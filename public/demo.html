@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentEnvoy — Your AI Negotiates So You Don't Have To</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131a;
+    --surface2: #1a1a24;
+    --border: #2a2a3a;
+    --text: #e8e8f0;
+    --text-dim: #8888a0;
+    --accent: #6c5ce7;
+    --accent-glow: #7c6cf7;
+    --green: #00d2a0;
+    --green-dim: #00a37d;
+    --orange: #f59e0b;
+    --red: #ef4444;
+    --blue: #3b82f6;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ===== SCENES ===== */
+  .scene {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 1;
+    background: var(--bg);
+  }
+  .scene.active {
+    display: flex;
+    pointer-events: auto;
+    z-index: 10;
+  }
+
+  /* ===== TITLE ===== */
+  .title-scene {
+    flex-direction: column;
+    gap: 20px;
+    background: radial-gradient(ellipse at center, #1a1a2e 0%, var(--bg) 70%);
+  }
+  .title-scene .logo {
+    font-size: 80px;
+    font-weight: 900;
+    letter-spacing: -3px;
+    background: linear-gradient(135deg, #6c5ce7, #a29bfe, #6c5ce7);
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 3s ease infinite;
+  }
+  .title-scene .tagline {
+    font-size: 24px;
+    font-weight: 300;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+  .title-scene .sub {
+    font-size: 14px;
+    color: #555568;
+    margin-top: 40px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  @keyframes shimmer {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  /* ===== PROBLEM ===== */
+  .problem-scene {
+    flex-direction: column;
+    gap: 36px;
+  }
+  .problem-scene h2 {
+    font-size: 44px;
+    font-weight: 300;
+    color: var(--text-dim);
+    text-align: center;
+    line-height: 1.3;
+  }
+  .problem-scene h2 em {
+    font-weight: 700;
+    font-style: normal;
+    color: var(--text);
+  }
+  .email-chain {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 520px;
+    width: 100%;
+  }
+  .email-msg {
+    padding: 12px 16px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.4;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: all 0.5s ease;
+  }
+  .email-msg.show { opacity: 1; transform: translateY(0); }
+  .email-msg.from-a {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    align-self: flex-start;
+    max-width: 82%;
+  }
+  .email-msg.from-b {
+    background: #1e1a2e;
+    border: 1px solid #2d2840;
+    align-self: flex-end;
+    max-width: 82%;
+  }
+  .email-msg .sender {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 3px;
+  }
+  .email-msg.from-a .sender { color: var(--blue); }
+  .email-msg.from-b .sender { color: var(--accent); }
+  .email-msg.punchline {
+    text-align: center;
+    background: transparent;
+    border: none;
+    color: var(--red);
+    font-weight: 600;
+    font-size: 18px;
+    align-self: center;
+    padding-top: 16px;
+    opacity: 0;
+  }
+
+  /* ===== INTRO ===== */
+  .intro-scene {
+    flex-direction: column;
+    gap: 28px;
+    background: radial-gradient(ellipse at center, #1a1a2e 0%, var(--bg) 70%);
+  }
+  .intro-scene h2 {
+    font-size: 50px;
+    font-weight: 800;
+    letter-spacing: -2px;
+    text-align: center;
+  }
+  .intro-scene h2 span {
+    background: linear-gradient(135deg, var(--green), #00e6b0);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .intro-scene p {
+    font-size: 20px;
+    color: var(--text-dim);
+    max-width: 620px;
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  /* ===== SCENE LABEL ===== */
+  .scene-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+
+  /* ===== PHONE FRAME ===== */
+  .phone-frame {
+    width: 420px;
+    background: var(--surface);
+    border-radius: 24px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(108,92,231,0.1);
+  }
+  .phone-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .phone-header .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px rgba(0,210,160,0.5);
+  }
+  .phone-header span {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+  }
+  .chat-area {
+    padding: 16px;
+    min-height: 420px;
+    max-height: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+  }
+
+  /* ===== CHAT MESSAGES ===== */
+  .chat-msg {
+    max-width: 90%;
+    padding: 11px 15px;
+    border-radius: 16px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    flex-shrink: 0;
+  }
+  .chat-msg.show { opacity: 1; transform: translateY(0) scale(1); }
+  .chat-msg.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+  .chat-msg.agent {
+    align-self: flex-start;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .chat-msg .agent-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--green);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 3px;
+  }
+  .chat-msg .link-box {
+    background: linear-gradient(135deg, rgba(108,92,231,0.15), rgba(0,210,160,0.1));
+    border: 1px solid rgba(108,92,231,0.3);
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 6px;
+    font-size: 12px;
+  }
+  .chat-msg .link-box .url {
+    font-weight: 700;
+    color: var(--green);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+  }
+  .chat-msg .link-box .detail {
+    color: var(--text-dim);
+    font-size: 11px;
+    margin-top: 5px;
+    line-height: 1.6;
+  }
+  .pref-tag {
+    display: inline-block;
+    background: rgba(108,92,231,0.2);
+    border: 1px solid rgba(108,92,231,0.3);
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-size: 11px;
+    color: var(--accent-glow);
+    margin: 1px 2px;
+  }
+  .pref-tag.green {
+    background: rgba(0,210,160,0.15);
+    border-color: rgba(0,210,160,0.3);
+    color: var(--green);
+  }
+  .pref-tag.orange {
+    background: rgba(245,158,11,0.15);
+    border-color: rgba(245,158,11,0.3);
+    color: var(--orange);
+  }
+
+  /* ===== DEAL ROOM ===== */
+  .dealroom-frame {
+    width: 780px;
+    background: var(--surface);
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    display: flex;
+    height: 500px;
+  }
+  .dr-chat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+  }
+  .dr-chat-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .dr-chat-header .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--green));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+  }
+  .dr-chat-header .info h3 { font-size: 13px; font-weight: 600; }
+  .dr-chat-header .info p { font-size: 11px; color: var(--text-dim); }
+  .dr-messages {
+    flex: 1;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+  }
+  .dr-msg {
+    max-width: 92%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    flex-shrink: 0;
+  }
+  .dr-msg.show { opacity: 1; transform: translateY(0); }
+  .dr-msg.mediator {
+    align-self: flex-start;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+  }
+  .dr-msg.responder {
+    align-self: flex-end;
+    background: var(--accent);
+    color: white;
+  }
+  .dr-msg .m-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--green);
+    margin-bottom: 3px;
+  }
+
+  /* ===== PROPOSALS SIDEBAR ===== */
+  .dr-proposals {
+    width: 270px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--bg);
+    overflow-y: auto;
+  }
+  .dr-proposals h4 {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+  }
+  .proposal-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    opacity: 0;
+    transform: translateX(20px);
+    transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .proposal-card.show { opacity: 1; transform: translateX(0); }
+  .proposal-card.selected {
+    border-color: var(--green);
+    box-shadow: 0 0 20px rgba(0,210,160,0.15);
+  }
+  .proposal-card .day { font-size: 13px; font-weight: 700; }
+  .proposal-card .time { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .proposal-card .format { font-size: 10px; color: var(--accent); margin-top: 5px; }
+  .proposal-card .match {
+    font-size: 10px; font-weight: 600; color: var(--green); margin-top: 5px;
+  }
+  .proposal-card .note {
+    font-size: 10px; color: var(--orange); margin-top: 4px; font-style: italic;
+  }
+  .connect-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0,210,160,0.1);
+    border: 1px solid rgba(0,210,160,0.3);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--green);
+    font-weight: 600;
+  }
+
+  /* ===== ESCALATION SCENE ===== */
+  .escalation-scene {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* ===== RFP SCENE ===== */
+  .rfp-scene {
+    flex-direction: column;
+    gap: 0;
+  }
+  .rfp-frame {
+    width: 780px;
+    background: var(--surface);
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    display: flex;
+    height: 500px;
+  }
+  .rfp-chat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+  }
+  .rfp-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .rfp-header .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--orange), var(--red));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+  }
+  .rfp-messages {
+    flex: 1;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+  }
+  .rfp-sidebar {
+    width: 270px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--bg);
+    overflow-y: auto;
+  }
+  .term-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    opacity: 0;
+    transform: translateX(20px);
+    transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .term-card.show { opacity: 1; transform: translateX(0); }
+  .term-card.agreed {
+    border-color: var(--green);
+    box-shadow: 0 0 15px rgba(0,210,160,0.1);
+  }
+  .term-card .label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+  .term-card .value { font-size: 14px; font-weight: 700; margin-top: 3px; }
+  .term-card .status { font-size: 10px; margin-top: 4px; font-weight: 600; }
+  .term-card .status.agreed-s { color: var(--green); }
+  .term-card .status.negotiating { color: var(--orange); }
+
+  /* ===== CONFIRMED ===== */
+  .confirmed-scene {
+    flex-direction: column;
+    gap: 24px;
+    background: radial-gradient(ellipse at center, #0d1f1a 0%, var(--bg) 70%);
+  }
+  .confirm-check {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--green), #00e6b0);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 40px;
+    box-shadow: 0 0 40px rgba(0,210,160,0.3);
+    animation: pulse-glow 2s ease infinite;
+  }
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 40px rgba(0,210,160,0.3); }
+    50% { box-shadow: 0 0 60px rgba(0,210,160,0.5); }
+  }
+  .confirm-details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 36px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+    max-width: 440px;
+  }
+  .confirm-details h3 { font-size: 22px; font-weight: 700; }
+  .confirm-details .detail-row {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 15px; color: var(--text-dim); justify-content: center;
+  }
+  .confirm-details .detail-row .icon { font-size: 18px; }
+  .confirm-details .footnote {
+    font-size: 12px; color: #555568; margin-top: 8px; font-style: italic;
+  }
+
+  /* ===== TRANSITION: "BUT WAIT" ===== */
+  .transition-scene {
+    flex-direction: column;
+    gap: 20px;
+    background: radial-gradient(ellipse at center, #1a1a2e 0%, var(--bg) 70%);
+  }
+  .transition-scene h2 {
+    font-size: 46px;
+    font-weight: 800;
+    letter-spacing: -2px;
+    text-align: center;
+    line-height: 1.3;
+  }
+  .transition-scene h2 span {
+    background: linear-gradient(135deg, var(--orange), #fbbf24);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .transition-scene p {
+    font-size: 20px;
+    color: var(--text-dim);
+    max-width: 600px;
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  /* ===== OUTRO ===== */
+  .outro-scene {
+    flex-direction: column;
+    gap: 28px;
+    background: radial-gradient(ellipse at center, #1a1a2e 0%, var(--bg) 70%);
+  }
+  .outro-scene .logo {
+    font-size: 64px;
+    font-weight: 900;
+    letter-spacing: -2px;
+    background: linear-gradient(135deg, #6c5ce7, #a29bfe);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .outro-scene .tagline {
+    font-size: 24px;
+    font-weight: 300;
+    color: var(--text-dim);
+  }
+  .outro-scene .url {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--green);
+    letter-spacing: 1px;
+    padding: 12px 28px;
+    border: 1px solid rgba(0,210,160,0.3);
+    border-radius: 100px;
+    background: rgba(0,210,160,0.05);
+  }
+  .outro-scene .features {
+    display: flex;
+    gap: 32px;
+    margin-top: 12px;
+  }
+  .outro-scene .features .feat {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  .outro-scene .features .feat .icon { font-size: 28px; margin-bottom: 6px; }
+
+  /* ===== PROGRESS BAR ===== */
+  .progress-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--green));
+    transition: width 0.8s ease;
+    z-index: 100;
+  }
+
+  /* ===== CONTROLS ===== */
+  .controls {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+  }
+  .controls button {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .controls button:hover {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<!-- SCENE 0: TITLE -->
+<div class="scene title-scene" id="s-title">
+  <div class="logo">AgentEnvoy</div>
+  <div class="tagline">Your AI negotiates so you don't have to.</div>
+  <div class="sub">Watch it work →</div>
+</div>
+
+<!-- SCENE 1: THE PROBLEM -->
+<div class="scene problem-scene" id="s-problem">
+  <h2>Scheduling a meeting<br><em>shouldn't</em> take 7 emails.</h2>
+  <div class="email-chain" id="email-chain">
+    <div class="email-msg from-a"><div class="sender">Sarah</div>Are you free Tuesday?</div>
+    <div class="email-msg from-b"><div class="sender">John</div>Tuesday's packed. How about Thursday afternoon?</div>
+    <div class="email-msg from-a"><div class="sender">Sarah</div>I have a conflict at 2. Could do morning?</div>
+    <div class="email-msg from-b"><div class="sender">John</div>Mornings are tough. Friday?</div>
+    <div class="email-msg from-a"><div class="sender">Sarah</div>I'm out Friday. Next week?</div>
+    <div class="email-msg from-b"><div class="sender">John</div>Let me check and get back to you...</div>
+    <div class="email-msg punchline">Sound familiar?</div>
+  </div>
+</div>
+
+<!-- SCENE 2: INTRO -->
+<div class="scene intro-scene" id="s-intro">
+  <h2>What if an AI <span>handled this</span>?</h2>
+  <p>A neutral mediator that reads both calendars, understands preferences, and finds the perfect time — in seconds, not days.</p>
+</div>
+
+<!-- SCENE 3: SETUP — rich variable preferences -->
+<div class="scene" id="s-setup" style="flex-direction:column">
+  <div class="scene-label">Step 1 — Tell your agent what you need</div>
+  <div class="phone-frame">
+    <div class="phone-header">
+      <div class="dot"></div>
+      <span>AgentEnvoy</span>
+    </div>
+    <div class="chat-area" id="setup-chat">
+      <div class="chat-msg user">I need to meet with Sarah this week. Tuesday works for a call but not video — I'll be driving. I'd rather not do Friday but can make it work if needed. If we end up doing Tuesday evening, suggest drinks at Vinyl instead.</div>
+      <div class="chat-msg agent">
+        <div class="agent-label">AgentEnvoy</div>
+        Got it — here's what I've set up:
+        <div class="link-box">
+          <div class="url">agentenvoy.ai/meet/john</div>
+          <div class="detail" style="margin-top:8px">
+            <span class="pref-tag green">Tue — phone call only</span>
+            <span class="pref-tag orange">Fri — last resort</span>
+            <span class="pref-tag">Tue evening → drinks at Vinyl</span><br>
+            <span class="pref-tag green">Wed/Thu — open, prefer afternoons</span>
+            <span class="pref-tag">30 min default</span>
+          </div>
+          <div class="detail" style="margin-top:8px">📅 Calendar synced &nbsp;·&nbsp; 14 events this week<br>I'll start with your preferred slots and only offer Friday if nothing else works.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCENE 4: DEAL ROOM — responder experience with connect options -->
+<div class="scene" id="s-dealroom" style="flex-direction:column">
+  <div class="scene-label">Step 2 — Sarah clicks the link</div>
+  <div class="dealroom-frame">
+    <div class="dr-chat">
+      <div class="dr-chat-header">
+        <div class="avatar">E</div>
+        <div class="info">
+          <h3>AgentEnvoy Mediator</h3>
+          <p>Scheduling · John Abramson × Sarah Chen</p>
+        </div>
+      </div>
+      <div class="dr-messages" id="dr-msgs-1">
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          Hi Sarah! I'm helping find a great time for you and John to meet this week. You can tell me what works, or connect a calendar for the best match.
+          <div class="connect-btn">📅 Connect Google Calendar</div>
+          <div class="connect-btn" style="margin-left:0;margin-top:4px">🔗 Import from Calendly</div>
+        </div>
+        <div class="dr-msg responder">I'm pretty open this week — mornings are best. Let me connect my calendar so you can see.</div>
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          Thanks! I can see both calendars now. Here are three options — notice John prefers afternoons but I found some morning overlap →
+        </div>
+        <div class="dr-msg responder">Wednesday at 10 is perfect!</div>
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          Booked! 🎉 Wednesday Apr 9, 10:00 AM — 30 min video call. Calendar events + Google Meet link created for both of you.
+        </div>
+      </div>
+    </div>
+    <div class="dr-proposals" id="dr-props-1">
+      <h4>Proposals</h4>
+      <div class="proposal-card" id="p1">
+        <div class="day">Wednesday, Apr 9</div>
+        <div class="time">10:00 AM – 10:30 AM</div>
+        <div class="format">📹 Video call</div>
+        <div class="match">⭐ Best mutual match</div>
+      </div>
+      <div class="proposal-card" id="p2">
+        <div class="day">Thursday, Apr 10</div>
+        <div class="time">2:00 PM – 2:30 PM</div>
+        <div class="format">📹 Video call</div>
+      </div>
+      <div class="proposal-card" id="p3">
+        <div class="day">Tuesday, Apr 8</div>
+        <div class="time">6:30 PM – drinks</div>
+        <div class="format">🍸 Vinyl Wine Bar</div>
+        <div class="note">John suggested drinks if Tuesday evening works</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCENE 5: CONFIRMED -->
+<div class="scene confirmed-scene" id="s-confirmed">
+  <div class="confirm-check">✓</div>
+  <div class="confirm-details">
+    <h3>Meeting Confirmed</h3>
+    <div class="detail-row"><span class="icon">📅</span> Wednesday, April 9 at 10:00 AM PDT</div>
+    <div class="detail-row"><span class="icon">⏱</span> 30 minutes</div>
+    <div class="detail-row"><span class="icon">📹</span> Google Meet link attached</div>
+    <div class="detail-row"><span class="icon">👥</span> John Abramson & Sarah Chen</div>
+    <div class="footnote">Calendar events created. Summary emailed to both.<br>"Sarah prefers mornings — John adjusted from his usual afternoon window."</div>
+  </div>
+</div>
+
+<!-- SCENE 6: ESCALATION SCENARIO -->
+<div class="scene" id="s-escalation" style="flex-direction:column">
+  <div class="scene-label">When it's not that simple — the agent escalates</div>
+  <div class="dealroom-frame">
+    <div class="dr-chat">
+      <div class="dr-chat-header">
+        <div class="avatar">E</div>
+        <div class="info">
+          <h3>AgentEnvoy Mediator</h3>
+          <p>Scheduling · John Abramson × Mike Torres</p>
+        </div>
+      </div>
+      <div class="dr-messages" id="dr-msgs-esc">
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          Hi Mike! I'm helping set up a meeting with John this week. What times work for you?
+        </div>
+        <div class="dr-msg responder">I'm slammed this week honestly. Only have a window Thursday after 5pm or maybe Saturday morning.</div>
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          Those are outside John's usual availability — but let me see what I can do. I think a Thursday evening slot might work, but I need to check with John on a couple things before I can confirm.
+        </div>
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          What's your email? I'll loop you both in once I have options nailed down. I'll also look into whether a quick 15-min phone call could work if a full meeting doesn't fit.
+        </div>
+        <div class="dr-msg responder">mike@acme.com — thanks, appreciate you working on it</div>
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          Got it. I'll email you and John together with 2-3 compromise options and tradeoffs. You can both just reply to pick one. ✉️
+        </div>
+      </div>
+    </div>
+    <div class="dr-proposals" id="dr-props-esc">
+      <h4>Agent Thinking</h4>
+      <div class="proposal-card" id="esc1">
+        <div class="day" style="color:var(--orange)">⚡ Escalating to humans</div>
+        <div class="time" style="margin-top:8px">Checking with John about:</div>
+        <div class="note">• Thu after 5pm — outside usual hours</div>
+        <div class="note">• Sat morning — weekend meeting</div>
+        <div class="note">• 15-min phone call as compromise</div>
+      </div>
+      <div class="proposal-card" id="esc2">
+        <div class="day" style="color:var(--text-dim);font-size:11px">📧 Email draft</div>
+        <div class="time" style="margin-top:6px;font-size:11px;line-height:1.5">
+          "Hi John & Mike — I explored options this week and it's tight. Here are the best compromises:<br><br>
+          1. Thu 5:30pm — 30min call ⚠️ after hours<br>
+          2. Fri 12pm — 15min phone ⚠️ John's last resort day<br>
+          3. Next Mon 10am — full slot ⚠️ pushed a week<br><br>
+          Reply with your pick."
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCENE 7: TRANSITION to RFP -->
+<div class="scene transition-scene" id="s-transition">
+  <h2>Meetings are just <span>the start</span>.</h2>
+  <p>The same agent negotiation works for RFPs, dinner plans, vendor terms, project timelines — any back-and-forth where two sides need to find common ground.</p>
+</div>
+
+<!-- SCENE 8: RFP NEGOTIATION -->
+<div class="scene" id="s-rfp" style="flex-direction:column">
+  <div class="scene-label">Scenario 2 — RFP Negotiation</div>
+  <div class="rfp-frame">
+    <div class="rfp-chat">
+      <div class="rfp-header">
+        <div class="avatar">R</div>
+        <div class="info">
+          <h3>AgentEnvoy Mediator</h3>
+          <p>RFP · Acme Corp × Vertex Design</p>
+        </div>
+      </div>
+      <div class="rfp-messages" id="rfp-msgs">
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          Welcome! Acme Corp has shared an RFP for their website redesign. I'll help negotiate terms that work for both sides. Here's what Acme is looking for →
+        </div>
+        <div class="dr-msg responder">We can hit the timeline but $40k is tight for that scope. We'd need $55k, or we can cut the e-commerce module to stay at $40k.</div>
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          Good to know. Acme's budget has some flex. Let me propose a middle ground: $48k with e-commerce included, but phased delivery — core site in 8 weeks, e-commerce in week 12. That keeps their launch on track.
+        </div>
+        <div class="dr-msg responder">$48k phased works. But we'd want 50% upfront instead of 30%.</div>
+        <div class="dr-msg mediator">
+          <div class="m-label">Mediator</div>
+          I'll check with Acme on the payment terms. Their standard is 30/40/30 but I think phased delivery justifies adjusting. Updating the term sheet now →
+        </div>
+      </div>
+    </div>
+    <div class="rfp-sidebar" id="rfp-terms">
+      <h4>Term Sheet</h4>
+      <div class="term-card" id="t1">
+        <div class="label">Budget</div>
+        <div class="value">$48,000</div>
+        <div class="status negotiating">↻ Counter: was $40k → $55k → $48k</div>
+      </div>
+      <div class="term-card" id="t2">
+        <div class="label">Timeline</div>
+        <div class="value">12 weeks (phased)</div>
+        <div class="status agreed-s">✓ Agreed</div>
+      </div>
+      <div class="term-card" id="t3">
+        <div class="label">Scope</div>
+        <div class="value">Full site + e-commerce</div>
+        <div class="status agreed-s">✓ Agreed</div>
+      </div>
+      <div class="term-card" id="t4">
+        <div class="label">Payment Terms</div>
+        <div class="value">50 / 25 / 25</div>
+        <div class="status negotiating">↻ Checking with Acme</div>
+      </div>
+      <div class="term-card" id="t5">
+        <div class="label">Revisions</div>
+        <div class="value">3 rounds included</div>
+        <div class="status agreed-s">✓ Agreed</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCENE 9: OUTRO -->
+<div class="scene outro-scene" id="s-outro">
+  <div class="logo">AgentEnvoy</div>
+  <div class="tagline">Your AI negotiates so you don't have to.</div>
+  <div class="features">
+    <div class="feat"><div class="icon">📅</div>Meetings</div>
+    <div class="feat"><div class="icon">📋</div>RFPs</div>
+    <div class="feat"><div class="icon">🍽</div>Dinner plans</div>
+    <div class="feat"><div class="icon">🤝</div>Vendor terms</div>
+    <div class="feat"><div class="icon">⚡</div>Anything</div>
+  </div>
+  <div class="url">agentenvoy.ai</div>
+</div>
+
+<!-- PROGRESS BAR -->
+<div class="progress-bar" id="progress"></div>
+
+<!-- CONTROLS -->
+<div class="controls">
+  <button onclick="restart()">↺ Replay</button>
+  <button onclick="togglePause()" id="pause-btn">⏸ Pause</button>
+  <button onclick="skipToNext()">→ Skip</button>
+</div>
+
+<script>
+const scenes = [
+  { id: 's-title',       dur: 4500,  setup: null },
+  { id: 's-problem',     dur: 12000, setup: animProblem },
+  { id: 's-intro',       dur: 5000,  setup: null },
+  { id: 's-setup',       dur: 10000, setup: animSetup },
+  { id: 's-dealroom',    dur: 14000, setup: animDealroom },
+  { id: 's-confirmed',   dur: 5000,  setup: null },
+  { id: 's-escalation',  dur: 16000, setup: animEscalation },
+  { id: 's-transition',  dur: 5000,  setup: null },
+  { id: 's-rfp',         dur: 16000, setup: animRFP },
+  { id: 's-outro',       dur: 6000,  setup: null },
+];
+
+let cur = -1, paused = false, timer = null, anims = [];
+
+function clearAnims() { anims.forEach(t => clearTimeout(t)); anims = []; }
+
+function showScene(i) {
+  if (i >= scenes.length) return;
+  clearAnims();
+  clearTimeout(timer);
+  document.querySelectorAll('.scene').forEach(s => s.classList.remove('active'));
+  cur = i;
+  const sc = scenes[i];
+  document.getElementById(sc.id).classList.add('active');
+  document.getElementById('progress').style.width = ((i + 1) / scenes.length * 100) + '%';
+  if (sc.setup) sc.setup();
+  if (!paused) timer = setTimeout(() => showScene(i + 1), sc.dur);
+}
+
+function stagger(selector, base, gap) {
+  const els = document.querySelectorAll(selector);
+  els.forEach((el, i) => {
+    el.classList.remove('show');
+    anims.push(setTimeout(() => {
+      el.classList.add('show');
+      el.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+    }, base + i * gap));
+  });
+}
+
+function animProblem() {
+  stagger('#email-chain .email-msg', 800, 1200);
+}
+
+function animSetup() {
+  const msgs = document.querySelectorAll('#setup-chat .chat-msg');
+  msgs.forEach(m => m.classList.remove('show'));
+  anims.push(setTimeout(() => { msgs[0].classList.add('show'); }, 600));
+  anims.push(setTimeout(() => {
+    msgs[1].classList.add('show');
+    const area = document.querySelector('#setup-chat');
+    area.scrollTop = area.scrollHeight;
+  }, 3000));
+}
+
+function animDealroom() {
+  const msgs = document.querySelectorAll('#dr-msgs-1 .dr-msg');
+  const props = [document.getElementById('p1'), document.getElementById('p2'), document.getElementById('p3')];
+  msgs.forEach(m => m.classList.remove('show'));
+  props.forEach(p => { p.classList.remove('show','selected'); });
+
+  anims.push(setTimeout(() => msgs[0].classList.add('show'), 500));
+  anims.push(setTimeout(() => msgs[1].classList.add('show'), 3500));
+  anims.push(setTimeout(() => {
+    msgs[2].classList.add('show');
+    props[0].classList.add('show');
+  }, 6000));
+  anims.push(setTimeout(() => props[1].classList.add('show'), 6800));
+  anims.push(setTimeout(() => props[2].classList.add('show'), 7600));
+  anims.push(setTimeout(() => {
+    msgs[3].classList.add('show');
+    props[0].classList.add('selected');
+  }, 10000));
+  anims.push(setTimeout(() => msgs[4].classList.add('show'), 12000));
+}
+
+function animEscalation() {
+  const msgs = document.querySelectorAll('#dr-msgs-esc .dr-msg');
+  const cards = [document.getElementById('esc1'), document.getElementById('esc2')];
+  msgs.forEach(m => m.classList.remove('show'));
+  cards.forEach(c => c.classList.remove('show'));
+
+  anims.push(setTimeout(() => msgs[0].classList.add('show'), 500));
+  anims.push(setTimeout(() => msgs[1].classList.add('show'), 3000));
+  anims.push(setTimeout(() => msgs[2].classList.add('show'), 6000));
+  anims.push(setTimeout(() => { msgs[3].classList.add('show'); cards[0].classList.add('show'); }, 9000));
+  anims.push(setTimeout(() => msgs[4].classList.add('show'), 11500));
+  anims.push(setTimeout(() => { msgs[5].classList.add('show'); cards[1].classList.add('show'); }, 13500));
+}
+
+function animRFP() {
+  const msgs = document.querySelectorAll('#rfp-msgs .dr-msg');
+  const terms = [document.getElementById('t1'), document.getElementById('t2'),
+                 document.getElementById('t3'), document.getElementById('t4'), document.getElementById('t5')];
+  msgs.forEach(m => m.classList.remove('show'));
+  terms.forEach(t => { t.classList.remove('show','agreed'); });
+
+  anims.push(setTimeout(() => { msgs[0].classList.add('show'); terms[0].classList.add('show'); }, 500));
+  anims.push(setTimeout(() => terms[1].classList.add('show'), 1200));
+  anims.push(setTimeout(() => terms[2].classList.add('show'), 1800));
+  anims.push(setTimeout(() => msgs[1].classList.add('show'), 4000));
+  anims.push(setTimeout(() => {
+    msgs[2].classList.add('show');
+    terms[1].classList.add('agreed');
+    terms[2].classList.add('agreed');
+    terms[4].classList.add('show');
+    terms[4].classList.add('agreed');
+  }, 7500));
+  anims.push(setTimeout(() => { msgs[3].classList.add('show'); terms[3].classList.add('show'); }, 10500));
+  anims.push(setTimeout(() => msgs[4].classList.add('show'), 13500));
+}
+
+function restart() {
+  clearTimeout(timer); clearAnims();
+  paused = false;
+  document.getElementById('pause-btn').textContent = '⏸ Pause';
+  showScene(0);
+}
+function togglePause() {
+  paused = !paused;
+  document.getElementById('pause-btn').textContent = paused ? '▶ Play' : '⏸ Pause';
+  if (!paused) timer = setTimeout(() => showScene(cur + 1), 2000);
+  else clearTimeout(timer);
+}
+function skipToNext() {
+  clearTimeout(timer); clearAnims();
+  showScene(cur < scenes.length - 1 ? cur + 1 : 0);
+}
+
+showScene(0);
+</script>
+
+</body>
+</html>
