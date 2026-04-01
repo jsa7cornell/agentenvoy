@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// NextAuth models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// AgentEnvoy models
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  meetSlug      String?   @unique
+  preferences   Json?     @default("{}")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  negotiationLinks   NegotiationLink[]
+  initiatedSessions  NegotiationSession[] @relation("initiator")
+  respondedSessions  NegotiationSession[] @relation("responder")
+}
+
+model NegotiationLink {
+  id           String   @id @default(cuid())
+  userId       String
+  type         String   @default("generic") // generic | contextual
+  slug         String   // same as user.meetSlug for generic
+  code         String?  @unique // unique code for contextual links
+  inviteeEmail String?
+  inviteeName  String?
+  topic        String?
+  rules        Json?    @default("{}")
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions NegotiationSession[]
+
+  @@index([slug])
+  @@index([slug, code])
+}
+
+model NegotiationSession {
+  id            String   @id @default(cuid())
+  linkId        String
+  initiatorId   String
+  responderId   String?
+  type          String   @default("calendar") // calendar | rfp
+  status        String   @default("active") // active | agreed | escalated | expired
+  meetingType   String?  // phone | video | in-person
+  duration      Int?     // minutes
+  format        String?
+  agreedTime    DateTime?
+  agreedFormat  String?
+  summary       String?  @db.Text
+  meetLink      String?
+  responderEmail String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  link      NegotiationLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  initiator User            @relation("initiator", fields: [initiatorId], references: [id])
+  responder User?           @relation("responder", fields: [responderId], references: [id])
+  messages  Message[]
+  proposals Proposal[]
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String   // administrator | responder | system
+  content   String   @db.Text
+  metadata  Json?    @default("{}")
+  createdAt DateTime @default(now())
+
+  session   NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  proposals Proposal[]
+}
+
+model Proposal {
+  id        String   @id @default(cuid())
+  sessionId String
+  messageId String?
+  dateTime  DateTime?
+  duration  Int?     // minutes
+  format    String?  // phone | video | in-person
+  location  String?
+  tier      Int      @default(1) // 1 | 2 | 3
+  status    String   @default("offered") // offered | accepted | rejected | countered
+  createdAt DateTime @default(now())
+
+  session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  message Message?           @relation(fields: [messageId], references: [id])
+}
