@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
 
   // Active threads context
   const activeThreads = await prisma.negotiationSession.findMany({
-    where: { initiatorId: user.id, status: { in: ["active", "agreed"] } },
+    where: { hostId: user.id, status: { in: ["active", "agreed"] } },
     include: { link: true, _count: { select: { messages: true } } },
     orderBy: { updatedAt: "desc" },
     take: 10,
@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
         const negotiationSession = await prisma.negotiationSession.create({
           data: {
             linkId: link.id,
-            initiatorId: user.id,
+            hostId: user.id,
             type: "calendar",
             status: "active",
             title,

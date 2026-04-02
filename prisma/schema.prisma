@@ -59,8 +59,8 @@ model User {
   accounts           Account[]
   sessions           Session[]
   negotiationLinks   NegotiationLink[]
-  initiatedSessions  NegotiationSession[] @relation("initiator")
-  respondedSessions  NegotiationSession[] @relation("responder")
+  hostedSessions     NegotiationSession[] @relation("host")
+  guestSessions      NegotiationSession[] @relation("guest")
   apiKeys            ApiKey[]
   channel            Channel?
 }
@@ -102,8 +102,8 @@ model NegotiationLink {
 model NegotiationSession {
   id            String   @id @default(cuid())
   linkId        String
-  initiatorId   String
-  responderId   String?
+  hostId        String
+  guestId       String?
   type          String   @default("calendar") // calendar | rfp
   status        String   @default("active") // active | agreed | escalated | expired
   title         String?  // "Q2 Roadmap — Sarah Chen"
@@ -115,13 +115,13 @@ model NegotiationSession {
   agreedFormat  String?
   summary       String?  @db.Text
   meetLink      String?
-  responderEmail String?
+  guestEmail     String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   link            NegotiationLink  @relation(fields: [linkId], references: [id], onDelete: Cascade)
-  initiator       User             @relation("initiator", fields: [initiatorId], references: [id])
-  responder       User?            @relation("responder", fields: [responderId], references: [id])
+  host            User             @relation("host", fields: [hostId], references: [id])
+  guest           User?            @relation("guest", fields: [guestId], references: [id])
   messages        Message[]
   proposals       Proposal[]
   channelMessages ChannelMessage[]
@@ -130,7 +130,7 @@ model NegotiationSession {
 model Message {
   id        String   @id @default(cuid())
   sessionId String
-  role      String   // administrator | responder | system
+  role      String   // administrator | guest | system
   content   String   @db.Text
   metadata  Json?    @default("{}")
   createdAt DateTime @default(now())
@@ -155,7 +155,7 @@ model Proposal {
   message Message?           @relation(fields: [messageId], references: [id])
 }
 
-// Channel: the initiator's feed — one per user
+// Channel: the host's dashboard chat — one per user
 model Channel {
   id        String           @id @default(cuid())
   userId    String           @unique

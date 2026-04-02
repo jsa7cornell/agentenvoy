@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     where: { id: sessionId },
     include: {
       link: true,
-      initiator: true,
+      host: true,
     },
   });
 
@@ -42,31 +42,31 @@ export async function POST(req: NextRequest) {
   const endTime = new Date(startTime.getTime() + durationMin * 60 * 1000);
   const meetingFormat = format || "video";
 
-  const responderEmail = session.responderEmail || session.link.inviteeEmail;
-  const initiatorEmail = session.initiator.email;
+  const guestEmail = session.guestEmail || session.link.inviteeEmail;
+  const hostEmail = session.host.email;
 
-  if (!initiatorEmail) {
+  if (!hostEmail) {
     return NextResponse.json(
-      { error: "Initiator email not found" },
+      { error: "Host email not found" },
       { status: 400 }
     );
   }
 
-  // Create calendar event for the initiator
+  // Create calendar event for the host
   let meetLink: string | undefined;
   let eventLink: string | undefined;
 
   try {
-    const result = await createCalendarEvent(session.initiatorId, {
+    const result = await createCalendarEvent(session.hostId, {
       summary: session.link.topic
         ? `${session.link.topic} — ${session.link.inviteeName || "Meeting"}`
-        : `Meeting with ${session.link.inviteeName || responderEmail || "guest"}`,
+        : `Meeting with ${session.link.inviteeName || guestEmail || "guest"}`,
       description: `Scheduled via Envoy\nFormat: ${meetingFormat}${location ? `\nLocation: ${location}` : ""}`,
       startTime,
       endTime,
       attendeeEmails: [
-        initiatorEmail,
-        ...(responderEmail ? [responderEmail] : []),
+        hostEmail,
+        ...(guestEmail ? [guestEmail] : []),
       ],
       addMeetLink: meetingFormat === "video",
     });
@@ -102,8 +102,8 @@ export async function POST(req: NextRequest) {
 
   // Send confirmation emails
   const emailBody = buildConfirmationEmail({
-    initiatorName: session.initiator.name || "The organizer",
-    responderName: session.link.inviteeName || undefined,
+    hostName: session.host.name || "The organizer",
+    guestName: session.link.inviteeName || undefined,
     topic: session.link.topic || undefined,
     dateTime: startTime,
     duration: durationMin,
@@ -112,8 +112,8 @@ export async function POST(req: NextRequest) {
     meetLink,
   });
 
-  const emailRecipients = [initiatorEmail];
-  if (responderEmail) emailRecipients.push(responderEmail);
+  const emailRecipients = [hostEmail];
+  if (guestEmail) emailRecipients.push(guestEmail);
 
   try {
     await resend.emails.send({
@@ -138,8 +138,8 @@ export async function POST(req: NextRequest) {
 }
 
 function buildConfirmationEmail(params: {
-  initiatorName: string;
-  responderName?: string;
+  hostName: string;
+  guestName?: string;
   topic?: string;
   dateTime: Date;
   duration: number;

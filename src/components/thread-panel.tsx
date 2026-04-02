@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 
 interface ThreadMessage {
   id: string;
-  role: string; // "administrator" | "responder" | "system"
+  role: string; // "administrator" | "guest" | "system"
   content: string;
   createdAt: string;
 }
@@ -178,7 +178,7 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
           }
 
           const isEnvoy = msg.role === "administrator";
-          const isResponder = msg.role === "responder";
+          const isGuest = msg.role === "guest";
 
           return (
             <div key={msg.id}>
@@ -186,15 +186,15 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
                 className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
                   isEnvoy
                     ? "self-start bg-white/7 rounded-bl-sm"
-                    : isResponder
+                    : isGuest
                     ? "self-end ml-auto bg-emerald-800 text-emerald-100 rounded-br-sm"
                     : "self-end ml-auto bg-purple-600 text-white rounded-br-sm"
                 }`}
               >
                 <div className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${
-                  isEnvoy ? "text-purple-400" : isResponder ? "text-emerald-400" : "text-white/60"
+                  isEnvoy ? "text-purple-400" : isGuest ? "text-emerald-400" : "text-white/60"
                 }`}>
-                  {isEnvoy ? "Envoy" : isResponder ? (session.link.inviteeName || "Responder") : "You"}
+                  {isEnvoy ? "Envoy" : isGuest ? (session.link.inviteeName || "Guest") : "You"}
                 </div>
                 <div className="whitespace-pre-wrap">{displayContent}</div>
               </div>

@@ -21,7 +21,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
-  const [initiatorName, setInitiatorName] = useState("");
+  const [hostName, setInitiatorName] = useState("");
   const [topic, setTopic] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -99,19 +99,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     setShowAgentInfo((prev) => !prev);
   }
 
-  // If the responder signed in (calendar connect), mark it and inject availability
+  // If the guest signed in (calendar connect), mark it and inject availability
   const calendarCheckDone = useRef(false);
   useEffect(() => {
     if (authSession?.user?.id && sessionId && !calendarConnected && !calendarCheckDone.current) {
       calendarCheckDone.current = true;
       setCalendarConnected(true);
-      // Notify the agent that responder connected their calendar
+      // Notify the agent that guest connected their calendar
       fetch("/api/negotiate/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          content: "[SYSTEM: The responder has connected their Google Calendar. You now have access to their availability. Cross-reference both calendars to propose optimal times.]",
+          content: "[SYSTEM: The guest has connected their Google Calendar. You now have access to their availability. Cross-reference both calendars to propose optimal times.]",
         }),
       }).then(async (res) => {
         if (!res.ok) return;
@@ -166,7 +166,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
         const data = await res.json();
         setSessionId(data.sessionId);
-        setInitiatorName(data.initiator?.name || "");
+        setInitiatorName(data.host?.name || "");
         setTopic(data.link?.topic || "");
         setMessages([
           {
@@ -191,7 +191,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
     const userMsg: Message = {
       id: Date.now().toString(),
-      role: "responder",
+      role: "guest",
       content: input.trim(),
     };
 
@@ -346,9 +346,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             </>
           )}
         </div>
-        {initiatorName && (
+        {hostName && (
           <span className="text-xs text-zinc-500">
-            Meeting with {initiatorName}
+            Meeting with {hostName}
           </span>
         )}
       </header>
@@ -376,14 +376,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   <div key={msg.id}>
                     <div
                       className={`flex ${
-                        msg.role === "responder"
+                        msg.role === "guest"
                           ? "justify-end"
                           : "justify-start"
                       }`}
                     >
                       <div
                         className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                          msg.role === "responder"
+                          msg.role === "guest"
                             ? "bg-indigo-600 text-white rounded-br-sm"
                             : msg.role === "system"
                               ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
@@ -555,13 +555,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             </div>
           )}
 
-          {initiatorName && (
+          {hostName && (
             <div className="mt-6">
               <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
                 Meeting with
               </h4>
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
-                <p className="text-sm font-medium">{initiatorName}</p>
+                <p className="text-sm font-medium">{hostName}</p>
                 {topic && (
                   <p className="text-xs text-zinc-400 mt-1">{topic}</p>
                 )}

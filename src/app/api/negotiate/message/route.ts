@@ -7,7 +7,7 @@ import { computeThreadStatus } from "@/lib/thread-status";
 // Send a message in a negotiation session and get agent response (streaming)
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { sessionId, content, responderEmail } = body;
+  const { sessionId, content, guestEmail } = body;
 
   if (!sessionId || !content) {
     return new Response(
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     where: { id: sessionId },
     include: {
       link: true,
-      initiator: true,
+      host: true,
       messages: { orderBy: { createdAt: "asc" } },
     },
   });
@@ -32,16 +32,16 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Save the responder's message
+  // Save the guest's message
   await prisma.message.create({
-    data: { sessionId, role: "responder", content },
+    data: { sessionId, role: "guest", content },
   });
 
-  // Update responder email if provided
-  if (responderEmail && !session.responderEmail) {
+  // Update guest email if provided
+  if (guestEmail && !session.guestEmail) {
     await prisma.negotiationSession.update({
       where: { id: sessionId },
-      data: { responderEmail },
+      data: { guestEmail },
     });
   }
 
@@ -55,12 +55,12 @@ export async function POST(req: NextRequest) {
   // Build agent context
   const context: AgentContext = {
     role: session.type === "calendar" ? "coordinator" : "administrator",
-    initiatorName: session.initiator.name || "the initiator",
-    initiatorPreferences:
-      (session.initiator.preferences as Record<string, unknown>) || {},
-    responderName: session.link.inviteeName || undefined,
-    responderEmail:
-      session.responderEmail || session.link.inviteeEmail || undefined,
+    hostName: session.host.name || "the host",
+    hostPreferences:
+      (session.host.preferences as Record<string, unknown>) || {},
+    guestName: session.link.inviteeName || undefined,
+    guestEmail:
+      session.guestEmail || session.link.inviteeEmail || undefined,
     topic: session.link.topic || undefined,
     rules: (session.link.rules as Record<string, unknown>) || {},
     conversationHistory: history,
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     status: session.status,
     inviteeName: session.link.inviteeName,
     lastMessageRole: lastMessage?.role,
-    responderEmail: session.responderEmail || session.link.inviteeEmail,
+    guestEmail: session.guestEmail || session.link.inviteeEmail,
   });
   await prisma.negotiationSession.update({
     where: { id: sessionId },

@@ -210,7 +210,7 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
             const status = computeThreadStatus({
               status: msg.thread.status,
               inviteeName: msg.thread.link.inviteeName,
-              responderEmail: msg.thread.link.inviteeEmail,
+              guestEmail: msg.thread.link.inviteeEmail,
             });
 
             return (

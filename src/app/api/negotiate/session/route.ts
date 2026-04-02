@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
   const session = await prisma.negotiationSession.create({
     data: {
       linkId: link.id,
-      initiatorId: user.id,
+      hostId: user.id,
       type: "calendar",
       status: "active",
       title: link.topic
@@ -80,10 +80,10 @@ export async function POST(req: NextRequest) {
   // Generate the initial greeting
   const context: AgentContext = {
     role: "coordinator",
-    initiatorName: user.name || "the organizer",
-    initiatorPreferences: (user.preferences as Record<string, unknown>) || {},
-    responderName: link.inviteeName || undefined,
-    responderEmail: link.inviteeEmail || undefined,
+    hostName: user.name || "the organizer",
+    hostPreferences: (user.preferences as Record<string, unknown>) || {},
+    guestName: link.inviteeName || undefined,
+    guestEmail: link.inviteeEmail || undefined,
     topic: link.topic || undefined,
     rules: (link.rules as Record<string, unknown>) || {},
     availableSlots,
@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     sessionId: session.id,
     greeting,
-    initiator: {
+    host: {
       name: user.name,
     },
     link: {
@@ -137,7 +137,7 @@ export async function GET(req: NextRequest) {
     where: { id: sessionId },
     include: {
       link: true,
-      initiator: { select: { name: true, image: true } },
+      host: { select: { name: true, image: true } },
       messages: { orderBy: { createdAt: "asc" } },
       proposals: { orderBy: { createdAt: "desc" } },
     },

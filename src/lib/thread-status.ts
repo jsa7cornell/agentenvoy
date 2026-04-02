@@ -3,8 +3,8 @@
 interface StatusInput {
   status: string;           // "active" | "agreed" | "escalated" | "expired"
   inviteeName?: string | null;
-  lastMessageRole?: string | null;  // "administrator" | "responder" | "system"
-  responderEmail?: string | null;
+  lastMessageRole?: string | null;  // "administrator" | "guest" | "system"
+  guestEmail?: string | null;
 }
 
 interface StatusResult {
@@ -13,7 +13,7 @@ interface StatusResult {
 }
 
 export function computeThreadStatus(input: StatusInput): StatusResult {
-  const name = input.inviteeName || input.responderEmail || "invitee";
+  const name = input.inviteeName || input.guestEmail || "invitee";
 
   if (input.status === "agreed") return { label: "Confirmed", color: "green" };
   if (input.status === "expired") return { label: "Expired", color: "gray" };
@@ -22,7 +22,7 @@ export function computeThreadStatus(input: StatusInput): StatusResult {
   // Active status — depends on last message
   if (!input.lastMessageRole) return { label: `Waiting for ${name}`, color: "amber" };
   if (input.lastMessageRole === "administrator") return { label: `Waiting for ${name}`, color: "amber" };
-  if (input.lastMessageRole === "responder") return { label: `${name} responded`, color: "purple" };
+  if (input.lastMessageRole === "guest") return { label: `${name} responded`, color: "purple" };
 
   return { label: "In progress", color: "purple" };
 }

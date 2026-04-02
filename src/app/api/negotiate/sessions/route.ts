@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   const status = req.nextUrl.searchParams.get("status"); // active | agreed | all
 
   const where: Record<string, unknown> = {
-    initiatorId: userId,
+    hostId: userId,
   };
   if (status && status !== "all") {
     where.status = status;
