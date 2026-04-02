@@ -23,13 +23,65 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [initiatorName, setInitiatorName] = useState("");
   const [topic, setTopic] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState(false); // eslint-disable-line @typescript-eslint/no-unused-vars
-  const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
+  const [confirmed, setConfirmed] = useState(false);
+  const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  function parseConfirmationProposal(content: string): {
+    text: string;
+    proposal: { dateTime: string; duration: number; format: string; location: string | null } | null;
+  } {
+    const match = content.match(
+      /\[CONFIRMATION_PROPOSAL\]([^\[]*)\[\/CONFIRMATION_PROPOSAL\]/
+    );
+    if (!match) return { text: content, proposal: null };
+    try {
+      const proposal = JSON.parse(match[1]);
+      const text = content.replace(
+        /\[CONFIRMATION_PROPOSAL\][^\[]*\[\/CONFIRMATION_PROPOSAL\]/,
+        ""
+      ).trim();
+      return { text, proposal };
+    } catch {
+      return { text: content, proposal: null };
+    }
+  }
+
+  async function handleConfirm(proposal: {
+    dateTime: string;
+    duration: number;
+    format: string;
+    location: string | null;
+  }) {
+    if (!sessionId || isConfirming) return;
+    setIsConfirming(true);
+    try {
+      const res = await fetch("/api/negotiate/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          dateTime: proposal.dateTime,
+          duration: proposal.duration,
+          format: proposal.format,
+          location: proposal.location,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to confirm");
+      const data = await res.json();
+      setConfirmData(data);
+      setConfirmed(true);
+    } catch (error) {
+      console.error("Confirm error:", error);
+    } finally {
+      setIsConfirming(false);
+    }
+  }
 
   // Initialize session on mount
   useEffect(() => {
@@ -250,31 +302,89 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 </div>
               </div>
             ) : (
-              messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${
-                    msg.role === "responder" ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                      msg.role === "responder"
-                        ? "bg-indigo-600 text-white rounded-br-sm"
-                        : msg.role === "system"
-                          ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
-                          : "bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-bl-sm"
-                    }`}
-                  >
-                    {msg.role === "administrator" && (
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                        AgentEnvoy
+              messages.map((msg) => {
+                const { text, proposal } =
+                  msg.role === "administrator"
+                    ? parseConfirmationProposal(msg.content)
+                    : { text: msg.content, proposal: null };
+
+                return (
+                  <div key={msg.id}>
+                    <div
+                      className={`flex ${
+                        msg.role === "responder"
+                          ? "justify-end"
+                          : "justify-start"
+                      }`}
+                    >
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                          msg.role === "responder"
+                            ? "bg-indigo-600 text-white rounded-br-sm"
+                            : msg.role === "system"
+                              ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
+                              : "bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-bl-sm"
+                        }`}
+                      >
+                        {msg.role === "administrator" && (
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
+                            AgentEnvoy
+                          </div>
+                        )}
+                        <div className="whitespace-pre-wrap">{text}</div>
+                      </div>
+                    </div>
+
+                    {proposal && !confirmed && (
+                      <div className="flex justify-start mt-2">
+                        <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                            Proposed meeting
+                          </div>
+                          <div className="space-y-1 text-sm text-zinc-300">
+                            <p>
+                              📅{" "}
+                              {new Date(proposal.dateTime).toLocaleDateString(
+                                "en-US",
+                                {
+                                  weekday: "long",
+                                  month: "long",
+                                  day: "numeric",
+                                }
+                              )}
+                            </p>
+                            <p>
+                              🕐{" "}
+                              {new Date(proposal.dateTime).toLocaleTimeString(
+                                "en-US",
+                                { hour: "numeric", minute: "2-digit" }
+                              )}{" "}
+                              ({proposal.duration} min)
+                            </p>
+                            <p>
+                              📱{" "}
+                              {proposal.format.charAt(0).toUpperCase() +
+                                proposal.format.slice(1)}
+                            </p>
+                            {proposal.location && (
+                              <p>📍 {proposal.location}</p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleConfirm(proposal)}
+                            disabled={isConfirming}
+                            className="w-full mt-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+                          >
+                            {isConfirming
+                              ? "Confirming..."
+                              : "Confirm this time"}
+                          </button>
+                        </div>
                       </div>
                     )}
-                    <div className="whitespace-pre-wrap">{msg.content}</div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
             {isSending && (
               <div className="flex justify-start">
