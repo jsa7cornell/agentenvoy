@@ -26,8 +26,8 @@ const playbooks: Record<string, string> = {
 export type DomainType = "calendar" | "rfp";
 
 const MODEL_CONFIG: Record<DomainType, string> = {
-  calendar: "claude-sonnet-4-20250514",
-  rfp: "claude-sonnet-4-20250514",
+  calendar: "claude-sonnet-4-6",
+  rfp: "claude-sonnet-4-6",
 };
 
 export function getModelForDomain(domain: DomainType): string {

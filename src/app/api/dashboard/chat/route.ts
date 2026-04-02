@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
   const contextMessage = `User: ${user?.name || "User"}\nMeet slug: ${user?.meetSlug || "not set"}\nCurrent preferences: ${JSON.stringify(user?.preferences || {})}\nBase URL: ${process.env.NEXTAUTH_URL || "https://agentenvoy.ai"}${availabilityContext}`;
 
   const result = streamText({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     system: DASHBOARD_SYSTEM + "\n\nCONTEXT:\n" + contextMessage,
     messages,
   });

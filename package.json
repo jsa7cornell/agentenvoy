@@ -9,10 +9,10 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.64",
+    "@ai-sdk/anthropic": "^3.0.66",
     "@auth/prisma-adapter": "^1.6.0",
     "@prisma/client": "^5.22.0",
-    "ai": "^6.0.142",
+    "ai": "^6.0.144",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "googleapis": "^171.4.0",

@@ -75,7 +75,7 @@ export async function parsePreferences(
   userPrompt: string
 ): Promise<Record<string, unknown>> {
   const { text } = await generateText({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     system: `You parse natural language scheduling preferences into structured JSON. Extract:
 - preferredDays: array of day names or "any"
 - preferredTimes: array of time ranges like "morning", "afternoon", "9am-12pm"
