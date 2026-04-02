@@ -32,7 +32,6 @@ export default function ThreadCard({
   inviteeEmail,
   messageCount,
   lastActivity,
-  threadUrl,
   selected,
   onClick,
 }: ThreadCardProps) {
