@@ -23,12 +23,15 @@ export default function Home() {
       <div className="relative z-10 text-center max-w-2xl">
         <div className="flex items-center justify-center gap-4 mb-2">
           <LogoIcon size={64} className="text-indigo-400" />
-          <h1 className="text-7xl md:text-8xl font-black tracking-tight bg-gradient-to-r from-indigo-400 via-purple-300 to-indigo-400 bg-clip-text text-transparent animate-[shimmer_3s_ease_infinite] bg-[length:200%_200%]">
-            AgentEnvoy
-          </h1>
+          <div className="flex items-baseline">
+            <h1 className="text-7xl md:text-8xl font-black tracking-tight bg-gradient-to-r from-indigo-400 via-purple-300 to-indigo-400 bg-clip-text text-transparent animate-[shimmer_3s_ease_infinite] bg-[length:200%_200%]">
+              AgentEnvoy
+            </h1>
+            <span className="text-5xl md:text-6xl font-light text-indigo-400/40 tracking-tight">.ai</span>
+          </div>
         </div>
 
-        <p className="mt-6 text-xl md:text-2xl font-light text-zinc-400 leading-relaxed">
+        <p className="mt-10 text-xl md:text-2xl font-light text-zinc-400 leading-relaxed">
           From <span className="text-zinc-200 font-medium">scheduling meetings</span> to{" "}
           <span className="text-zinc-200 font-medium">navigating proposals</span> — your
           AI negotiates so you don&apos;t have to.
