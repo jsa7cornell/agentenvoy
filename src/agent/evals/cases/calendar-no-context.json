@@ -1,0 +1,21 @@
+{
+  "name": "calendar-no-context-generic-link",
+  "description": "Generic link — no guest name, topic, or format. Agent should ask for basics.",
+  "domain": "calendar",
+  "context": {
+    "role": "coordinator",
+    "hostName": "John",
+    "availableSlots": [
+      { "start": "2026-04-08T09:00:00", "end": "2026-04-08T09:30:00" },
+      { "start": "2026-04-08T14:00:00", "end": "2026-04-08T14:30:00" },
+      { "start": "2026-04-09T10:00:00", "end": "2026-04-09T10:30:00" }
+    ]
+  },
+  "trigger": "greeting",
+  "assertions": [
+    { "type": "contains", "value": "John" },
+    { "type": "contains_any", "values": ["name", "who", "your name", "introduce"] },
+    { "type": "not_contains", "value": "[CONFIRMATION_PROPOSAL]" },
+    { "type": "max_length", "value": 500 }
+  ]
+}

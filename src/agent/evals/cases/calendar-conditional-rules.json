@@ -1,0 +1,32 @@
+{
+  "name": "calendar-conditional-rules",
+  "description": "Tuesday = phone only, Tuesday evening = drinks at Vinyl. Agent should apply rules when proposing.",
+  "domain": "calendar",
+  "context": {
+    "role": "coordinator",
+    "hostName": "John",
+    "guestName": "Sarah",
+    "topic": "Q2 Planning",
+    "rules": {
+      "format": "phone",
+      "conditionalRules": [
+        { "condition": "Tuesday", "rule": "phone only" },
+        { "condition": "Tuesday evening", "rule": "drinks at Vinyl instead" }
+      ],
+      "lastResort": ["Friday"]
+    },
+    "availableSlots": [
+      { "start": "2026-04-08T10:00:00", "end": "2026-04-08T10:30:00" },
+      { "start": "2026-04-08T18:00:00", "end": "2026-04-08T19:00:00" },
+      { "start": "2026-04-11T14:00:00", "end": "2026-04-11T14:30:00" }
+    ]
+  },
+  "trigger": "greeting",
+  "assertions": [
+    { "type": "contains", "value": "Sarah" },
+    { "type": "contains_any", "values": ["phone", "call"] },
+    { "type": "contains_any", "values": ["Vinyl", "drinks", "evening"] },
+    { "type": "contains_any", "values": ["last resort", "also available", "if none"] },
+    { "type": "max_length", "value": 700 }
+  ]
+}

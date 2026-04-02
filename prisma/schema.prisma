@@ -125,6 +125,7 @@ model NegotiationSession {
   messages        Message[]
   proposals       Proposal[]
   channelMessages ChannelMessage[]
+  outcome         NegotiationOutcome?
 }
 
 model Message {
@@ -153,6 +154,22 @@ model Proposal {
 
   session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   message Message?           @relation(fields: [messageId], references: [id])
+}
+
+// NegotiationOutcome: tracks results of confirmed negotiations for learning
+model NegotiationOutcome {
+  id                     String   @id @default(cuid())
+  sessionId              String   @unique
+  exchangeCount          Int      // guest messages only (not system/greeting)
+  tierReached            Int      @default(1) // 1 | 2 | 3
+  guestCounterProposed   Boolean  @default(false)
+  timeToConfirmationSec  Int?     // seconds from session creation to confirmation
+  proposedFormat         String?  // what the agent first proposed
+  agreedFormat           String?  // what was actually confirmed
+  feedback               String?  @db.Text // open-ended guest feedback
+  createdAt              DateTime @default(now())
+
+  session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }
 
 // Channel: the host's dashboard chat — one per user

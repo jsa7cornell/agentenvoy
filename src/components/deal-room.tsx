@@ -29,6 +29,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isConfirming, setIsConfirming] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [showAgentInfo, setShowAgentInfo] = useState(false);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { data: authSession } = useSession();
 
@@ -312,7 +314,45 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               </a>
             )}
           </div>
-          <div className="mt-6 p-4 border border-indigo-500/20 bg-indigo-500/5 rounded-xl">
+          {/* Feedback */}
+          <div className="mt-6 p-4 border border-zinc-700 bg-zinc-900 rounded-xl text-left">
+            {feedbackSent ? (
+              <p className="text-sm text-zinc-400">Thanks for your feedback!</p>
+            ) : (
+              <>
+                <label className="text-sm font-medium text-zinc-300 block mb-2">
+                  Anything you'd like to share? Your feedback helps us improve.
+                </label>
+                <textarea
+                  value={feedbackText}
+                  onChange={(e) => setFeedbackText(e.target.value)}
+                  placeholder="Optional — tell us how this went..."
+                  rows={2}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 resize-none outline-none focus:border-indigo-500 transition"
+                />
+                {feedbackText.trim() && (
+                  <button
+                    onClick={async () => {
+                      if (!sessionId || !feedbackText.trim()) return;
+                      try {
+                        await fetch("/api/negotiate/confirm", {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ sessionId, feedback: feedbackText.trim() }),
+                        });
+                        setFeedbackSent(true);
+                      } catch {}
+                    }}
+                    className="mt-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs rounded-lg font-medium transition"
+                  >
+                    Send feedback
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="mt-4 p-4 border border-indigo-500/20 bg-indigo-500/5 rounded-xl">
             <p className="text-sm font-semibold text-indigo-300">
               Want your own AI negotiator?
             </p>

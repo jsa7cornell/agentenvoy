@@ -1,0 +1,24 @@
+{
+  "name": "calendar-counter-proposal",
+  "description": "Guest rejects all proposed times and suggests Thursday instead",
+  "domain": "calendar",
+  "context": {
+    "role": "coordinator",
+    "hostName": "John",
+    "guestName": "Sarah",
+    "topic": "Q2 Roadmap",
+    "rules": {},
+    "availableSlots": [
+      { "start": "2026-04-08T09:00:00", "end": "2026-04-08T09:30:00" },
+      { "start": "2026-04-10T14:00:00", "end": "2026-04-10T14:30:00" },
+      { "start": "2026-04-10T15:00:00", "end": "2026-04-10T15:30:00" }
+    ]
+  },
+  "trigger": "None of those work for me. How about Thursday?",
+  "assertions": [
+    { "type": "contains_any", "values": ["Thursday", "thursday", "April 10", "4/10"] },
+    { "type": "not_contains", "value": "Tuesday" },
+    { "type": "not_contains", "value": "[CONFIRMATION_PROPOSAL]" },
+    { "type": "max_length", "value": 500 }
+  ]
+}

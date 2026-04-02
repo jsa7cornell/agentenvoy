@@ -100,6 +100,35 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Create NegotiationOutcome for tracking
+  try {
+    const messages = await prisma.message.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: "asc" },
+    });
+    const guestMessages = messages.filter((m) => m.role === "guest");
+    const hasCounterProposal = guestMessages.some((m) =>
+      /none of|don't work|doesn't work|how about|instead|different/i.test(m.content)
+    );
+    const timeToConfirmationSec = Math.round(
+      (Date.now() - session.createdAt.getTime()) / 1000
+    );
+
+    await prisma.negotiationOutcome.create({
+      data: {
+        sessionId,
+        exchangeCount: guestMessages.length,
+        tierReached: 1, // TODO: track tier progression
+        guestCounterProposed: hasCounterProposal,
+        timeToConfirmationSec,
+        proposedFormat: session.format || null,
+        agreedFormat: meetingFormat,
+      },
+    });
+  } catch (e) {
+    console.error("Failed to create NegotiationOutcome:", e);
+  }
+
   // Send confirmation emails
   const emailBody = buildConfirmationEmail({
     hostName: session.host.name || "The organizer",
@@ -135,6 +164,33 @@ export async function POST(req: NextRequest) {
     meetLink,
     eventLink,
   });
+}
+
+// PATCH /api/negotiate/confirm
+// Update feedback on a NegotiationOutcome
+export async function PATCH(req: NextRequest) {
+  const body = await req.json();
+  const { sessionId, feedback } = body;
+
+  if (!sessionId || !feedback) {
+    return NextResponse.json(
+      { error: "Missing sessionId or feedback" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    await prisma.negotiationOutcome.update({
+      where: { sessionId },
+      data: { feedback },
+    });
+    return NextResponse.json({ status: "updated" });
+  } catch {
+    return NextResponse.json(
+      { error: "Outcome not found" },
+      { status: 404 }
+    );
+  }
 }
 
 function buildConfirmationEmail(params: {
