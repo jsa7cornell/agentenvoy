@@ -171,31 +171,29 @@ function buildSessionContext(options: ComposeOptions): string {
   if (options.availableSlots && options.availableSlots.length > 0) {
     const tz =
       (options.hostPreferences?.explicit as Record<string, unknown> | undefined)?.timezone as string | undefined ??
-      (options.hostPreferences?.timezone as string | undefined);
-    const tzOpts = tz ? { timeZone: tz } : {};
+      (options.hostPreferences?.timezone as string | undefined) ??
+      "America/Los_Angeles";
 
-    // Resolve timezone label once for the header
-    const sampleDate = new Date(options.availableSlots[0].start);
-    const tzLabel = sampleDate.toLocaleTimeString("en-US", { timeZoneName: "short", ...tzOpts }).split(" ").pop();
+    const tzLabel = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
+      .formatToParts(new Date(options.availableSlots[0].start))
+      .find((p) => p.type === "timeZoneName")?.value ?? tz;
+
+    const timeFmt = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: tz,
+    });
 
     parts.push(
-      `Available calendar slots (host, ${tzLabel}):\n${options.availableSlots
+      `Available calendar slots for the host (${tzLabel}). IMPORTANT — use these day names and times exactly as written; do not recalculate days of the week:\n${options.availableSlots
         .slice(0, 20)
         .map((s) => {
           const start = new Date(s.start);
           const end = new Date(s.end);
-          const day = start.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...tzOpts });
-          const sh = start.getHours();
-          const sm = start.getMinutes();
-          const eh = end.getHours();
-          const em = end.getMinutes();
-          const period = (h: number) => h < 12 ? "AM" : "PM";
-          const h12 = (h: number) => h === 0 ? 12 : h > 12 ? h - 12 : h;
-          const fmtTime = (h: number, m: number) => m === 0 ? `${h12(h)}` : `${h12(h)}:${String(m).padStart(2, "0")}`;
-          const samePeriod = period(sh) === period(eh);
-          const startStr = samePeriod ? fmtTime(sh, sm) : `${fmtTime(sh, sm)} ${period(sh)}`;
-          const endStr = `${fmtTime(eh, em)} ${period(eh)}`;
-          return `  ${day} ${startStr}–${endStr}`;
+          const day = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: tz }).format(start);
+          const startTime = timeFmt.format(start);
+          const endTime = timeFmt.format(end);
+          return `  ${day} ${startTime}–${endTime}`;
         })
         .join("\n")}`
     );

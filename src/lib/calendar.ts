@@ -41,10 +41,31 @@ export async function getGoogleCalendarClient(userId: string) {
   return google.calendar({ version: "v3", auth: oauth2Client });
 }
 
+/**
+ * Get the hour and day-of-week for a Date in a specific IANA timezone.
+ * Uses Intl so it works correctly on UTC servers (Vercel).
+ */
+function getLocalParts(date: Date, tz: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    hour12: false,
+    minute: "numeric",
+    weekday: "short",
+    timeZone: tz,
+  }).formatToParts(date);
+
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  const dayName = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const isWeekend = dayName === "Sat" || dayName === "Sun";
+  return { hour, minute, isWeekend };
+}
+
 export async function getAvailableSlots(
   userId: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  timezone = "America/Los_Angeles"
 ): Promise<
   Array<{ start: Date; end: Date; duration: number }>
 > {
@@ -69,21 +90,20 @@ export async function getAvailableSlots(
   const current = new Date(startDate);
 
   // Snap to next :00 or :30 boundary so slots start on even times
-  const mins = current.getMinutes();
+  const { minute: mins } = getLocalParts(current, timezone);
   if (mins > 0 && mins < 30) {
-    current.setMinutes(30, 0, 0);
+    current.setMinutes(current.getMinutes() + (30 - mins), 0, 0);
   } else if (mins > 30) {
-    current.setHours(current.getHours() + 1, 0, 0, 0);
+    current.setMinutes(current.getMinutes() + (60 - mins), 0, 0);
   } else {
     current.setSeconds(0, 0);
   }
 
   while (current < endDate) {
-    const hour = current.getHours();
-    const day = current.getDay();
+    const { hour, isWeekend } = getLocalParts(current, timezone);
 
-    // Skip weekends and outside business hours
-    if (day === 0 || day === 6 || hour < 9 || hour >= 18) {
+    // Skip weekends and outside business hours (in host's timezone)
+    if (isWeekend || hour < 9 || hour >= 18) {
       current.setMinutes(current.getMinutes() + 30);
       continue;
     }
