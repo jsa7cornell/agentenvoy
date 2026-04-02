@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { signIn, useSession } from "next-auth/react";
 
 interface Message {
   id: string;
@@ -26,7 +27,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [confirmed, setConfirmed] = useState(false);
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [showAgentInfo, setShowAgentInfo] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { data: authSession } = useSession();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -82,6 +86,66 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       setIsConfirming(false);
     }
   }
+
+  function handleConnectCalendar() {
+    // Sign in with Google — on return, calendar access is granted
+    const callbackUrl = code
+      ? `/meet/${slug}/${code}`
+      : `/meet/${slug}`;
+    signIn("google", { callbackUrl });
+  }
+
+  function handleConnectAgent() {
+    setShowAgentInfo((prev) => !prev);
+  }
+
+  // If the responder signed in (calendar connect), mark it and inject availability
+  const calendarCheckDone = useRef(false);
+  useEffect(() => {
+    if (authSession?.user?.id && sessionId && !calendarConnected && !calendarCheckDone.current) {
+      calendarCheckDone.current = true;
+      setCalendarConnected(true);
+      // Notify the agent that responder connected their calendar
+      fetch("/api/negotiate/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          content: "[SYSTEM: The responder has connected their Google Calendar. You now have access to their availability. Cross-reference both calendars to propose optimal times.]",
+        }),
+      }).then(async (res) => {
+        if (!res.ok) return;
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let fullText = "";
+        const assistantId = (Date.now() + 1).toString();
+        setMessages((prev) => [
+          ...prev,
+          { id: assistantId, role: "administrator", content: "" },
+        ]);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+          for (const line of lines) {
+            if (line.startsWith("0:")) {
+              try {
+                const text = JSON.parse(line.slice(2));
+                fullText += text;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId ? { ...m, content: fullText } : m
+                  )
+                );
+              } catch {}
+            }
+          }
+        }
+      }).catch(() => {});
+    }
+  }, [authSession, sessionId, calendarConnected, slug, code]);
 
   // Initialize session on mount
   useEffect(() => {
@@ -328,7 +392,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       >
                         {msg.role === "administrator" && (
                           <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                            AgentEnvoy
+                            Envoy
                           </div>
                         )}
                         <div className="whitespace-pre-wrap">{text}</div>
@@ -390,7 +454,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               <div className="flex justify-start">
                 <div className="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-bl-sm px-4 py-3">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                    AgentEnvoy
+                    Envoy
                   </div>
                   <div className="flex gap-1">
                     <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
@@ -440,23 +504,56 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             Quick actions
           </h4>
 
-          <button className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group">
-            <div className="text-sm font-medium text-zinc-200 group-hover:text-indigo-300 transition">
-              📅 Connect your calendar
+          {calendarConnected ? (
+            <div className="w-full bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-3">
+              <div className="text-sm font-medium text-emerald-300">
+                Calendar connected
+              </div>
+              <p className="text-xs text-zinc-500 mt-1">
+                Your availability is being shared
+              </p>
             </div>
-            <p className="text-xs text-zinc-500 mt-1">
-              Share your availability automatically
-            </p>
-          </button>
+          ) : (
+            <button
+              onClick={handleConnectCalendar}
+              className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group"
+            >
+              <div className="text-sm font-medium text-zinc-200 group-hover:text-indigo-300 transition">
+                Connect your calendar
+              </div>
+              <p className="text-xs text-zinc-500 mt-1">
+                Sign in with Google to share your availability
+              </p>
+            </button>
+          )}
 
-          <button className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group">
+          <button
+            onClick={handleConnectAgent}
+            className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group"
+          >
             <div className="text-sm font-medium text-zinc-200 group-hover:text-indigo-300 transition">
-              🤖 Connect your agent
+              Connect your agent
             </div>
             <p className="text-xs text-zinc-500 mt-1">
               Let your AI handle this negotiation
             </p>
           </button>
+
+          {showAgentInfo && (
+            <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-xs text-zinc-400 space-y-2">
+              <p className="font-medium text-zinc-200">Agent API</p>
+              <p>Your agent can negotiate on your behalf via the AgentEnvoy API.</p>
+              <p>Send messages to this session at:</p>
+              <code className="block bg-zinc-800 rounded p-2 text-emerald-400 text-[11px] break-all">
+                POST /api/negotiate/message
+              </code>
+              <p className="mt-1">
+                <a href="https://agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300">
+                  Sign up for API access
+                </a>
+              </p>
+            </div>
+          )}
 
           {initiatorName && (
             <div className="mt-6">

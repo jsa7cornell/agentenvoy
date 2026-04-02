@@ -55,6 +55,10 @@ export async function POST(req: NextRequest) {
       initiatorId: user.id,
       type: "calendar",
       status: "active",
+      title: link.topic
+        ? `${link.topic}${link.inviteeName ? ` — ${link.inviteeName}` : ''}`
+        : `Meeting${link.inviteeName ? ` with ${link.inviteeName}` : ''}`,
+      statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
     },
   });
 
@@ -93,7 +97,7 @@ export async function POST(req: NextRequest) {
       {
         role: "user",
         content:
-          "A new visitor just opened the deal room. Generate your initial greeting. Introduce yourself, mention the topic if known, ask about format preference (phone/video/in-person), and offer to help find a time. If you know the responder's name, use it. Mention they can connect their calendar or their agent for faster scheduling.",
+          "A new visitor just opened the deal room. Generate your initial greeting following your GREETING STRATEGY instructions. Use all context you have — name, topic, format, timing, available slots. Propose specific times if you have calendar data and preferences. Be efficient.",
       },
     ],
   });

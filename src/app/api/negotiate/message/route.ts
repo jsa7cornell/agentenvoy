@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { AgentContext } from "@/agent/administrator";
+import { computeThreadStatus } from "@/lib/thread-status";
 
 // POST /api/negotiate/message
 // Send a message in a negotiation session and get agent response (streaming)
@@ -71,6 +72,22 @@ export async function POST(req: NextRequest) {
   // Save the response
   await prisma.message.create({
     data: { sessionId, role: "administrator", content: responseText },
+  });
+
+  // Update thread status label
+  const lastMessage = await prisma.message.findFirst({
+    where: { sessionId },
+    orderBy: { createdAt: "desc" },
+  });
+  const statusResult = computeThreadStatus({
+    status: session.status,
+    inviteeName: session.link.inviteeName,
+    lastMessageRole: lastMessage?.role,
+    responderEmail: session.responderEmail || session.link.inviteeEmail,
+  });
+  await prisma.negotiationSession.update({
+    where: { id: sessionId },
+    data: { statusLabel: statusResult.label },
   });
 
   // Return as a streaming-compatible format

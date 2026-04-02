@@ -128,7 +128,7 @@ export function Chat({
             >
               {message.role === "assistant" && (
                 <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                  AgentEnvoy
+                  Envoy
                 </div>
               )}
               <div className="whitespace-pre-wrap">
@@ -143,7 +143,7 @@ export function Chat({
           <div className="flex justify-start">
             <div className="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-bl-sm px-4 py-3">
               <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                AgentEnvoy
+                Envoy
               </div>
               <div className="flex gap-1">
                 <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />

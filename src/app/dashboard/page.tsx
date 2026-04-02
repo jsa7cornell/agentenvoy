@@ -2,30 +2,15 @@
 
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
-import { Chat } from "@/components/chat";
-
-interface NegotiationSession {
-  id: string;
-  status: string;
-  type: string;
-  agreedTime?: string;
-  agreedFormat?: string;
-  meetLink?: string;
-  updatedAt: string;
-  link: {
-    type: string;
-    inviteeName?: string;
-    inviteeEmail?: string;
-    topic?: string;
-  };
-  _count: { messages: number };
-}
+import { useEffect, useState } from "react";
+import Feed from "@/components/feed";
+import ThreadPanel from "@/components/thread-panel";
+import { ConnectionsMenu } from "@/components/connections-menu";
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [sessions, setSessions] = useState<NegotiationSession[]>([]);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -34,24 +19,8 @@ export default function DashboardPage() {
     }
   }, [status, router]);
 
-  const fetchSessions = useCallback(async () => {
-    try {
-      const res = await fetch("/api/negotiate/sessions?status=all");
-      if (res.ok) {
-        const data = await res.json();
-        setSessions(data.sessions);
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    if (status === "authenticated") {
-      fetchSessions();
-    }
-  }, [status, fetchSessions]);
-
   const meetUrl = session?.user?.meetSlug
-    ? `${window.location.origin}/meet/${session.user.meetSlug}`
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/meet/${session.user.meetSlug}`
     : null;
 
   function copyLink() {
@@ -59,34 +28,6 @@ export default function DashboardPage() {
       navigator.clipboard.writeText(meetUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    }
-  }
-
-  async function handleAction(action: Record<string, unknown>) {
-    if (action.action === "create_link") {
-      try {
-        const res = await fetch("/api/negotiate/create", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inviteeEmail: action.inviteeEmail,
-            inviteeName: action.inviteeName,
-            topic: action.topic,
-            rules: action.rules,
-          }),
-        });
-        if (res.ok) {
-          fetchSessions();
-        }
-      } catch {}
-    } else if (action.action === "update_preferences") {
-      try {
-        await fetch("/api/agent/configure", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: JSON.stringify(action.preferences) }),
-        });
-      } catch {}
     }
   }
 
@@ -100,27 +41,37 @@ export default function DashboardPage() {
 
   if (!session) return null;
 
-  const activeSessions = sessions.filter((s) => s.status === "active");
-  const completedSessions = sessions.filter((s) => s.status === "agreed");
-
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-zinc-100">
+    <div className="h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-zinc-800 px-6 py-3.5 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-            AgentEnvoy
-          </h1>
-          <span className="text-xs text-zinc-500">Dashboard</span>
+          <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+            E
+          </div>
+          <h1 className="text-lg font-semibold">Envoy</h1>
         </div>
         <div className="flex items-center gap-4">
+          {meetUrl && (
+            <button
+              onClick={copyLink}
+              className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700 hover:border-purple-500/40 text-zinc-400 hover:text-zinc-200 transition flex items-center gap-2"
+            >
+              <code className="text-purple-400 font-mono text-[11px]">
+                /meet/{session.user?.meetSlug}
+              </code>
+              <span>{copied ? "Copied!" : "Copy"}</span>
+            </button>
+          )}
+          <ConnectionsMenu />
+          <div className="w-px h-5 bg-zinc-800" />
           <span className="text-sm text-zinc-400">{session.user?.name}</span>
           {session.user?.image && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={session.user.image}
               alt=""
-              className="w-8 h-8 rounded-full"
+              className="w-7 h-7 rounded-full"
             />
           )}
           <button
@@ -132,106 +83,25 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-65px)]">
-        {/* Left side — Chat */}
-        <div className="flex-1 flex flex-col border-r border-zinc-800">
-          {/* Meet link bar */}
-          {meetUrl && (
-            <div className="px-6 py-3 border-b border-zinc-800 flex items-center gap-3 bg-zinc-900/50">
-              <span className="text-xs text-zinc-500 font-medium">
-                Your meet link:
-              </span>
-              <code className="text-sm text-emerald-400 font-mono">
-                {meetUrl}
-              </code>
-              <button
-                onClick={copyLink}
-                className="text-xs px-3 py-1 rounded-lg bg-zinc-800 border border-zinc-700 hover:border-indigo-500 text-zinc-300 transition"
-              >
-                {copied ? "Copied!" : "Copy"}
-              </button>
-            </div>
-          )}
-
-          <Chat
-            endpoint="/api/dashboard/chat"
-            placeholder="Tell me about a meeting you want to set up..."
-            initialMessages={[
-              {
-                id: "welcome",
-                role: "assistant",
-                content: `Hi ${session.user?.name?.split(" ")[0] || "there"}! I'm your AgentEnvoy assistant. Tell me about a meeting you'd like to set up, and I'll create a link for you.\n\nFor example: "I need to meet with Sarah Chen this week about the Q2 roadmap. Tuesday works best, phone only."`,
-              },
-            ]}
-            onAction={handleAction}
+      {/* Main: Feed + Thread Panel */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Feed */}
+        <div className="flex-1 min-w-0">
+          <Feed
+            onThreadSelect={(id) => setSelectedThreadId(id)}
+            selectedThreadId={selectedThreadId}
           />
         </div>
 
-        {/* Right side — Sessions */}
-        <div className="w-80 overflow-y-auto p-4 space-y-6">
-          {/* Active negotiations */}
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">
-              Active ({activeSessions.length})
-            </h3>
-            {activeSessions.length === 0 ? (
-              <p className="text-xs text-zinc-600">No active negotiations</p>
-            ) : (
-              <div className="space-y-2">
-                {activeSessions.map((s) => (
-                  <SessionCard key={s.id} session={s} />
-                ))}
-              </div>
-            )}
+        {/* Thread panel */}
+        {selectedThreadId && (
+          <div className="w-[460px] flex-shrink-0 overflow-hidden">
+            <ThreadPanel
+              sessionId={selectedThreadId}
+              onClose={() => setSelectedThreadId(null)}
+            />
           </div>
-
-          {/* Completed */}
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-3">
-              Completed ({completedSessions.length})
-            </h3>
-            {completedSessions.length === 0 ? (
-              <p className="text-xs text-zinc-600">No completed negotiations</p>
-            ) : (
-              <div className="space-y-2">
-                {completedSessions.map((s) => (
-                  <SessionCard key={s.id} session={s} />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SessionCard({ session: s }: { session: NegotiationSession }) {
-  return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-zinc-700 transition cursor-pointer">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-sm font-medium truncate">
-          {s.link.inviteeName || s.link.inviteeEmail || "Unknown"}
-        </span>
-        <span
-          className={`text-[10px] font-bold uppercase tracking-wider ${
-            s.status === "active"
-              ? "text-amber-400"
-              : s.status === "agreed"
-                ? "text-emerald-400"
-                : "text-zinc-500"
-          }`}
-        >
-          {s.status}
-        </span>
-      </div>
-      {s.link.topic && (
-        <p className="text-xs text-zinc-400 truncate">{s.link.topic}</p>
-      )}
-      <div className="flex items-center gap-2 mt-2 text-[10px] text-zinc-500">
-        <span>{s._count.messages} messages</span>
-        <span className="text-zinc-700">&middot;</span>
-        <span>{s.link.type}</span>
+        )}
       </div>
     </div>
   );

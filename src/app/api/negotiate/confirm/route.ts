@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
       summary: session.link.topic
         ? `${session.link.topic} — ${session.link.inviteeName || "Meeting"}`
         : `Meeting with ${session.link.inviteeName || responderEmail || "guest"}`,
-      description: `Scheduled via AgentEnvoy\nFormat: ${meetingFormat}${location ? `\nLocation: ${location}` : ""}`,
+      description: `Scheduled via Envoy\nFormat: ${meetingFormat}${location ? `\nLocation: ${location}` : ""}`,
       startTime,
       endTime,
       attendeeEmails: [
@@ -83,6 +83,7 @@ export async function POST(req: NextRequest) {
     where: { id: sessionId },
     data: {
       status: "agreed",
+      statusLabel: "Confirmed",
       agreedTime: startTime,
       agreedFormat: meetingFormat,
       meetLink: meetLink || null,

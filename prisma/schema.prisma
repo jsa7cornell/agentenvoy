@@ -62,6 +62,7 @@ model User {
   initiatedSessions  NegotiationSession[] @relation("initiator")
   respondedSessions  NegotiationSession[] @relation("responder")
   apiKeys            ApiKey[]
+  channel            Channel?
 }
 
 model ApiKey {
@@ -105,6 +106,8 @@ model NegotiationSession {
   responderId   String?
   type          String   @default("calendar") // calendar | rfp
   status        String   @default("active") // active | agreed | escalated | expired
+  title         String?  // "Q2 Roadmap — Sarah Chen"
+  statusLabel   String?  // "Waiting for Sarah", "Confirmed", etc.
   meetingType   String?  // phone | video | in-person
   duration      Int?     // minutes
   format        String?
@@ -116,11 +119,12 @@ model NegotiationSession {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  link      NegotiationLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
-  initiator User            @relation("initiator", fields: [initiatorId], references: [id])
-  responder User?           @relation("responder", fields: [responderId], references: [id])
-  messages  Message[]
-  proposals Proposal[]
+  link            NegotiationLink  @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  initiator       User             @relation("initiator", fields: [initiatorId], references: [id])
+  responder       User?            @relation("responder", fields: [responderId], references: [id])
+  messages        Message[]
+  proposals       Proposal[]
+  channelMessages ChannelMessage[]
 }
 
 model Message {
@@ -149,4 +153,29 @@ model Proposal {
 
   session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   message Message?           @relation(fields: [messageId], references: [id])
+}
+
+// Channel: the initiator's feed — one per user
+model Channel {
+  id        String           @id @default(cuid())
+  userId    String           @unique
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  ChannelMessage[]
+  createdAt DateTime         @default(now())
+}
+
+// ChannelMessage: feed-level messages between user and Envoy
+model ChannelMessage {
+  id        String              @id @default(cuid())
+  channelId String
+  channel   Channel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  role      String              // "user" | "envoy" | "system"
+  content   String              @db.Text
+  threadId  String?             // FK to NegotiationSession — renders as ThreadCard in feed
+  thread    NegotiationSession? @relation(fields: [threadId], references: [id])
+  metadata  Json?               @default("{}")
+  createdAt DateTime            @default(now())
+
+  @@index([channelId])
+  @@index([threadId])
 }
