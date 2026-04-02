@@ -79,6 +79,44 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
     const text = input.trim();
     if (!text || loading) return;
 
+    // Host note: :: prefix — saved as feedback on the selected thread
+    if (text.startsWith("::")) {
+      const noteContent = text.slice(2).trim();
+      if (!noteContent) return;
+      if (!selectedThreadId) {
+        // No thread selected — tell the user
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `system-${Date.now()}`,
+            role: "system",
+            content: "Select a thread first to leave a note (:: only works with a thread open).",
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+        return;
+      }
+      setInput("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      try {
+        await fetch("/api/negotiate/note", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: selectedThreadId, content: noteContent }),
+        });
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `note-${Date.now()}`,
+            role: "system",
+            content: `Note saved on thread: "${noteContent}"`,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+      } catch {}
+      return;
+    }
+
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
