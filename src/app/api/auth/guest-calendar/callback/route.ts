@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   const now = new Date();
   const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-  let guestSlots: Array<{ start: string; end: string }> = [];
+  const guestSlots: Array<{ start: string; end: string }> = [];
   try {
     const { data } = await calendar.freebusy.query({
       requestBody: {

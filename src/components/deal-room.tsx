@@ -324,7 +324,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             ) : (
               <>
                 <label className="text-sm font-medium text-zinc-300 block mb-2">
-                  Anything you'd like to share? Your feedback helps us improve.
+                  Anything you&apos;d like to share? Your feedback helps us improve.
                 </label>
                 <textarea
                   value={feedbackText}
