@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { getAvailableSlots } from "@/lib/calendar";
+import { generateCode } from "@/lib/utils";
 
 const CHANNEL_SYSTEM = `You are Envoy, the user's scheduling agent. You operate in their feed — a chat interface where scheduling threads appear as inline cards.
 
@@ -15,13 +16,14 @@ CORE BEHAVIOR:
 4. Be contextual — reference the user's calendar, active threads, and preferences
 
 CREATING THREADS:
-When the user wants to schedule something, extract: who (name, email), what (topic), when (preferences), format (phone/video/in-person), duration.
+When the user wants to schedule something, extract what you can: who (name), what (topic), when (preferences), format (phone/video/in-person), duration.
 Then emit an action block:
 \`\`\`agentenvoy-action
-{"action":"create_thread","inviteeName":"Sarah Chen","inviteeEmail":"sarah@acme.com","topic":"Q2 Roadmap","format":"phone","duration":30,"rules":{"preferredDays":["Tuesday"],"lastResort":["Friday"]}}
+{"action":"create_thread","inviteeName":"Sarah Chen","topic":"Q2 Roadmap","format":"phone","duration":30,"rules":{"preferredDays":["Tuesday"],"lastResort":["Friday"]}}
 \`\`\`
 
-If you're missing critical info (who or email), ask for it conversationally — don't make the user fill out a form.
+IMPORTANT — email is OPTIONAL. The inviteeName is the only required field. Do NOT ask for email unless the user wants Envoy to send the invite directly. If the user just says "set up a meeting with Bryan", create the thread with just the name — they can share the link themselves.
+If the user provides an email, include "inviteeEmail" in the action block. If not, omit it.
 
 TONE: Conversational, efficient, no filler. You know the user's calendar — reference it naturally.`;
 
@@ -114,13 +116,105 @@ export async function POST(req: NextRequest) {
     messages,
   });
 
-  // Save envoy response
+  // Parse for agentenvoy-action blocks
+  const actionRegex = /```agentenvoy-action\s*\n?([\s\S]*?)\n?```/g;
+  const actionMatch = actionRegex.exec(text);
+
+  // Strip action blocks from the visible message
+  const displayText = text.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
+
+  // Process action if found
+  if (actionMatch) {
+    try {
+      const action = JSON.parse(actionMatch[1]);
+
+      if (action.action === "create_thread") {
+        const code = generateCode();
+        const baseUrl = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
+        const threadUrl = `${baseUrl}/meet/${user.meetSlug}/${code}`;
+        const title = action.topic
+          ? `${action.topic} — ${action.inviteeName || "Invitee"}`
+          : `Catch up — ${action.inviteeName || "Invitee"}`;
+
+        // Create contextual link
+        const link = await prisma.negotiationLink.create({
+          data: {
+            userId: user.id,
+            type: "contextual",
+            slug: user.meetSlug || "",
+            code,
+            inviteeEmail: action.inviteeEmail || null,
+            inviteeName: action.inviteeName || null,
+            topic: action.topic || null,
+            rules: action.rules || {},
+          },
+        });
+
+        // Create negotiation session
+        const negotiationSession = await prisma.negotiationSession.create({
+          data: {
+            linkId: link.id,
+            initiatorId: user.id,
+            type: "calendar",
+            status: "active",
+            title,
+            statusLabel: `Waiting for ${action.inviteeName || "invitee"}`,
+            format: action.format || null,
+            duration: action.duration || 30,
+          },
+        });
+
+        // Save envoy response (stripped of action block) with threadId
+        await prisma.channelMessage.create({
+          data: {
+            channelId: channel.id,
+            role: "envoy",
+            content: displayText || `I've set up a thread for ${action.inviteeName || "your meeting"}.`,
+            threadId: negotiationSession.id,
+          },
+        });
+
+        // Build a response that includes the thread data
+        const shareNote = action.inviteeEmail
+          ? `I'll send the invite to ${action.inviteeEmail}.`
+          : `Here's the link to share: ${threadUrl}`;
+
+        const responsePayload = {
+          message: displayText || `I've set up a thread for ${action.inviteeName || "your meeting"}.`,
+          shareNote,
+          thread: {
+            id: negotiationSession.id,
+            title,
+            status: "active",
+            statusLabel: `Waiting for ${action.inviteeName || "invitee"}`,
+            format: action.format || null,
+            duration: action.duration || 30,
+            url: threadUrl,
+            code,
+            link: {
+              inviteeName: action.inviteeName || null,
+              inviteeEmail: action.inviteeEmail || null,
+              topic: action.topic || null,
+              code,
+              slug: user.meetSlug || "",
+            },
+          },
+        };
+
+        return NextResponse.json(responsePayload);
+      }
+    } catch (e) {
+      console.error("Failed to parse/execute action:", e);
+    }
+  }
+
+  // No action — save envoy response as-is
   await prisma.channelMessage.create({
-    data: { channelId: channel.id, role: "envoy", content: text },
+    data: { channelId: channel.id, role: "envoy", content: displayText || text },
   });
 
   // Return as stream-compatible format (matching existing pattern)
-  const encoded = JSON.stringify(text);
+  const encoded = JSON.stringify(displayText || text);
   return new Response(`0:${encoded}\n`, {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });

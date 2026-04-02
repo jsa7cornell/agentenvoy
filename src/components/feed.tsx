@@ -101,61 +101,61 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
 
       if (!res.ok) throw new Error("Failed to send");
 
-      const responseText = await res.text();
+      const contentType = res.headers.get("content-type") || "";
 
-      // Parse AI SDK format: 0:"text"\n
-      let content = responseText;
-      try {
-        // Handle streaming format lines
-        const lines = responseText.split("\n").filter(Boolean);
-        const parsed = lines.map((line) => {
-          if (line.startsWith("0:")) {
-            return JSON.parse(line.slice(2));
-          }
-          return line;
-        });
-        content = parsed.join("");
-      } catch {
-        // Use raw text if parsing fails
-      }
+      if (contentType.includes("application/json")) {
+        // Thread creation response — server returns JSON with thread data
+        const data = await res.json();
 
-      // Check for action blocks
-      const actionMatch = content.match(
-        /```agentenvoy-action\s*\n?([\s\S]*?)\n?```/
-      );
+        // Add envoy message with share note
+        const envoyContent = data.shareNote
+          ? `${data.message}\n\n${data.shareNote}`
+          : data.message;
 
-      let displayContent = content;
+        const envoyMsg: ChannelMsg = {
+          id: `temp-envoy-${Date.now()}`,
+          role: "envoy",
+          content: envoyContent,
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, envoyMsg]);
 
-      if (actionMatch) {
-        displayContent = content
+        // Reload messages to get the full thread card from the server
+        const refreshRes = await fetch("/api/channel/messages");
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json();
+          setMessages(refreshData.messages || []);
+        }
+      } else {
+        // Regular text response — parse AI SDK format: 0:"text"\n
+        const responseText = await res.text();
+        let content = responseText;
+        try {
+          const lines = responseText.split("\n").filter(Boolean);
+          const parsed = lines.map((line) => {
+            if (line.startsWith("0:")) {
+              return JSON.parse(line.slice(2));
+            }
+            return line;
+          });
+          content = parsed.join("");
+        } catch {
+          // Use raw text if parsing fails
+        }
+
+        // Strip any action blocks that leaked through (safety net)
+        const displayContent = content
           .replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "")
           .trim();
 
-        try {
-          const action = JSON.parse(actionMatch[1]);
-          if (action.action === "create_thread" && action.sessionId) {
-            // Reload messages to get the thread card
-            const refreshRes = await fetch("/api/channel/messages");
-            if (refreshRes.ok) {
-              const refreshData = await refreshRes.json();
-              setMessages(refreshData.messages || []);
-              setLoading(false);
-              return;
-            }
-          }
-        } catch (e) {
-          console.error("Failed to parse action:", e);
-        }
+        const envoyMsg: ChannelMsg = {
+          id: `temp-envoy-${Date.now()}`,
+          role: "envoy",
+          content: displayContent || content,
+          createdAt: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, envoyMsg]);
       }
-
-      // Add envoy response
-      const envoyMsg: ChannelMsg = {
-        id: `temp-envoy-${Date.now()}`,
-        role: "envoy",
-        content: displayContent,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, envoyMsg]);
     } catch (e) {
       console.error("Send error:", e);
       // Add error message

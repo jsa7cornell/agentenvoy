@@ -37,6 +37,11 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
   },
+  session: {
+    strategy: "database",
+    maxAge: 7 * 24 * 60 * 60, // 7 days
+    updateAge: 24 * 60 * 60,  // refresh session token every 24 hours
+  },
   pages: {
     signIn: "/",
     error: "/",
