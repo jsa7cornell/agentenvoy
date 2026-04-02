@@ -68,6 +68,16 @@ export async function getAvailableSlots(
   const slots: Array<{ start: Date; end: Date; duration: number }> = [];
   const current = new Date(startDate);
 
+  // Snap to next :00 or :30 boundary so slots start on even times
+  const mins = current.getMinutes();
+  if (mins > 0 && mins < 30) {
+    current.setMinutes(30, 0, 0);
+  } else if (mins > 30) {
+    current.setHours(current.getHours() + 1, 0, 0, 0);
+  } else {
+    current.setSeconds(0, 0);
+  }
+
   while (current < endDate) {
     const hour = current.getHours();
     const day = current.getDay();

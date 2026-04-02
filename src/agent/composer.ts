@@ -144,30 +144,28 @@ function buildSessionContext(options: ComposeOptions): string {
       (options.hostPreferences?.timezone as string | undefined);
     const tzOpts = tz ? { timeZone: tz } : {};
 
+    // Resolve timezone label once for the header
+    const sampleDate = new Date(options.availableSlots[0].start);
+    const tzLabel = sampleDate.toLocaleTimeString("en-US", { timeZoneName: "short", ...tzOpts }).split(" ").pop();
+
     parts.push(
-      `Available calendar slots (host):\n${options.availableSlots
+      `Available calendar slots (host, ${tzLabel}):\n${options.availableSlots
         .slice(0, 20)
         .map((s) => {
           const start = new Date(s.start);
           const end = new Date(s.end);
-          const dayLabel = start.toLocaleDateString("en-US", {
-            weekday: "long",
-            month: "long",
-            day: "numeric",
-            ...tzOpts,
-          });
-          const startTime = start.toLocaleTimeString("en-US", {
-            hour: "numeric",
-            minute: "2-digit",
-            timeZoneName: "short",
-            ...tzOpts,
-          });
-          const endTime = end.toLocaleTimeString("en-US", {
-            hour: "numeric",
-            minute: "2-digit",
-            ...tzOpts,
-          });
-          return `  ${dayLabel}: ${startTime} – ${endTime} (${s.start})`;
+          const day = start.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...tzOpts });
+          const sh = start.getHours();
+          const sm = start.getMinutes();
+          const eh = end.getHours();
+          const em = end.getMinutes();
+          const period = (h: number) => h < 12 ? "AM" : "PM";
+          const h12 = (h: number) => h === 0 ? 12 : h > 12 ? h - 12 : h;
+          const fmtTime = (h: number, m: number) => m === 0 ? `${h12(h)}` : `${h12(h)}:${String(m).padStart(2, "0")}`;
+          const samePeriod = period(sh) === period(eh);
+          const startStr = samePeriod ? fmtTime(sh, sm) : `${fmtTime(sh, sm)} ${period(sh)}`;
+          const endStr = `${fmtTime(eh, em)} ${period(eh)}`;
+          return `  ${day} ${startStr}–${endStr}`;
         })
         .join("\n")}`
     );
