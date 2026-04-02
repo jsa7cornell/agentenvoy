@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { authenticateRequest } from "@/lib/api-auth";
 
 // GET /api/negotiate/sessions
 // List all negotiation sessions for the current user
+// Auth: Bearer token OR NextAuth session
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const userId = await authenticateRequest(req);
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const status = req.nextUrl.searchParams.get("status"); // active | agreed | all
 
   const where: Record<string, unknown> = {
-    initiatorId: session.user.id,
+    initiatorId: userId,
   };
   if (status && status !== "all") {
     where.status = status;

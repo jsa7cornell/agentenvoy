@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { parsePreferences } from "@/agent/administrator";
+import { authenticateRequest } from "@/lib/api-auth";
 
 // POST /api/agent/configure
 // Update user preferences via natural language prompt
 // This is the "agent setup" — the prompt IS the configuration
+// Auth: Bearer token OR NextAuth session
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const userId = await authenticateRequest(req);
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
   // Merge with existing preferences
   const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
+    where: { id: userId },
     select: { preferences: true },
   });
 
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   const mergedPrefs = { ...existingPrefs, ...preferences };
 
   await prisma.user.update({
-    where: { id: session.user.id },
+    where: { id: userId },
     data: { preferences: mergedPrefs as object },
   });
 

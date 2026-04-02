@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { parsePreferences } from "@/agent/administrator";
+import { authenticateRequest } from "@/lib/api-auth";
 
 // POST /api/negotiate/create
 // Creates a contextual negotiation link
+// Auth: Bearer token OR NextAuth session
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
+  const userId = await authenticateRequest(req);
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   const { inviteeEmail, inviteeName, topic, rules, prompt } = body;
 
   const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
+    where: { id: userId },
     select: { meetSlug: true },
   });
 
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
 
   const link = await prisma.negotiationLink.create({
     data: {
-      userId: session.user.id,
+      userId,
       type: "contextual",
       slug: user.meetSlug,
       code,

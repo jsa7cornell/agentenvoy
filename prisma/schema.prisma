@@ -61,6 +61,20 @@ model User {
   negotiationLinks   NegotiationLink[]
   initiatedSessions  NegotiationSession[] @relation("initiator")
   respondedSessions  NegotiationSession[] @relation("responder")
+  apiKeys            ApiKey[]
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  key        String    @unique // SHA-256 hash of the plaintext key
+  userId     String
+  name       String    @default("Default")
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([key])
 }
 
 model NegotiationLink {
