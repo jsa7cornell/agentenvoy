@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { signIn, useSession } from "next-auth/react";
 
 interface Message {
   id: string;
@@ -32,7 +31,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSent, setFeedbackSent] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { data: authSession } = useSession();
+
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -90,30 +89,34 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   }
 
   function handleConnectCalendar() {
-    // Sign in with Google — on return, calendar access is granted
-    const callbackUrl = code
-      ? `/meet/${slug}/${code}`
-      : `/meet/${slug}`;
-    signIn("google", { callbackUrl });
+    // Guest-specific OAuth with read-only calendar scope
+    const returnUrl = code ? `/meet/${slug}/${code}` : `/meet/${slug}`;
+    window.location.href = `/api/auth/guest-calendar?sessionId=${sessionId}&returnUrl=${encodeURIComponent(returnUrl)}`;
   }
 
   function handleConnectAgent() {
     setShowAgentInfo((prev) => !prev);
   }
 
-  // If the guest signed in (calendar connect), mark it and inject availability
+  // Detect guest calendar connect via URL param (returned from guest OAuth flow)
   const calendarCheckDone = useRef(false);
   useEffect(() => {
-    if (authSession?.user?.id && sessionId && !calendarConnected && !calendarCheckDone.current) {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("calendarConnected") === "true" && sessionId && !calendarConnected && !calendarCheckDone.current) {
       calendarCheckDone.current = true;
       setCalendarConnected(true);
-      // Notify the agent that guest connected their calendar
+      // Clean up URL param
+      const url = new URL(window.location.href);
+      url.searchParams.delete("calendarConnected");
+      window.history.replaceState({}, "", url.pathname);
+      // Ask the agent to re-evaluate with guest availability now injected
       fetch("/api/negotiate/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          content: "[SYSTEM: The guest has connected their Google Calendar. You now have access to their availability. Cross-reference both calendars to propose optimal times.]",
+          content: "[SYSTEM: The guest connected their Google Calendar (read-only). Their availability has been added to the session. Cross-reference both calendars to propose optimal mutual times.]",
         }),
       }).then(async (res) => {
         if (!res.ok) return;
@@ -147,7 +150,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         }
       }).catch(() => {});
     }
-  }, [authSession, sessionId, calendarConnected, slug, code]);
+  }, [sessionId, calendarConnected]);
 
   // Initialize session on mount
   useEffect(() => {
@@ -556,13 +559,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           ) : (
             <button
               onClick={handleConnectCalendar}
-              className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group"
+              disabled={!sessionId}
+              className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group disabled:opacity-50"
             >
-              <div className="text-sm font-medium text-zinc-200 group-hover:text-indigo-300 transition">
-                Connect your calendar
+              <div className="text-sm font-medium text-indigo-400 group-hover:text-indigo-300 transition underline underline-offset-2">
+                Connect your calendar for automatic availability
               </div>
               <p className="text-xs text-zinc-500 mt-1">
-                Sign in with Google to share your availability
+                One-time read-only access via Google — we only check your free/busy times
               </p>
             </button>
           )}
