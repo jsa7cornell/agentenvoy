@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import Feed from "@/components/feed";
 import ThreadPanel from "@/components/thread-panel";
 import { ConnectionsMenu } from "@/components/connections-menu";
+import { LogoFull } from "@/components/logo";
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
@@ -45,11 +46,8 @@ export default function DashboardPage() {
     <div className="h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col overflow-hidden">
       {/* Header */}
       <header className="border-b border-zinc-800 px-6 py-3.5 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">
-            E
-          </div>
-          <h1 className="text-lg font-semibold">Envoy</h1>
+        <div className="flex items-center">
+          <LogoFull height={28} className="text-zinc-100" />
         </div>
         <div className="flex items-center gap-4">
           {meetUrl && (

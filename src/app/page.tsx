@@ -3,6 +3,7 @@
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { LogoIcon } from "@/components/logo";
 
 export default function Home() {
   const { status } = useSession();
@@ -20,9 +21,12 @@ export default function Home() {
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,#1a1a2e_0%,#0a0a0f_70%)]" />
 
       <div className="relative z-10 text-center max-w-2xl">
-        <h1 className="text-7xl md:text-8xl font-black tracking-tight bg-gradient-to-r from-indigo-400 via-purple-300 to-indigo-400 bg-clip-text text-transparent animate-[shimmer_3s_ease_infinite] bg-[length:200%_200%]">
-          AgentEnvoy
-        </h1>
+        <div className="flex items-center justify-center gap-4 mb-2">
+          <LogoIcon size={64} className="text-indigo-400" />
+          <h1 className="text-7xl md:text-8xl font-black tracking-tight bg-gradient-to-r from-indigo-400 via-purple-300 to-indigo-400 bg-clip-text text-transparent animate-[shimmer_3s_ease_infinite] bg-[length:200%_200%]">
+            AgentEnvoy
+          </h1>
+        </div>
 
         <p className="mt-6 text-xl md:text-2xl font-light text-zinc-400 leading-relaxed">
           From <span className="text-zinc-200 font-medium">scheduling meetings</span> to{" "}

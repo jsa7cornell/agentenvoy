@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 72" width="420" height="72">
+  <rect x="2" y="8" width="42" height="32" rx="9" fill="#111" opacity="0.85"/>
+  <polygon points="12,40 8,50 22,40" fill="#111" opacity="0.85"/>
+  <rect x="28" y="22" width="42" height="32" rx="9" fill="#111" opacity="0.35"/>
+  <polygon points="58,54 62,64 48,54" fill="#111" opacity="0.35"/>
+  <text x="84" y="49" fill="#111" font-family="-apple-system, system-ui, sans-serif" font-size="36" font-weight="600" letter-spacing="-0.5">AgentEnvoy<tspan fill="#999" font-weight="300">.ai</tspan></text>
+</svg>
