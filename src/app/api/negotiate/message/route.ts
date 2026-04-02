@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { AgentContext } from "@/agent/administrator";
+import { getAvailableSlots } from "@/lib/calendar";
 import { computeThreadStatus } from "@/lib/thread-status";
 
 // POST /api/negotiate/message
@@ -52,6 +53,20 @@ export async function POST(req: NextRequest) {
   }));
   history.push({ role: "user", content });
 
+  // Fetch calendar slots for context
+  let availableSlots: Array<{ start: string; end: string }> = [];
+  try {
+    const now = new Date();
+    const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const slots = await getAvailableSlots(session.hostId, now, twoWeeks);
+    availableSlots = slots.slice(0, 20).map((s) => ({
+      start: s.start.toISOString(),
+      end: s.end.toISOString(),
+    }));
+  } catch (e) {
+    console.log("Calendar context error in negotiate/message:", e);
+  }
+
   // Build agent context
   const context: AgentContext = {
     role: session.type === "calendar" ? "coordinator" : "administrator",
@@ -63,6 +78,7 @@ export async function POST(req: NextRequest) {
       session.guestEmail || session.link.inviteeEmail || undefined,
     topic: session.link.topic || undefined,
     rules: (session.link.rules as Record<string, unknown>) || {},
+    availableSlots,
     conversationHistory: history,
   };
 
