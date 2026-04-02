@@ -194,10 +194,34 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     e.preventDefault();
     if (!input.trim() || isSending || !sessionId) return;
 
+    const text = input.trim();
+
+    // Host note: :: prefix — saved as feedback, not sent to agent or shown to guest
+    if (text.startsWith("::")) {
+      const noteContent = text.slice(2).trim();
+      if (!noteContent) return;
+      setInput("");
+      try {
+        await fetch("/api/negotiate/note", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, content: noteContent }),
+        });
+        // Show ephemeral confirmation — fades after 3s
+        const noteMsg: Message = {
+          id: `note-${Date.now()}`,
+          role: "host_note",
+          content: noteContent,
+        };
+        setMessages((prev) => [...prev, noteMsg]);
+      } catch {}
+      return;
+    }
+
     const userMsg: Message = {
       id: Date.now().toString(),
       role: "guest",
-      content: input.trim(),
+      content: text,
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -410,6 +434,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               </div>
             ) : (
               messages.map((msg) => {
+                // Host notes — small amber pill, only visible to the host
+                if (msg.role === "host_note") {
+                  return (
+                    <div key={msg.id} className="flex justify-end">
+                      <div className="max-w-[70%] rounded-lg px-3 py-1.5 text-xs bg-amber-900/30 border border-amber-700/40 text-amber-300">
+                        <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-500 mr-1.5">Note</span>
+                        {msg.content}
+                      </div>
+                    </div>
+                  );
+                }
+
                 const { text, proposal } =
                   msg.role === "administrator"
                     ? parseConfirmationProposal(msg.content)

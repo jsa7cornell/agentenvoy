@@ -169,6 +169,17 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
           const proposal = msg.role === "administrator" ? parseConfirmationProposal(msg.content) : null;
           const displayContent = msg.role === "administrator" ? stripProposalBlock(msg.content) : msg.content;
 
+          if (msg.role === "host_note") {
+            return (
+              <div key={msg.id} className="self-end ml-auto max-w-[80%]">
+                <div className="rounded-lg px-3 py-1.5 text-xs bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                  <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-500 mr-1.5">Note</span>
+                  {msg.content}
+                </div>
+              </div>
+            );
+          }
+
           if (msg.role === "system") {
             return (
               <div key={msg.id} className="text-center text-xs text-gray-500 py-2">
