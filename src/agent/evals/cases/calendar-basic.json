@@ -22,7 +22,7 @@
     { "type": "contains", "value": "phone" },
     { "type": "not_contains", "value": "video" },
     { "type": "not_contains", "value": "What format" },
-    { "type": "not_contains", "value": "prefer" },
+    { "type": "not_contains", "value": "Would you prefer" },
     { "type": "contains_any", "values": ["9:00", "9:30", "10:00", "10:30", "9 AM", "10 AM", "9am", "10am"] },
     { "type": "max_length", "value": 600 }
   ]

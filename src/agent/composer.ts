@@ -124,6 +124,36 @@ function formatPreferences(prefs: Record<string, unknown>): string {
   return parts.join("\n\n");
 }
 
+function formatRules(rules: Record<string, unknown>): string {
+  const lines: string[] = ["Special rules for this negotiation:"];
+
+  if (rules.format) {
+    lines.push(`- Default format: ${rules.format}`);
+  }
+
+  const conditional = rules.conditionalRules as Array<{ condition: string; rule: string }> | undefined;
+  if (conditional && conditional.length > 0) {
+    for (const cr of conditional) {
+      lines.push(`- IF ${cr.condition} → ${cr.rule}`);
+    }
+  }
+
+  const lastResort = rules.lastResort as string[] | undefined;
+  if (lastResort && lastResort.length > 0) {
+    lines.push(`- LAST RESORT only (deprioritize): ${lastResort.join(", ")}`);
+  }
+
+  // Include any other rules not already handled
+  const handled = new Set(["format", "conditionalRules", "lastResort"]);
+  for (const [key, value] of Object.entries(rules)) {
+    if (!handled.has(key) && value !== null && value !== undefined) {
+      lines.push(`- ${key}: ${JSON.stringify(value)}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function buildSessionContext(options: ComposeOptions): string {
   const parts: string[] = [];
 
@@ -135,7 +165,7 @@ function buildSessionContext(options: ComposeOptions): string {
   if (options.topic) parts.push(`Topic: ${options.topic}`);
 
   if (options.rules && Object.keys(options.rules).length > 0) {
-    parts.push(`Special rules for this negotiation: ${JSON.stringify(options.rules)}`);
+    parts.push(formatRules(options.rules));
   }
 
   if (options.availableSlots && options.availableSlots.length > 0) {
