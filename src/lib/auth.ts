@@ -37,7 +37,6 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
   },
-  debug: true,
   pages: {
     signIn: "/",
     error: "/",
