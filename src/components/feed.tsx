@@ -41,6 +41,7 @@ export default function Feed() {
   const [initialLoading, setInitialLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hasLoadedRef = useRef(false);
 
   // Load channel history
   useEffect(() => {
@@ -55,14 +56,20 @@ export default function Feed() {
         console.error("Failed to load channel messages:", e);
       } finally {
         setInitialLoading(false);
+        hasLoadedRef.current = true;
       }
     }
     loadMessages();
   }, []);
 
-  // Scroll to bottom on new messages
+  // Only auto-scroll on NEW messages (not initial load)
+  const prevMessageCount = useRef(0);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!hasLoadedRef.current) return;
+    if (messages.length > prevMessageCount.current && prevMessageCount.current > 0) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    prevMessageCount.current = messages.length;
   }, [messages]);
 
   // Auto-resize textarea

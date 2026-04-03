@@ -141,64 +141,6 @@ export default function ProfilePage() {
           </button>
         </div>
 
-        {/* Meeting Preferences */}
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-3">
-            Meeting Preferences
-          </h2>
-          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 space-y-3">
-            {sentences.length > 0 ? (
-              <div className="space-y-2">
-                {sentences.map((s, i) => (
-                  <div
-                    key={i}
-                    className="flex items-start gap-2 text-sm text-zinc-300"
-                  >
-                    <div className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-1.5 flex-shrink-0" />
-                    {s}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500">
-                No preferences set yet. Tell Envoy how you like to meet.
-              </p>
-            )}
-
-            <div className="pt-2 border-t border-zinc-800">
-              <div className="flex gap-2">
-                <input
-                  value={prefInput}
-                  onChange={(e) => setPrefInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handlePrefUpdate(); }}
-                  placeholder="e.g. I prefer 30-minute video calls on Google Meet, mornings work best"
-                  className="flex-1 bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-purple-500/50 transition"
-                />
-                <button
-                  onClick={handlePrefUpdate}
-                  disabled={!prefInput.trim() || prefLoading}
-                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-30 text-white text-sm rounded-lg font-medium transition"
-                >
-                  {prefLoading ? "..." : "Update"}
-                </button>
-              </div>
-              {prefMessage && (
-                <p className="text-xs text-zinc-500 mt-1.5">{prefMessage}</p>
-              )}
-            </div>
-          </div>
-        </section>
-
-        {/* Availability Tuner */}
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-3">
-            Availability Tuner
-          </h2>
-          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
-            <AvailabilityTuner />
-          </div>
-        </section>
-
         {/* Connections */}
         <section>
           <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-3">
@@ -257,6 +199,64 @@ export default function ProfilePage() {
                 <div className="text-[10px] text-zinc-600 mt-0.5">Coming soon</div>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* General Preferences */}
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-3">
+            General Preferences
+          </h2>
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 space-y-3">
+            {sentences.length > 0 ? (
+              <div className="space-y-2">
+                {sentences.map((s, i) => (
+                  <div
+                    key={i}
+                    className="flex items-start gap-2 text-sm text-zinc-300"
+                  >
+                    <div className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-1.5 flex-shrink-0" />
+                    {s}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-500">
+                No preferences set yet. Tell Envoy how you like to meet.
+              </p>
+            )}
+
+            <div className="pt-2 border-t border-zinc-800">
+              <div className="flex gap-2">
+                <input
+                  value={prefInput}
+                  onChange={(e) => setPrefInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handlePrefUpdate(); }}
+                  placeholder="e.g. I prefer 30-minute video calls on Google Meet, mornings work best"
+                  className="flex-1 bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-purple-500/50 transition"
+                />
+                <button
+                  onClick={handlePrefUpdate}
+                  disabled={!prefInput.trim() || prefLoading}
+                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-30 text-white text-sm rounded-lg font-medium transition"
+                >
+                  {prefLoading ? "..." : "Update"}
+                </button>
+              </div>
+              {prefMessage && (
+                <p className="text-xs text-zinc-500 mt-1.5">{prefMessage}</p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Availability Tuner */}
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-3">
+            Availability Tuner
+          </h2>
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
+            <AvailabilityTuner />
           </div>
         </section>
 
