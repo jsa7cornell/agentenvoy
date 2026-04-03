@@ -206,11 +206,6 @@ export default function PrivacyPage() {
           </section>
         </div>
 
-        <div className="mt-16 border-t border-zinc-800 pt-6">
-          <a href="/" className="text-sm text-indigo-400 hover:text-indigo-300">
-            &larr; Back to AgentEnvoy
-          </a>
-        </div>
       </div>
     </div>
   );

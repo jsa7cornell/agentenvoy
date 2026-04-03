@@ -30,7 +30,14 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <footer className="relative z-10 py-4 text-center text-xs text-zinc-600 space-x-4">
+            <a href="/privacy" className="hover:text-zinc-400 transition">Privacy</a>
+            <span>&middot;</span>
+            <a href="/terms" className="hover:text-zinc-400 transition">Terms</a>
+          </footer>
+        </Providers>
       </body>
     </html>
   );

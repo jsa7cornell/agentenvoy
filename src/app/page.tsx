@@ -85,13 +85,6 @@ export default function Home() {
           ))}
         </div>
       </div>
-
-      {/* Footer */}
-      <footer className="relative z-10 mt-auto py-6 text-center text-xs text-zinc-600 space-x-4">
-        <a href="/privacy" className="hover:text-zinc-400 transition">Privacy</a>
-        <span>&middot;</span>
-        <a href="/terms" className="hover:text-zinc-400 transition">Terms</a>
-      </footer>
     </div>
   );
 }
