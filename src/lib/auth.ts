@@ -16,7 +16,7 @@ const devProvider =
             secret: { label: "Dev Secret", type: "password" },
           },
           async authorize(credentials) {
-            if (credentials?.secret !== process.env.DEV_AUTH_SECRET) {
+            if (!credentials || credentials.secret !== process.env.DEV_AUTH_SECRET) {
               return null;
             }
             const user = await prisma.user.findUnique({
