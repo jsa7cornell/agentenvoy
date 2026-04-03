@@ -62,11 +62,15 @@ export default function Feed() {
     loadMessages();
   }, []);
 
-  // Only auto-scroll on NEW messages (not initial load)
+  // Scroll to bottom: instant on first load, smooth on new messages
   const prevMessageCount = useRef(0);
   useEffect(() => {
-    if (!hasLoadedRef.current) return;
-    if (messages.length > prevMessageCount.current && prevMessageCount.current > 0) {
+    if (messages.length === 0) return;
+    if (prevMessageCount.current === 0) {
+      // Initial load — jump to bottom instantly, no animation
+      messagesEndRef.current?.scrollIntoView();
+    } else if (messages.length > prevMessageCount.current) {
+      // New message added — smooth scroll
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
     prevMessageCount.current = messages.length;

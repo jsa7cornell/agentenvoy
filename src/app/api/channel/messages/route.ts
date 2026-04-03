@@ -25,8 +25,10 @@ export async function GET() {
     return NextResponse.json({ messages: [] });
   }
 
+  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
   const messages = await prisma.channelMessage.findMany({
-    where: { channelId: channel.id },
+    where: { channelId: channel.id, createdAt: { gte: oneWeekAgo } },
     orderBy: { createdAt: "asc" },
     include: {
       thread: {
