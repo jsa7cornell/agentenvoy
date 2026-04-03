@@ -40,6 +40,7 @@ export default function Feed() {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedRef = useRef(false);
 
@@ -62,16 +63,18 @@ export default function Feed() {
     loadMessages();
   }, []);
 
-  // Scroll to bottom: instant on first load, smooth on new messages
+  // Scroll feed container to bottom (without affecting page scroll)
   const prevMessageCount = useRef(0);
   useEffect(() => {
     if (messages.length === 0) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
     if (prevMessageCount.current === 0) {
-      // Initial load — jump to bottom instantly, no animation
-      messagesEndRef.current?.scrollIntoView();
+      // Initial load — jump to bottom instantly
+      container.scrollTop = container.scrollHeight;
     } else if (messages.length > prevMessageCount.current) {
-      // New message added — smooth scroll
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      // New message — smooth scroll
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
     }
     prevMessageCount.current = messages.length;
   }, [messages]);
@@ -251,7 +254,7 @@ export default function Feed() {
   return (
     <div className="flex flex-col h-full">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-1.5">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-1.5">
         {messages.length === 0 && !loading && (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-sm text-gray-500">Start a conversation with Envoy</p>
