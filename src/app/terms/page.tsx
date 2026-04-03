@@ -3,128 +3,130 @@ export default function TermsPage() {
     <div className="min-h-screen bg-[#0a0a0f] text-zinc-100">
       <div className="max-w-3xl mx-auto px-6 py-16">
         <h1 className="text-3xl font-bold mb-2">Terms of Service</h1>
-        <p className="text-sm text-zinc-500 mb-10">Last updated: April 2, 2026</p>
+        <p className="text-sm text-zinc-500 mb-12">Last updated: April 2, 2026</p>
 
         <div className="prose prose-invert prose-zinc max-w-none space-y-8 text-sm leading-relaxed text-zinc-300">
+
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">1. Acceptance of Terms</h2>
+            <h2 className="text-lg font-semibold text-zinc-100">1. What AgentEnvoy Is</h2>
             <p>
-              By using AgentEnvoy (&quot;the Service&quot;), operated at agentenvoy.ai, you agree to
-              these Terms of Service. If you do not agree, do not use the Service.
+              AgentEnvoy is an AI-powered scheduling and negotiation platform. An AI agent
+              (&ldquo;Envoy&rdquo;) acts as a neutral administrator &mdash; it coordinates between
+              parties without representing either side. By using AgentEnvoy, you agree to these terms.
             </p>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">2. Description of Service</h2>
+            <h2 className="text-lg font-semibold text-zinc-100">2. Our Commitments</h2>
             <p>
-              AgentEnvoy is an AI-powered scheduling and negotiation platform. The Service uses
-              artificial intelligence to coordinate meetings and negotiations between parties.
-              AgentEnvoy acts as a neutral administrator — it does not represent either party
-              in a negotiation.
+              AgentEnvoy operates under the principles described in our{" "}
+              <a href="/privacy" className="text-indigo-400 hover:text-indigo-300">Privacy Policy</a>.
+              In particular:
             </p>
+            <ul className="list-disc pl-6 space-y-1 mt-2">
+              <li>We treat your information as if it were our own</li>
+              <li>We learn only what the negotiation requires</li>
+              <li>We never advantage one party using the other&apos;s private data</li>
+            </ul>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-zinc-100">3. Accounts</h2>
             <ul className="list-disc pl-6 space-y-1">
-              <li>You must sign in with a valid Google account to create an AgentEnvoy account</li>
-              <li>You are responsible for maintaining the security of your account</li>
-              <li>You must provide accurate information when using the Service</li>
-              <li>One person or entity may not maintain more than one account</li>
+              <li>Sign in with a valid Google account to create an AgentEnvoy account</li>
+              <li>You are responsible for maintaining the security of your account and API keys</li>
+              <li>Provide accurate information when using the service</li>
             </ul>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">4. Acceptable Use</h2>
-            <p>You agree not to:</p>
-            <ul className="list-disc pl-6 space-y-1">
-              <li>Use the Service for any unlawful purpose</li>
-              <li>Abuse, harass, or send unsolicited meeting requests to others</li>
-              <li>Attempt to gain unauthorized access to the Service or its systems</li>
-              <li>Interfere with other users&apos; use of the Service</li>
-              <li>Use the Service to send spam or bulk unsolicited communications</li>
-              <li>Reverse engineer, decompile, or attempt to extract the source code of the Service</li>
+            <h2 className="text-lg font-semibold text-zinc-100">4. Calendar Access</h2>
+            <p>
+              By connecting your Google Calendar, you grant AgentEnvoy permission to:
+            </p>
+            <ul className="list-disc pl-6 space-y-1 mt-2">
+              <li><strong>Hosts:</strong> Read your availability and create calendar events when
+                meetings are confirmed by both parties</li>
+              <li><strong>Guests:</strong> Read your availability (read-only, one-time) to find
+                mutual times</li>
             </ul>
+            <p className="mt-2">
+              You can revoke calendar access at any time via your{" "}
+              <a href="https://myaccount.google.com/permissions" className="text-indigo-400 hover:text-indigo-300" target="_blank" rel="noopener noreferrer">
+                Google Account settings
+              </a>.
+            </p>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-zinc-100">5. AI Agent Behavior</h2>
             <p>
-              The AgentEnvoy AI agent (&quot;Envoy&quot;) assists with scheduling and negotiations.
-              While we strive for accuracy, the AI may occasionally make errors or
-              misunderstand context. You are responsible for reviewing and confirming any
-              proposed meetings or agreements before they are finalized. AgentEnvoy is not
-              liable for scheduling conflicts, missed meetings, or miscommunications arising
-              from AI-generated proposals.
+              Envoy assists with scheduling and negotiations. While we build for accuracy, the AI
+              may occasionally misunderstand context. You are responsible for reviewing and confirming
+              any proposed meeting before it is finalized. AgentEnvoy is not liable for scheduling
+              conflicts or miscommunications arising from AI-generated proposals.
             </p>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">6. Calendar Access</h2>
-            <p>
-              By connecting your Google Calendar, you grant AgentEnvoy permission to read your
-              availability and, for account holders, to create calendar events on your behalf
-              when meetings are confirmed. You can revoke this access at any time through your
-              Google Account settings. See our{" "}
-              <a href="/privacy" className="text-indigo-400 hover:text-indigo-300">
-                Privacy Policy
-              </a>{" "}
-              for details on how we handle your calendar data.
-            </p>
+            <h2 className="text-lg font-semibold text-zinc-100">6. Acceptable Use</h2>
+            <p>Do not:</p>
+            <ul className="list-disc pl-6 space-y-1 mt-2">
+              <li>Use the service for unlawful purposes</li>
+              <li>Send unsolicited or abusive meeting requests</li>
+              <li>Attempt unauthorized access to the service or its systems</li>
+              <li>Share API keys publicly or embed them in client-side code</li>
+            </ul>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">7. API Access</h2>
+            <h2 className="text-lg font-semibold text-zinc-100">7. Data Retention</h2>
             <p>
-              API keys grant programmatic access to AgentEnvoy. You are responsible for
-              keeping your API keys secure. Do not share API keys publicly or embed them in
-              client-side code. We reserve the right to revoke API keys that are misused.
+              Negotiation session data is retained for 30 days after completion, then permanently
+              deleted. Account data persists for the life of your account. Full details in our{" "}
+              <a href="/privacy" className="text-indigo-400 hover:text-indigo-300">Privacy Policy</a>.
             </p>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-zinc-100">8. Intellectual Property</h2>
             <p>
-              The Service, including its design, code, and AI models, is owned by AgentEnvoy.
-              Your data remains yours — we do not claim ownership of your calendar data,
-              messages, or other content you provide through the Service.
+              The service is owned by AgentEnvoy. Your data remains yours &mdash; we do not claim
+              ownership of your calendar data, messages, or other content.
             </p>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-zinc-100">9. Limitation of Liability</h2>
             <p>
-              The Service is provided &quot;as is&quot; without warranty of any kind. AgentEnvoy is not
-              liable for any indirect, incidental, special, consequential, or punitive damages
-              resulting from your use of or inability to use the Service, including but not
-              limited to missed meetings, scheduling errors, or data loss.
+              The service is provided &ldquo;as is.&rdquo; AgentEnvoy is not liable for indirect,
+              incidental, or consequential damages resulting from your use of the service, including
+              missed meetings, scheduling errors, or data loss.
             </p>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-zinc-100">10. Termination</h2>
             <p>
-              We may suspend or terminate your access to the Service at any time for violation
-              of these terms. You may delete your account at any time by contacting us. Upon
-              termination, your data will be deleted in accordance with our Privacy Policy.
+              We may suspend access for violation of these terms. You may delete your account at
+              any time by contacting us. Upon termination, your data is deleted per our retention policy.
             </p>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">11. Changes to Terms</h2>
+            <h2 className="text-lg font-semibold text-zinc-100">11. Changes</h2>
             <p>
-              We may update these terms from time to time. Continued use of the Service after
-              changes constitutes acceptance of the new terms.
+              We may update these terms. Continued use after changes constitutes acceptance.
             </p>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-zinc-100">12. Contact</h2>
             <p>
-              For questions about these terms, contact us at{" "}
+              Questions:{" "}
               <a href="mailto:support@agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300">
                 support@agentenvoy.ai
-              </a>.
+              </a>
             </p>
           </section>
         </div>
