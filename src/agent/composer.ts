@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
+import type { CalendarContext, CalendarEvent } from "@/lib/calendar";
 
 // --- Playbook cache (read once per cold start) ---
 
@@ -15,6 +16,7 @@ function loadPlaybook(filename: string): string {
 }
 
 const playbooks: Record<string, string> = {
+  globalTaste: loadPlaybook("global-taste.md"),
   persona: loadPlaybook("persona.md"),
   negotiation: loadPlaybook("negotiation.md"),
   calendar: loadPlaybook("calendar.md"),
@@ -44,13 +46,22 @@ export interface ComposeOptions {
   guestEmail?: string;
   topic?: string;
   rules?: Record<string, unknown>;
+  /** @deprecated Use calendarContext instead */
   availableSlots?: Array<{ start: string; end: string }>;
+  calendarContext?: CalendarContext;
+  hostPersistentKnowledge?: string | null;
+  hostSituationalKnowledge?: string | null;
   hostDirectives?: string[];
   role?: string;
 }
 
 export function composeSystemPrompt(options: ComposeOptions): string {
   const sections: string[] = [];
+
+  // Layer 0: Global Taste (platform defaults)
+  if (playbooks.globalTaste) {
+    sections.push(playbooks.globalTaste);
+  }
 
   // Layer 1: Core Persona
   sections.push(playbooks.persona);
@@ -82,7 +93,23 @@ export function composeSystemPrompt(options: ComposeOptions): string {
     );
   }
 
-  // Layer 5: Session Context
+  // Layer 4c: Host Knowledge Base (persistent + situational)
+  const knowledgeParts: string[] = [];
+  if (options.hostPersistentKnowledge) {
+    knowledgeParts.push(
+      `## Persistent Preferences\nWho this host is, how they work, and what matters to them. This rarely changes.\n\n${options.hostPersistentKnowledge}`
+    );
+  }
+  if (options.hostSituationalKnowledge) {
+    knowledgeParts.push(
+      `## Situational Context\nWhat's happening right now — near-term overrides, upcoming events, temporary rules. This changes frequently. If situational context conflicts with persistent preferences, situational wins.\n\n${options.hostSituationalKnowledge}`
+    );
+  }
+  if (knowledgeParts.length > 0) {
+    sections.push(`# Host Knowledge Base\n\n${knowledgeParts.join("\n\n")}`);
+  }
+
+  // Layer 5: Session Context (includes calendar)
   const context = buildSessionContext(options);
   sections.push(`# Session Context\n\n${context}`);
 
@@ -179,7 +206,12 @@ function buildSessionContext(options: ComposeOptions): string {
     parts.push(formatRules(options.rules));
   }
 
-  if (options.availableSlots && options.availableSlots.length > 0) {
+  // New: CalendarContext — raw events as daily calendar view
+  if (options.calendarContext?.connected && options.calendarContext.events.length > 0) {
+    parts.push(formatCalendarContext(options.calendarContext));
+  }
+  // Legacy fallback: old availableSlots format
+  else if (options.availableSlots && options.availableSlots.length > 0) {
     const tz =
       (options.hostPreferences?.explicit as Record<string, unknown> | undefined)?.timezone as string | undefined ??
       (options.hostPreferences?.timezone as string | undefined) ??
@@ -211,6 +243,107 @@ function buildSessionContext(options: ComposeOptions): string {
   }
 
   return parts.join("\n");
+}
+
+/**
+ * Format CalendarContext as a daily event view for the AI.
+ * No pre-computed availability — the AI reasons about what's open.
+ */
+function formatCalendarContext(ctx: CalendarContext): string {
+  const tz = ctx.timezone;
+
+  const tzLabel = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
+    .formatToParts(new Date())
+    .find((p) => p.type === "timeZoneName")?.value ?? tz;
+
+  // Compute the current UTC offset for this timezone (e.g., "-07:00" for PDT)
+  // This is what the AI must use in CONFIRMATION_PROPOSAL dateTime fields
+  const utcOffset = getUtcOffsetString(tz);
+
+  const timeFmt = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: tz,
+  });
+
+  const dayFmt = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: tz,
+  });
+
+  // Group events by day
+  const dayMap = new Map<string, CalendarEvent[]>();
+  for (const ev of ctx.events) {
+    const dayKey = dayFmt.format(ev.start);
+    if (!dayMap.has(dayKey)) dayMap.set(dayKey, []);
+    dayMap.get(dayKey)!.push(ev);
+  }
+
+  // Build daily view — also include days with no events in the range
+  const lines: string[] = [
+    `Host's calendar (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz}), calendars checked: ${ctx.calendars.join(", ")}.\nIMPORTANT — use these day names and times exactly as written; do not recalculate days of the week. You decide what's available based on these events + the host knowledge base. No pre-computed slots — reason holistically.\nWhen building a CONFIRMATION_PROPOSAL, use UTC offset "${utcOffset}" and timezone "${tz}" — e.g., "2026-04-03T16:00:00${utcOffset}".\n`,
+  ];
+
+  for (const [day, events] of Array.from(dayMap)) {
+    lines.push(`${day}:`);
+    for (const ev of events) {
+      if (ev.isAllDay) {
+        const tags: string[] = [];
+        if (ev.calendar !== ctx.calendars[0]) tags.push(`from "${ev.calendar}"`);
+        const tagStr = tags.length > 0 ? ` [${tags.join(", ")}]` : "";
+        lines.push(`  ${ev.summary} [all day${tagStr}]`);
+      } else {
+        const startStr = timeFmt.format(ev.start);
+        const endStr = timeFmt.format(ev.end);
+        const tags: string[] = [];
+        if (ev.location) tags.push(ev.location);
+        if (ev.isRecurring) tags.push("recurring");
+        if (ev.calendar !== ctx.calendars[0]) tags.push(`from "${ev.calendar}"`);
+        const tagStr = tags.length > 0 ? ` [${tags.join(", ")}]` : "";
+        lines.push(`  ${startStr}–${endStr} ${ev.summary}${tagStr}`);
+      }
+    }
+  }
+
+  if (!ctx.canWrite) {
+    lines.push(
+      "\nNote: Calendar is read-only (no write-capable provider connected). Confirmation will send an .ics email instead of creating a calendar event directly."
+    );
+  }
+
+  return lines.join("\n");
+}
+
+// --- Timezone helpers ---
+
+/**
+ * Get the UTC offset string for an IANA timezone (e.g., "America/Los_Angeles" → "-07:00").
+ * Uses Intl to compute the correct offset including DST.
+ */
+export function getUtcOffsetString(tz: string): string {
+  const now = new Date();
+  // Format a date in the target timezone and in UTC, compare to get offset
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    timeZoneName: "longOffset",
+  }).formatToParts(now);
+  const offsetPart = parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+  // offsetPart is like "GMT-07:00" or "GMT+05:30" or "GMT" (for UTC)
+  const match = offsetPart.match(/GMT([+-]\d{2}:\d{2})/);
+  if (match) return match[1]; // e.g., "-07:00"
+  if (offsetPart === "GMT") return "+00:00";
+  // Fallback: compute manually
+  const utcStr = now.toLocaleString("en-US", { timeZone: "UTC" });
+  const tzStr = now.toLocaleString("en-US", { timeZone: tz });
+  const diffMs = new Date(tzStr).getTime() - new Date(utcStr).getTime();
+  const diffMin = Math.round(diffMs / 60000);
+  const sign = diffMin >= 0 ? "+" : "-";
+  const absMin = Math.abs(diffMin);
+  const h = String(Math.floor(absMin / 60)).padStart(2, "0");
+  const m = String(absMin % 60).padStart(2, "0");
+  return `${sign}${h}:${m}`;
 }
 
 // --- Playbook metadata (for evals and debugging) ---

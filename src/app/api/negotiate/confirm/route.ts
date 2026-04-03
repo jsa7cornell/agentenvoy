@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createCalendarEvent } from "@/lib/calendar";
+import { extractLearnings } from "@/agent/administrator";
 import { Resend } from "resend";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -9,7 +10,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // Confirm an agreed-upon time — creates calendar events, sends emails
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { sessionId, dateTime, duration, format, location } = body;
+  const { sessionId, dateTime, duration, format, location, timezone } = body;
 
   if (!sessionId || !dateTime) {
     return NextResponse.json(
@@ -37,7 +38,27 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const startTime = new Date(dateTime);
+  // Resolve the host's timezone for display purposes
+  const hostPrefs = session.host.preferences as Record<string, unknown> | null;
+  const hostTimezone: string =
+    timezone ||
+    (hostPrefs?.timezone as string) ||
+    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ||
+    "America/Los_Angeles";
+
+  // Parse dateTime — if it includes a UTC offset (e.g., "2026-04-03T16:00:00-07:00"),
+  // new Date() handles it correctly. If it's bare (legacy, no offset), interpret it
+  // in the host's timezone by appending the offset.
+  let dateTimeStr = dateTime as string;
+  const hasOffset = /[+-]\d{2}:\d{2}$/.test(dateTimeStr) || dateTimeStr.endsWith("Z");
+  if (!hasOffset) {
+    // Legacy: bare ISO string without offset. Compute host's current UTC offset
+    // and append it so the time is interpreted in the host's timezone, not UTC.
+    const offsetStr = computeUtcOffset(hostTimezone);
+    dateTimeStr = `${dateTimeStr}${offsetStr}`;
+  }
+
+  const startTime = new Date(dateTimeStr);
   const durationMin = duration || 30;
   const endTime = new Date(startTime.getTime() + durationMin * 60 * 1000);
   const meetingFormat = format || "video";
@@ -78,6 +99,26 @@ export async function POST(req: NextRequest) {
     // Continue anyway — calendar isn't strictly required
   }
 
+  // Format times in the host's timezone for display
+  const displayDate = startTime.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: hostTimezone,
+  });
+  const displayTime = startTime.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: hostTimezone,
+  });
+  const tzAbbr = new Intl.DateTimeFormat("en-US", {
+    timeZoneName: "short",
+    timeZone: hostTimezone,
+  })
+    .formatToParts(startTime)
+    .find((p) => p.type === "timeZoneName")?.value ?? hostTimezone;
+
   // Update session
   await prisma.negotiationSession.update({
     where: { id: sessionId },
@@ -87,7 +128,7 @@ export async function POST(req: NextRequest) {
       agreedTime: startTime,
       agreedFormat: meetingFormat,
       meetLink: meetLink || null,
-      summary: `${meetingFormat} meeting on ${startTime.toLocaleDateString()} at ${startTime.toLocaleTimeString()}${location ? ` at ${location}` : ""}`,
+      summary: `${meetingFormat} meeting on ${displayDate} at ${displayTime} ${tzAbbr}${location ? ` at ${location}` : ""}`,
     },
   });
 
@@ -96,7 +137,7 @@ export async function POST(req: NextRequest) {
     data: {
       sessionId,
       role: "system",
-      content: `Meeting confirmed: ${meetingFormat} on ${startTime.toLocaleDateString()} at ${startTime.toLocaleTimeString()}${meetLink ? `. Meet link: ${meetLink}` : ""}`,
+      content: `Meeting confirmed: ${meetingFormat} on ${displayDate} at ${displayTime} ${tzAbbr}${meetLink ? `. Meet link: ${meetLink}` : ""}`,
     },
   });
 
@@ -129,6 +170,33 @@ export async function POST(req: NextRequest) {
     console.error("Failed to create NegotiationOutcome:", e);
   }
 
+  // Extract learnings and update host knowledge base
+  try {
+    const allMessages = await prisma.message.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: "asc" },
+    });
+    const transcript = allMessages
+      .map((m) => `[${m.role}]: ${m.content}`)
+      .join("\n");
+    const updates = await extractLearnings(
+      transcript,
+      session.host.persistentKnowledge,
+      session.host.situationalKnowledge,
+      session.host.name || "host"
+    );
+    await prisma.user.update({
+      where: { id: session.hostId },
+      data: {
+        persistentKnowledge: updates.persistent,
+        situationalKnowledge: updates.situational,
+      },
+    });
+  } catch (e) {
+    console.error("Failed to extract learnings:", e);
+    // Non-blocking — confirmation already succeeded
+  }
+
   // Send confirmation emails
   const emailBody = buildConfirmationEmail({
     hostName: session.host.name || "The organizer",
@@ -139,6 +207,7 @@ export async function POST(req: NextRequest) {
     format: meetingFormat,
     location,
     meetLink,
+    timezone: hostTimezone,
   });
 
   const emailRecipients = [hostEmail];
@@ -193,6 +262,31 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
+/**
+ * Compute the UTC offset string for an IANA timezone (e.g., "-07:00" for America/Los_Angeles in PDT).
+ */
+function computeUtcOffset(tz: string): string {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    timeZoneName: "longOffset",
+  }).formatToParts(now);
+  const offsetPart = parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+  const match = offsetPart.match(/GMT([+-]\d{2}:\d{2})/);
+  if (match) return match[1];
+  if (offsetPart === "GMT") return "+00:00";
+  // Fallback
+  const utcStr = now.toLocaleString("en-US", { timeZone: "UTC" });
+  const tzStr = now.toLocaleString("en-US", { timeZone: tz });
+  const diffMs = new Date(tzStr).getTime() - new Date(utcStr).getTime();
+  const diffMin = Math.round(diffMs / 60000);
+  const sign = diffMin >= 0 ? "+" : "-";
+  const absMin = Math.abs(diffMin);
+  const h = String(Math.floor(absMin / 60)).padStart(2, "0");
+  const m = String(absMin % 60).padStart(2, "0");
+  return `${sign}${h}:${m}`;
+}
+
 function buildConfirmationEmail(params: {
   hostName: string;
   guestName?: string;
@@ -202,7 +296,16 @@ function buildConfirmationEmail(params: {
   format: string;
   location?: string;
   meetLink?: string;
+  timezone?: string;
 }) {
+  const tz = params.timezone || "America/Los_Angeles";
+  const tzAbbr = new Intl.DateTimeFormat("en-US", {
+    timeZoneName: "short",
+    timeZone: tz,
+  })
+    .formatToParts(params.dateTime)
+    .find((p) => p.type === "timeZoneName")?.value ?? tz;
+
   return `
     <div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
       <div style="text-align: center; margin-bottom: 24px;">
@@ -211,8 +314,8 @@ function buildConfirmationEmail(params: {
       </div>
       <div style="background: #f8f8fc; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
         ${params.topic ? `<p style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600;">${params.topic}</p>` : ""}
-        <p style="margin: 0 0 8px 0; color: #666;">📅 ${params.dateTime.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
-        <p style="margin: 0 0 8px 0; color: #666;">🕐 ${params.dateTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} (${params.duration} min)</p>
+        <p style="margin: 0 0 8px 0; color: #666;">📅 ${params.dateTime.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: tz })}</p>
+        <p style="margin: 0 0 8px 0; color: #666;">🕐 ${params.dateTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz })} ${tzAbbr} (${params.duration} min)</p>
         <p style="margin: 0 0 8px 0; color: #666;">📱 ${params.format.charAt(0).toUpperCase() + params.format.slice(1)}</p>
         ${params.location ? `<p style="margin: 0 0 8px 0; color: #666;">📍 ${params.location}</p>` : ""}
         ${params.meetLink ? `<p style="margin: 0;"><a href="${params.meetLink}" style="color: #6c5ce7; font-weight: 600;">Join Google Meet</a></p>` : ""}

@@ -84,7 +84,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   function parseConfirmationProposal(content: string): {
     text: string;
-    proposal: { dateTime: string; duration: number; format: string; location: string | null } | null;
+    proposal: { dateTime: string; duration: number; format: string; location: string | null; timezone?: string } | null;
   } {
     const match = content.match(
       /\[CONFIRMATION_PROPOSAL\]([^\[]*)\[\/CONFIRMATION_PROPOSAL\]/
@@ -107,6 +107,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     duration: number;
     format: string;
     location: string | null;
+    timezone?: string;
   }) {
     if (!sessionId || isConfirming) return;
     setIsConfirming(true);
@@ -120,6 +121,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           duration: proposal.duration,
           format: proposal.format,
           location: proposal.location,
+          timezone: proposal.timezone,
         }),
       });
       if (!res.ok) throw new Error("Failed to confirm");
