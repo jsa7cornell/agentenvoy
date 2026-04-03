@@ -196,9 +196,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
     const text = input.trim();
 
-    // Global directive: ::: prefix — shapes all future negotiations
-    if (text.startsWith(":::")) {
-      const directive = text.slice(3).trim();
+    // Host directive: :: prefix — global, shapes all future negotiations
+    if (text.startsWith("::")) {
+      const directive = text.slice(2).trim();
       if (!directive) return;
       setInput("");
       try {
@@ -210,31 +210,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         const directiveMsg: Message = {
           id: `directive-${Date.now()}`,
           role: "host_note",
-          content: `[DIRECTIVE] ${directive}`,
+          content: directive,
         };
         setMessages((prev) => [...prev, directiveMsg]);
-      } catch {}
-      return;
-    }
-
-    // Host note: :: prefix — saved as feedback, not sent to agent or shown to guest
-    if (text.startsWith("::")) {
-      const noteContent = text.slice(2).trim();
-      if (!noteContent) return;
-      setInput("");
-      try {
-        await fetch("/api/negotiate/note", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, content: noteContent }),
-        });
-        // Show ephemeral confirmation — fades after 3s
-        const noteMsg: Message = {
-          id: `note-${Date.now()}`,
-          role: "host_note",
-          content: noteContent,
-        };
-        setMessages((prev) => [...prev, noteMsg]);
       } catch {}
       return;
     }
