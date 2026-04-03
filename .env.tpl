@@ -20,3 +20,6 @@ GOOGLE_CLIENT_SECRET=op://Secrets/GOOGLE_CLIENT_SECRET/credential
 
 # ─── Resend ────────────────────────────────────────────────
 RESEND_API_KEY=op://Secrets/AGENTENVOY_RESEND_API_KEY/credential
+
+# ─── Dev Auth (non-secret, dev-only) ──────────────────────
+DEV_AUTH_SECRET=dev-test-secret-local-only

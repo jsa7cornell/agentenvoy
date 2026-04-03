@@ -12,12 +12,18 @@ export async function GET(req: NextRequest) {
   }
 
   const status = req.nextUrl.searchParams.get("status"); // active | agreed | all
+  const archived = req.nextUrl.searchParams.get("archived"); // true | false
 
   const where: Record<string, unknown> = {
     hostId: userId,
   };
   if (status && status !== "all") {
     where.status = status;
+  }
+  if (archived === "true") {
+    where.archived = true;
+  } else if (archived === "false") {
+    where.archived = false;
   }
 
   const sessions = await prisma.negotiationSession.findMany({

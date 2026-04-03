@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAvailableSlots } from "@/lib/calendar";
 import { generateAgentResponse, AgentContext } from "@/agent/administrator";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 // POST /api/negotiate/session
 // Start a new negotiation session from a link click
@@ -13,10 +15,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing slug" }, { status: 400 });
   }
 
+  // Detect if the visitor is the host
+  const authSession = await getServerSession(authOptions);
+
   // Find the user by meetSlug
   const user = await prisma.user.findUnique({
     where: { meetSlug: slug },
-    select: { id: true, name: true, preferences: true, hostDirectives: true, meetSlug: true },
+    select: { id: true, name: true, email: true, preferences: true, hostDirectives: true, meetSlug: true },
   });
 
   if (!user) {
@@ -43,12 +48,22 @@ export async function POST(req: NextRequest) {
     });
 
     if (existingSession) {
+      // Check if archived
+      if (existingSession.archived) {
+        return NextResponse.json(
+          { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
+          { status: 410 }
+        );
+      }
+
       const linkPayload = {
         type: link.type,
         topic: link.topic,
         inviteeName: link.inviteeName,
         format: (link.rules as Record<string, unknown>)?.format ?? null,
       };
+
+      const isHost = authSession?.user?.id === user.id;
 
       // Already confirmed — tell the visitor
       if (existingSession.status === "agreed") {
@@ -61,6 +76,8 @@ export async function POST(req: NextRequest) {
           meetLink: existingSession.meetLink,
           host: { name: user.name },
           link: linkPayload,
+          isHost,
+          hostName: user.name,
         });
       }
 
@@ -78,6 +95,8 @@ export async function POST(req: NextRequest) {
           resumed: true,
           host: { name: user.name },
           link: linkPayload,
+          isHost,
+          hostName: user.name,
         });
       }
     }
@@ -161,6 +180,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  const isHost = authSession?.user?.id === user.id;
+
   return NextResponse.json({
     sessionId: session.id,
     greeting,
@@ -173,6 +194,8 @@ export async function POST(req: NextRequest) {
       inviteeName: link.inviteeName,
       format: (link.rules as Record<string, unknown>)?.format ?? null,
     },
+    isHost,
+    hostName: user.name,
   });
 }
 
@@ -184,19 +207,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing session id" }, { status: 400 });
   }
 
-  const session = await prisma.negotiationSession.findUnique({
+  const negotiation = await prisma.negotiationSession.findUnique({
     where: { id: sessionId },
     include: {
       link: true,
-      host: { select: { name: true, image: true } },
+      host: { select: { id: true, name: true, image: true } },
       messages: { orderBy: { createdAt: "asc" } },
       proposals: { orderBy: { createdAt: "desc" } },
     },
   });
 
-  if (!session) {
+  if (!negotiation) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ session });
+  const authSession = await getServerSession(authOptions);
+  const isHost = authSession?.user?.id === negotiation.hostId;
+
+  return NextResponse.json({ session: negotiation, isHost, hostName: negotiation.host.name });
 }

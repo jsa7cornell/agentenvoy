@@ -52,7 +52,7 @@ function generateWeekDays(): DaySlot[] {
   return days;
 }
 
-export function AvailabilityTuner({ onClose }: { onClose: () => void }) {
+export function AvailabilityTuner({ onClose }: { onClose?: () => void } = {}) {
   const [days, setDays] = useState<DaySlot[]>(generateWeekDays);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -270,7 +270,7 @@ export function AvailabilityTuner({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a0f]">
+    <div className={`flex flex-col bg-[#0a0a0f] ${onClose ? "h-full" : "min-h-[500px]"}`}>
       {/* Header */}
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -293,7 +293,7 @@ export function AvailabilityTuner({ onClose }: { onClose: () => void }) {
             Availability Tuner
           </h3>
         </div>
-        <button
+        {onClose && <button
           onClick={onClose}
           className="text-zinc-500 hover:text-zinc-300 transition p-1"
         >
@@ -310,7 +310,7 @@ export function AvailabilityTuner({ onClose }: { onClose: () => void }) {
               d="M6 18L18 6M6 6l12 12"
             />
           </svg>
-        </button>
+        </button>}
       </div>
 
       {/* Day picker strip */}

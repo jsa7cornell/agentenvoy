@@ -1,7 +1,39 @@
 import { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
+import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "./prisma";
+
+// Dev-only credentials provider — NEVER available in production
+const devProvider =
+  process.env.NODE_ENV !== "production" && process.env.DEV_AUTH_SECRET
+    ? [
+        CredentialsProvider({
+          id: "dev-credentials",
+          name: "Dev Login",
+          credentials: {
+            email: { label: "Email", type: "email" },
+            secret: { label: "Dev Secret", type: "password" },
+          },
+          async authorize(credentials) {
+            if (credentials?.secret !== process.env.DEV_AUTH_SECRET) {
+              return null;
+            }
+            const user = await prisma.user.findUnique({
+              where: { email: credentials.email },
+            });
+            if (!user) return null;
+            return { id: user.id, email: user.email, name: user.name };
+          },
+        }),
+      ]
+    : [];
+
+if (devProvider.length > 0) {
+  console.warn(
+    "⚠️  Dev auth provider is ENABLED. This must NEVER run in production."
+  );
+}
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma) as NextAuthOptions["adapter"],
@@ -18,17 +50,22 @@ export const authOptions: NextAuthOptions = {
         },
       },
     }),
+    ...devProvider,
   ],
   callbacks: {
-    async session({ session, user }) {
+    async session({ session, user, token }) {
       if (session.user) {
-        session.user.id = user.id;
-        // Fetch meetSlug for the user
-        const dbUser = await prisma.user.findUnique({
-          where: { id: user.id },
-          select: { meetSlug: true },
-        });
-        session.user.meetSlug = dbUser?.meetSlug ?? null;
+        // Database sessions pass `user`, JWT sessions pass `token`
+        const userId = user?.id ?? token?.sub;
+        if (userId) {
+          session.user.id = userId;
+          const dbUser = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { meetSlug: true, preferences: true },
+          });
+          session.user.meetSlug = dbUser?.meetSlug ?? null;
+          session.user.preferences = (dbUser?.preferences as Record<string, unknown>) ?? null;
+        }
       }
       return session;
     },
@@ -36,9 +73,17 @@ export const authOptions: NextAuthOptions = {
       // Account tokens are saved automatically by PrismaAdapter
       return true;
     },
+    // JWT callback needed for credentials provider
+    async jwt({ token, user }) {
+      if (user) {
+        token.sub = user.id;
+      }
+      return token;
+    },
   },
   session: {
-    strategy: "database",
+    // Use JWT when dev credentials provider is active (credentials doesn't support database sessions)
+    strategy: devProvider.length > 0 ? "jwt" : "database",
     maxAge: 7 * 24 * 60 * 60, // 7 days
     updateAge: 24 * 60 * 60,  // refresh session token every 24 hours
   },

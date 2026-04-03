@@ -107,6 +107,7 @@ model NegotiationSession {
   guestId       String?
   type          String   @default("calendar") // calendar | rfp
   status        String   @default("active") // active | agreed | escalated | expired
+  archived      Boolean  @default(false)
   title         String?  // "Q2 Roadmap — Sarah Chen"
   statusLabel   String?  // "Waiting for Sarah", "Confirmed", etc.
   meetingType   String?  // phone | video | in-person

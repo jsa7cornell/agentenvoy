@@ -39,6 +39,7 @@ export async function GET() {
           meetingType: true,
           duration: true,
           format: true,
+          archived: true,
           agreedTime: true,
           meetLink: true,
           createdAt: true,

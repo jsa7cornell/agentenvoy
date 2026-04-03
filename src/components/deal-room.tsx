@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { LogoFull } from "./logo";
 import { AvailabilityCalendar } from "./availability-calendar";
+import Link from "next/link";
 
 interface Message {
   id: string;
@@ -41,10 +42,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
-  const [hostName, setInitiatorName] = useState("");
+  const [hostName, setHostName] = useState("");
+  const [isHost, setIsHost] = useState(false);
   const [topic, setTopic] = useState("");
   const [linkFormat, setLinkFormat] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [archivedData, setArchivedData] = useState<{ hostEmail: string | null; hostName: string | null } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -203,6 +206,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
         if (!res.ok) {
           const data = await res.json();
+          if (data.error === "archived") {
+            setArchivedData({ hostEmail: data.hostEmail, hostName: data.hostName });
+            setIsLoading(false);
+            return;
+          }
           setError(data.error || "Failed to start session");
           setIsLoading(false);
           return;
@@ -210,7 +218,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
         const data = await res.json();
         setSessionId(data.sessionId);
-        setInitiatorName(data.host?.name || "");
+        setHostName(data.host?.name || data.hostName || "");
+        setIsHost(data.isHost || false);
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
 
@@ -261,8 +270,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
     const text = input.trim();
 
-    // Host directive: :: prefix
-    if (text.startsWith("::")) {
+    // Host directive: :: prefix (host only)
+    if (isHost && text.startsWith("::")) {
       const directive = text.slice(2).trim();
       if (!directive) return;
       setInput("");
@@ -282,9 +291,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       return;
     }
 
+    const messageRole = isHost ? "host" : "guest";
     const userMsg: Message = {
       id: Date.now().toString(),
-      role: "guest",
+      role: messageRole,
       content: text,
     };
 
@@ -304,6 +314,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
       if (!res.ok) throw new Error("Failed to send");
 
+      const contentType = res.headers.get("content-type") || "";
+
+      // Host messages return JSON (no agent response)
+      if (contentType.includes("application/json")) {
+        // No agent response for host messages — message already displayed optimistically
+        setIsSending(false);
+        return;
+      }
+
+      // Guest messages get a streaming agent response
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No reader");
 
@@ -352,12 +372,40 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     return "Meeting";
   }
 
+  // --- Archived state ---
+  if (archivedData) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 mx-auto mb-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+            <svg className="w-7 h-7 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold text-zinc-100 mb-2">Meeting Archived</h1>
+          <p className="text-sm text-zinc-500 mb-4">
+            This meeting has been archived by {archivedData.hostName || "the host"}.
+          </p>
+          {archivedData.hostEmail && (
+            <p className="text-sm text-zinc-400">
+              Contact{" "}
+              <a href={`mailto:${archivedData.hostEmail}`} className="text-indigo-400 hover:text-indigo-300">
+                {archivedData.hostEmail}
+              </a>{" "}
+              if you need to reconnect.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // --- Error state ---
   if (error) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
         <div className="text-center">
-          <div className="text-4xl mb-4">😕</div>
+          <div className="text-4xl mb-4">&#128533;</div>
           <h1 className="text-xl font-bold text-zinc-100 mb-2">Link not found</h1>
           <p className="text-zinc-500">{error}</p>
         </div>
@@ -371,69 +419,79 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
         <div className="text-center max-w-md">
           <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-500 flex items-center justify-center text-4xl shadow-lg shadow-emerald-500/20">
-            ✓
+            &#10003;
           </div>
           <h1 className="text-2xl font-bold text-zinc-100 mb-4">Meeting Confirmed</h1>
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-left space-y-3">
             {topic && <p className="text-sm font-semibold text-zinc-100">{topic}</p>}
             <p className="text-sm text-zinc-400">
-              📅 {new Date(confirmData.dateTime as string).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+              &#128197; {new Date(confirmData.dateTime as string).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
             </p>
             <p className="text-sm text-zinc-400">
-              🕐 {new Date(confirmData.dateTime as string).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} ({String(confirmData.duration)} min)
+              &#128336; {new Date(confirmData.dateTime as string).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} ({String(confirmData.duration)} min)
             </p>
             <p className="text-sm text-zinc-400">
-              📱 {String(confirmData.format).charAt(0).toUpperCase() + String(confirmData.format).slice(1)}
+              &#128241; {String(confirmData.format).charAt(0).toUpperCase() + String(confirmData.format).slice(1)}
             </p>
             {typeof confirmData.meetLink === "string" && (
               <a href={confirmData.meetLink as string} className="inline-block text-sm text-indigo-400 hover:text-indigo-300 font-medium" target="_blank" rel="noopener noreferrer">
-                Join Google Meet →
+                Join Google Meet &rarr;
               </a>
             )}
           </div>
-          <div className="mt-6 p-4 border border-zinc-700 bg-zinc-900 rounded-xl text-left">
-            {feedbackSent ? (
-              <p className="text-sm text-zinc-400">Thanks for your feedback!</p>
-            ) : (
-              <>
-                <label className="text-sm font-medium text-zinc-300 block mb-2">
-                  Anything you&apos;d like to share? Your feedback helps us improve.
-                </label>
-                <textarea
-                  value={feedbackText}
-                  onChange={(e) => setFeedbackText(e.target.value)}
-                  placeholder="Optional — tell us how this went..."
-                  rows={2}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 resize-none outline-none focus:border-indigo-500 transition"
-                />
-                {feedbackText.trim() && (
-                  <button
-                    onClick={async () => {
-                      if (!sessionId || !feedbackText.trim()) return;
-                      try {
-                        await fetch("/api/negotiate/confirm", {
-                          method: "PATCH",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ sessionId, feedback: feedbackText.trim() }),
-                        });
-                        setFeedbackSent(true);
-                      } catch {}
-                    }}
-                    className="mt-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs rounded-lg font-medium transition"
-                  >
-                    Send feedback
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-          <div className="mt-4 p-4 border border-indigo-500/20 bg-indigo-500/5 rounded-xl">
-            <p className="text-sm font-semibold text-indigo-300">Want your own AI negotiator?</p>
-            <p className="text-xs text-zinc-500 mt-1">Create your AgentEnvoy link and let AI handle your scheduling.</p>
-            <a href="/" className="inline-block mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg font-medium transition">
-              Sign up for AgentEnvoy
-            </a>
-          </div>
+          {!isHost && (
+            <div className="mt-6 p-4 border border-zinc-700 bg-zinc-900 rounded-xl text-left">
+              {feedbackSent ? (
+                <p className="text-sm text-zinc-400">Thanks for your feedback!</p>
+              ) : (
+                <>
+                  <label className="text-sm font-medium text-zinc-300 block mb-2">
+                    Anything you&apos;d like to share? Your feedback helps us improve.
+                  </label>
+                  <textarea
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    placeholder="Optional — tell us how this went..."
+                    rows={2}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 resize-none outline-none focus:border-indigo-500 transition"
+                  />
+                  {feedbackText.trim() && (
+                    <button
+                      onClick={async () => {
+                        if (!sessionId || !feedbackText.trim()) return;
+                        try {
+                          await fetch("/api/negotiate/confirm", {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ sessionId, feedback: feedbackText.trim() }),
+                          });
+                          setFeedbackSent(true);
+                        } catch {}
+                      }}
+                      className="mt-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs rounded-lg font-medium transition"
+                    >
+                      Send feedback
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {isHost ? (
+            <div className="mt-4">
+              <Link href="/dashboard" className="text-sm text-indigo-400 hover:text-indigo-300 font-medium">
+                &larr; Back to dashboard
+              </Link>
+            </div>
+          ) : (
+            <div className="mt-4 p-4 border border-indigo-500/20 bg-indigo-500/5 rounded-xl">
+              <p className="text-sm font-semibold text-indigo-300">Want your own AI negotiator?</p>
+              <p className="text-xs text-zinc-500 mt-1">Create your AgentEnvoy link and let AI handle your scheduling.</p>
+              <a href="/" className="inline-block mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg font-medium transition">
+                Sign up for AgentEnvoy
+              </a>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -447,58 +505,60 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         <h2 className="text-base font-semibold text-zinc-100">{getEventTitle()}</h2>
         <p className="text-xs text-zinc-500 mt-0.5">
           {linkFormat === "phone" ? "Phone call" : linkFormat === "video" ? "Video call" : linkFormat === "in-person" ? "In person" : "Meeting"}
-          {" · 30 min"}
+          {" \u00B7 30 min"}
         </p>
       </div>
 
-      {/* Connections */}
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
-          Connections
-        </h4>
-        <div className="space-y-2">
-          <button
-            onClick={handleConnectAgent}
-            className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group"
-          >
-            <div className="text-sm font-medium text-zinc-300 group-hover:text-indigo-300 transition">
-              Connect your agent
-            </div>
-            <p className="text-xs text-zinc-600 mt-0.5">Details coming soon!</p>
-          </button>
-
-          {showAgentInfo && (
-            <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-xs text-zinc-400 space-y-2">
-              <p className="font-medium text-zinc-200">Agent API</p>
-              <p>Your agent can negotiate on your behalf via the AgentEnvoy API.</p>
-              <code className="block bg-zinc-800 rounded p-2 text-emerald-400 text-[11px] break-all">
-                POST /api/negotiate/message
-              </code>
-              <a href="https://agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300 text-xs">
-                Sign up for API access
-              </a>
-            </div>
-          )}
-
-          {calendarConnected ? (
-            <div className="w-full bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-3">
-              <div className="text-sm font-medium text-emerald-300">Calendar connected</div>
-              <p className="text-xs text-zinc-500 mt-1">Your availability is being shared</p>
-            </div>
-          ) : (
+      {/* Connections — only show for guests */}
+      {!isHost && (
+        <div>
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
+            Connections
+          </h4>
+          <div className="space-y-2">
             <button
-              onClick={handleConnectCalendar}
-              disabled={!sessionId}
-              className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group disabled:opacity-50"
+              onClick={handleConnectAgent}
+              className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group"
             >
-              <div className="text-sm font-medium text-indigo-400 group-hover:text-indigo-300 transition">
-                Connect Calendar
+              <div className="text-sm font-medium text-zinc-300 group-hover:text-indigo-300 transition">
+                Connect your agent
               </div>
-              <p className="text-xs text-zinc-600 mt-0.5">Let AgentEnvoy find the best match!</p>
+              <p className="text-xs text-zinc-600 mt-0.5">Details coming soon!</p>
             </button>
-          )}
+
+            {showAgentInfo && (
+              <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-xs text-zinc-400 space-y-2">
+                <p className="font-medium text-zinc-200">Agent API</p>
+                <p>Your agent can negotiate on your behalf via the AgentEnvoy API.</p>
+                <code className="block bg-zinc-800 rounded p-2 text-emerald-400 text-[11px] break-all">
+                  POST /api/negotiate/message
+                </code>
+                <a href="https://agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300 text-xs">
+                  Sign up for API access
+                </a>
+              </div>
+            )}
+
+            {calendarConnected ? (
+              <div className="w-full bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-3">
+                <div className="text-sm font-medium text-emerald-300">Calendar connected</div>
+                <p className="text-xs text-zinc-500 mt-1">Your availability is being shared</p>
+              </div>
+            ) : (
+              <button
+                onClick={handleConnectCalendar}
+                disabled={!sessionId}
+                className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group disabled:opacity-50"
+              >
+                <div className="text-sm font-medium text-indigo-400 group-hover:text-indigo-300 transition">
+                  Connect Calendar
+                </div>
+                <p className="text-xs text-zinc-600 mt-0.5">Let AgentEnvoy find the best match!</p>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Availability calendar */}
       <div>
@@ -527,7 +587,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         ) : (
           messages.map((msg) => {
+            // Host notes — only visible to host
             if (msg.role === "host_note") {
+              if (!isHost) return null;
               return (
                 <div key={msg.id} className="flex justify-end">
                   <div className="max-w-[70%] rounded-lg px-3 py-1.5 text-xs bg-amber-900/30 border border-amber-700/40 text-amber-300">
@@ -543,20 +605,44 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 ? parseConfirmationProposal(msg.content)
                 : { text: msg.content, proposal: null };
 
+            // Determine alignment and styling
+            const isOwnMessage =
+              (isHost && msg.role === "host") ||
+              (!isHost && msg.role === "guest");
+
+            const messageStyle =
+              msg.role === "host"
+                ? "bg-purple-600 text-white rounded-br-sm"
+                : msg.role === "guest"
+                  ? "bg-indigo-600 text-white rounded-br-sm"
+                  : msg.role === "system"
+                    ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
+                    : "bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-bl-sm";
+
+            const senderLabel =
+              msg.role === "host"
+                ? hostName || "Host"
+                : msg.role === "guest"
+                  ? "Guest"
+                  : msg.role === "administrator"
+                    ? "Envoy"
+                    : null;
+
+            const labelColor =
+              msg.role === "host"
+                ? "text-white/60"
+                : msg.role === "guest"
+                  ? "text-white/60"
+                  : "text-emerald-400";
+
             return (
               <div key={msg.id}>
-                <div className={`flex ${msg.role === "guest" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                      msg.role === "guest"
-                        ? "bg-indigo-600 text-white rounded-br-sm"
-                        : msg.role === "system"
-                          ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
-                          : "bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-bl-sm"
-                    }`}
-                  >
-                    {msg.role === "administrator" && (
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">Envoy</div>
+                <div className={`flex ${isOwnMessage ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${messageStyle}`}>
+                    {senderLabel && (
+                      <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${labelColor}`}>
+                        {senderLabel}
+                      </div>
                     )}
                     <div className="whitespace-pre-wrap">{text}</div>
                   </div>
@@ -567,10 +653,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                     <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Proposed meeting</div>
                       <div className="space-y-1 text-sm text-zinc-300">
-                        <p>📅 {new Date(proposal.dateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
-                        <p>🕐 {new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} ({proposal.duration} min)</p>
-                        <p>📱 {proposal.format.charAt(0).toUpperCase() + proposal.format.slice(1)}</p>
-                        {proposal.location && <p>📍 {proposal.location}</p>}
+                        <p>&#128197; {new Date(proposal.dateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
+                        <p>&#128336; {new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} ({proposal.duration} min)</p>
+                        <p>&#128241; {proposal.format.charAt(0).toUpperCase() + proposal.format.slice(1)}</p>
+                        {proposal.location && <p>&#128205; {proposal.location}</p>}
                       </div>
                       <button
                         onClick={() => handleConfirm(proposal)}
@@ -613,7 +699,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 handleSend(e);
               }
             }}
-            placeholder="Type your message..."
+            placeholder={isHost ? `Message as ${hostName || "Host"}...` : "Type your message..."}
             rows={1}
             disabled={isLoading}
             className="flex-1 resize-none bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
@@ -626,6 +712,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             Send
           </button>
         </div>
+        {isHost && (
+          <p className="text-[10px] text-zinc-600 mt-1.5">
+            Prefix with <code className="text-zinc-500">::</code> for private notes to Envoy
+          </p>
+        )}
       </form>
     </>
   );
@@ -644,9 +735,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         <a href="/">
           <LogoFull height={24} className="text-zinc-100" />
         </a>
-        <a href="/" className="text-xs text-zinc-500 hover:text-zinc-300 transition">
-          Sign in
-        </a>
+        {isHost ? (
+          <Link href="/dashboard" className="text-xs text-zinc-500 hover:text-zinc-300 transition">
+            &larr; Dashboard
+          </Link>
+        ) : (
+          <a href="/" className="text-xs text-zinc-500 hover:text-zinc-300 transition">
+            Sign in
+          </a>
+        )}
       </header>
 
       {/* Mobile tab bar — visible only on small screens */}

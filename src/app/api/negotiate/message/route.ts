@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { AgentContext } from "@/agent/administrator";
 import { getAvailableSlots } from "@/lib/calendar";
 import { computeThreadStatus } from "@/lib/thread-status";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 // POST /api/negotiate/message
 // Send a message in a negotiation session and get agent response (streaming)
@@ -33,17 +35,30 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Save the guest's message
+  // Detect if sender is the host
+  const authSession = await getServerSession(authOptions);
+  const isHost = authSession?.user?.id === session.hostId;
+  const messageRole = isHost ? "host" : "guest";
+
+  // Save the message
   await prisma.message.create({
-    data: { sessionId, role: "guest", content },
+    data: { sessionId, role: messageRole, content },
   });
 
-  // Update guest email if provided
-  if (guestEmail && !session.guestEmail) {
+  // Update guest email if provided (guest only)
+  if (!isHost && guestEmail && !session.guestEmail) {
     await prisma.negotiationSession.update({
       where: { id: sessionId },
       data: { guestEmail },
     });
+  }
+
+  // If host sends a regular message, don't trigger agent response — it's direct to guest
+  if (isHost) {
+    return new Response(
+      JSON.stringify({ ok: true, role: "host" }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
   }
 
   // Build conversation history

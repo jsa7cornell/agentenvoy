@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import ThreadCard from "./thread-card";
 import { computeThreadStatus } from "@/lib/thread-status";
 
@@ -19,6 +20,8 @@ interface ChannelMsg {
     meetingType?: string;
     duration?: number;
     format?: string;
+    archived?: boolean;
+    agreedTime?: string;
     link: {
       inviteeName?: string;
       inviteeEmail?: string;
@@ -30,12 +33,8 @@ interface ChannelMsg {
   } | null;
 }
 
-interface FeedProps {
-  onThreadSelect: (sessionId: string) => void;
-  selectedThreadId?: string | null;
-}
-
-export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
+export default function Feed() {
+  const router = useRouter();
   const [messages, setMessages] = useState<ChannelMsg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -74,6 +73,33 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
     el.style.height = Math.min(el.scrollHeight, 120) + "px";
   }, []);
 
+  // Navigate to deal room
+  function navigateToThread(thread: NonNullable<ChannelMsg["thread"]>) {
+    const url = thread.link.code
+      ? `/meet/${thread.link.slug}/${thread.link.code}`
+      : `/meet/${thread.link.slug}`;
+    router.push(url);
+  }
+
+  // Archive a thread
+  async function handleArchive(sessionId: string) {
+    try {
+      await fetch("/api/negotiate/archive", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, archived: true }),
+      });
+      // Refresh messages to remove archived thread
+      const res = await fetch("/api/channel/messages");
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.messages || []);
+      }
+    } catch (e) {
+      console.error("Archive error:", e);
+    }
+  }
+
   // Send message
   const handleSend = async () => {
     const text = input.trim();
@@ -89,10 +115,7 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
         await fetch("/api/negotiate/directive", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: directive,
-            sessionId: selectedThreadId || undefined,
-          }),
+          body: JSON.stringify({ content: directive }),
         });
         setMessages((prev) => [
           ...prev,
@@ -132,10 +155,7 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
       const contentType = res.headers.get("content-type") || "";
 
       if (contentType.includes("application/json")) {
-        // Thread creation response — server returns JSON with thread data
         const data = await res.json();
-
-        // Add envoy message with share note
         const envoyContent = data.shareNote
           ? `${data.message}\n\n${data.shareNote}`
           : data.message;
@@ -155,7 +175,6 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
           setMessages(refreshData.messages || []);
         }
       } else {
-        // Regular text response — parse AI SDK format: 0:"text"\n
         const responseText = await res.text();
         let content = responseText;
         try {
@@ -167,11 +186,8 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
             return line;
           });
           content = parsed.join("");
-        } catch {
-          // Use raw text if parsing fails
-        }
+        } catch {}
 
-        // Strip any action blocks that leaked through (safety net)
         const displayContent = content
           .replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "")
           .trim();
@@ -186,7 +202,6 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
       }
     } catch (e) {
       console.error("Send error:", e);
-      // Add error message
       setMessages((prev) => [
         ...prev,
         {
@@ -225,7 +240,7 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-1.5">
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-1.5">
         {messages.length === 0 && !loading && (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-sm text-gray-500">Start a conversation with Envoy</p>
@@ -233,13 +248,20 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
         )}
 
         {messages.map((msg) => {
-          // Thread card
+          // Thread card — skip archived
           if (msg.threadId && msg.thread) {
+            if (msg.thread.archived) return null;
+
             const status = computeThreadStatus({
               status: msg.thread.status,
               inviteeName: msg.thread.link.inviteeName,
               guestEmail: msg.thread.link.inviteeEmail,
             });
+
+            const canArchive =
+              msg.thread.status === "agreed" ||
+              msg.thread.status === "expired" ||
+              (msg.thread.agreedTime && new Date(msg.thread.agreedTime) < new Date());
 
             return (
               <ThreadCard
@@ -254,8 +276,11 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
                 inviteeName={msg.thread.link.inviteeName || undefined}
                 inviteeEmail={msg.thread.link.inviteeEmail || undefined}
                 messageCount={msg.thread._count.messages}
-                selected={selectedThreadId === msg.thread.id}
-                onClick={() => onThreadSelect(msg.thread!.id)}
+                linkSlug={msg.thread.link.slug}
+                linkCode={msg.thread.link.code || undefined}
+                canArchive={!!canArchive}
+                onArchive={() => handleArchive(msg.thread!.id)}
+                onClick={() => navigateToThread(msg.thread!)}
               />
             );
           }
@@ -305,7 +330,7 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
       </div>
 
       {/* Input */}
-      <div className="px-6 py-4 border-t border-white/5 flex-shrink-0">
+      <div className="px-4 sm:px-6 py-4 border-t border-white/5 flex-shrink-0">
         <div className="flex gap-2 items-end">
           <textarea
             ref={textareaRef}
