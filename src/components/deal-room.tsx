@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { LogoFull } from "./logo";
+import { AvailabilityCalendar } from "./availability-calendar";
 
 interface Message {
   id: string;
@@ -14,6 +16,25 @@ interface DealRoomProps {
   code?: string;
 }
 
+// --- Icons (inline SVG) ---
+
+function ChatIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function ClockIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
 export function DealRoom({ slug, code }: DealRoomProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -22,6 +43,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isSending, setIsSending] = useState(false);
   const [hostName, setInitiatorName] = useState("");
   const [topic, setTopic] = useState("");
+  const [linkFormat, setLinkFormat] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
@@ -32,10 +54,30 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [feedbackSent, setFeedbackSent] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Slots state for calendar widget
+  const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string }>> | null>(null);
+  const [slotTimezone, setSlotTimezone] = useState("America/New_York");
+
+  // Mobile tab state
+  const [mobileTab, setMobileTab] = useState<"chat" | "details">("chat");
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Fetch slots when session is ready
+  useEffect(() => {
+    if (!sessionId) return;
+    fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) {
+          setSlotsByDay(data.slotsByDay);
+          setSlotTimezone(data.timezone);
+        }
+      })
+      .catch(() => {});
+  }, [sessionId]);
 
   function parseConfirmationProposal(content: string): {
     text: string;
@@ -89,7 +131,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   }
 
   function handleConnectCalendar() {
-    // Guest-specific OAuth with read-only calendar scope
     const returnUrl = code ? `/meet/${slug}/${code}` : `/meet/${slug}`;
     window.location.href = `/api/auth/guest-calendar?sessionId=${sessionId}&returnUrl=${encodeURIComponent(returnUrl)}`;
   }
@@ -98,7 +139,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     setShowAgentInfo((prev) => !prev);
   }
 
-  // Detect guest calendar connect via URL param (returned from guest OAuth flow)
+  // Detect guest calendar connect via URL param
   const calendarCheckDone = useRef(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -106,11 +147,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     if (params.get("calendarConnected") === "true" && sessionId && !calendarConnected && !calendarCheckDone.current) {
       calendarCheckDone.current = true;
       setCalendarConnected(true);
-      // Clean up URL param
       const url = new URL(window.location.href);
       url.searchParams.delete("calendarConnected");
       window.history.replaceState({}, "", url.pathname);
-      // Ask the agent to re-evaluate with guest availability now injected
       fetch("/api/negotiate/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -150,7 +189,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         }
       }).catch(() => {});
     }
-  }, [sessionId, calendarConnected]);
+  }, [sessionId, calendarConnected, slug, code]);
 
   // Initialize session on mount
   useEffect(() => {
@@ -173,13 +212,39 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setSessionId(data.sessionId);
         setInitiatorName(data.host?.name || "");
         setTopic(data.link?.topic || "");
-        setMessages([
-          {
-            id: "greeting",
-            role: "administrator",
-            content: data.greeting,
-          },
-        ]);
+        setLinkFormat(data.link?.format || "");
+
+        // Already confirmed — jump straight to confirmation screen
+        if (data.confirmed) {
+          setConfirmData({
+            dateTime: data.agreedTime,
+            duration: data.duration || 30,
+            format: data.agreedFormat || "phone",
+            meetLink: data.meetLink,
+          });
+          setConfirmed(true);
+          return;
+        }
+
+        // If resuming an existing session, load full message history
+        if (data.resumed && data.messages?.length > 0) {
+          setMessages(
+            data.messages.map((m: { id: string; role: string; content: string; createdAt?: string }) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              createdAt: m.createdAt,
+            }))
+          );
+        } else {
+          setMessages([
+            {
+              id: "greeting",
+              role: "administrator",
+              content: data.greeting,
+            },
+          ]);
+        }
       } catch {
         setError("Failed to connect. Please try again.");
       } finally {
@@ -196,7 +261,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
     const text = input.trim();
 
-    // Host directive: :: prefix — global, shapes all future negotiations
+    // Host directive: :: prefix
     if (text.startsWith("::")) {
       const directive = text.slice(2).trim();
       if (!directive) return;
@@ -279,20 +344,28 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     }
   }
 
+  // --- Contextual event title ---
+  function getEventTitle() {
+    if (topic && hostName) return `${topic} with ${hostName}`;
+    if (linkFormat === "phone" && hostName) return `Call with ${hostName}`;
+    if (hostName) return `Meet with ${hostName}`;
+    return "Meeting";
+  }
+
+  // --- Error state ---
   if (error) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
         <div className="text-center">
           <div className="text-4xl mb-4">😕</div>
-          <h1 className="text-xl font-bold text-zinc-100 mb-2">
-            Link not found
-          </h1>
+          <h1 className="text-xl font-bold text-zinc-100 mb-2">Link not found</h1>
           <p className="text-zinc-500">{error}</p>
         </div>
       </div>
     );
   }
 
+  // --- Confirmed state ---
   if (confirmed && confirmData) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
@@ -300,47 +373,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-500 flex items-center justify-center text-4xl shadow-lg shadow-emerald-500/20">
             ✓
           </div>
-          <h1 className="text-2xl font-bold text-zinc-100 mb-4">
-            Meeting Confirmed
-          </h1>
+          <h1 className="text-2xl font-bold text-zinc-100 mb-4">Meeting Confirmed</h1>
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-left space-y-3">
-            {topic && (
-              <p className="text-sm font-semibold text-zinc-100">{topic}</p>
-            )}
+            {topic && <p className="text-sm font-semibold text-zinc-100">{topic}</p>}
             <p className="text-sm text-zinc-400">
-              📅{" "}
-              {new Date(confirmData.dateTime as string).toLocaleDateString(
-                "en-US",
-                {
-                  weekday: "long",
-                  month: "long",
-                  day: "numeric",
-                }
-              )}
+              📅 {new Date(confirmData.dateTime as string).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
             </p>
             <p className="text-sm text-zinc-400">
-              🕐{" "}
-              {new Date(confirmData.dateTime as string).toLocaleTimeString(
-                "en-US",
-                { hour: "numeric", minute: "2-digit" }
-              )}{" "}
-              ({String(confirmData.duration)} min)
+              🕐 {new Date(confirmData.dateTime as string).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} ({String(confirmData.duration)} min)
             </p>
             <p className="text-sm text-zinc-400">
               📱 {String(confirmData.format).charAt(0).toUpperCase() + String(confirmData.format).slice(1)}
             </p>
             {typeof confirmData.meetLink === "string" && (
-              <a
-                href={confirmData.meetLink as string}
-                className="inline-block text-sm text-indigo-400 hover:text-indigo-300 font-medium"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
+              <a href={confirmData.meetLink as string} className="inline-block text-sm text-indigo-400 hover:text-indigo-300 font-medium" target="_blank" rel="noopener noreferrer">
                 Join Google Meet →
               </a>
             )}
           </div>
-          {/* Feedback */}
           <div className="mt-6 p-4 border border-zinc-700 bg-zinc-900 rounded-xl text-left">
             {feedbackSent ? (
               <p className="text-sm text-zinc-400">Thanks for your feedback!</p>
@@ -377,18 +427,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               </>
             )}
           </div>
-
           <div className="mt-4 p-4 border border-indigo-500/20 bg-indigo-500/5 rounded-xl">
-            <p className="text-sm font-semibold text-indigo-300">
-              Want your own AI negotiator?
-            </p>
-            <p className="text-xs text-zinc-500 mt-1">
-              Create your AgentEnvoy link and let AI handle your scheduling.
-            </p>
-            <a
-              href="/"
-              className="inline-block mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg font-medium transition"
-            >
+            <p className="text-sm font-semibold text-indigo-300">Want your own AI negotiator?</p>
+            <p className="text-xs text-zinc-500 mt-1">Create your AgentEnvoy link and let AI handle your scheduling.</p>
+            <a href="/" className="inline-block mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg font-medium transition">
               Sign up for AgentEnvoy
             </a>
           </div>
@@ -397,199 +439,51 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col">
-      {/* Header */}
-      <header className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <a href="/" className="text-lg font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
-            AgentEnvoy
-          </a>
-          {topic && (
-            <>
-              <span className="text-zinc-700">·</span>
-              <span className="text-sm text-zinc-400">{topic}</span>
-            </>
-          )}
-        </div>
-        {hostName && (
-          <span className="text-xs text-zinc-500">
-            Meeting with {hostName}
-          </span>
-        )}
-      </header>
+  // --- Sidebar content (shared between desktop sidebar and mobile Details tab) ---
+  const sidebarContent = (
+    <div className="space-y-5">
+      {/* Event title */}
+      <div>
+        <h2 className="text-base font-semibold text-zinc-100">{getEventTitle()}</h2>
+        <p className="text-xs text-zinc-500 mt-0.5">
+          {linkFormat === "phone" ? "Phone call" : linkFormat === "video" ? "Video call" : linkFormat === "in-person" ? "In person" : "Meeting"}
+          {" · 30 min"}
+        </p>
+      </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Chat panel */}
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {isLoading ? (
-              <div className="flex justify-center py-12">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
-                  <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.1s]" />
-                  <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.2s]" />
-                </div>
-              </div>
-            ) : (
-              messages.map((msg) => {
-                // Host notes — small amber pill, only visible to the host
-                if (msg.role === "host_note") {
-                  return (
-                    <div key={msg.id} className="flex justify-end">
-                      <div className="max-w-[70%] rounded-lg px-3 py-1.5 text-xs bg-amber-900/30 border border-amber-700/40 text-amber-300">
-                        <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-500 mr-1.5">Note</span>
-                        {msg.content}
-                      </div>
-                    </div>
-                  );
-                }
-
-                const { text, proposal } =
-                  msg.role === "administrator"
-                    ? parseConfirmationProposal(msg.content)
-                    : { text: msg.content, proposal: null };
-
-                return (
-                  <div key={msg.id}>
-                    <div
-                      className={`flex ${
-                        msg.role === "guest"
-                          ? "justify-end"
-                          : "justify-start"
-                      }`}
-                    >
-                      <div
-                        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                          msg.role === "guest"
-                            ? "bg-indigo-600 text-white rounded-br-sm"
-                            : msg.role === "system"
-                              ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
-                              : "bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-bl-sm"
-                        }`}
-                      >
-                        {msg.role === "administrator" && (
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                            Envoy
-                          </div>
-                        )}
-                        <div className="whitespace-pre-wrap">{text}</div>
-                      </div>
-                    </div>
-
-                    {proposal && !confirmed && (
-                      <div className="flex justify-start mt-2">
-                        <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                            Proposed meeting
-                          </div>
-                          <div className="space-y-1 text-sm text-zinc-300">
-                            <p>
-                              📅{" "}
-                              {new Date(proposal.dateTime).toLocaleDateString(
-                                "en-US",
-                                {
-                                  weekday: "long",
-                                  month: "long",
-                                  day: "numeric",
-                                }
-                              )}
-                            </p>
-                            <p>
-                              🕐{" "}
-                              {new Date(proposal.dateTime).toLocaleTimeString(
-                                "en-US",
-                                { hour: "numeric", minute: "2-digit" }
-                              )}{" "}
-                              ({proposal.duration} min)
-                            </p>
-                            <p>
-                              📱{" "}
-                              {proposal.format.charAt(0).toUpperCase() +
-                                proposal.format.slice(1)}
-                            </p>
-                            {proposal.location && (
-                              <p>📍 {proposal.location}</p>
-                            )}
-                          </div>
-                          <button
-                            onClick={() => handleConfirm(proposal)}
-                            disabled={isConfirming}
-                            className="w-full mt-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
-                          >
-                            {isConfirming
-                              ? "Confirming..."
-                              : "Confirm this time"}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-            {isSending && (
-              <div className="flex justify-start">
-                <div className="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-bl-sm px-4 py-3">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                    Envoy
-                  </div>
-                  <div className="flex gap-1">
-                    <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
-                    <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.1s]" />
-                    <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.2s]" />
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input */}
-          <form
-            onSubmit={handleSend}
-            className="p-4 border-t border-zinc-800"
+      {/* Connections */}
+      <div>
+        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
+          Connections
+        </h4>
+        <div className="space-y-2">
+          <button
+            onClick={handleConnectAgent}
+            className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group"
           >
-            <div className="flex gap-2">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend(e);
-                  }
-                }}
-                placeholder="Type your message..."
-                rows={1}
-                disabled={isLoading}
-                className="flex-1 resize-none bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={isSending || !input.trim() || isLoading}
-                className="px-4 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition"
-              >
-                Send
-              </button>
+            <div className="text-sm font-medium text-zinc-300 group-hover:text-indigo-300 transition">
+              Connect your agent
             </div>
-          </form>
-        </div>
+            <p className="text-xs text-zinc-600 mt-0.5">Details coming soon!</p>
+          </button>
 
-        {/* Right sidebar — connect options */}
-        <div className="w-72 border-l border-zinc-800 p-4 space-y-4 overflow-y-auto hidden md:block">
-          <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-            Quick actions
-          </h4>
+          {showAgentInfo && (
+            <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-xs text-zinc-400 space-y-2">
+              <p className="font-medium text-zinc-200">Agent API</p>
+              <p>Your agent can negotiate on your behalf via the AgentEnvoy API.</p>
+              <code className="block bg-zinc-800 rounded p-2 text-emerald-400 text-[11px] break-all">
+                POST /api/negotiate/message
+              </code>
+              <a href="https://agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300 text-xs">
+                Sign up for API access
+              </a>
+            </div>
+          )}
 
           {calendarConnected ? (
             <div className="w-full bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-3">
-              <div className="text-sm font-medium text-emerald-300">
-                Calendar connected
-              </div>
-              <p className="text-xs text-zinc-500 mt-1">
-                Your availability is being shared
-              </p>
+              <div className="text-sm font-medium text-emerald-300">Calendar connected</div>
+              <p className="text-xs text-zinc-500 mt-1">Your availability is being shared</p>
             </div>
           ) : (
             <button
@@ -597,57 +491,208 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               disabled={!sessionId}
               className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group disabled:opacity-50"
             >
-              <div className="text-sm font-medium text-indigo-400 group-hover:text-indigo-300 transition underline underline-offset-2">
-                Connect your calendar for automatic availability
+              <div className="text-sm font-medium text-indigo-400 group-hover:text-indigo-300 transition">
+                Connect Calendar
               </div>
-              <p className="text-xs text-zinc-500 mt-1">
-                One-time read-only access via Google — we only check your free/busy times
-              </p>
+              <p className="text-xs text-zinc-600 mt-0.5">Let AgentEnvoy find the best match!</p>
             </button>
           )}
+        </div>
+      </div>
 
-          <button
-            onClick={handleConnectAgent}
-            className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group"
-          >
-            <div className="text-sm font-medium text-zinc-200 group-hover:text-indigo-300 transition">
-              Connect your agent
+      {/* Availability calendar */}
+      <div>
+        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
+          Availability
+        </h4>
+        <AvailabilityCalendar
+          slotsByDay={slotsByDay || {}}
+          timezone={slotTimezone}
+        />
+      </div>
+    </div>
+  );
+
+  // --- Chat content (shared between desktop and mobile Chat tab) ---
+  const chatContent = (
+    <>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {isLoading ? (
+          <div className="flex justify-center py-12">
+            <div className="flex gap-1">
+              <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
+              <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.1s]" />
+              <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.2s]" />
             </div>
-            <p className="text-xs text-zinc-500 mt-1">
-              Let your AI handle this negotiation
-            </p>
-          </button>
+          </div>
+        ) : (
+          messages.map((msg) => {
+            if (msg.role === "host_note") {
+              return (
+                <div key={msg.id} className="flex justify-end">
+                  <div className="max-w-[70%] rounded-lg px-3 py-1.5 text-xs bg-amber-900/30 border border-amber-700/40 text-amber-300">
+                    <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-500 mr-1.5">Note</span>
+                    {msg.content}
+                  </div>
+                </div>
+              );
+            }
 
-          {showAgentInfo && (
-            <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-xs text-zinc-400 space-y-2">
-              <p className="font-medium text-zinc-200">Agent API</p>
-              <p>Your agent can negotiate on your behalf via the AgentEnvoy API.</p>
-              <p>Send messages to this session at:</p>
-              <code className="block bg-zinc-800 rounded p-2 text-emerald-400 text-[11px] break-all">
-                POST /api/negotiate/message
-              </code>
-              <p className="mt-1">
-                <a href="https://agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300">
-                  Sign up for API access
-                </a>
-              </p>
-            </div>
-          )}
+            const { text, proposal } =
+              msg.role === "administrator"
+                ? parseConfirmationProposal(msg.content)
+                : { text: msg.content, proposal: null };
 
-          {hostName && (
-            <div className="mt-6">
-              <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
-                Meeting with
-              </h4>
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
-                <p className="text-sm font-medium">{hostName}</p>
-                {topic && (
-                  <p className="text-xs text-zinc-400 mt-1">{topic}</p>
+            return (
+              <div key={msg.id}>
+                <div className={`flex ${msg.role === "guest" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                      msg.role === "guest"
+                        ? "bg-indigo-600 text-white rounded-br-sm"
+                        : msg.role === "system"
+                          ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
+                          : "bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-bl-sm"
+                    }`}
+                  >
+                    {msg.role === "administrator" && (
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">Envoy</div>
+                    )}
+                    <div className="whitespace-pre-wrap">{text}</div>
+                  </div>
+                </div>
+
+                {proposal && !confirmed && (
+                  <div className="flex justify-start mt-2">
+                    <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Proposed meeting</div>
+                      <div className="space-y-1 text-sm text-zinc-300">
+                        <p>📅 {new Date(proposal.dateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
+                        <p>🕐 {new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} ({proposal.duration} min)</p>
+                        <p>📱 {proposal.format.charAt(0).toUpperCase() + proposal.format.slice(1)}</p>
+                        {proposal.location && <p>📍 {proposal.location}</p>}
+                      </div>
+                      <button
+                        onClick={() => handleConfirm(proposal)}
+                        disabled={isConfirming}
+                        className="w-full mt-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+                      >
+                        {isConfirming ? "Confirming..." : "Confirm this time"}
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
+            );
+          })
+        )}
+        {isSending && (
+          <div className="flex justify-start">
+            <div className="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-bl-sm px-4 py-3">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">Envoy</div>
+              <div className="flex gap-1">
+                <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
+                <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.1s]" />
+                <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.2s]" />
+              </div>
             </div>
-          )}
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <form onSubmit={handleSend} className="p-4 border-t border-zinc-800">
+        <div className="flex gap-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend(e);
+              }
+            }}
+            placeholder="Type your message..."
+            rows={1}
+            disabled={isLoading}
+            className="flex-1 resize-none bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={isSending || !input.trim() || isLoading}
+            className="px-4 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition"
+          >
+            Send
+          </button>
         </div>
+      </form>
+    </>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col">
+      {/* Prototype banner */}
+      <div className="bg-amber-900/30 border-b border-amber-700/40 px-4 py-1.5 text-center">
+        <span className="text-xs text-amber-300">
+          Prototype — email and other features still in development
+        </span>
+      </div>
+
+      {/* Header */}
+      <header className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between">
+        <a href="/">
+          <LogoFull height={24} className="text-zinc-100" />
+        </a>
+        <a href="/" className="text-xs text-zinc-500 hover:text-zinc-300 transition">
+          Sign in
+        </a>
+      </header>
+
+      {/* Mobile tab bar — visible only on small screens */}
+      <div className="flex md:hidden border-b border-zinc-800">
+        <button
+          onClick={() => setMobileTab("chat")}
+          className={`flex-1 py-2.5 flex items-center justify-center gap-1.5 text-sm font-medium transition ${
+            mobileTab === "chat"
+              ? "text-indigo-400 border-b-2 border-indigo-400"
+              : "text-zinc-500"
+          }`}
+        >
+          <ChatIcon className={mobileTab === "chat" ? "text-indigo-400" : "text-zinc-500"} />
+          Chat
+        </button>
+        <button
+          onClick={() => setMobileTab("details")}
+          className={`flex-1 py-2.5 flex items-center justify-center gap-1.5 text-sm font-medium transition ${
+            mobileTab === "details"
+              ? "text-indigo-400 border-b-2 border-indigo-400"
+              : "text-zinc-500"
+          }`}
+        >
+          <ClockIcon className={mobileTab === "details" ? "text-indigo-400" : "text-zinc-500"} />
+          Details
+        </button>
+      </div>
+
+      {/* Desktop layout */}
+      <div className="hidden md:flex flex-1 overflow-hidden">
+        {/* Chat panel */}
+        <div className="flex-1 flex flex-col">{chatContent}</div>
+
+        {/* Right sidebar */}
+        <div className="w-80 border-l border-zinc-800 p-4 overflow-y-auto">
+          {sidebarContent}
+        </div>
+      </div>
+
+      {/* Mobile layout */}
+      <div className="flex md:hidden flex-1 overflow-hidden">
+        {mobileTab === "chat" ? (
+          <div className="flex-1 flex flex-col">{chatContent}</div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-4">{sidebarContent}</div>
+        )}
       </div>
     </div>
   );

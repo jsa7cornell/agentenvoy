@@ -32,6 +32,55 @@ export async function POST(req: NextRequest) {
     if (!link) {
       return NextResponse.json({ error: "Link not found" }, { status: 404 });
     }
+
+    // For contextual links, check for an existing session (active or confirmed)
+    const existingSession = await prisma.negotiationSession.findFirst({
+      where: { linkId: link.id },
+      orderBy: { createdAt: "desc" },
+      include: {
+        messages: { orderBy: { createdAt: "asc" } },
+      },
+    });
+
+    if (existingSession) {
+      const linkPayload = {
+        type: link.type,
+        topic: link.topic,
+        inviteeName: link.inviteeName,
+        format: (link.rules as Record<string, unknown>)?.format ?? null,
+      };
+
+      // Already confirmed — tell the visitor
+      if (existingSession.status === "agreed") {
+        return NextResponse.json({
+          sessionId: existingSession.id,
+          confirmed: true,
+          agreedTime: existingSession.agreedTime?.toISOString() ?? null,
+          agreedFormat: existingSession.agreedFormat,
+          duration: existingSession.duration,
+          meetLink: existingSession.meetLink,
+          host: { name: user.name },
+          link: linkPayload,
+        });
+      }
+
+      // Active session — resume with full history
+      if (existingSession.status === "active" && existingSession.messages.length > 0) {
+        return NextResponse.json({
+          sessionId: existingSession.id,
+          greeting: existingSession.messages[0].content,
+          messages: existingSession.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            createdAt: m.createdAt.toISOString(),
+          })),
+          resumed: true,
+          host: { name: user.name },
+          link: linkPayload,
+        });
+      }
+    }
   } else {
     // Find or create the generic link for this user
     link = await prisma.negotiationLink.findFirst({
@@ -122,6 +171,7 @@ export async function POST(req: NextRequest) {
       type: link.type,
       topic: link.topic,
       inviteeName: link.inviteeName,
+      format: (link.rules as Record<string, unknown>)?.format ?? null,
     },
   });
 }
