@@ -45,6 +45,7 @@ export interface ComposeOptions {
   topic?: string;
   rules?: Record<string, unknown>;
   availableSlots?: Array<{ start: string; end: string }>;
+  hostDirectives?: string[];
   role?: string;
 }
 
@@ -69,6 +70,16 @@ export function composeSystemPrompt(options: ComposeOptions): string {
     if (prefsSection) {
       sections.push(`# Host Preferences\n\n${prefsSection}`);
     }
+  }
+
+  // Layer 4b: Host Directives (from ::: feedback — highest priority user instructions)
+  if (options.hostDirectives && options.hostDirectives.length > 0) {
+    const directivesBlock = options.hostDirectives
+      .map((d) => `- ${d}`)
+      .join("\n");
+    sections.push(
+      `# Host Directives\n\nThese are explicit instructions from the host. They override defaults and learned preferences. Follow them exactly.\n\n${directivesBlock}`
+    );
   }
 
   // Layer 5: Session Context

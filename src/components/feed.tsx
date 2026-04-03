@@ -79,6 +79,34 @@ export default function Feed({ onThreadSelect, selectedThreadId }: FeedProps) {
     const text = input.trim();
     if (!text || loading) return;
 
+    // Global directive: ::: prefix — shapes all future negotiations
+    if (text.startsWith(":::")) {
+      const directive = text.slice(3).trim();
+      if (!directive) return;
+      setInput("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      try {
+        await fetch("/api/negotiate/directive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: directive,
+            sessionId: selectedThreadId || undefined,
+          }),
+        });
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `directive-${Date.now()}`,
+            role: "system",
+            content: `Directive saved: "${directive}" — applies to all future negotiations.`,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+      } catch {}
+      return;
+    }
+
     // Host note: :: prefix — saved as feedback on the selected thread
     if (text.startsWith("::")) {
       const noteContent = text.slice(2).trim();

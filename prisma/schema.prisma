@@ -52,8 +52,9 @@ model User {
   emailVerified DateTime?
   image         String?
   meetSlug      String?   @unique
-  preferences   Json?     @default("{}")
-  createdAt     DateTime  @default(now())
+  preferences      Json?     @default("{}")
+  hostDirectives   Json?     @default("[]") // string[] — global ::: directives that shape all negotiations
+  createdAt        DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   accounts           Account[]

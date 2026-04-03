@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   // Find the user by meetSlug
   const user = await prisma.user.findUnique({
     where: { meetSlug: slug },
-    select: { id: true, name: true, preferences: true, meetSlug: true },
+    select: { id: true, name: true, preferences: true, hostDirectives: true, meetSlug: true },
   });
 
   if (!user) {
@@ -82,6 +82,7 @@ export async function POST(req: NextRequest) {
     role: "coordinator",
     hostName: user.name || "the organizer",
     hostPreferences: (user.preferences as Record<string, unknown>) || {},
+    hostDirectives: (user.hostDirectives as string[]) || [],
     guestName: link.inviteeName || undefined,
     guestEmail: link.inviteeEmail || undefined,
     topic: link.topic || undefined,

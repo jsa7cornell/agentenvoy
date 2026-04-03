@@ -196,6 +196,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
     const text = input.trim();
 
+    // Global directive: ::: prefix — shapes all future negotiations
+    if (text.startsWith(":::")) {
+      const directive = text.slice(3).trim();
+      if (!directive) return;
+      setInput("");
+      try {
+        await fetch("/api/negotiate/directive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: directive, sessionId }),
+        });
+        const directiveMsg: Message = {
+          id: `directive-${Date.now()}`,
+          role: "host_note",
+          content: `[DIRECTIVE] ${directive}`,
+        };
+        setMessages((prev) => [...prev, directiveMsg]);
+      } catch {}
+      return;
+    }
+
     // Host note: :: prefix — saved as feedback, not sent to agent or shown to guest
     if (text.startsWith("::")) {
       const noteContent = text.slice(2).trim();
@@ -403,9 +424,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       {/* Header */}
       <header className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+          <a href="/" className="text-lg font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
             AgentEnvoy
-          </h1>
+          </a>
           {topic && (
             <>
               <span className="text-zinc-700">·</span>

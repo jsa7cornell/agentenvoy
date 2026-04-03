@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
     hostName: session.host.name || "the host",
     hostPreferences:
       (session.host.preferences as Record<string, unknown>) || {},
+    hostDirectives: (session.host.hostDirectives as string[]) || [],
     guestName: session.link.inviteeName || undefined,
     guestEmail:
       session.guestEmail || session.link.inviteeEmail || undefined,

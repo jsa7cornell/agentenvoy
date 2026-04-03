@@ -14,6 +14,7 @@ export interface AgentContext {
   topic?: string;
   rules?: Record<string, unknown>;
   availableSlots?: Array<{ start: string; end: string }>;
+  hostDirectives?: string[];
   conversationHistory: Array<{ role: string; content: string }>;
 }
 
@@ -32,6 +33,7 @@ export async function streamAgentResponse(context: AgentContext) {
     topic: context.topic,
     rules: context.rules,
     availableSlots: context.availableSlots,
+    hostDirectives: context.hostDirectives,
     role: context.role,
   });
 
@@ -56,6 +58,7 @@ export async function generateAgentResponse(context: AgentContext) {
     topic: context.topic,
     rules: context.rules,
     availableSlots: context.availableSlots,
+    hostDirectives: context.hostDirectives,
     role: context.role,
   });
 
