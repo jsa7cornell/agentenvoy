@@ -1,10 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { post, HOST_SLUG, BASE, API_KEY } from "./helpers";
+import { post, HOST_SLUG, API_KEY } from "./helpers";
 
 describe("Confirmed Session Revisit", () => {
-  const CONFIRM_CODE = "test-ctx-confirm";
-  let linkId: string;
-
   beforeAll(async () => {
     // Create a fresh contextual link for this test
     const { data } = await post(
@@ -16,10 +13,9 @@ describe("Confirmed Session Revisit", () => {
       },
       { bearer: API_KEY }
     );
-    linkId = data.link.id;
 
     // Create session via the link
-    const session = await post("/api/negotiate/session", {
+    await post("/api/negotiate/session", {
       slug: HOST_SLUG,
       code: data.link.code,
     });
