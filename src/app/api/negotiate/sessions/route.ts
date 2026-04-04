@@ -32,6 +32,8 @@ export async function GET(req: NextRequest) {
       link: {
         select: {
           type: true,
+          slug: true,
+          code: true,
           inviteeName: true,
           inviteeEmail: true,
           topic: true,
