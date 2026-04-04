@@ -2,6 +2,7 @@ import { streamText, generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { composeSystemPrompt, getModelForDomain } from "./composer";
 import type { DomainType } from "./composer";
+import type { CalendarContext } from "@/lib/calendar";
 
 export type AgentRole = "coordinator" | "administrator";
 
@@ -13,7 +14,11 @@ export interface AgentContext {
   guestEmail?: string;
   topic?: string;
   rules?: Record<string, unknown>;
+  /** @deprecated Use calendarContext instead */
   availableSlots?: Array<{ start: string; end: string }>;
+  calendarContext?: CalendarContext;
+  hostPersistentKnowledge?: string | null;
+  hostSituationalKnowledge?: string | null;
   hostDirectives?: string[];
   conversationHistory: Array<{ role: string; content: string }>;
 }
@@ -22,9 +27,9 @@ function getDomain(context: AgentContext): DomainType {
   return context.role === "coordinator" ? "calendar" : "calendar"; // RFP comes later
 }
 
-export async function streamAgentResponse(context: AgentContext) {
+function buildComposeOptions(context: AgentContext) {
   const domain = getDomain(context);
-  const systemPrompt = composeSystemPrompt({
+  return {
     domain,
     hostName: context.hostName,
     hostPreferences: context.hostPreferences,
@@ -33,12 +38,20 @@ export async function streamAgentResponse(context: AgentContext) {
     topic: context.topic,
     rules: context.rules,
     availableSlots: context.availableSlots,
+    calendarContext: context.calendarContext,
+    hostPersistentKnowledge: context.hostPersistentKnowledge,
+    hostSituationalKnowledge: context.hostSituationalKnowledge,
     hostDirectives: context.hostDirectives,
     role: context.role,
-  });
+  };
+}
+
+export async function streamAgentResponse(context: AgentContext) {
+  const opts = buildComposeOptions(context);
+  const systemPrompt = composeSystemPrompt(opts);
 
   return streamText({
-    model: anthropic(getModelForDomain(domain)),
+    model: anthropic(getModelForDomain(opts.domain)),
     system: systemPrompt,
     messages: context.conversationHistory.map((m) => ({
       role: m.role as "user" | "assistant",
@@ -48,22 +61,11 @@ export async function streamAgentResponse(context: AgentContext) {
 }
 
 export async function generateAgentResponse(context: AgentContext) {
-  const domain = getDomain(context);
-  const systemPrompt = composeSystemPrompt({
-    domain,
-    hostName: context.hostName,
-    hostPreferences: context.hostPreferences,
-    guestName: context.guestName,
-    guestEmail: context.guestEmail,
-    topic: context.topic,
-    rules: context.rules,
-    availableSlots: context.availableSlots,
-    hostDirectives: context.hostDirectives,
-    role: context.role,
-  });
+  const opts = buildComposeOptions(context);
+  const systemPrompt = composeSystemPrompt(opts);
 
   const { text } = await generateText({
-    model: anthropic(getModelForDomain(domain)),
+    model: anthropic(getModelForDomain(opts.domain)),
     system: systemPrompt,
     messages: context.conversationHistory.map((m) => ({
       role: m.role as "user" | "assistant",
@@ -101,4 +103,104 @@ Return ONLY valid JSON, no markdown or explanation.`,
   } catch {
     return { raw: userPrompt, parseError: true };
   }
+}
+
+/**
+ * Extract learnings from a completed negotiation transcript.
+ * Uses Claude to merge new observations into the appropriate knowledge layer.
+ * Persistent: durable patterns/preferences. Situational: near-term context.
+ */
+export async function extractLearnings(
+  transcript: string,
+  existingPersistent: string | null,
+  existingSituational: string | null,
+  hostName: string
+): Promise<{ persistent: string; situational: string }> {
+  const { text } = await generateText({
+    model: anthropic("claude-sonnet-4-6"),
+    system: `You analyze completed scheduling negotiation transcripts to extract learnings about the host (${hostName}).
+
+You maintain two knowledge layers:
+1. **Persistent Preferences** — durable patterns, preferences, identity. Rarely changes. Examples: "prefers mornings for calls", "needs 30 min travel buffer for in-person", "likes to stack meetings on MWF".
+2. **Situational Context** — near-term overrides, upcoming events, temporary rules. Changes frequently, can expire. Examples: "in Mexico next week", "training for a race this month".
+
+You receive the existing content of both layers plus a negotiation transcript. Your job:
+- Extract any new observations from the transcript
+- Merge them into the appropriate layer (persistent vs situational)
+- Remove expired situational items
+- Deduplicate — don't repeat what's already there
+- Keep each layer under 500 words
+- Return as JSON: {"persistent": "...", "situational": "..."}
+
+If nothing new was learned, return the existing content unchanged.
+Return ONLY valid JSON, no markdown or explanation.`,
+    prompt: `Existing persistent knowledge:\n${existingPersistent || "(empty)"}\n\nExisting situational knowledge:\n${existingSituational || "(empty)"}\n\nNegotiation transcript:\n${transcript}`,
+  });
+
+  try {
+    const parsed = JSON.parse(text);
+    return {
+      persistent: parsed.persistent || existingPersistent || "",
+      situational: parsed.situational || existingSituational || "",
+    };
+  } catch {
+    return {
+      persistent: existingPersistent || "",
+      situational: existingSituational || "",
+    };
+  }
+}
+
+/**
+ * Build a human-readable preview of what the agent knows about a host.
+ * Used for the "show me my prompt" feature.
+ */
+export function buildKnowledgePreview(params: {
+  preferences?: Record<string, unknown>;
+  directives?: string[];
+  persistentKnowledge?: string | null;
+  situationalKnowledge?: string | null;
+}): string {
+  const parts: string[] = [];
+
+  // Preferences
+  if (params.preferences && Object.keys(params.preferences).length > 0) {
+    parts.push("## Preferences");
+    const explicit = params.preferences.explicit as Record<string, unknown> | undefined;
+    if (explicit) {
+      for (const [key, value] of Object.entries(explicit)) {
+        if (value !== null && value !== undefined && value !== "") {
+          parts.push(`- ${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`);
+        }
+      }
+    } else {
+      for (const [key, value] of Object.entries(params.preferences)) {
+        if (key !== "learned" && value !== null && value !== undefined && value !== "") {
+          parts.push(`- ${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`);
+        }
+      }
+    }
+  }
+
+  // Directives
+  if (params.directives && params.directives.length > 0) {
+    parts.push("\n## Directives");
+    for (const d of params.directives) {
+      parts.push(`- ${d}`);
+    }
+  }
+
+  // Persistent Knowledge
+  if (params.persistentKnowledge) {
+    parts.push("\n## Persistent Preferences");
+    parts.push(params.persistentKnowledge);
+  }
+
+  // Situational Knowledge
+  if (params.situationalKnowledge) {
+    parts.push("\n## Situational Context");
+    parts.push(params.situationalKnowledge);
+  }
+
+  return parts.length > 0 ? parts.join("\n") : "No preferences or knowledge configured yet.";
 }

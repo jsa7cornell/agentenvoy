@@ -1,5 +1,228 @@
-import { google } from "googleapis";
+import { google, calendar_v3 } from "googleapis";
 import { prisma } from "./prisma";
+
+// --- Calendar Provider Abstraction ---
+
+export interface CalendarProvider {
+  readonly type: string; // "google", "ical", "outlook"
+  readonly canWrite: boolean;
+  getEvents(start: Date, end: Date): Promise<CalendarEvent[]>;
+  createEvent(params: CreateEventParams): Promise<EventResult>;
+  listCalendars(): Promise<Array<{ id: string; name: string }>>;
+}
+
+export interface CalendarEvent {
+  id: string;
+  summary: string;
+  start: Date;
+  end: Date;
+  calendar: string; // calendar name (e.g., "Jack's Schedule", "Work")
+  provider: string; // provider type (e.g., "google", "ical", "outlook")
+  location?: string;
+  attendeeCount?: number;
+  isAllDay: boolean;
+  isRecurring: boolean;
+}
+
+export interface CreateEventParams {
+  summary: string;
+  description?: string;
+  startTime: Date;
+  endTime: Date;
+  attendeeEmails: string[];
+  addMeetLink?: boolean;
+}
+
+export interface EventResult {
+  eventId?: string | null;
+  htmlLink?: string | null;
+  meetLink?: string | null;
+}
+
+export interface CalendarContext {
+  connected: boolean;
+  events: CalendarEvent[];
+  calendars: string[];
+  timezone: string;
+  canWrite: boolean;
+  hostLocation?: string; // future: from device, for now: inferred from events/knowledge
+}
+
+// --- Google Calendar Provider ---
+
+class GoogleCalendarProvider implements CalendarProvider {
+  readonly type = "google";
+  readonly canWrite = true;
+  private client: calendar_v3.Calendar;
+
+  constructor(client: calendar_v3.Calendar) {
+    this.client = client;
+  }
+
+  async listCalendars(): Promise<Array<{ id: string; name: string }>> {
+    const { data } = await this.client.calendarList.list();
+    return (data.items ?? []).map((c) => ({
+      id: c.id || "primary",
+      name: c.summary || c.id || "primary",
+    }));
+  }
+
+  async getEvents(start: Date, end: Date): Promise<CalendarEvent[]> {
+    const calendars = await this.listCalendars();
+    const allEvents: CalendarEvent[] = [];
+
+    for (const cal of calendars) {
+      try {
+        const { data } = await this.client.events.list({
+          calendarId: cal.id,
+          timeMin: start.toISOString(),
+          timeMax: end.toISOString(),
+          singleEvents: true,
+          orderBy: "startTime",
+          maxResults: 100,
+        });
+
+        for (const ev of data.items ?? []) {
+          const isAllDay = !ev.start?.dateTime;
+          const evStart = isAllDay
+            ? new Date(ev.start?.date + "T00:00:00")
+            : new Date(ev.start!.dateTime!);
+          const evEnd = isAllDay
+            ? new Date(ev.end?.date + "T00:00:00")
+            : new Date(ev.end!.dateTime!);
+
+          allEvents.push({
+            id: ev.id || crypto.randomUUID(),
+            summary: ev.summary || "(no title)",
+            start: evStart,
+            end: evEnd,
+            calendar: cal.name,
+            provider: "google",
+            location: ev.location || undefined,
+            attendeeCount: ev.attendees?.length ?? 0,
+            isAllDay,
+            isRecurring: !!ev.recurringEventId,
+          });
+        }
+      } catch (e) {
+        console.log(`Failed to fetch events for calendar ${cal.name}:`, e);
+      }
+    }
+
+    return allEvents;
+  }
+
+  async createEvent(params: CreateEventParams): Promise<EventResult> {
+    const event = {
+      summary: params.summary,
+      description: params.description,
+      start: { dateTime: params.startTime.toISOString() },
+      end: { dateTime: params.endTime.toISOString() },
+      attendees: params.attendeeEmails.map((email) => ({ email })),
+      ...(params.addMeetLink && {
+        conferenceData: {
+          createRequest: {
+            requestId: `agentenvoy-${Date.now()}`,
+            conferenceSolutionKey: { type: "hangoutsMeet" },
+          },
+        },
+      }),
+    };
+
+    const { data } = await this.client.events.insert({
+      calendarId: "primary",
+      requestBody: event,
+      conferenceDataVersion: params.addMeetLink ? 1 : 0,
+      sendUpdates: "all",
+    });
+
+    return {
+      eventId: data.id,
+      htmlLink: data.htmlLink,
+      meetLink: data.conferenceData?.entryPoints?.find(
+        (e) => e.entryPointType === "video"
+      )?.uri,
+    };
+  }
+}
+
+// --- Provider registry ---
+
+async function getProviders(userId: string): Promise<CalendarProvider[]> {
+  const providers: CalendarProvider[] = [];
+
+  // Google
+  try {
+    const client = await getGoogleCalendarClient(userId);
+    providers.push(new GoogleCalendarProvider(client));
+  } catch {
+    // No Google account connected — that's ok
+  }
+
+  // Future: iCal (read-only URL subscription), Outlook (Microsoft Graph), CalDAV
+  // Each would be a new class implementing CalendarProvider
+
+  return providers;
+}
+
+// --- Main context function ---
+
+export async function getCalendarContext(
+  userId: string,
+  startDate: Date,
+  endDate: Date,
+  timezone = "America/Los_Angeles"
+): Promise<CalendarContext> {
+  const providers = await getProviders(userId);
+
+  if (providers.length === 0) {
+    return {
+      connected: false,
+      events: [],
+      calendars: [],
+      timezone,
+      canWrite: false,
+    };
+  }
+
+  const allEvents: CalendarEvent[] = [];
+  const allCalendars: string[] = [];
+  let canWrite = false;
+
+  for (const provider of providers) {
+    try {
+      const calendars = await provider.listCalendars();
+      allCalendars.push(...calendars.map((c) => c.name));
+
+      const events = await provider.getEvents(startDate, endDate);
+      allEvents.push(...events);
+
+      if (provider.canWrite) canWrite = true;
+    } catch (e) {
+      console.log(`Provider ${provider.type} failed:`, e);
+    }
+  }
+
+  // Deduplicate by id, sort by start time
+  const seen = new Set<string>();
+  const dedupedEvents = allEvents.filter((ev) => {
+    if (seen.has(ev.id)) return false;
+    seen.add(ev.id);
+    return true;
+  });
+  dedupedEvents.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  // Cap at ~50 events (next 7 days detailed, summarize further out)
+  const capped = dedupedEvents.slice(0, 50);
+
+  return {
+    connected: true,
+    events: capped,
+    calendars: Array.from(new Set(allCalendars)),
+    timezone,
+    canWrite,
+  };
+}
 
 export async function getGoogleCalendarClient(userId: string) {
   const account = await prisma.account.findFirst({
@@ -61,6 +284,7 @@ function getLocalParts(date: Date, tz: string) {
   return { hour, minute, isWeekend };
 }
 
+/** @deprecated Use getCalendarContext() instead — AI reasons over raw events */
 export async function getAvailableSlots(
   userId: string,
   startDate: Date,

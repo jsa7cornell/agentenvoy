@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { AgentContext } from "@/agent/administrator";
-import { getAvailableSlots } from "@/lib/calendar";
+import { getCalendarContext } from "@/lib/calendar";
+import type { CalendarContext } from "@/lib/calendar";
 import { computeThreadStatus } from "@/lib/thread-status";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -68,16 +69,17 @@ export async function POST(req: NextRequest) {
   }));
   history.push({ role: "user", content });
 
-  // Fetch calendar slots for context
-  let availableSlots: Array<{ start: string; end: string }> = [];
+  // Fetch calendar context
+  let calendarContext: CalendarContext | undefined;
   try {
     const now = new Date();
     const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-    const slots = await getAvailableSlots(session.hostId, now, twoWeeks);
-    availableSlots = slots.slice(0, 20).map((s) => ({
-      start: s.start.toISOString(),
-      end: s.end.toISOString(),
-    }));
+    const hostPrefs = session.host.preferences as Record<string, unknown> | null;
+    const tz =
+      (hostPrefs?.timezone as string) ??
+      ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
+      "America/Los_Angeles";
+    calendarContext = await getCalendarContext(session.hostId, now, twoWeeks, tz);
   } catch (e) {
     console.log("Calendar context error in negotiate/message:", e);
   }
@@ -94,7 +96,9 @@ export async function POST(req: NextRequest) {
       session.guestEmail || session.link.inviteeEmail || undefined,
     topic: session.link.topic || undefined,
     rules: (session.link.rules as Record<string, unknown>) || {},
-    availableSlots,
+    calendarContext,
+    hostPersistentKnowledge: (session.host as { persistentKnowledge?: string }).persistentKnowledge,
+    hostSituationalKnowledge: (session.host as { situationalKnowledge?: string }).situationalKnowledge,
     conversationHistory: history,
   };
 

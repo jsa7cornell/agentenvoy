@@ -4,7 +4,6 @@ import { useSession, signIn, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DashboardHeader } from "@/components/dashboard-header";
-import { AvailabilityTuner } from "@/components/availability-tuner";
 import Link from "next/link";
 
 interface ConnectionStatus {
@@ -15,50 +14,21 @@ interface ConnectionStatus {
   };
 }
 
-function preferencesToSentences(prefs: Record<string, unknown>): string[] {
-  const sentences: string[] = [];
-  const explicit = prefs.explicit as Record<string, unknown> | undefined;
-
-  if (explicit) {
-    if (explicit.format) {
-      const fmt = String(explicit.format);
-      if (fmt === "video") sentences.push("I prefer video calls (Google Meet)");
-      else if (fmt === "phone") sentences.push("I prefer phone calls");
-      else if (fmt === "in-person") sentences.push("I prefer meeting in person");
-      else sentences.push(`My preferred format is ${fmt}`);
-    }
-    if (explicit.duration) sentences.push(`My default meeting length is ${explicit.duration} minutes`);
-    if (explicit.timezone) sentences.push(`I'm in ${explicit.timezone}`);
-    if (explicit.location) sentences.push(`For in-person meetings, I prefer ${explicit.location}`);
-    if (explicit.bufferMinutes) sentences.push(`I need ${explicit.bufferMinutes} minutes between meetings`);
-    if (explicit.preferredTimes) {
-      sentences.push(`Preferred times: ${JSON.stringify(explicit.preferredTimes)}`);
-    }
-    if (explicit.blackoutDays) {
-      sentences.push(`I avoid: ${JSON.stringify(explicit.blackoutDays)}`);
-    }
-  }
-
-  // Flat prefs (no explicit/learned structure)
-  if (!explicit) {
-    for (const [key, value] of Object.entries(prefs)) {
-      if (key === "learned") continue;
-      if (value !== null && value !== undefined && value !== "" && value !== "{}") {
-        sentences.push(`${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`);
-      }
-    }
-  }
-
-  return sentences;
+interface KnowledgeState {
+  persistentKnowledge: string;
+  situationalKnowledge: string;
+  preview: string;
 }
 
 export default function ProfilePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [connStatus, setConnStatus] = useState<ConnectionStatus | null>(null);
-  const [prefInput, setPrefInput] = useState("");
-  const [prefLoading, setPrefLoading] = useState(false);
-  const [prefMessage, setPrefMessage] = useState("");
+  const [knowledge, setKnowledge] = useState<KnowledgeState | null>(null);
+  const [persistent, setPersistent] = useState("");
+  const [situational, setSituational] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/");
@@ -69,36 +39,44 @@ export default function ProfilePage() {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (data) setConnStatus(data); })
       .catch(() => {});
+
+    fetch("/api/agent/knowledge")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: KnowledgeState | null) => {
+        if (data) {
+          setKnowledge(data);
+          setPersistent(data.persistentKnowledge);
+          setSituational(data.situationalKnowledge);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const calendarConnected = connStatus?.google?.calendar ?? false;
 
-  const preferences = (session?.user?.preferences as Record<string, unknown>) || {};
-  const sentences = preferencesToSentences(preferences);
-
-  async function handlePrefUpdate() {
-    const text = prefInput.trim();
-    if (!text || prefLoading) return;
-    setPrefLoading(true);
-    setPrefMessage("");
+  async function handleSaveKnowledge() {
+    if (saving) return;
+    setSaving(true);
+    setSaveMessage("");
     try {
-      const res = await fetch("/api/agent/configure", {
-        method: "POST",
+      const res = await fetch("/api/agent/knowledge", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text }),
+        body: JSON.stringify({
+          persistentKnowledge: persistent,
+          situationalKnowledge: situational,
+        }),
       });
       if (res.ok) {
-        setPrefMessage("Preferences updated");
-        setPrefInput("");
-        // Refresh session to get updated preferences
-        window.location.reload();
+        setSaveMessage("Saved");
+        setTimeout(() => setSaveMessage(""), 2000);
       } else {
-        setPrefMessage("Failed to update");
+        setSaveMessage("Failed to save");
       }
     } catch {
-      setPrefMessage("Failed to update");
+      setSaveMessage("Failed to save");
     } finally {
-      setPrefLoading(false);
+      setSaving(false);
     }
   }
 
@@ -202,61 +180,61 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* General Preferences */}
+        {/* Knowledge Base */}
         <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-3">
-            General Preferences
-          </h2>
-          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 space-y-3">
-            {sentences.length > 0 ? (
-              <div className="space-y-2">
-                {sentences.map((s, i) => (
-                  <div
-                    key={i}
-                    className="flex items-start gap-2 text-sm text-zinc-300"
-                  >
-                    <div className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-1.5 flex-shrink-0" />
-                    {s}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-500">
-                No preferences set yet. Tell Envoy how you like to meet.
-              </p>
-            )}
-
-            <div className="pt-2 border-t border-zinc-800">
-              <div className="flex gap-2">
-                <input
-                  value={prefInput}
-                  onChange={(e) => setPrefInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handlePrefUpdate(); }}
-                  placeholder="e.g. I prefer 30-minute video calls on Google Meet, mornings work best"
-                  className="flex-1 bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-purple-500/50 transition"
-                />
-                <button
-                  onClick={handlePrefUpdate}
-                  disabled={!prefInput.trim() || prefLoading}
-                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-30 text-white text-sm rounded-lg font-medium transition"
-                >
-                  {prefLoading ? "..." : "Update"}
-                </button>
-              </div>
-              {prefMessage && (
-                <p className="text-xs text-zinc-500 mt-1.5">{prefMessage}</p>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">
+              Knowledge Base
+            </h2>
+            <div className="flex items-center gap-2">
+              {saveMessage && (
+                <span className={`text-xs ${saveMessage === "Saved" ? "text-emerald-400" : "text-red-400"}`}>
+                  {saveMessage}
+                </span>
               )}
+              <button
+                onClick={handleSaveKnowledge}
+                disabled={saving}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-30 text-white text-xs rounded-lg font-medium transition"
+              >
+                {saving ? "Saving..." : "Save"}
+              </button>
             </div>
           </div>
-        </section>
+          <div className="space-y-4">
+            {/* Persistent Preferences */}
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+              <h3 className="text-xs font-semibold text-zinc-400 mb-1">
+                Persistent Preferences
+              </h3>
+              <p className="text-[10px] text-zinc-600 mb-3">
+                Who you are, how you work, what matters. Rarely changes. Your agent reads this on every negotiation.
+              </p>
+              <textarea
+                value={persistent}
+                onChange={(e) => setPersistent(e.target.value)}
+                rows={6}
+                placeholder="e.g. I prefer mornings for calls. Budget 30 min travel for in-person meetings. I like to stack calls on MWF."
+                className="w-full bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-purple-500/50 transition resize-y min-h-[100px]"
+              />
+            </div>
 
-        {/* Availability Tuner */}
-        <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 mb-3">
-            Availability Tuner
-          </h2>
-          <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden">
-            <AvailabilityTuner />
+            {/* Situational Context */}
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+              <h3 className="text-xs font-semibold text-zinc-400 mb-1">
+                Situational Context
+              </h3>
+              <p className="text-[10px] text-zinc-600 mb-3">
+                What&apos;s happening right now — near-term overrides, upcoming events, temporary rules. Update as things change.
+              </p>
+              <textarea
+                value={situational}
+                onChange={(e) => setSituational(e.target.value)}
+                rows={4}
+                placeholder="e.g. In Mexico next week — no morning meetings. Training for a race this month, 7am calls are fine."
+                className="w-full bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-purple-500/50 transition resize-y min-h-[80px]"
+              />
+            </div>
           </div>
         </section>
 

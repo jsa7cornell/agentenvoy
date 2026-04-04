@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAvailableSlots } from "@/lib/calendar";
+import { getCalendarContext } from "@/lib/calendar";
+import type { CalendarContext } from "@/lib/calendar";
 import { generateAgentResponse, AgentContext } from "@/agent/administrator";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
   // Find the user by meetSlug
   const user = await prisma.user.findUnique({
     where: { meetSlug: slug },
-    select: { id: true, name: true, email: true, preferences: true, hostDirectives: true, meetSlug: true },
+    select: { id: true, name: true, email: true, preferences: true, hostDirectives: true, meetSlug: true, persistentKnowledge: true, situationalKnowledge: true },
   });
 
   if (!user) {
@@ -130,19 +131,19 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Get available slots for the next 2 weeks
-  let availableSlots: Array<{ start: string; end: string }> = [];
+  // Get calendar context for the next 2 weeks
+  let calendarContext: CalendarContext | undefined;
   try {
     const now = new Date();
     const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-    const slots = await getAvailableSlots(user.id, now, twoWeeks);
-    availableSlots = slots.slice(0, 20).map((s) => ({
-      start: s.start.toISOString(),
-      end: s.end.toISOString(),
-    }));
+    const tz =
+      (user.preferences as Record<string, unknown>)?.timezone as string ??
+      ((user.preferences as Record<string, unknown>)?.explicit as Record<string, unknown> | undefined)?.timezone as string ??
+      "America/Los_Angeles";
+    calendarContext = await getCalendarContext(user.id, now, twoWeeks, tz);
   } catch (e) {
     // Calendar might not be connected — that's ok
-    console.log("Could not fetch calendar slots:", e);
+    console.log("Could not fetch calendar context:", e);
   }
 
   // Generate the initial greeting
@@ -155,7 +156,9 @@ export async function POST(req: NextRequest) {
     guestEmail: link.inviteeEmail || undefined,
     topic: link.topic || undefined,
     rules: (link.rules as Record<string, unknown>) || {},
-    availableSlots,
+    calendarContext,
+    hostPersistentKnowledge: user.persistentKnowledge,
+    hostSituationalKnowledge: user.situationalKnowledge,
     conversationHistory: [],
   };
 
