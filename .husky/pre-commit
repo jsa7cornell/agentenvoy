@@ -1,0 +1,5 @@
+# Block .env.local from being committed
+if git diff --cached --name-only | grep -q '\.env\.local$'; then
+  echo "ERROR: .env.local is staged for commit. Unstage it with: git reset HEAD .env.local"
+  exit 1
+fi
