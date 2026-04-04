@@ -24,7 +24,7 @@ export default function ProfilePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [connStatus, setConnStatus] = useState<ConnectionStatus | null>(null);
-  const [knowledge, setKnowledge] = useState<KnowledgeState | null>(null);
+  const [, setKnowledge] = useState<KnowledgeState | null>(null);
   const [persistent, setPersistent] = useState("");
   const [situational, setSituational] = useState("");
   const [saving, setSaving] = useState(false);
