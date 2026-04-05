@@ -432,13 +432,33 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     return null;
   })();
 
-  const eventStatus: "confirmed" | "proposed" | "scheduling" =
-    confirmed ? "confirmed" : latestProposal ? "proposed" : "scheduling";
+  // Detect cancellation or change requests in recent messages
+  const hasCancellation = (() => {
+    const recent = messages.slice(-4);
+    const cancelTerms = /cancel|cancelled|cancellation/i;
+    return recent.some((m) => (m.role === "administrator" || m.role === "guest" || m.role === "host") && cancelTerms.test(m.content));
+  })();
+
+  const hasChangeRequest = (() => {
+    if (hasCancellation) return false;
+    const recent = messages.slice(-4);
+    const changeTerms = /reschedul|change.*time|move.*meeting|push.*to|different.*time/i;
+    return confirmed && recent.some((m) => (m.role === "guest" || m.role === "host") && changeTerms.test(m.content));
+  })();
+
+  const eventStatus: "confirmed" | "proposed" | "scheduling" | "cancelled" | "changing" =
+    hasCancellation ? "cancelled"
+    : hasChangeRequest ? "changing"
+    : confirmed ? "confirmed"
+    : latestProposal ? "proposed"
+    : "scheduling";
 
   const statusConfig = {
-    confirmed: { label: "Confirmed", color: "text-emerald-400", bg: "from-emerald-500/8 to-emerald-500/3", border: "border-emerald-500/25", dot: "bg-emerald-400" },
-    proposed: { label: "Proposed", color: "text-amber-400", bg: "from-amber-500/8 to-amber-500/3", border: "border-amber-500/25", dot: "bg-amber-400" },
-    scheduling: { label: "Scheduling", color: "text-zinc-400", bg: "from-zinc-500/5 to-zinc-500/2", border: "border-zinc-700", dot: "bg-zinc-500" },
+    confirmed: { label: "Confirmed", color: "text-emerald-400", border: "border-emerald-500/25", dot: "bg-emerald-400" },
+    proposed: { label: "Proposed", color: "text-amber-400", border: "border-amber-500/25", dot: "bg-amber-400" },
+    scheduling: { label: "Scheduling", color: "text-zinc-400", border: "border-zinc-700", dot: "bg-zinc-500" },
+    cancelled: { label: "Cancelled", color: "text-red-400", border: "border-red-500/25", dot: "bg-red-400" },
+    changing: { label: "Changing", color: "text-amber-400", border: "border-amber-500/25", dot: "bg-amber-400" },
   }[eventStatus];
 
   // Event details come from confirmData (confirmed) or latestProposal (proposed) or just title (scheduling)
@@ -461,78 +481,81 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const hasExtraDetails = !!(eventMeetLink || eventLocation);
 
   const eventCard = (
-    <div className={`sticky top-0 z-10 mx-0 px-3 sm:px-4 py-2.5 sm:py-3 bg-[#0a0a0f]/95 backdrop-blur-sm border-b ${statusConfig.border} flex-shrink-0`}>
-      <div className="flex items-start gap-2.5 max-w-3xl mx-auto">
-        {/* Status dot */}
-        <div className={`w-2 h-2 rounded-full ${statusConfig.dot} mt-1.5 flex-shrink-0`} />
-
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          {/* Title + status */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-zinc-100 truncate">{getEventTitle()}</span>
-            <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color}`}>{statusConfig.label}</span>
-          </div>
-
-          {/* Details row */}
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-zinc-500">
-            {eventFormat && (
-              <span>{eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat} &middot; {eventDuration} min</span>
-            )}
-            {eventDateTime && (
-              <span>{new Date(eventDateTime).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} {new Date(eventDateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
-            )}
-            {!eventDateTime && !eventFormat && <span>Meeting details pending</span>}
-          </div>
-
-          {/* Sub-details (meet link, location) — truncated on mobile */}
-          {hasExtraDetails && (
-            <div className="mt-1 text-[11px]">
-              {eventMeetLink && (
-                <a href={eventMeetLink} className="text-indigo-400 hover:text-indigo-300 truncate block max-w-[250px]" target="_blank" rel="noopener noreferrer">
-                  {eventMeetLink.replace("https://", "")}
-                </a>
-              )}
-              {eventLocation && <span className="text-zinc-500 truncate block max-w-[250px]">{eventLocation}</span>}
-            </div>
-          )}
+    <div className={`z-10 mx-0 px-4 sm:px-5 py-3 sm:py-4 bg-[#0a0a0f]/95 backdrop-blur-sm border-b ${statusConfig.border} flex-shrink-0`}>
+      <div className="max-w-3xl mx-auto">
+        {/* Row 1: Title + status */}
+        <div className="flex items-center gap-2.5 mb-1.5">
+          <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0`} />
+          <span className="text-sm font-semibold text-zinc-100 truncate">{getEventTitle()}</span>
+          <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color} flex-shrink-0`}>{statusConfig.label}</span>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {confirmed && (
-            <>
-              <button onClick={downloadIcs} className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition" title="Download .ics">
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                </svg>
-              </button>
-              <button
-                onClick={() => {
-                  setInput("I need to change this meeting — ");
-                  document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-                }}
-                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition"
-                title="Change event"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                </svg>
-              </button>
-            </>
+        {/* Row 2: Details */}
+        <div className="flex flex-wrap gap-x-4 gap-y-0.5 ml-5 text-xs text-zinc-400">
+          {eventFormat && (
+            <span>{eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat} &middot; {eventDuration} min</span>
           )}
-          {hasExtraDetails && (
+          {eventDateTime && (
+            <span>{new Date(eventDateTime).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} {new Date(eventDateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
+          )}
+          {!eventDateTime && !eventFormat && <span>Meeting details pending</span>}
+          {eventMeetLink && (
+            <a href={eventMeetLink} className="text-indigo-400 hover:text-indigo-300 truncate max-w-[200px]" target="_blank" rel="noopener noreferrer">
+              {eventMeetLink.replace("https://", "").split("/").slice(0, 2).join("/")}
+            </a>
+          )}
+          {eventLocation && <span className="truncate max-w-[200px]">{eventLocation}</span>}
+        </div>
+
+        {/* Row 3: Actions */}
+        {(confirmed || eventStatus === "cancelled") && (
+          <div className="flex items-center gap-3 ml-5 mt-2.5">
+            {eventStatus !== "cancelled" && (
+              <>
+                {/* Google Calendar */}
+                {typeof confirmData?.eventLink === "string" && (
+                  <a href={confirmData.eventLink as string} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700 hover:border-zinc-600 transition text-xs text-zinc-300">
+                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0">
+                      <path d="M18.316 5.684H24v12.632h-5.684V5.684z" fill="#1967D2" />
+                      <path d="M5.684 18.316V5.684L0 5.684v12.632l5.684 0z" fill="#188038" />
+                      <path d="M18.316 24V18.316H5.684V24h12.632z" fill="#1967D2" />
+                      <path d="M18.316 5.684V0H5.684v5.684h12.632z" fill="#EA4335" />
+                      <path d="M18.316 18.316H5.684V5.684h12.632v12.632z" fill="#fff" />
+                      <path d="M9.2 15.7V9.1h1.5v2.4h2.6V9.1h1.5v6.6h-1.5v-2.8h-2.6v2.8H9.2z" fill="#1967D2" />
+                    </svg>
+                    Google
+                  </a>
+                )}
+                {/* ICS download */}
+                <button onClick={downloadIcs} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700 hover:border-zinc-600 transition text-xs text-zinc-300">
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                  </svg>
+                  .ics
+                </button>
+              </>
+            )}
+            {/* Propose changes */}
             <button
-              onClick={() => setShowDetailsModal(true)}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition"
-              title="See details"
+              onClick={() => {
+                setInput("I'd like to propose a change to this meeting — ");
+                document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+              }}
+              className="text-xs text-indigo-400 hover:text-indigo-300 transition"
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-              </svg>
+              Propose changes
             </button>
-          )}
-        </div>
+            {/* More details */}
+            {hasExtraDetails && (
+              <button
+                onClick={() => setShowDetailsModal(true)}
+                className="text-xs text-zinc-500 hover:text-zinc-400 transition"
+              >
+                Details
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
