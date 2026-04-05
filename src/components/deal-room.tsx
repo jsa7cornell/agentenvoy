@@ -34,9 +34,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isConfirming, setIsConfirming] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<string>("active");
+  const [sessionStatusLabel, setSessionStatusLabel] = useState<string>("");
   const [statusAnimating, setStatusAnimating] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const prevStatusRef = useRef<string>("scheduling");
+  const prevStatusRef = useRef<string>("active");
 
   // Slots state for availability calendar sidebar
   const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string }>> | null>(null);
@@ -62,38 +64,35 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   // Track event status changes for animation pulse
   useEffect(() => {
-    if (messages.length === 0) return;
-    // Derive a simple status key from current state
-    const cancelTerms = /cancel|cancelled|cancellation/i;
-    const hasCancelMsg = messages.slice(-4).some((m) => cancelTerms.test(m.content));
-    const hasProposal = messages.some((m) => m.role === "administrator" && m.content.includes("[CONFIRMATION_PROPOSAL]"));
-    const currentKey = hasCancelMsg ? "cancelled" : confirmed ? "confirmed" : hasProposal ? "proposed" : "scheduling";
-    if (prevStatusRef.current !== currentKey && prevStatusRef.current !== "scheduling") {
+    const currentKey = confirmed ? "agreed" : sessionStatus;
+    if (prevStatusRef.current !== currentKey && prevStatusRef.current !== "active") {
       setStatusAnimating(true);
       const timer = setTimeout(() => setStatusAnimating(false), 1500);
       prevStatusRef.current = currentKey;
       return () => clearTimeout(timer);
     }
     prevStatusRef.current = currentKey;
-  }, [confirmed, messages]);
+  }, [confirmed, sessionStatus]);
 
   function parseConfirmationProposal(content: string): {
     text: string;
     proposal: { dateTime: string; duration: number; format: string; location: string | null; timezone?: string } | null;
   } {
-    const match = content.match(
+    // Strip STATUS_UPDATE blocks (should already be stripped server-side, but belt-and-suspenders)
+    const cleaned = content.replace(/\s*\[STATUS_UPDATE\].*?\[\/STATUS_UPDATE\]\s*/g, "");
+    const match = cleaned.match(
       /\[CONFIRMATION_PROPOSAL\]([^\[]*)\[\/CONFIRMATION_PROPOSAL\]/
     );
-    if (!match) return { text: content, proposal: null };
+    if (!match) return { text: cleaned.trim(), proposal: null };
     try {
       const proposal = JSON.parse(match[1]);
-      const text = content.replace(
+      const text = cleaned.replace(
         /\[CONFIRMATION_PROPOSAL\][^\[]*\[\/CONFIRMATION_PROPOSAL\]/,
         ""
       ).trim();
       return { text, proposal };
     } catch {
-      return { text: content, proposal: null };
+      return { text: cleaned.trim(), proposal: null };
     }
   }
 
@@ -123,6 +122,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       const data = await res.json();
       setConfirmData(data);
       setConfirmed(true);
+      setSessionStatus("agreed");
+      setSessionStatusLabel("Confirmed");
     } catch (error) {
       console.error("Confirm error:", error);
     } finally {
@@ -210,6 +211,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setIsHost(data.isHost || false);
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
+        setSessionStatus(data.status || "active");
+        setSessionStatusLabel(data.statusLabel || "");
 
         // Already confirmed — load messages AND set confirmed state
         if (data.confirmed) {
@@ -356,6 +359,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           }
         }
       }
+      // Re-fetch session status after AI response
+      if (sessionId) {
+        try {
+          const sessionRes = await fetch(`/api/negotiate/session?id=${sessionId}`);
+          if (sessionRes.ok) {
+            const { session: sess } = await sessionRes.json();
+            setSessionStatus(sess.status);
+            setSessionStatusLabel(sess.statusLabel || "");
+          }
+        } catch {}
+      }
     } catch (error) {
       console.error("Send error:", error);
     } finally {
@@ -451,34 +465,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     return null;
   })();
 
-  // Detect cancellation or change requests in recent messages
-  const hasCancellation = (() => {
-    const recent = messages.slice(-4);
-    const cancelTerms = /cancel|cancelled|cancellation/i;
-    return recent.some((m) => (m.role === "administrator" || m.role === "guest" || m.role === "host") && cancelTerms.test(m.content));
-  })();
+  // Server-driven status — confirmed state overrides sessionStatus for backwards compat
+  const eventStatus = confirmed ? "agreed" : sessionStatus;
 
-  const hasChangeRequest = (() => {
-    if (hasCancellation) return false;
-    const recent = messages.slice(-4);
-    const changeTerms = /reschedul|change.*time|move.*meeting|push.*to|different.*time/i;
-    return confirmed && recent.some((m) => (m.role === "guest" || m.role === "host") && changeTerms.test(m.content));
-  })();
-
-  const eventStatus: "confirmed" | "proposed" | "scheduling" | "cancelled" | "changing" =
-    hasCancellation ? "cancelled"
-    : hasChangeRequest ? "changing"
-    : confirmed ? "confirmed"
-    : latestProposal ? "proposed"
-    : "scheduling";
-
-  const statusConfig = {
-    confirmed: { label: "Confirmed", color: "text-emerald-400", border: "border-emerald-500/25", dot: "bg-emerald-400" },
+  const statusConfigs: Record<string, { label: string; color: string; border: string; dot: string }> = {
+    active: { label: "Scheduling", color: "text-zinc-400", border: "border-zinc-700", dot: "bg-zinc-500" },
     proposed: { label: "Proposed", color: "text-amber-400", border: "border-amber-500/25", dot: "bg-amber-400" },
-    scheduling: { label: "Scheduling", color: "text-zinc-400", border: "border-zinc-700", dot: "bg-zinc-500" },
+    agreed: { label: "Confirmed", color: "text-emerald-400", border: "border-emerald-500/25", dot: "bg-emerald-400" },
     cancelled: { label: "Cancelled", color: "text-red-400", border: "border-red-500/25", dot: "bg-red-400" },
-    changing: { label: "Changing", color: "text-amber-400", border: "border-amber-500/25", dot: "bg-amber-400" },
-  }[eventStatus];
+    escalated: { label: "Escalated", color: "text-orange-400", border: "border-orange-500/25", dot: "bg-orange-400" },
+    expired: { label: "Expired", color: "text-zinc-500", border: "border-zinc-700", dot: "bg-zinc-600" },
+  };
+
+  const statusConfig = statusConfigs[eventStatus] || statusConfigs.active;
 
   // Event details come from confirmData (confirmed) or latestProposal (proposed) or just title (scheduling)
   const eventDateTime = confirmed && confirmData
@@ -525,6 +524,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />
           <span className="text-sm font-semibold text-zinc-100 truncate">{getEventTitle()}</span>
           <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color} flex-shrink-0`}>{statusConfig.label}</span>
+          {sessionStatusLabel && (
+            <span className="text-[10px] text-zinc-500 ml-2">{sessionStatusLabel}</span>
+          )}
         </div>
 
         {/* Row 2: Details */}

@@ -7,6 +7,22 @@ import { computeThreadStatus } from "@/lib/thread-status";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
+const VALID_STATUSES = ["active", "proposed", "cancelled", "escalated"];
+
+function parseStatusUpdate(content: string): { status: string; label: string } | null {
+  const match = content.match(/\[STATUS_UPDATE\](.*?)\[\/STATUS_UPDATE\]/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function stripStatusUpdate(content: string): string {
+  return content.replace(/\s*\[STATUS_UPDATE\].*?\[\/STATUS_UPDATE\]\s*/g, "").trim();
+}
+
 // POST /api/negotiate/message
 // Send a message in a negotiation session and get agent response (streaming)
 export async function POST(req: NextRequest) {
@@ -105,33 +121,47 @@ export async function POST(req: NextRequest) {
   const { generateAgentResponse } = await import("@/agent/administrator");
   const responseText = await generateAgentResponse(context);
 
-  // Save the response
+  // Parse and apply status update if present
+  const statusUpdate = parseStatusUpdate(responseText);
+  const displayText = stripStatusUpdate(responseText);
+
+  // Save the response (stripped of status block)
   await prisma.message.create({
-    data: { sessionId, role: "administrator", content: responseText },
+    data: { sessionId, role: "administrator", content: displayText },
   });
 
-  // Update thread status label
-  const lastMessage = await prisma.message.findFirst({
-    where: { sessionId },
-    orderBy: { createdAt: "desc" },
-  });
-  const statusResult = computeThreadStatus({
-    status: session.status,
-    inviteeName: session.link.inviteeName,
-    lastMessageRole: lastMessage?.role,
-    guestEmail: session.guestEmail || session.link.inviteeEmail,
-  });
-  await prisma.negotiationSession.update({
-    where: { id: sessionId },
-    data: { statusLabel: statusResult.label },
-  });
+  // Update session status from AI block, or fall back to thread status heuristic
+  if (statusUpdate && VALID_STATUSES.includes(statusUpdate.status)) {
+    await prisma.negotiationSession.update({
+      where: { id: sessionId },
+      data: {
+        status: statusUpdate.status,
+        statusLabel: statusUpdate.label,
+      },
+    });
+  } else {
+    const lastMessage = await prisma.message.findFirst({
+      where: { sessionId },
+      orderBy: { createdAt: "desc" },
+    });
+    const statusResult = computeThreadStatus({
+      status: session.status,
+      inviteeName: session.link.inviteeName,
+      lastMessageRole: lastMessage?.role,
+      guestEmail: session.guestEmail || session.link.inviteeEmail,
+    });
+    await prisma.negotiationSession.update({
+      where: { id: sessionId },
+      data: { statusLabel: statusResult.label },
+    });
+  }
 
   // Return as a streaming-compatible format
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
-      // Send in AI SDK text stream format
-      controller.enqueue(encoder.encode(`0:${JSON.stringify(responseText)}\n`));
+      // Send in AI SDK text stream format (stripped of status block)
+      controller.enqueue(encoder.encode(`0:${JSON.stringify(displayText)}\n`));
       controller.close();
     },
   });

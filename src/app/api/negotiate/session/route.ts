@@ -70,6 +70,8 @@ export async function POST(req: NextRequest) {
       if (existingSession.status === "agreed") {
         return NextResponse.json({
           sessionId: existingSession.id,
+          status: existingSession.status,
+          statusLabel: existingSession.statusLabel,
           confirmed: true,
           agreedTime: existingSession.agreedTime?.toISOString() ?? null,
           agreedFormat: existingSession.agreedFormat,
@@ -88,10 +90,12 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // Active session — resume with full history
-      if (existingSession.status === "active" && existingSession.messages.length > 0) {
+      // Active/proposed/cancelled/escalated session — resume with full history
+      if (existingSession.messages.length > 0) {
         return NextResponse.json({
           sessionId: existingSession.id,
+          status: existingSession.status,
+          statusLabel: existingSession.statusLabel,
           greeting: existingSession.messages[0].content,
           messages: existingSession.messages.map((m) => ({
             id: m.id,
@@ -193,6 +197,8 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     sessionId: session.id,
+    status: session.status,
+    statusLabel: session.statusLabel,
     greeting,
     host: {
       name: user.name,

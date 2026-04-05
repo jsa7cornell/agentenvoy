@@ -1,7 +1,7 @@
 // Thread status engine — computes dynamic status labels for thread cards
 
 interface StatusInput {
-  status: string;           // "active" | "agreed" | "escalated" | "expired"
+  status: string;           // "active" | "proposed" | "agreed" | "cancelled" | "escalated" | "expired"
   inviteeName?: string | null;
   lastMessageRole?: string | null;  // "administrator" | "guest" | "system"
   guestEmail?: string | null;
@@ -18,6 +18,8 @@ export function computeThreadStatus(input: StatusInput): StatusResult {
   if (input.status === "agreed") return { label: "Confirmed", color: "green" };
   if (input.status === "expired") return { label: "Expired", color: "gray" };
   if (input.status === "escalated") return { label: "Needs your input", color: "red" };
+  if (input.status === "cancelled") return { label: "Cancelled", color: "red" };
+  if (input.status === "proposed") return { label: `Waiting for ${name}`, color: "amber" };
 
   // Active status — depends on last message
   if (!input.lastMessageRole) return { label: `Waiting for ${name}`, color: "amber" };
