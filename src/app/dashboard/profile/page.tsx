@@ -104,8 +104,12 @@ export default function ProfilePage() {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.sessions) {
-          // Sort by nearest date first (agreedTime for confirmed, createdAt for pending)
+          // Sort: confirmed first (by meeting date), then pending (by creation date)
           const sorted = [...data.sessions].sort((a: ActiveSession, b: ActiveSession) => {
+            const aConfirmed = a.status === "agreed" ? 0 : 1;
+            const bConfirmed = b.status === "agreed" ? 0 : 1;
+            if (aConfirmed !== bConfirmed) return aConfirmed - bConfirmed;
+            // Within same group, sort by date (nearest first)
             const dateA = a.agreedTime || a.createdAt;
             const dateB = b.agreedTime || b.createdAt;
             return new Date(dateA).getTime() - new Date(dateB).getTime();
@@ -353,6 +357,14 @@ export default function ProfilePage() {
           ) : (
             <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-800/60">
               {activeSessions.map((s) => {
+                const statusDisplay: Record<string, { label: string; bg: string; text: string }> = {
+                  agreed: { label: "Confirmed", bg: "bg-green-500/10", text: "text-green-400" },
+                  proposed: { label: "Proposed", bg: "bg-amber-500/10", text: "text-amber-400" },
+                  active: { label: "Pending", bg: "bg-amber-500/10", text: "text-amber-400" },
+                  cancelled: { label: "Cancelled", bg: "bg-red-500/10", text: "text-red-400" },
+                  escalated: { label: "Escalated", bg: "bg-orange-500/10", text: "text-orange-400" },
+                };
+                const sd = statusDisplay[s.status] || statusDisplay.active;
                 const isConfirmed = s.status === "agreed";
                 const displayDate = isConfirmed && s.agreedTime
                   ? new Date(s.agreedTime).toLocaleDateString("en-US", { month: "short", day: "numeric" })
@@ -369,18 +381,16 @@ export default function ProfilePage() {
                     {/* Title + guest */}
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-zinc-200 truncate">{title}</div>
-                      <div className="text-xs text-zinc-500 truncate">{guestLabel}</div>
+                      <div className="text-xs text-zinc-500 truncate">
+                        {s.statusLabel || guestLabel}
+                      </div>
                     </div>
 
                     {/* Status badge */}
                     <span
-                      className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${
-                        isConfirmed
-                          ? "bg-green-500/10 text-green-400"
-                          : "bg-amber-500/10 text-amber-400"
-                      }`}
+                      className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${sd.bg} ${sd.text}`}
                     >
-                      {isConfirmed ? "Confirmed" : "Pending"}
+                      {sd.label}
                     </span>
 
                     {/* Date */}
