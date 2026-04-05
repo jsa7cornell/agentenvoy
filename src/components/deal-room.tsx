@@ -712,16 +712,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   );
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col">
+    <div className="h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col overflow-hidden">
       {/* Prototype banner */}
-      <div className="bg-amber-900/30 border-b border-amber-700/40 px-4 py-1.5 text-center">
+      <div className="bg-amber-900/30 border-b border-amber-700/40 px-4 py-1.5 text-center flex-shrink-0">
         <span className="text-xs text-amber-300">
           Prototype — email and other features still in development
         </span>
       </div>
 
       {/* Header */}
-      <header className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between">
+      <header className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between flex-shrink-0">
         <a href="/">
           <LogoFull height={24} className="text-zinc-100" />
         </a>
