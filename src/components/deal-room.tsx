@@ -640,6 +640,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             )}
           </div>
         )}
+
+        {/* Signup CTA — guests only, after confirmation */}
+        {confirmed && !isHost && (
+          <div className="ml-5 mt-3 p-3 rounded-xl bg-purple-500/8 border border-purple-500/20">
+            <p className="text-xs text-zinc-300">
+              Want your own AI negotiator?{" "}
+              <a href="/api/auth/signin" className="text-purple-400 hover:text-purple-300 font-semibold transition">
+                Create a free AgentEnvoy account
+              </a>{" "}
+              — Envoy handles scheduling so you don&apos;t have to.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -820,13 +833,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   return (
     <div className="fixed inset-0 bg-[#0a0a0f] text-zinc-100 flex flex-col overflow-hidden z-20">
-      {/* Prototype banner */}
-      <div className="bg-amber-900/30 border-b border-amber-700/40 px-4 py-1.5 text-center flex-shrink-0">
-        <span className="text-xs text-amber-300">
-          Prototype — email and other features still in development
-        </span>
-      </div>
-
       {/* Header */}
       <header className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between flex-shrink-0">
         <a href="/">

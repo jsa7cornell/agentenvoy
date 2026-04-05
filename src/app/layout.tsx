@@ -31,6 +31,11 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <Providers>
+          <div className="bg-amber-900/30 border-b border-amber-700/40 px-4 py-1.5 text-center flex-shrink-0">
+            <span className="text-xs text-amber-300">
+              Prototype — email and other features still in development
+            </span>
+          </div>
           {children}
           <footer className="relative z-10 py-4 text-center text-xs text-zinc-600 space-x-4">
             <a href="/privacy" className="hover:text-zinc-400 transition">Privacy</a>
