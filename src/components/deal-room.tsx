@@ -736,13 +736,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         )}
       </header>
 
-      {/* Event card — sticky at top */}
-      {eventCard}
-
       {/* Main area — chat + sidebar on desktop */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Chat — takes full width on mobile, flex-1 on desktop */}
+        {/* Chat column — event card + messages */}
         <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Event card — sticky inside chat column */}
+          {eventCard}
           {chatContent}
         </div>
 
