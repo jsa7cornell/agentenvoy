@@ -46,6 +46,7 @@ export async function GET() {
           meetLink: true,
           createdAt: true,
           updatedAt: true,
+          linkId: true,
           link: {
             select: {
               inviteeName: true,
@@ -53,6 +54,7 @@ export async function GET() {
               topic: true,
               code: true,
               slug: true,
+              mode: true,
             },
           },
           _count: {
@@ -63,5 +65,43 @@ export async function GET() {
     },
   });
 
-  return NextResponse.json({ messages });
+  // For group links, attach participant data
+  const groupLinkIds = new Set<string>();
+  for (const msg of messages) {
+    if (msg.thread?.link?.mode === "group" && msg.thread.linkId) {
+      groupLinkIds.add(msg.thread.linkId);
+    }
+  }
+
+  const participantsByLink: Record<string, Array<{ name: string | null; status: string; role: string }>> = {};
+  if (groupLinkIds.size > 0) {
+    const participants = await prisma.sessionParticipant.findMany({
+      where: { linkId: { in: Array.from(groupLinkIds) } },
+    });
+    for (const p of participants) {
+      if (!participantsByLink[p.linkId]) participantsByLink[p.linkId] = [];
+      participantsByLink[p.linkId].push({
+        name: p.name || p.email || null,
+        status: p.status,
+        role: p.role,
+      });
+    }
+  }
+
+  // Enrich thread data with group info
+  const enrichedMessages = messages.map((msg) => {
+    if (msg.thread?.link?.mode === "group" && msg.thread.linkId) {
+      return {
+        ...msg,
+        thread: {
+          ...msg.thread,
+          isGroupEvent: true,
+          participants: participantsByLink[msg.thread.linkId] || [],
+        },
+      };
+    }
+    return msg;
+  });
+
+  return NextResponse.json({ messages: enrichedMessages });
 }
