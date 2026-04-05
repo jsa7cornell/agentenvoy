@@ -53,8 +53,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isConfirming, setIsConfirming] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [showAgentInfo, setShowAgentInfo] = useState(false);
-  const [feedbackText, setFeedbackText] = useState("");
-  const [feedbackSent, setFeedbackSent] = useState(false);
+  // Feedback state reserved for future use
+  // const [feedbackText, setFeedbackText] = useState("");
+  // const [feedbackSent, setFeedbackSent] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Slots state for calendar widget
@@ -225,7 +226,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
 
-        // Already confirmed — jump straight to confirmation screen
+        // Already confirmed — load messages AND set confirmed state
         if (data.confirmed) {
           setConfirmData({
             dateTime: data.agreedTime,
@@ -234,6 +235,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             meetLink: data.meetLink,
           });
           setConfirmed(true);
+          // Load message history so chat is visible below the event card
+          if (data.messages?.length > 0) {
+            setMessages(
+              data.messages.map((m: { id: string; role: string; content: string; createdAt?: string }) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                createdAt: m.createdAt,
+              }))
+            );
+          }
           return;
         }
 
@@ -415,89 +427,81 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     );
   }
 
-  // --- Confirmed state ---
-  if (confirmed && confirmData) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-500 flex items-center justify-center text-4xl shadow-lg shadow-emerald-500/20">
-            &#10003;
-          </div>
-          <h1 className="text-2xl font-bold text-zinc-100 mb-4">Meeting Confirmed</h1>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 text-left space-y-3">
-            {topic && <p className="text-sm font-semibold text-zinc-100">{topic}</p>}
-            <p className="text-sm text-zinc-400">
-              &#128197; {new Date(confirmData.dateTime as string).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-            </p>
-            <p className="text-sm text-zinc-400">
-              &#128336; {new Date(confirmData.dateTime as string).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} ({String(confirmData.duration)} min)
-            </p>
-            <p className="text-sm text-zinc-400">
-              &#128241; {String(confirmData.format).charAt(0).toUpperCase() + String(confirmData.format).slice(1)}
-            </p>
-            {typeof confirmData.meetLink === "string" && (
-              <a href={confirmData.meetLink as string} className="inline-block text-sm text-indigo-400 hover:text-indigo-300 font-medium" target="_blank" rel="noopener noreferrer">
-                Join Google Meet &rarr;
-              </a>
-            )}
-          </div>
-          {!isHost && (
-            <div className="mt-6 p-4 border border-zinc-700 bg-zinc-900 rounded-xl text-left">
-              {feedbackSent ? (
-                <p className="text-sm text-zinc-400">Thanks for your feedback!</p>
-              ) : (
-                <>
-                  <label className="text-sm font-medium text-zinc-300 block mb-2">
-                    Anything you&apos;d like to share? Your feedback helps us improve.
-                  </label>
-                  <textarea
-                    value={feedbackText}
-                    onChange={(e) => setFeedbackText(e.target.value)}
-                    placeholder="Optional — tell us how this went..."
-                    rows={2}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 resize-none outline-none focus:border-indigo-500 transition"
-                  />
-                  {feedbackText.trim() && (
-                    <button
-                      onClick={async () => {
-                        if (!sessionId || !feedbackText.trim()) return;
-                        try {
-                          await fetch("/api/negotiate/confirm", {
-                            method: "PATCH",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ sessionId, feedback: feedbackText.trim() }),
-                          });
-                          setFeedbackSent(true);
-                        } catch {}
-                      }}
-                      className="mt-2 px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs rounded-lg font-medium transition"
-                    >
-                      Send feedback
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-          {isHost ? (
-            <div className="mt-4">
-              <Link href="/dashboard" className="text-sm text-indigo-400 hover:text-indigo-300 font-medium">
-                &larr; Back to dashboard
-              </Link>
-            </div>
-          ) : (
-            <div className="mt-4 p-4 border border-indigo-500/20 bg-indigo-500/5 rounded-xl">
-              <p className="text-sm font-semibold text-indigo-300">Want your own AI negotiator?</p>
-              <p className="text-xs text-zinc-500 mt-1">Create your AgentEnvoy link and let AI handle your scheduling.</p>
-              <a href="/" className="inline-block mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg font-medium transition">
-                Sign up for AgentEnvoy
-              </a>
-            </div>
-          )}
+  // --- ICS download helper ---
+  function downloadIcs() {
+    if (!confirmData) return;
+    const dt = new Date(confirmData.dateTime as string);
+    const end = new Date(dt.getTime() + (Number(confirmData.duration) || 30) * 60000);
+    const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "BEGIN:VEVENT",
+      `DTSTART:${fmt(dt)}`,
+      `DTEND:${fmt(end)}`,
+      `SUMMARY:${getEventTitle()}`,
+      confirmData.meetLink ? `URL:${confirmData.meetLink}` : "",
+      confirmData.location ? `LOCATION:${confirmData.location}` : "",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].filter(Boolean).join("\r\n");
+    const blob = new Blob([ics], { type: "text/calendar" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "meeting.ics";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // --- Confirmed event banner (renders inside chat, not as separate page) ---
+  const confirmedBanner = confirmed && confirmData ? (
+    <div className="mx-3 sm:mx-4 mt-3 mb-1 p-3 sm:p-4 bg-gradient-to-br from-emerald-500/8 to-emerald-500/3 border border-emerald-500/25 rounded-xl flex-shrink-0">
+      {/* Row 1: Status + Title */}
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-500 flex items-center justify-center text-xs text-white flex-shrink-0">&#10003;</div>
+        <span className="text-sm font-semibold text-emerald-400">Confirmed</span>
+      </div>
+      {/* Row 2: Meeting title + format */}
+      <div className="mb-2">
+        <div className="text-sm font-medium text-zinc-100">{getEventTitle()}</div>
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-zinc-400">
+          <span>&#128197; {new Date(confirmData.dateTime as string).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>
+          <span>&#128336; {new Date(confirmData.dateTime as string).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
+          <span>{String(confirmData.format) === "phone" ? "&#128222;" : String(confirmData.format) === "video" ? "&#127909;" : "&#128205;"} {String(confirmData.format).charAt(0).toUpperCase() + String(confirmData.format).slice(1)} &middot; {String(confirmData.duration)} min</span>
         </div>
       </div>
-    );
-  }
+      {/* Sub-info: meet link, location */}
+      {typeof confirmData.meetLink === "string" && (
+        <a href={confirmData.meetLink as string} className="text-xs text-indigo-400 hover:text-indigo-300 block mb-2" target="_blank" rel="noopener noreferrer">
+          {(confirmData.meetLink as string).replace("https://", "")} &rarr;
+        </a>
+      )}
+      {typeof confirmData.location === "string" && confirmData.location && (
+        <div className="text-xs text-zinc-500 mb-2">&#128205; {confirmData.location as string}</div>
+      )}
+      {/* Actions */}
+      <div className="flex flex-wrap gap-2">
+        {typeof confirmData.eventLink === "string" && (
+          <a href={confirmData.eventLink as string} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1 text-[10px] font-medium rounded-lg bg-emerald-900/40 text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 transition">
+            &#128197; Add to Google
+          </a>
+        )}
+        <button onClick={downloadIcs} className="px-2.5 py-1 text-[10px] font-medium rounded-lg bg-zinc-800 text-zinc-400 border border-zinc-700 hover:border-zinc-600 transition">
+          &#128229; Download .ics
+        </button>
+        <button
+          onClick={() => {
+            setInput("I need to change this meeting — ");
+            document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+          }}
+          className="px-2.5 py-1 text-[10px] font-medium rounded-lg bg-zinc-800 text-zinc-400 border border-zinc-700 hover:border-zinc-600 transition"
+        >
+          Change event
+        </button>
+      </div>
+    </div>
+  ) : null;
 
   // --- Sidebar content (shared between desktop sidebar and mobile Details tab) ---
   const sidebarContent = (
@@ -578,6 +582,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // --- Chat content (shared between desktop and mobile Chat tab) ---
   const chatContent = (
     <>
+      {confirmedBanner}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {isLoading ? (
           <div className="flex justify-center py-12">

@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
 
       const isHost = authSession?.user?.id === user.id;
 
-      // Already confirmed — tell the visitor
+      // Already confirmed — return confirmation data AND messages
       if (existingSession.status === "agreed") {
         return NextResponse.json({
           sessionId: existingSession.id,
@@ -75,6 +75,12 @@ export async function POST(req: NextRequest) {
           agreedFormat: existingSession.agreedFormat,
           duration: existingSession.duration,
           meetLink: existingSession.meetLink,
+          messages: existingSession.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            createdAt: m.createdAt.toISOString(),
+          })),
           host: { name: user.name },
           link: linkPayload,
           isHost,
