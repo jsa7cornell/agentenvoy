@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { LogoFull } from "./logo";
+import { AvailabilityCalendar } from "./availability-calendar";
 import Link from "next/link";
 
 interface Message {
@@ -35,9 +36,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Slots state for availability calendar sidebar
+  const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string }>> | null>(null);
+  const [slotTimezone, setSlotTimezone] = useState("America/New_York");
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Fetch slots for availability calendar
+  useEffect(() => {
+    if (!sessionId) return;
+    fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) {
+          setSlotsByDay(data.slotsByDay);
+          setSlotTimezone(data.timezone);
+        }
+      })
+      .catch(() => {});
+  }, [sessionId]);
 
   function parseConfirmationProposal(content: string): {
     text: string;
@@ -720,9 +739,23 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       {/* Event card — sticky at top */}
       {eventCard}
 
-      {/* Chat — full width, single column */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {chatContent}
+      {/* Main area — chat + sidebar on desktop */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Chat — takes full width on mobile, flex-1 on desktop */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {chatContent}
+        </div>
+
+        {/* Availability sidebar — desktop only */}
+        <div className="hidden md:flex w-64 flex-shrink-0 border-l border-zinc-800 p-4 overflow-y-auto flex-col">
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
+            Availability
+          </h4>
+          <AvailabilityCalendar
+            slotsByDay={slotsByDay || {}}
+            timezone={slotTimezone}
+          />
+        </div>
       </div>
 
       {/* Details modal */}
