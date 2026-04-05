@@ -774,7 +774,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   );
 
   return (
-    <div className="h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-[#0a0a0f] text-zinc-100 flex flex-col overflow-hidden z-20">
       {/* Prototype banner */}
       <div className="bg-amber-900/30 border-b border-amber-700/40 px-4 py-1.5 text-center flex-shrink-0">
         <span className="text-xs text-amber-300">
