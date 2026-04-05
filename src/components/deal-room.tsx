@@ -34,7 +34,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isConfirming, setIsConfirming] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [statusAnimating, setStatusAnimating] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevStatusRef = useRef<string>("scheduling");
 
   // Slots state for availability calendar sidebar
   const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string }>> | null>(null);
@@ -57,6 +59,23 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       })
       .catch(() => {});
   }, [sessionId]);
+
+  // Track event status changes for animation pulse
+  useEffect(() => {
+    if (messages.length === 0) return;
+    // Derive a simple status key from current state
+    const cancelTerms = /cancel|cancelled|cancellation/i;
+    const hasCancelMsg = messages.slice(-4).some((m) => cancelTerms.test(m.content));
+    const hasProposal = messages.some((m) => m.role === "administrator" && m.content.includes("[CONFIRMATION_PROPOSAL]"));
+    const currentKey = hasCancelMsg ? "cancelled" : confirmed ? "confirmed" : hasProposal ? "proposed" : "scheduling";
+    if (prevStatusRef.current !== currentKey && prevStatusRef.current !== "scheduling") {
+      setStatusAnimating(true);
+      const timer = setTimeout(() => setStatusAnimating(false), 1500);
+      prevStatusRef.current = currentKey;
+      return () => clearTimeout(timer);
+    }
+    prevStatusRef.current = currentKey;
+  }, [confirmed, messages]);
 
   function parseConfirmationProposal(content: string): {
     text: string;
@@ -480,12 +499,30 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   const hasExtraDetails = !!(eventMeetLink || eventLocation);
 
+  // Generate Google Calendar "add event" URL from event details
+  const googleCalUrl = (() => {
+    if (!eventDateTime) return null;
+    const dt = new Date(eventDateTime);
+    const dur = Number(eventDuration) || 30;
+    const end = new Date(dt.getTime() + dur * 60000);
+    const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const params = new URLSearchParams({
+      action: "TEMPLATE",
+      text: getEventTitle(),
+      dates: `${fmt(dt)}/${fmt(end)}`,
+      ...(eventLocation ? { location: eventLocation } : {}),
+      ...(eventMeetLink ? { details: `Join: ${eventMeetLink}` } : {}),
+    });
+    return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  })();
+
+
   const eventCard = (
-    <div className={`z-10 mx-0 px-4 sm:px-5 py-3 sm:py-4 bg-[#0a0a0f]/95 backdrop-blur-sm border-b ${statusConfig.border} flex-shrink-0`}>
+    <div className={`z-10 mx-0 px-4 sm:px-5 py-3 sm:py-4 bg-[#0a0a0f]/95 backdrop-blur-sm border-b ${statusConfig.border} flex-shrink-0 transition-all duration-500 ${statusAnimating ? "ring-1 ring-inset " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-500/40 bg-amber-500/5") : ""}`}>
       <div className="max-w-3xl mx-auto">
         {/* Row 1: Title + status */}
         <div className="flex items-center gap-2.5 mb-1.5">
-          <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0`} />
+          <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />
           <span className="text-sm font-semibold text-zinc-100 truncate">{getEventTitle()}</span>
           <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color} flex-shrink-0`}>{statusConfig.label}</span>
         </div>
@@ -513,8 +550,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             {eventStatus !== "cancelled" && (
               <>
                 {/* Google Calendar */}
-                {typeof confirmData?.eventLink === "string" && (
-                  <a href={confirmData.eventLink as string} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700 hover:border-zinc-600 transition text-xs text-zinc-300">
+                {googleCalUrl && (
+                  <a href={googleCalUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700 hover:border-zinc-600 transition text-xs text-zinc-300">
                     <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0">
                       <path d="M18.316 5.684H24v12.632h-5.684V5.684z" fill="#1967D2" />
                       <path d="M5.684 18.316V5.684L0 5.684v12.632l5.684 0z" fill="#188038" />
@@ -576,8 +613,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         {confirmed && (
           <div className="flex gap-2 mt-4">
             <button onClick={downloadIcs} className="flex-1 px-3 py-2 text-xs font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-lg hover:border-zinc-600 transition">Download .ics</button>
-            {typeof confirmData?.eventLink === "string" && (
-              <a href={confirmData.eventLink as string} target="_blank" rel="noopener noreferrer" className="flex-1 px-3 py-2 text-xs font-medium bg-emerald-900/40 text-emerald-300 border border-emerald-500/20 rounded-lg hover:border-emerald-500/40 transition text-center">Add to Google</a>
+            {googleCalUrl && (
+              <a href={googleCalUrl} target="_blank" rel="noopener noreferrer" className="flex-1 px-3 py-2 text-xs font-medium bg-emerald-900/40 text-emerald-300 border border-emerald-500/20 rounded-lg hover:border-emerald-500/40 transition text-center">Add to Google</a>
             )}
           </div>
         )}
