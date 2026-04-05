@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 
+interface Participant {
+  name: string | null;
+  status: string;
+  role: string;
+}
+
 interface ThreadCardProps {
   title: string;
   statusLabel: string;
@@ -17,6 +23,8 @@ interface ThreadCardProps {
   onArchive?: () => void;
   selected?: boolean;
   onClick?: () => void;
+  isGroupEvent?: boolean;
+  participants?: Participant[];
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
@@ -26,6 +34,13 @@ const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
   orange: { bg: "bg-orange-500/10", text: "text-orange-400" },
   red: { bg: "bg-red-500/10", text: "text-red-400" },
   gray: { bg: "bg-gray-500/10", text: "text-gray-400" },
+};
+
+const PARTICIPANT_DOT: Record<string, string> = {
+  agreed: "bg-green-400",
+  active: "bg-amber-400",
+  pending: "bg-gray-400",
+  declined: "bg-red-400",
 };
 
 export default function ThreadCard({
@@ -43,6 +58,8 @@ export default function ThreadCard({
   onArchive,
   selected,
   onClick,
+  isGroupEvent,
+  participants,
 }: ThreadCardProps) {
   const style = STATUS_STYLES[statusColor] || STATUS_STYLES.gray;
   const [linkCopied, setLinkCopied] = useState(false);
@@ -87,9 +104,21 @@ export default function ThreadCard({
         </div>
       </div>
 
+      {/* Participants (group events) */}
+      {isGroupEvent && participants && participants.length > 0 && (
+        <div className="flex flex-wrap gap-2 px-4 pb-2">
+          {participants.filter((p) => p.role === "guest").map((p, i) => (
+            <span key={i} className="flex items-center gap-1 text-xs text-gray-400">
+              <span className={`w-1.5 h-1.5 rounded-full ${PARTICIPANT_DOT[p.status] || PARTICIPANT_DOT.pending}`} />
+              {p.name || "Unknown"}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Meta */}
       <div className="flex gap-3 px-4 pb-2 text-xs text-gray-500">
-        {inviteeEmail && <span>{inviteeEmail}</span>}
+        {!isGroupEvent && inviteeEmail && <span>{inviteeEmail}</span>}
         {messageCount !== undefined && messageCount > 0 && (
           <span>{messageCount} messages</span>
         )}

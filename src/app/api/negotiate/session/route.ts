@@ -39,76 +39,150 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Link not found" }, { status: 404 });
     }
 
-    // For contextual links, check for an existing session (active or confirmed)
-    const existingSession = await prisma.negotiationSession.findFirst({
-      where: { linkId: link.id },
-      orderBy: { createdAt: "desc" },
-      include: {
-        messages: { orderBy: { createdAt: "asc" } },
-      },
-    });
+    const isHost = authSession?.user?.id === user.id;
+    const linkPayload = {
+      type: link.type,
+      topic: link.topic,
+      inviteeName: link.inviteeName,
+      format: (link.rules as Record<string, unknown>)?.format ?? null,
+    };
 
-    if (existingSession) {
-      // Check if archived
-      if (existingSession.archived) {
-        return NextResponse.json(
-          { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
-          { status: 410 }
-        );
+    // --- GROUP MODE: each visitor gets their own session ---
+    if (link.mode === "group") {
+      const visitorEmail = authSession?.user?.email || null;
+      const visitorUserId = authSession?.user?.id || null;
+
+      // Load all participants for this link
+      const participants = await prisma.sessionParticipant.findMany({
+        where: { linkId: link.id },
+        include: { session: { include: { messages: { orderBy: { createdAt: "asc" } } } } },
+      });
+
+      const participantSummary = participants.map((p) => ({
+        name: p.name || p.email || "Unknown",
+        status: p.status,
+        role: p.role,
+      }));
+
+      // Find this visitor's existing session
+      let myParticipant = null;
+      if (isHost) {
+        myParticipant = participants.find((p) => p.role === "host");
+      } else if (visitorUserId) {
+        myParticipant = participants.find((p) => p.userId === visitorUserId && p.role === "guest");
+      }
+      if (!myParticipant && visitorEmail) {
+        myParticipant = participants.find((p) => p.email === visitorEmail && p.role === "guest");
       }
 
-      const linkPayload = {
-        type: link.type,
-        topic: link.topic,
-        inviteeName: link.inviteeName,
-        format: (link.rules as Record<string, unknown>)?.format ?? null,
-      };
+      if (myParticipant) {
+        const existingSession = myParticipant.session;
 
-      const isHost = authSession?.user?.id === user.id;
+        if (existingSession.archived) {
+          return NextResponse.json(
+            { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
+            { status: 410 }
+          );
+        }
 
-      // Already confirmed — return confirmation data AND messages
-      if (existingSession.status === "agreed") {
-        return NextResponse.json({
-          sessionId: existingSession.id,
-          status: existingSession.status,
-          statusLabel: existingSession.statusLabel,
-          confirmed: true,
-          agreedTime: existingSession.agreedTime?.toISOString() ?? null,
-          agreedFormat: existingSession.agreedFormat,
-          duration: existingSession.duration,
-          meetLink: existingSession.meetLink,
-          messages: existingSession.messages.map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            createdAt: m.createdAt.toISOString(),
-          })),
-          host: { name: user.name },
-          link: linkPayload,
-          isHost,
-          hostName: user.name,
-        });
+        if (existingSession.status === "agreed") {
+          return NextResponse.json({
+            sessionId: existingSession.id,
+            status: existingSession.status,
+            statusLabel: existingSession.statusLabel,
+            confirmed: true,
+            agreedTime: existingSession.agreedTime?.toISOString() ?? null,
+            agreedFormat: existingSession.agreedFormat,
+            duration: existingSession.duration,
+            meetLink: existingSession.meetLink,
+            messages: existingSession.messages.map((m) => ({
+              id: m.id, role: m.role, content: m.content, createdAt: m.createdAt.toISOString(),
+            })),
+            host: { name: user.name },
+            link: linkPayload,
+            isHost,
+            isGroupEvent: true,
+            participants: participantSummary,
+            hostName: user.name,
+          });
+        }
+
+        if (existingSession.messages.length > 0) {
+          return NextResponse.json({
+            sessionId: existingSession.id,
+            status: existingSession.status,
+            statusLabel: existingSession.statusLabel,
+            greeting: existingSession.messages[0].content,
+            messages: existingSession.messages.map((m) => ({
+              id: m.id, role: m.role, content: m.content, createdAt: m.createdAt.toISOString(),
+            })),
+            resumed: true,
+            host: { name: user.name },
+            link: linkPayload,
+            isHost,
+            isGroupEvent: true,
+            participants: participantSummary,
+            hostName: user.name,
+          });
+        }
       }
 
-      // Active/proposed/cancelled/escalated session — resume with full history
-      if (existingSession.messages.length > 0) {
-        return NextResponse.json({
-          sessionId: existingSession.id,
-          status: existingSession.status,
-          statusLabel: existingSession.statusLabel,
-          greeting: existingSession.messages[0].content,
-          messages: existingSession.messages.map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            createdAt: m.createdAt.toISOString(),
-          })),
-          resumed: true,
-          host: { name: user.name },
-          link: linkPayload,
-          isHost,
-          hostName: user.name,
-        });
+      // No existing session for this visitor — will fall through to create one below.
+      // But first, set group context so the greeting is group-aware.
+    } else {
+      // --- SINGLE MODE (default): resume existing session ---
+      const existingSession = await prisma.negotiationSession.findFirst({
+        where: { linkId: link.id },
+        orderBy: { createdAt: "desc" },
+        include: {
+          messages: { orderBy: { createdAt: "asc" } },
+        },
+      });
+
+      if (existingSession) {
+        if (existingSession.archived) {
+          return NextResponse.json(
+            { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
+            { status: 410 }
+          );
+        }
+
+        if (existingSession.status === "agreed") {
+          return NextResponse.json({
+            sessionId: existingSession.id,
+            status: existingSession.status,
+            statusLabel: existingSession.statusLabel,
+            confirmed: true,
+            agreedTime: existingSession.agreedTime?.toISOString() ?? null,
+            agreedFormat: existingSession.agreedFormat,
+            duration: existingSession.duration,
+            meetLink: existingSession.meetLink,
+            messages: existingSession.messages.map((m) => ({
+              id: m.id, role: m.role, content: m.content, createdAt: m.createdAt.toISOString(),
+            })),
+            host: { name: user.name },
+            link: linkPayload,
+            isHost,
+            hostName: user.name,
+          });
+        }
+
+        if (existingSession.messages.length > 0) {
+          return NextResponse.json({
+            sessionId: existingSession.id,
+            status: existingSession.status,
+            statusLabel: existingSession.statusLabel,
+            greeting: existingSession.messages[0].content,
+            messages: existingSession.messages.map((m) => ({
+              id: m.id, role: m.role, content: m.content, createdAt: m.createdAt.toISOString(),
+            })),
+            resumed: true,
+            host: { name: user.name },
+            link: linkPayload,
+            isHost,
+            hostName: user.name,
+          });
+        }
       }
     }
   } else {
@@ -127,6 +201,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const isGroupEvent = link.mode === "group";
+  const isHost = authSession?.user?.id === user.id;
+
   // Create the session
   const session = await prisma.negotiationSession.create({
     data: {
@@ -140,6 +217,23 @@ export async function POST(req: NextRequest) {
       statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
     },
   });
+
+  // For group links, create a SessionParticipant row
+  if (isGroupEvent) {
+    const visitorEmail = authSession?.user?.email || null;
+    const visitorUserId = authSession?.user?.id || null;
+    await prisma.sessionParticipant.create({
+      data: {
+        linkId: link.id,
+        sessionId: session.id,
+        userId: visitorUserId,
+        email: visitorEmail,
+        name: isHost ? user.name : (link.inviteeName || null),
+        role: isHost ? "host" : "guest",
+        status: "active",
+      },
+    });
+  }
 
   // Get calendar context for the next 2 weeks
   let calendarContext: CalendarContext | undefined;
@@ -156,6 +250,18 @@ export async function POST(req: NextRequest) {
     console.log("Could not fetch calendar context:", e);
   }
 
+  // Build group participant context if applicable
+  let eventParticipants: Array<{ name: string; status: string }> | undefined;
+  if (isGroupEvent) {
+    const allParticipants = await prisma.sessionParticipant.findMany({
+      where: { linkId: link.id },
+    });
+    eventParticipants = allParticipants.map((p) => ({
+      name: p.name || p.email || "Unknown",
+      status: p.status,
+    }));
+  }
+
   // Generate the initial greeting
   const context: AgentContext = {
     role: "coordinator",
@@ -169,19 +275,19 @@ export async function POST(req: NextRequest) {
     calendarContext,
     hostPersistentKnowledge: user.persistentKnowledge,
     hostSituationalKnowledge: user.situationalKnowledge,
+    isGroupEvent,
+    eventParticipants,
     conversationHistory: [],
   };
 
   // Generate greeting
+  const greetingPrompt = isGroupEvent
+    ? `A new participant just opened the deal room for a group event. Generate your initial greeting following your GREETING STRATEGY and GROUP EVENT COORDINATION instructions. Mention the group context — how many others are involved, who has responded, any emerging time overlaps. Use all context you have — name, topic, format, timing, available slots. Be efficient.`
+    : `A new visitor just opened the deal room. Generate your initial greeting following your GREETING STRATEGY instructions. Use all context you have — name, topic, format, timing, available slots. Propose specific times if you have calendar data and preferences. Be efficient.`;
+
   const greeting = await generateAgentResponse({
     ...context,
-    conversationHistory: [
-      {
-        role: "user",
-        content:
-          "A new visitor just opened the deal room. Generate your initial greeting following your GREETING STRATEGY instructions. Use all context you have — name, topic, format, timing, available slots. Propose specific times if you have calendar data and preferences. Be efficient.",
-      },
-    ],
+    conversationHistory: [{ role: "user", content: greetingPrompt }],
   });
 
   // Save the greeting message
@@ -193,7 +299,10 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const isHost = authSession?.user?.id === user.id;
+  const participantSummary = eventParticipants?.map((p) => ({
+    name: p.name,
+    status: p.status,
+  }));
 
   return NextResponse.json({
     sessionId: session.id,
@@ -210,6 +319,8 @@ export async function POST(req: NextRequest) {
       format: (link.rules as Record<string, unknown>)?.format ?? null,
     },
     isHost,
+    isGroupEvent: isGroupEvent || undefined,
+    participants: participantSummary,
     hostName: user.name,
   });
 }

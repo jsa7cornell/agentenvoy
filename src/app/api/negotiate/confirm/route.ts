@@ -63,7 +63,6 @@ export async function POST(req: NextRequest) {
   const endTime = new Date(startTime.getTime() + durationMin * 60 * 1000);
   const meetingFormat = format || "video";
 
-  const guestEmail = session.guestEmail || session.link.inviteeEmail;
   const hostEmail = session.host.email;
 
   if (!hostEmail) {
@@ -72,6 +71,26 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+
+  // Determine if this is a group event
+  const isGroupEvent = session.link.mode === "group";
+  let allParticipantEmails: string[] = [];
+  let allParticipantSessions: string[] = [];
+
+  if (isGroupEvent) {
+    const participants = await prisma.sessionParticipant.findMany({
+      where: { linkId: session.linkId },
+    });
+    allParticipantEmails = participants
+      .map((p) => p.email)
+      .filter((e): e is string => !!e);
+    allParticipantSessions = participants.map((p) => p.sessionId);
+  }
+
+  const guestEmail = session.guestEmail || session.link.inviteeEmail;
+  const attendeeEmails = isGroupEvent
+    ? [hostEmail, ...allParticipantEmails.filter((e) => e !== hostEmail)]
+    : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
 
   // Create calendar event for the host
   let meetLink: string | undefined;
@@ -82,13 +101,10 @@ export async function POST(req: NextRequest) {
       summary: session.link.topic
         ? `${session.link.topic} — ${session.link.inviteeName || "Meeting"}`
         : `Meeting with ${session.link.inviteeName || guestEmail || "guest"}`,
-      description: `Scheduled via Envoy\nFormat: ${meetingFormat}${location ? `\nLocation: ${location}` : ""}`,
+      description: `Scheduled via Envoy\nFormat: ${meetingFormat}${location ? `\nLocation: ${location}` : ""}${isGroupEvent ? `\nParticipants: ${attendeeEmails.length}` : ""}`,
       startTime,
       endTime,
-      attendeeEmails: [
-        hostEmail,
-        ...(guestEmail ? [guestEmail] : []),
-      ],
+      attendeeEmails,
       addMeetLink: meetingFormat === "video",
     });
 
@@ -119,27 +135,43 @@ export async function POST(req: NextRequest) {
     .formatToParts(startTime)
     .find((p) => p.type === "timeZoneName")?.value ?? hostTimezone;
 
-  // Update session
-  await prisma.negotiationSession.update({
-    where: { id: sessionId },
+  // Update session(s) — for group events, update ALL linked sessions
+  const sessionIdsToUpdate = isGroupEvent ? allParticipantSessions : [sessionId];
+  const confirmSummary = `${meetingFormat} meeting on ${displayDate} at ${displayTime} ${tzAbbr}${location ? ` at ${location}` : ""}`;
+  const confirmMessage = `Meeting confirmed: ${meetingFormat} on ${displayDate} at ${displayTime} ${tzAbbr}${meetLink ? `. Meet link: ${meetLink}` : ""}`;
+
+  await prisma.negotiationSession.updateMany({
+    where: { id: { in: sessionIdsToUpdate } },
     data: {
       status: "agreed",
       statusLabel: "Confirmed",
       agreedTime: startTime,
       agreedFormat: meetingFormat,
       meetLink: meetLink || null,
-      summary: `${meetingFormat} meeting on ${displayDate} at ${displayTime} ${tzAbbr}${location ? ` at ${location}` : ""}`,
+      summary: confirmSummary,
     },
   });
 
-  // Save system message
-  await prisma.message.create({
-    data: {
-      sessionId,
-      role: "system",
-      content: `Meeting confirmed: ${meetingFormat} on ${displayDate} at ${displayTime} ${tzAbbr}${meetLink ? `. Meet link: ${meetLink}` : ""}`,
-    },
-  });
+  // Update all participant statuses to "agreed"
+  if (isGroupEvent) {
+    await prisma.sessionParticipant.updateMany({
+      where: { linkId: session.linkId },
+      data: { status: "agreed" },
+    });
+  }
+
+  // Save system message in ALL sessions
+  await Promise.all(
+    sessionIdsToUpdate.map((sid) =>
+      prisma.message.create({
+        data: {
+          sessionId: sid,
+          role: "system",
+          content: confirmMessage,
+        },
+      })
+    )
+  );
 
   // Create NegotiationOutcome for tracking
   try {
@@ -164,6 +196,7 @@ export async function POST(req: NextRequest) {
         timeToConfirmationSec,
         proposedFormat: session.format || null,
         agreedFormat: meetingFormat,
+        participantCount: isGroupEvent ? attendeeEmails.length : 2,
       },
     });
   } catch (e) {
@@ -210,8 +243,9 @@ export async function POST(req: NextRequest) {
     timezone: hostTimezone,
   });
 
-  const emailRecipients = [hostEmail];
-  if (guestEmail) emailRecipients.push(guestEmail);
+  const emailRecipients = isGroupEvent
+    ? attendeeEmails
+    : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
 
   try {
     await resend.emails.send({

@@ -52,6 +52,12 @@ export interface ComposeOptions {
   hostPersistentKnowledge?: string | null;
   hostSituationalKnowledge?: string | null;
   hostDirectives?: string[];
+  isGroupEvent?: boolean;
+  eventParticipants?: Array<{
+    name: string;
+    status: string;
+    statedAvailability?: string;
+  }>;
   role?: string;
 }
 
@@ -197,6 +203,19 @@ function buildSessionContext(options: ComposeOptions): string {
 
   if (options.role) parts.push(`Role: ${options.role}`);
   parts.push(`Host: ${options.hostName}`);
+
+  if (options.isGroupEvent) {
+    const participants = options.eventParticipants || [];
+    const guestParticipants = participants.filter((p) => p.status !== undefined);
+    parts.push(`Session type: Group event (${guestParticipants.length} participant${guestParticipants.length !== 1 ? "s" : ""} + host)`);
+    if (guestParticipants.length > 0) {
+      parts.push("Other participants and their status:");
+      for (const p of guestParticipants) {
+        const availNote = p.statedAvailability ? ` — ${p.statedAvailability}` : "";
+        parts.push(`  - ${p.name} (${p.status}${availNote})`);
+      }
+    }
+  }
 
   if (options.guestName) parts.push(`Guest: ${options.guestName}`);
   if (options.guestEmail) parts.push(`Guest email: ${options.guestEmail}`);

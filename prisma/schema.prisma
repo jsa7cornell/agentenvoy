@@ -64,6 +64,7 @@ model User {
   negotiationLinks   NegotiationLink[]
   hostedSessions     NegotiationSession[] @relation("host")
   guestSessions      NegotiationSession[] @relation("guest")
+  participations     SessionParticipant[]
   apiKeys            ApiKey[]
   channel            Channel?
 }
@@ -85,6 +86,7 @@ model NegotiationLink {
   id           String   @id @default(cuid())
   userId       String
   type         String   @default("generic") // generic | contextual
+  mode         String   @default("single")  // "single" | "group"
   slug         String   // same as user.meetSlug for generic
   code         String?  @unique // unique code for contextual links
   inviteeEmail String?
@@ -95,8 +97,9 @@ model NegotiationLink {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sessions NegotiationSession[]
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions     NegotiationSession[]
+  participants SessionParticipant[]
 
   @@index([slug])
   @@index([slug, code])
@@ -123,13 +126,14 @@ model NegotiationSession {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  link            NegotiationLink  @relation(fields: [linkId], references: [id], onDelete: Cascade)
-  host            User             @relation("host", fields: [hostId], references: [id])
-  guest           User?            @relation("guest", fields: [guestId], references: [id])
+  link            NegotiationLink    @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  host            User               @relation("host", fields: [hostId], references: [id])
+  guest           User?              @relation("guest", fields: [guestId], references: [id])
   messages        Message[]
   proposals       Proposal[]
   channelMessages ChannelMessage[]
   outcome         NegotiationOutcome?
+  participant     SessionParticipant?
 }
 
 model Message {
@@ -170,6 +174,7 @@ model NegotiationOutcome {
   timeToConfirmationSec  Int?     // seconds from session creation to confirmation
   proposedFormat         String?  // what the agent first proposed
   agreedFormat           String?  // what was actually confirmed
+  participantCount       Int      @default(2) // total participants including host
   feedback               String?  @db.Text // open-ended guest feedback
   createdAt              DateTime @default(now())
 
@@ -183,6 +188,26 @@ model Channel {
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages  ChannelMessage[]
   createdAt DateTime         @default(now())
+}
+
+// SessionParticipant: tracks each person in a group event
+model SessionParticipant {
+  id        String   @id @default(cuid())
+  linkId    String
+  sessionId String   @unique
+  userId    String?
+  email     String?
+  name      String?
+  role      String   @default("guest")    // "host" | "guest"
+  status    String   @default("pending")  // "pending" | "active" | "agreed" | "declined"
+  joinedAt  DateTime @default(now())
+
+  link    NegotiationLink    @relation(fields: [linkId], references: [id])
+  session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User?              @relation(fields: [userId], references: [id])
+
+  @@unique([linkId, email])
+  @@index([linkId])
 }
 
 // ChannelMessage: feed-level messages between user and Envoy

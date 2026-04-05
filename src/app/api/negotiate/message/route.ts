@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { AgentContext } from "@/agent/administrator";
+import { AgentContext, extractAvailabilitySummary } from "@/agent/administrator";
 import { getCalendarContext } from "@/lib/calendar";
 import type { CalendarContext } from "@/lib/calendar";
 import { computeThreadStatus } from "@/lib/thread-status";
@@ -100,6 +100,49 @@ export async function POST(req: NextRequest) {
     console.log("Calendar context error in negotiate/message:", e);
   }
 
+  // Build group context if applicable
+  const isGroupEvent = (session.link as { mode?: string }).mode === "group";
+  let eventParticipants: Array<{ name: string; status: string; statedAvailability?: string }> | undefined;
+
+  if (isGroupEvent) {
+    const allParticipants = await prisma.sessionParticipant.findMany({
+      where: { linkId: session.linkId },
+      include: {
+        session: {
+          include: { messages: { orderBy: { createdAt: "asc" } } },
+        },
+      },
+    });
+
+    // Update this participant's status to "active" on first guest message
+    const thisParticipant = allParticipants.find((p) => p.sessionId === sessionId);
+    if (thisParticipant && thisParticipant.status === "pending") {
+      await prisma.sessionParticipant.update({
+        where: { id: thisParticipant.id },
+        data: { status: "active" },
+      });
+    }
+
+    // Extract availability from other participants' sessions
+    const participantContexts = await Promise.all(
+      allParticipants
+        .filter((p) => p.sessionId !== sessionId)
+        .map(async (p) => {
+          const msgs = p.session.messages.map((m) => ({
+            role: m.role === "administrator" ? "assistant" : m.role,
+            content: m.content,
+          }));
+          const availability = msgs.length > 1 ? await extractAvailabilitySummary(msgs) : null;
+          return {
+            name: p.name || p.email || "Unknown",
+            status: p.status,
+            statedAvailability: availability || undefined,
+          };
+        })
+    );
+    eventParticipants = participantContexts;
+  }
+
   // Build agent context
   const context: AgentContext = {
     role: session.type === "calendar" ? "coordinator" : "administrator",
@@ -115,6 +158,8 @@ export async function POST(req: NextRequest) {
     calendarContext,
     hostPersistentKnowledge: (session.host as { persistentKnowledge?: string }).persistentKnowledge,
     hostSituationalKnowledge: (session.host as { situationalKnowledge?: string }).situationalKnowledge,
+    isGroupEvent: isGroupEvent || undefined,
+    eventParticipants,
     conversationHistory: history,
   };
 

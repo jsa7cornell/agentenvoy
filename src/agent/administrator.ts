@@ -20,6 +20,12 @@ export interface AgentContext {
   hostPersistentKnowledge?: string | null;
   hostSituationalKnowledge?: string | null;
   hostDirectives?: string[];
+  isGroupEvent?: boolean;
+  eventParticipants?: Array<{
+    name: string;
+    status: string;
+    statedAvailability?: string;
+  }>;
   conversationHistory: Array<{ role: string; content: string }>;
 }
 
@@ -42,6 +48,8 @@ function buildComposeOptions(context: AgentContext) {
     hostPersistentKnowledge: context.hostPersistentKnowledge,
     hostSituationalKnowledge: context.hostSituationalKnowledge,
     hostDirectives: context.hostDirectives,
+    isGroupEvent: context.isGroupEvent,
+    eventParticipants: context.eventParticipants,
     role: context.role,
   };
 }
@@ -148,6 +156,36 @@ Return ONLY valid JSON, no markdown or explanation.`,
       persistent: existingPersistent || "",
       situational: existingSituational || "",
     };
+  }
+}
+
+/**
+ * Extract a short availability summary from a participant's conversation.
+ * Used to build cross-session context in group events.
+ */
+export async function extractAvailabilitySummary(
+  messages: Array<{ role: string; content: string }>
+): Promise<string | null> {
+  // Only process if there are guest messages with substance
+  const guestMessages = messages.filter((m) => m.role === "guest" || m.role === "user");
+  if (guestMessages.length === 0) return null;
+
+  const transcript = messages
+    .map((m) => `[${m.role}]: ${m.content}`)
+    .join("\n");
+
+  try {
+    const { text } = await generateText({
+      model: anthropic("claude-haiku-4-5-20251001"),
+      system: `Extract a 1-2 sentence availability summary from this scheduling conversation. Focus on: what days/times work, what doesn't work, format preferences. If no availability has been stated yet, return "NO_AVAILABILITY". Return ONLY the summary text, no explanation.`,
+      prompt: transcript,
+    });
+
+    const trimmed = text.trim();
+    if (trimmed === "NO_AVAILABILITY" || trimmed.length < 5) return null;
+    return trimmed;
+  } catch {
+    return null;
   }
 }
 

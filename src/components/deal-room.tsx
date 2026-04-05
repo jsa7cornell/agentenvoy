@@ -37,6 +37,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [sessionStatus, setSessionStatus] = useState<string>("active");
   const [sessionStatusLabel, setSessionStatusLabel] = useState<string>("");
   const [statusAnimating, setStatusAnimating] = useState(false);
+  const [isGroupEvent, setIsGroupEvent] = useState(false);
+  const [participants, setParticipants] = useState<Array<{ name: string; status: string }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const prevStatusRef = useRef<string>("active");
 
@@ -213,6 +215,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setLinkFormat(data.link?.format || "");
         setSessionStatus(data.status || "active");
         setSessionStatusLabel(data.statusLabel || "");
+        if (data.isGroupEvent) setIsGroupEvent(true);
+        if (data.participants) setParticipants(data.participants);
 
         // Already confirmed — load messages AND set confirmed state
         if (data.confirmed) {
@@ -529,6 +533,22 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           )}
         </div>
 
+        {/* Participants row (group events) */}
+        {isGroupEvent && participants.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 ml-5 mb-1">
+            {participants.map((p, i) => (
+              <span key={i} className="flex items-center gap-1 text-xs text-zinc-400">
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  p.status === "agreed" ? "bg-emerald-400" :
+                  p.status === "active" ? "bg-amber-400" :
+                  p.status === "declined" ? "bg-red-400" : "bg-zinc-500"
+                }`} />
+                {p.name}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Row 2: Details */}
         <div className="flex flex-wrap gap-x-4 gap-y-0.5 ml-5 text-xs text-zinc-400">
           {eventFormat && (
@@ -545,6 +565,31 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           )}
           {eventLocation && <span className="truncate max-w-[200px]">{eventLocation}</span>}
         </div>
+
+        {/* Add participant button — host only, non-confirmed */}
+        {isHost && !confirmed && eventStatus !== "cancelled" && (
+          <div className="ml-5 mt-1.5">
+            <button
+              onClick={async () => {
+                if (!sessionId) return;
+                try {
+                  const res = await fetch("/api/negotiate/upgrade", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ sessionId }),
+                  });
+                  if (res.ok) {
+                    setIsGroupEvent(true);
+                  }
+                } catch {}
+              }}
+              className={`text-xs transition ${isGroupEvent ? "text-zinc-600 cursor-default" : "text-indigo-400 hover:text-indigo-300"}`}
+              disabled={isGroupEvent}
+            >
+              {isGroupEvent ? "Group link active — share link to add people" : "+ Add participant (make group link)"}
+            </button>
+          </div>
+        )}
 
         {/* Row 3: Actions */}
         {(confirmed || eventStatus === "cancelled") && (

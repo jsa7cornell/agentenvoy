@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ThreadCard from "./thread-card";
-import { computeThreadStatus } from "@/lib/thread-status";
+import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-status";
 
 interface ChannelMsg {
   id: string;
@@ -22,12 +22,15 @@ interface ChannelMsg {
     format?: string;
     archived?: boolean;
     agreedTime?: string;
+    isGroupEvent?: boolean;
+    participants?: Array<{ name: string | null; status: string; role: string }>;
     link: {
       inviteeName?: string;
       inviteeEmail?: string;
       topic?: string;
       code?: string;
       slug: string;
+      mode?: string;
     };
     _count: { messages: number };
   } | null;
@@ -266,11 +269,19 @@ export default function Feed() {
           if (msg.threadId && msg.thread) {
             if (msg.thread.archived) return null;
 
-            const status = computeThreadStatus({
-              status: msg.thread.status,
-              inviteeName: msg.thread.link.inviteeName,
-              guestEmail: msg.thread.link.inviteeEmail,
-            });
+            const isGroup = msg.thread.isGroupEvent || msg.thread.link.mode === "group";
+            const guestParticipants = (msg.thread.participants || []).filter((p) => p.role === "guest");
+
+            const status = isGroup && guestParticipants.length > 0
+              ? computeGroupThreadStatus(
+                  guestParticipants.map((p) => ({ name: p.name || "Unknown", status: p.status })),
+                  msg.thread.status
+                )
+              : computeThreadStatus({
+                  status: msg.thread.status,
+                  inviteeName: msg.thread.link.inviteeName,
+                  guestEmail: msg.thread.link.inviteeEmail,
+                });
 
             const canArchive =
               msg.thread.status === "agreed" ||
@@ -286,6 +297,7 @@ export default function Feed() {
                 subtitle={[
                   msg.thread.format === "phone" ? "Phone call" : msg.thread.format === "video" ? "Video" : msg.thread.format,
                   msg.thread.duration ? `${msg.thread.duration} min` : null,
+                  isGroup ? `${guestParticipants.length} participant${guestParticipants.length !== 1 ? "s" : ""}` : null,
                 ].filter(Boolean).join(" · ") || undefined}
                 inviteeName={msg.thread.link.inviteeName || undefined}
                 inviteeEmail={msg.thread.link.inviteeEmail || undefined}
@@ -295,6 +307,8 @@ export default function Feed() {
                 canArchive={!!canArchive}
                 onArchive={() => handleArchive(msg.thread!.id)}
                 onClick={() => navigateToThread(msg.thread!)}
+                isGroupEvent={isGroup}
+                participants={msg.thread.participants || undefined}
               />
             );
           }
