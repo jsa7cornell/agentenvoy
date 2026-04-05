@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from "react";
 import { LogoFull } from "./logo";
-import { AvailabilityCalendar } from "./availability-calendar";
 import Link from "next/link";
 
 interface Message {
@@ -15,25 +14,6 @@ interface Message {
 interface DealRoomProps {
   slug: string;
   code?: string;
-}
-
-// --- Icons (inline SVG) ---
-
-function ChatIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function ClockIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
-  );
 }
 
 export function DealRoom({ slug, code }: DealRoomProps) {
@@ -52,36 +32,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
-  const [showAgentInfo, setShowAgentInfo] = useState(false);
-  // Feedback state reserved for future use
-  // const [feedbackText, setFeedbackText] = useState("");
-  // const [feedbackSent, setFeedbackSent] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Slots state for calendar widget
-  const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string }>> | null>(null);
-  const [slotTimezone, setSlotTimezone] = useState("America/New_York");
-
-  // Mobile tab state
-  const [mobileTab, setMobileTab] = useState<"chat" | "details">("chat");
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  // Fetch slots when session is ready
-  useEffect(() => {
-    if (!sessionId) return;
-    fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data) {
-          setSlotsByDay(data.slotsByDay);
-          setSlotTimezone(data.timezone);
-        }
-      })
-      .catch(() => {});
-  }, [sessionId]);
 
   function parseConfirmationProposal(content: string): {
     text: string;
@@ -134,15 +90,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     } finally {
       setIsConfirming(false);
     }
-  }
-
-  function handleConnectCalendar() {
-    const returnUrl = code ? `/meet/${slug}/${code}` : `/meet/${slug}`;
-    window.location.href = `/api/auth/guest-calendar?sessionId=${sessionId}&returnUrl=${encodeURIComponent(returnUrl)}`;
-  }
-
-  function handleConnectAgent() {
-    setShowAgentInfo((prev) => !prev);
   }
 
   // Detect guest calendar connect via URL param
@@ -454,135 +401,152 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     URL.revokeObjectURL(url);
   }
 
-  // --- Confirmed event banner (renders inside chat, not as separate page) ---
-  const confirmedBanner = confirmed && confirmData ? (
-    <div className="mx-3 sm:mx-4 mt-3 mb-1 p-3 sm:p-4 bg-gradient-to-br from-emerald-500/8 to-emerald-500/3 border border-emerald-500/25 rounded-xl flex-shrink-0">
-      {/* Row 1: Status + Title */}
-      <div className="flex items-center gap-2 mb-2">
-        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-500 flex items-center justify-center text-xs text-white flex-shrink-0">&#10003;</div>
-        <span className="text-sm font-semibold text-emerald-400">Confirmed</span>
-      </div>
-      {/* Row 2: Meeting title + format */}
-      <div className="mb-2">
-        <div className="text-sm font-medium text-zinc-100">{getEventTitle()}</div>
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-zinc-400">
-          <span>&#128197; {new Date(confirmData.dateTime as string).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</span>
-          <span>&#128336; {new Date(confirmData.dateTime as string).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
-          <span>{String(confirmData.format) === "phone" ? "&#128222;" : String(confirmData.format) === "video" ? "&#127909;" : "&#128205;"} {String(confirmData.format).charAt(0).toUpperCase() + String(confirmData.format).slice(1)} &middot; {String(confirmData.duration)} min</span>
-        </div>
-      </div>
-      {/* Sub-info: meet link, location */}
-      {typeof confirmData.meetLink === "string" && (
-        <a href={confirmData.meetLink as string} className="text-xs text-indigo-400 hover:text-indigo-300 block mb-2" target="_blank" rel="noopener noreferrer">
-          {(confirmData.meetLink as string).replace("https://", "")} &rarr;
-        </a>
-      )}
-      {typeof confirmData.location === "string" && confirmData.location && (
-        <div className="text-xs text-zinc-500 mb-2">&#128205; {confirmData.location as string}</div>
-      )}
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2">
-        {typeof confirmData.eventLink === "string" && (
-          <a href={confirmData.eventLink as string} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1 text-[10px] font-medium rounded-lg bg-emerald-900/40 text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 transition">
-            &#128197; Add to Google
-          </a>
-        )}
-        <button onClick={downloadIcs} className="px-2.5 py-1 text-[10px] font-medium rounded-lg bg-zinc-800 text-zinc-400 border border-zinc-700 hover:border-zinc-600 transition">
-          &#128229; Download .ics
-        </button>
-        <button
-          onClick={() => {
-            setInput("I need to change this meeting — ");
-            document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-          }}
-          className="px-2.5 py-1 text-[10px] font-medium rounded-lg bg-zinc-800 text-zinc-400 border border-zinc-700 hover:border-zinc-600 transition"
-        >
-          Change event
-        </button>
-      </div>
-    </div>
-  ) : null;
+  // --- Sticky event card (shows in all states) ---
+  // Determine the latest proposal from messages (for "Proposed" state)
+  const latestProposal = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "administrator") {
+        const { proposal } = parseConfirmationProposal(messages[i].content);
+        if (proposal) return proposal;
+      }
+    }
+    return null;
+  })();
 
-  // --- Sidebar content (shared between desktop sidebar and mobile Details tab) ---
-  const sidebarContent = (
-    <div className="space-y-5">
-      {/* Event title */}
-      <div>
-        <h2 className="text-base font-semibold text-zinc-100">{getEventTitle()}</h2>
-        <p className="text-xs text-zinc-500 mt-0.5">
-          {linkFormat === "phone" ? "Phone call" : linkFormat === "video" ? "Video call" : linkFormat === "in-person" ? "In person" : "Meeting"}
-          {" \u00B7 30 min"}
-        </p>
-      </div>
+  const eventStatus: "confirmed" | "proposed" | "scheduling" =
+    confirmed ? "confirmed" : latestProposal ? "proposed" : "scheduling";
 
-      {/* Connections — only show for guests */}
-      {!isHost && (
-        <div>
-          <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
-            Connections
-          </h4>
-          <div className="space-y-2">
-            <button
-              onClick={handleConnectAgent}
-              className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group"
-            >
-              <div className="text-sm font-medium text-zinc-300 group-hover:text-indigo-300 transition">
-                Connect your agent
-              </div>
-              <p className="text-xs text-zinc-600 mt-0.5">Details coming soon!</p>
-            </button>
+  const statusConfig = {
+    confirmed: { label: "Confirmed", color: "text-emerald-400", bg: "from-emerald-500/8 to-emerald-500/3", border: "border-emerald-500/25", dot: "bg-emerald-400" },
+    proposed: { label: "Proposed", color: "text-amber-400", bg: "from-amber-500/8 to-amber-500/3", border: "border-amber-500/25", dot: "bg-amber-400" },
+    scheduling: { label: "Scheduling", color: "text-zinc-400", bg: "from-zinc-500/5 to-zinc-500/2", border: "border-zinc-700", dot: "bg-zinc-500" },
+  }[eventStatus];
 
-            {showAgentInfo && (
-              <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-xs text-zinc-400 space-y-2">
-                <p className="font-medium text-zinc-200">Agent API</p>
-                <p>Your agent can negotiate on your behalf via the AgentEnvoy API.</p>
-                <code className="block bg-zinc-800 rounded p-2 text-emerald-400 text-[11px] break-all">
-                  POST /api/negotiate/message
-                </code>
-                <a href="https://agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300 text-xs">
-                  Sign up for API access
-                </a>
-              </div>
-            )}
+  // Event details come from confirmData (confirmed) or latestProposal (proposed) or just title (scheduling)
+  const eventDateTime = confirmed && confirmData
+    ? confirmData.dateTime as string
+    : latestProposal?.dateTime ?? null;
+  const eventFormat = confirmed && confirmData
+    ? String(confirmData.format)
+    : latestProposal?.format ?? linkFormat ?? null;
+  const eventDuration = confirmed && confirmData
+    ? String(confirmData.duration)
+    : latestProposal ? String(latestProposal.duration) : "30";
+  const eventLocation = confirmed && confirmData
+    ? (confirmData.location as string | null)
+    : latestProposal?.location ?? null;
+  const eventMeetLink = confirmed && confirmData
+    ? (confirmData.meetLink as string | undefined)
+    : undefined;
 
-            {calendarConnected ? (
-              <div className="w-full bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-3">
-                <div className="text-sm font-medium text-emerald-300">Calendar connected</div>
-                <p className="text-xs text-zinc-500 mt-1">Your availability is being shared</p>
-              </div>
-            ) : (
-              <button
-                onClick={handleConnectCalendar}
-                disabled={!sessionId}
-                className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-xl p-3 hover:border-indigo-500/50 transition group disabled:opacity-50"
-              >
-                <div className="text-sm font-medium text-indigo-400 group-hover:text-indigo-300 transition">
-                  Connect Calendar
-                </div>
-                <p className="text-xs text-zinc-600 mt-0.5">Let AgentEnvoy find the best match!</p>
-              </button>
-            )}
+  const hasExtraDetails = !!(eventMeetLink || eventLocation);
+
+  const eventCard = (
+    <div className={`sticky top-0 z-10 mx-0 px-3 sm:px-4 py-2.5 sm:py-3 bg-[#0a0a0f]/95 backdrop-blur-sm border-b ${statusConfig.border} flex-shrink-0`}>
+      <div className="flex items-start gap-2.5 max-w-3xl mx-auto">
+        {/* Status dot */}
+        <div className={`w-2 h-2 rounded-full ${statusConfig.dot} mt-1.5 flex-shrink-0`} />
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          {/* Title + status */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium text-zinc-100 truncate">{getEventTitle()}</span>
+            <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color}`}>{statusConfig.label}</span>
           </div>
-        </div>
-      )}
 
-      {/* Availability calendar */}
-      <div>
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
-          Availability
-        </h4>
-        <AvailabilityCalendar
-          slotsByDay={slotsByDay || {}}
-          timezone={slotTimezone}
-        />
+          {/* Details row */}
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[11px] text-zinc-500">
+            {eventFormat && (
+              <span>{eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat} &middot; {eventDuration} min</span>
+            )}
+            {eventDateTime && (
+              <span>{new Date(eventDateTime).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} {new Date(eventDateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
+            )}
+            {!eventDateTime && !eventFormat && <span>Meeting details pending</span>}
+          </div>
+
+          {/* Sub-details (meet link, location) — truncated on mobile */}
+          {hasExtraDetails && (
+            <div className="mt-1 text-[11px]">
+              {eventMeetLink && (
+                <a href={eventMeetLink} className="text-indigo-400 hover:text-indigo-300 truncate block max-w-[250px]" target="_blank" rel="noopener noreferrer">
+                  {eventMeetLink.replace("https://", "")}
+                </a>
+              )}
+              {eventLocation && <span className="text-zinc-500 truncate block max-w-[250px]">{eventLocation}</span>}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {confirmed && (
+            <>
+              <button onClick={downloadIcs} className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition" title="Download .ics">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+              </button>
+              <button
+                onClick={() => {
+                  setInput("I need to change this meeting — ");
+                  document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                }}
+                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition"
+                title="Change event"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                </svg>
+              </button>
+            </>
+          )}
+          {hasExtraDetails && (
+            <button
+              onClick={() => setShowDetailsModal(true)}
+              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition"
+              title="See details"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
 
-  // --- Chat content (shared between desktop and mobile Chat tab) ---
+  // --- Details modal ---
+  const detailsModal = showDetailsModal ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowDetailsModal(false)}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-zinc-100 mb-4">Meeting Details</h3>
+        <div className="space-y-3 text-sm text-zinc-300">
+          <div><span className="text-zinc-500">Title:</span> {getEventTitle()}</div>
+          {eventDateTime && <div><span className="text-zinc-500">When:</span> {new Date(eventDateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {new Date(eventDateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</div>}
+          {eventFormat && <div><span className="text-zinc-500">Format:</span> {eventFormat.charAt(0).toUpperCase() + eventFormat.slice(1)} &middot; {eventDuration} min</div>}
+          {eventLocation && <div><span className="text-zinc-500">Location:</span> {eventLocation}</div>}
+          {eventMeetLink && <div><span className="text-zinc-500">Link:</span> <a href={eventMeetLink} className="text-indigo-400 hover:text-indigo-300" target="_blank" rel="noopener noreferrer">{eventMeetLink}</a></div>}
+          {hostName && <div><span className="text-zinc-500">Host:</span> {hostName}</div>}
+        </div>
+        {confirmed && (
+          <div className="flex gap-2 mt-4">
+            <button onClick={downloadIcs} className="flex-1 px-3 py-2 text-xs font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-lg hover:border-zinc-600 transition">Download .ics</button>
+            {typeof confirmData?.eventLink === "string" && (
+              <a href={confirmData.eventLink as string} target="_blank" rel="noopener noreferrer" className="flex-1 px-3 py-2 text-xs font-medium bg-emerald-900/40 text-emerald-300 border border-emerald-500/20 rounded-lg hover:border-emerald-500/40 transition text-center">Add to Google</a>
+            )}
+          </div>
+        )}
+        <button onClick={() => setShowDetailsModal(false)} className="w-full mt-3 px-3 py-2 text-xs text-zinc-500 border border-zinc-800 rounded-lg hover:border-zinc-700 transition">Close</button>
+      </div>
+    </div>
+  ) : null;
+
+  // --- Main content ---
   const chatContent = (
     <>
-      {confirmedBanner}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {isLoading ? (
           <div className="flex justify-center py-12">
@@ -753,51 +717,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         )}
       </header>
 
-      {/* Mobile tab bar — visible only on small screens */}
-      <div className="flex md:hidden border-b border-zinc-800">
-        <button
-          onClick={() => setMobileTab("chat")}
-          className={`flex-1 py-2.5 flex items-center justify-center gap-1.5 text-sm font-medium transition ${
-            mobileTab === "chat"
-              ? "text-indigo-400 border-b-2 border-indigo-400"
-              : "text-zinc-500"
-          }`}
-        >
-          <ChatIcon className={mobileTab === "chat" ? "text-indigo-400" : "text-zinc-500"} />
-          Chat
-        </button>
-        <button
-          onClick={() => setMobileTab("details")}
-          className={`flex-1 py-2.5 flex items-center justify-center gap-1.5 text-sm font-medium transition ${
-            mobileTab === "details"
-              ? "text-indigo-400 border-b-2 border-indigo-400"
-              : "text-zinc-500"
-          }`}
-        >
-          <ClockIcon className={mobileTab === "details" ? "text-indigo-400" : "text-zinc-500"} />
-          Details
-        </button>
+      {/* Event card — sticky at top */}
+      {eventCard}
+
+      {/* Chat — full width, single column */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {chatContent}
       </div>
 
-      {/* Desktop layout */}
-      <div className="hidden md:flex flex-1 overflow-hidden">
-        {/* Chat panel */}
-        <div className="flex-1 flex flex-col">{chatContent}</div>
-
-        {/* Right sidebar */}
-        <div className="w-80 border-l border-zinc-800 p-4 overflow-y-auto">
-          {sidebarContent}
-        </div>
-      </div>
-
-      {/* Mobile layout */}
-      <div className="flex md:hidden flex-1 overflow-hidden">
-        {mobileTab === "chat" ? (
-          <div className="flex-1 flex flex-col">{chatContent}</div>
-        ) : (
-          <div className="flex-1 overflow-y-auto p-4">{sidebarContent}</div>
-        )}
-      </div>
+      {/* Details modal */}
+      {detailsModal}
     </div>
   );
 }
