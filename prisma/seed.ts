@@ -1,6 +1,14 @@
 import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
+// Use direct connection (port 5432) for short-lived scripts.
+// The pooler (port 6543) uses PgBouncer in transaction mode,
+// which breaks Prisma's prepared statements in scripts that
+// open a connection, run a few queries, and exit.
+const prisma = new PrismaClient({
+  datasources: {
+    db: { url: process.env.POSTGRES_URL_NON_POOLING },
+  },
+});
 
 const TEST_USER_ID = "test-user-e2e";
 const TEST_KEY_ID = "test-apikey-e2e";
