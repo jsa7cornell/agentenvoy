@@ -7,6 +7,7 @@ import { computeThreadStatus } from "@/lib/thread-status";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
+import { sanitizeHistory, roleSummary } from "@/lib/conversation";
 
 const VALID_STATUSES = ["active", "proposed", "cancelled", "escalated"];
 
@@ -79,12 +80,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Build conversation history
-  const history = session.messages.map((m) => ({
-    role: m.role === "administrator" ? "assistant" : "user",
+  // Build and sanitize conversation history
+  const rawHistory = session.messages.map((m) => ({
+    role: m.role,
     content: m.content,
   }));
-  history.push({ role: "user", content });
+  rawHistory.push({ role: "guest", content });
+  const { messages: history, warnings } = sanitizeHistory(rawHistory, [
+    "administrator",
+    "assistant",
+  ]);
+  if (warnings.length > 0) {
+    console.warn(
+      `[negotiate/message] History sanitized | sessionId=${sessionId} | ${warnings.join("; ")}`
+    );
+  }
 
   // Fetch calendar context
   let calendarContext: CalendarContext | undefined;
@@ -166,7 +176,23 @@ export async function POST(req: NextRequest) {
   };
 
   const { generateAgentResponse } = await import("@/agent/administrator");
-  const responseText = await generateAgentResponse(context);
+  let responseText: string;
+  try {
+    responseText = await generateAgentResponse(context);
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error(
+      `[negotiate/message] AI call failed | sessionId=${sessionId} | hostId=${session.hostId} | messageCount=${history.length} | roles=${roleSummary(history)} | error=${err.message}`
+    );
+    return new Response(
+      JSON.stringify({
+        error: "AI service temporarily unavailable",
+        detail: err.message,
+        retryable: true,
+      }),
+      { status: 502, headers: { "Content-Type": "application/json" } }
+    );
+  }
 
   // Parse and execute [ACTION] blocks
   const actions = parseActions(responseText);

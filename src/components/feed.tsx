@@ -167,7 +167,18 @@ export default function Feed() {
         body: JSON.stringify({ message: text }),
       });
 
-      if (!res.ok) throw new Error("Failed to send");
+      if (!res.ok) {
+        let errorMsg = "Failed to send message. Please try again.";
+        try {
+          const errBody = await res.json();
+          if (errBody.error) {
+            errorMsg = errBody.retryable
+              ? `${errBody.error} — try again in a moment.`
+              : errBody.error;
+          }
+        } catch {}
+        throw new Error(errorMsg);
+      }
 
       const contentType = res.headers.get("content-type") || "";
 
@@ -220,12 +231,13 @@ export default function Feed() {
       }
     } catch (e) {
       console.error("Send error:", e);
+      const errorContent = e instanceof Error ? e.message : "Failed to send message. Please try again.";
       setMessages((prev) => [
         ...prev,
         {
           id: `error-${Date.now()}`,
           role: "system",
-          content: "Failed to send message. Please try again.",
+          content: errorContent,
           createdAt: new Date().toISOString(),
         },
       ]);

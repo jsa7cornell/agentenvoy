@@ -7,6 +7,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { getAvailableSlots } from "@/lib/calendar";
 import { generateCode } from "@/lib/utils";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
+import { sanitizeHistory, roleSummary } from "@/lib/conversation";
 
 const CHANNEL_SYSTEM = `You are Envoy, the user's scheduling agent. You operate in their feed — a chat interface where scheduling threads appear as inline cards.
 
@@ -146,31 +147,34 @@ export async function POST(req: NextRequest) {
     take: 50,
   });
 
-  // Build conversation history for the AI. Filter out system messages (action results)
-  // and merge consecutive same-role messages to satisfy the alternating-turns requirement.
-  const filtered = history
-    .filter(m => m.role === "user" || m.role === "envoy")
-    .map(m => ({
-      role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
-      content: m.content,
-    }));
-  const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
-  for (const msg of filtered) {
-    const prev = messages[messages.length - 1];
-    if (prev && prev.role === msg.role) {
-      // Merge consecutive same-role messages
-      prev.content += "\n" + msg.content;
-    } else {
-      messages.push({ ...msg });
-    }
+  // Sanitize history for the Anthropic API (filter system messages, merge consecutive turns)
+  const { messages, warnings } = sanitizeHistory(
+    history.map(m => ({ role: m.role, content: m.content })),
+    ["envoy", "assistant"]
+  );
+  if (warnings.length > 0) {
+    console.warn(`[channel/chat] History sanitized | userId=${user.id} | ${warnings.join("; ")}`);
   }
 
   // Generate response
-  const { text } = await generateText({
-    model: anthropic("claude-sonnet-4-5"),
-    system: CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n"),
-    messages,
-  });
+  let text: string;
+  try {
+    const result = await generateText({
+      model: anthropic("claude-sonnet-4-5"),
+      system: CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n"),
+      messages,
+    });
+    text = result.text;
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error(
+      `[channel/chat] AI call failed | userId=${user.id} | messageCount=${messages.length} | roles=${roleSummary(messages)} | error=${err.message}`
+    );
+    return NextResponse.json(
+      { error: "AI service temporarily unavailable", detail: err.message, retryable: true },
+      { status: 502 }
+    );
+  }
 
   // --- Parse and execute [ACTION] blocks ---
   const actions = parseActions(text);
