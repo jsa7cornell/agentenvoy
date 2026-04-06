@@ -160,7 +160,7 @@ export async function POST(req: NextRequest) {
   let text: string;
   try {
     const result = await generateText({
-      model: anthropic("claude-sonnet-4-5"),
+      model: anthropic("claude-sonnet-4-6"),
       system: CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n"),
       messages,
     });
