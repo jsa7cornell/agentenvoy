@@ -74,6 +74,14 @@ export function sanitizeHistory(
     merged.unshift({ role: "user", content: "(conversation started)" });
   }
 
+  // Step 4: Ensure ends with "user" (Anthropic requires this)
+  if (merged.length > 0 && merged[merged.length - 1].role !== "user") {
+    warnings.push(`History ended with ${merged[merged.length - 1].role} — trimmed trailing assistant message(s)`);
+    while (merged.length > 0 && merged[merged.length - 1].role !== "user") {
+      merged.pop();
+    }
+  }
+
   return { messages: merged, warnings };
 }
 

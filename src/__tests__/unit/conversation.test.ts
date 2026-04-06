@@ -11,6 +11,7 @@ describe("sanitizeHistory", () => {
       { role: "envoy", content: "Hi there" },
       { role: "guest", content: "I'm available Tuesday" },
       { role: "administrator", content: "Let me check" },
+      { role: "user", content: "Thanks" },
     ];
     const { messages } = sanitizeHistory(raw);
     expect(messages.map((m) => m.role)).toEqual([
@@ -18,6 +19,7 @@ describe("sanitizeHistory", () => {
       "assistant",
       "user",
       "assistant",
+      "user",
     ]);
   });
 
@@ -27,11 +29,13 @@ describe("sanitizeHistory", () => {
       { role: "system", content: "✓ Archived 3 sessions" },
       { role: "envoy", content: "Done!" },
       { role: "host_note", content: "Internal note" },
+      { role: "user", content: "Thanks" },
     ];
     const { messages } = sanitizeHistory(raw, ["envoy", "assistant"]);
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(3);
     expect(messages[0]).toEqual({ role: "user", content: "Archive my sessions" });
     expect(messages[1]).toEqual({ role: "assistant", content: "Done!" });
+    expect(messages[2]).toEqual({ role: "user", content: "Thanks" });
   });
 
   it("merges consecutive same-role messages", () => {
@@ -40,9 +44,10 @@ describe("sanitizeHistory", () => {
       { role: "envoy", content: "Hi" },
       { role: "system", content: "✓ Action done" }, // filtered out
       { role: "envoy", content: "What else?" }, // would be consecutive with "Hi"
+      { role: "user", content: "Nothing" },
     ];
     const { messages, warnings } = sanitizeHistory(raw, ["envoy", "assistant"]);
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(3);
     expect(messages[1].content).toBe("Hi\nWhat else?");
     expect(warnings.some((w) => w.includes("Merged"))).toBe(true);
   });
@@ -53,9 +58,10 @@ describe("sanitizeHistory", () => {
       { role: "envoy", content: "" },
       { role: "envoy", content: "   " },
       { role: "envoy", content: "Real response" },
+      { role: "user", content: "Ok" },
     ];
     const { messages, warnings } = sanitizeHistory(raw, ["envoy", "assistant"]);
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(3);
     expect(messages[1].content).toBe("Real response");
     expect(warnings.filter((w) => w.includes("Dropped empty")).length).toBe(2);
   });
@@ -83,14 +89,39 @@ describe("sanitizeHistory", () => {
       { role: "envoy", content: "You have 3 meetings today." },
       { role: "system", content: "✓ Updated status" },
       { role: "envoy", content: "Anything else?" },
+      { role: "user", content: "No thanks" },
     ];
     const { messages } = sanitizeHistory(raw, ["envoy", "assistant"]);
     // Verify alternating pattern
     for (let i = 1; i < messages.length; i++) {
       expect(messages[i].role).not.toBe(messages[i - 1].role);
     }
-    // The two envoy messages after the second system message should be merged
-    expect(messages[messages.length - 1].content).toContain("Anything else?");
+    // Must end with user
+    expect(messages[messages.length - 1].role).toBe("user");
+  });
+
+  it("trims trailing assistant messages so history ends with user", () => {
+    const raw = [
+      { role: "user", content: "Hello" },
+      { role: "envoy", content: "Hi there" },
+      { role: "user", content: "Archive my sessions" },
+      { role: "envoy", content: "Done!" },
+    ];
+    const { messages, warnings } = sanitizeHistory(raw, ["envoy", "assistant"]);
+    expect(messages[messages.length - 1].role).toBe("user");
+    expect(messages).toHaveLength(3); // user, assistant, user (trailing assistant trimmed)
+    expect(warnings.some((w) => w.includes("ended with"))).toBe(true);
+  });
+
+  it("handles history that is only assistant messages", () => {
+    const raw = [
+      { role: "envoy", content: "Welcome!" },
+      { role: "envoy", content: "How can I help?" },
+    ];
+    const { messages } = sanitizeHistory(raw, ["envoy", "assistant"]);
+    // Merged to 1 assistant, prepend user, trim trailing assistant → just synthetic user
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toEqual({ role: "user", content: "(conversation started)" });
   });
 
   it("handles empty history", () => {
@@ -112,9 +143,11 @@ describe("sanitizeHistory", () => {
     const raw = [
       { role: "user", content: "Hi" },
       { role: "coordinator", content: "Hello" },
+      { role: "user", content: "Thanks" },
     ];
     const { messages } = sanitizeHistory(raw, ["coordinator"]);
     expect(messages[1].role).toBe("assistant");
+    expect(messages[2].role).toBe("user");
   });
 });
 

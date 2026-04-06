@@ -141,12 +141,13 @@ export async function POST(req: NextRequest) {
   });
   contextParts.push(`Current time: ${timeStr}`);
 
-  // Get conversation history
+  // Get conversation history (most recent 50, then reverse to chronological order)
   const history = await prisma.channelMessage.findMany({
     where: { channelId: channel.id },
-    orderBy: { createdAt: "asc" },
+    orderBy: { createdAt: "desc" },
     take: 50,
   });
+  history.reverse();
 
   // Sanitize history for the Anthropic API (filter system messages, merge consecutive turns)
   const { messages, warnings } = sanitizeHistory(
