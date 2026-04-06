@@ -90,7 +90,7 @@ export async function parsePreferences(
   userPrompt: string
 ): Promise<Record<string, unknown>> {
   const { text } = await generateText({
-    model: anthropic("claude-sonnet-4-6"),
+    model: anthropic("claude-sonnet-4-5"),
     system: `You parse natural language scheduling preferences into structured JSON. Extract:
 - preferredDays: array of day names or "any"
 - preferredTimes: array of time ranges like "morning", "afternoon", "9am-12pm"
@@ -127,7 +127,7 @@ export async function extractLearnings(
   hostName: string
 ): Promise<{ persistent: string; situational: string }> {
   const { text } = await generateText({
-    model: anthropic("claude-sonnet-4-6"),
+    model: anthropic("claude-sonnet-4-5"),
     system: `You analyze completed scheduling negotiation transcripts to extract learnings about the host (${hostName}).
 
 You maintain two knowledge layers:

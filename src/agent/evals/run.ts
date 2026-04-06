@@ -201,7 +201,7 @@ async function main() {
 
     for (const evalCase of cases) {
       const modelId = model
-        ? model === "sonnet" ? "claude-sonnet-4-6"
+        ? model === "sonnet" ? "claude-sonnet-4-5"
         : model === "haiku" ? "claude-haiku-4-5-20251001"
         : model
         : undefined;
