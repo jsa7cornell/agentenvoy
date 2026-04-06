@@ -312,24 +312,31 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Append action results summary if any non-create_link actions executed
+  // If actions executed and AI didn't provide conversational text, build a summary
   if (actionResults.length > 0) {
     const summary = actionResults
       .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
       .join("\n");
-    // Save the action results as a system message
-    await prisma.channelMessage.create({
-      data: { channelId: channel.id, role: "system", content: summary },
-    });
+    if (!displayText) {
+      displayText = summary;
+    } else {
+      // Save action results as a separate system message
+      await prisma.channelMessage.create({
+        data: { channelId: channel.id, role: "system", content: summary },
+      });
+    }
   }
+
+  // Final fallback — never save or return empty content
+  const finalText = displayText || text || "Done.";
 
   // Save envoy response
   await prisma.channelMessage.create({
-    data: { channelId: channel.id, role: "envoy", content: displayText || text },
+    data: { channelId: channel.id, role: "envoy", content: finalText },
   });
 
   // Return as stream-compatible format (matching existing pattern)
-  const encoded = JSON.stringify(displayText || text);
+  const encoded = JSON.stringify(finalText);
   return new Response(`0:${encoded}\n`, {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
