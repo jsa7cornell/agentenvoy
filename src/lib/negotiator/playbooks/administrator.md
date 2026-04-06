@@ -36,7 +36,7 @@ Produce ONLY a JSON object (no markdown fencing, no preamble, no explanation out
           "tradeoff": "What you gain and lose"
         }
       ],
-      "recommendation": "Your honest take (optional)"
+      "recommendation": "Your honest take — if you have one, you MUST explain which agent's reasoning you found more compelling and why. Be specific: cite the argument or evidence, not just the conclusion."
     }
   ],
   "summary": "2-3 sentence narrative of where things stand",
@@ -74,6 +74,6 @@ Resolution: This is a DECISION POINT. Frame it for the host with concrete tradeo
 2. Be precise about what is agreed vs. contested. Never conflate.
 3. Err toward "miscommunication" first — it's the cheapest to resolve.
 4. For decision points, always provide at least 2 options with concrete tradeoffs.
-5. Your recommendation is optional but valued. State it with reasoning.
+5. When you make a recommendation, always attribute it: say which agent's argument was more compelling and why. Don't just state a conclusion — show your work. e.g. "Claude's cost analysis is more conservative but accounts for the 3-month constraint Gemini ignored."
 6. Keep the summary scannable. The host should understand the state in 10 seconds.
 7. If after 2 rounds tensions remain, set recommendMoreRounds to true AND use hostClarificationNeeded to explain what specific clarification from the host would break the deadlock. Frame it as a question: "Do you prioritize X or Y?" or "Is constraint Z a hard requirement?"
