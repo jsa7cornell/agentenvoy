@@ -340,6 +340,16 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         </button>
       </div>
 
+      {/* Synthesis phases — above research */}
+      {syntheses.map((s, i) => (
+        <PhaseSynthesis
+          key={i}
+          synthesis={s}
+          round={i + 1}
+          prevSynthesis={i > 0 ? syntheses[i - 1] : undefined}
+        />
+      ))}
+
       {/* Research phase */}
       {(phase === "researching" || research.length > 0) && (
         <PhaseResearch
@@ -348,11 +358,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           streamingTexts={streamingTexts}
         />
       )}
-
-      {/* Synthesis phases */}
-      {syntheses.map((s, i) => (
-        <PhaseSynthesis key={i} synthesis={s} round={i + 1} />
-      ))}
 
       {/* Awaiting decision */}
       {phase === "awaiting-decision" && latestSynthesis && (

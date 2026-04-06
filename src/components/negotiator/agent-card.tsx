@@ -8,6 +8,12 @@ import {
   MODEL_OPTIONS,
 } from "@/lib/negotiator/types";
 
+const PROVIDER_NAMES: Record<ModelProvider, string> = {
+  anthropic: "Claude",
+  google: "Gemini",
+  openai: "GPT",
+};
+
 interface AgentCardProps {
   agent: AgentConfig;
   index: number;
@@ -51,16 +57,6 @@ export function AgentCard({
         )}
       </div>
 
-      {/* Name */}
-      <input
-        type="text"
-        value={agent.name}
-        onChange={(e) => onChange({ ...agent, name: e.target.value })}
-        placeholder="Agent name (e.g. Claude, Gemini)"
-        disabled={disabled}
-        className="w-full bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50"
-      />
-
       {/* Provider + Model row */}
       <div className="flex gap-2">
         <select
@@ -71,6 +67,7 @@ export function AgentCard({
               ...agent,
               provider,
               model: DEFAULT_MODELS[provider],
+              name: PROVIDER_NAMES[provider],
             });
           }}
           disabled={disabled}
