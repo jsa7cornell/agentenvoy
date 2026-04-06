@@ -21,5 +21,10 @@ GOOGLE_CLIENT_SECRET=op://Secrets/GOOGLE_CLIENT_SECRET/credential
 # ─── Resend ────────────────────────────────────────────────
 RESEND_API_KEY=op://Secrets/AGENTENVOY_RESEND_API_KEY/credential
 
+# ─── Negotiator (multi-agent negotiation tool) ────────────
+NEGOTIATOR_ANTHROPIC_API_KEY=op://Secrets/NEGOTIATOR_ANTHROPIC_API_KEY/credential
+NEGOTIATOR_GOOGLE_AI_API_KEY=op://Secrets/NEGOTIATOR_GOOGLE_AI_API_KEY/credential
+NEGOTIATOR_OPENAI_API_KEY=op://Secrets/NEGOTIATOR_OPENAI_API_KEY/credential
+
 # ─── Dev Auth (non-secret, dev-only) ──────────────────────
 DEV_AUTH_SECRET=dev-test-secret-local-only
