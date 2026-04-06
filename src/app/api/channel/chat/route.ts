@@ -146,10 +146,24 @@ export async function POST(req: NextRequest) {
     take: 50,
   });
 
-  const messages = history.map(m => ({
-    role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
-    content: m.content,
-  }));
+  // Build conversation history for the AI. Filter out system messages (action results)
+  // and merge consecutive same-role messages to satisfy the alternating-turns requirement.
+  const filtered = history
+    .filter(m => m.role === "user" || m.role === "envoy")
+    .map(m => ({
+      role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+      content: m.content,
+    }));
+  const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
+  for (const msg of filtered) {
+    const prev = messages[messages.length - 1];
+    if (prev && prev.role === msg.role) {
+      // Merge consecutive same-role messages
+      prev.content += "\n" + msg.content;
+    } else {
+      messages.push({ ...msg });
+    }
+  }
 
   // Generate response
   const { text } = await generateText({
