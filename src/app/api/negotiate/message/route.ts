@@ -28,6 +28,7 @@ function stripStatusUpdate(content: string): string {
 // POST /api/negotiate/message
 // Send a message in a negotiation session and get agent response (streaming)
 export async function POST(req: NextRequest) {
+  try {
   const body = await req.json();
   const { sessionId, content, guestEmail } = body;
 
@@ -254,4 +255,12 @@ export async function POST(req: NextRequest) {
       "Cache-Control": "no-cache",
     },
   });
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error(`[negotiate/message] Unhandled error: ${err.message}`, err.stack);
+    return new Response(
+      JSON.stringify({ error: "Something went wrong", detail: err.message, retryable: true }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
 }

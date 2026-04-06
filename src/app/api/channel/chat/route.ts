@@ -53,6 +53,7 @@ Rules:
 TONE: Conversational, efficient, no filler. You know the user's calendar — reference it naturally.`;
 
 export async function POST(req: NextRequest) {
+  try {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -340,4 +341,12 @@ export async function POST(req: NextRequest) {
   return new Response(`0:${encoded}\n`, {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error(`[channel/chat] Unhandled error: ${err.message}`, err.stack);
+    return NextResponse.json(
+      { error: "Something went wrong", detail: err.message, retryable: true },
+      { status: 500 }
+    );
+  }
 }
