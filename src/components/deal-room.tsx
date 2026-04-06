@@ -80,8 +80,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     text: string;
     proposal: { dateTime: string; duration: number; format: string; location: string | null; timezone?: string } | null;
   } {
-    // Strip STATUS_UPDATE blocks (should already be stripped server-side, but belt-and-suspenders)
-    const cleaned = content.replace(/\s*\[STATUS_UPDATE\].*?\[\/STATUS_UPDATE\]\s*/g, "");
+    // Strip STATUS_UPDATE and ACTION blocks (should already be stripped server-side, but belt-and-suspenders)
+    const cleaned = content
+      .replace(/\s*\[STATUS_UPDATE\].*?\[\/STATUS_UPDATE\]\s*/g, "")
+      .replace(/\s*\[ACTION\].*?\[\/ACTION\]\s*/g, "");
     const match = cleaned.match(
       /\[CONFIRMATION_PROPOSAL\]([^\[]*)\[\/CONFIRMATION_PROPOSAL\]/
     );

@@ -6,6 +6,7 @@ import type { CalendarContext } from "@/lib/calendar";
 import { computeThreadStatus } from "@/lib/thread-status";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 
 const VALID_STATUSES = ["active", "proposed", "cancelled", "escalated"];
 
@@ -146,6 +147,7 @@ export async function POST(req: NextRequest) {
   // Build agent context
   const context: AgentContext = {
     role: session.type === "calendar" ? "coordinator" : "administrator",
+    sessionId,
     hostName: session.host.name || "the host",
     hostPreferences:
       (session.host.preferences as Record<string, unknown>) || {},
@@ -166,11 +168,20 @@ export async function POST(req: NextRequest) {
   const { generateAgentResponse } = await import("@/agent/administrator");
   const responseText = await generateAgentResponse(context);
 
-  // Parse and apply status update if present
-  const statusUpdate = parseStatusUpdate(responseText);
-  const displayText = stripStatusUpdate(responseText);
+  // Parse and execute [ACTION] blocks
+  const actions = parseActions(responseText);
+  if (actions.length > 0) {
+    await executeActions(actions, session.hostId, { sessionId });
+  }
 
-  // Save the response (stripped of status block)
+  // Strip all structured blocks from the display text
+  let displayText = stripActionBlocks(responseText);
+
+  // Parse and apply status update if present
+  const statusUpdate = parseStatusUpdate(displayText);
+  displayText = stripStatusUpdate(displayText);
+
+  // Save the response (stripped of all blocks)
   await prisma.message.create({
     data: { sessionId, role: "administrator", content: displayText },
   });
@@ -205,7 +216,7 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
-      // Send in AI SDK text stream format (stripped of status block)
+      // Send in AI SDK text stream format (stripped of all blocks)
       controller.enqueue(encoder.encode(`0:${JSON.stringify(displayText)}\n`));
       controller.close();
     },

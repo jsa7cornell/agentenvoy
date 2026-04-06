@@ -6,13 +6,14 @@ import { generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { getAvailableSlots } from "@/lib/calendar";
 import { generateCode } from "@/lib/utils";
+import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 
 const CHANNEL_SYSTEM = `You are Envoy, the user's scheduling agent. You operate in their feed — a chat interface where scheduling threads appear as inline cards.
 
 CORE BEHAVIOR:
 1. Create scheduling threads when the user describes a meeting they want to set up
 2. Give status updates on active threads when asked
-3. Take actions on existing threads ("push Sarah to Wednesday", "cancel the Noah meeting")
+3. Take actions on existing threads ("archive the Bryan meeting", "cancel the Noah meeting", "change Sarah's meeting to video")
 4. Be contextual — reference the user's calendar, active threads, and preferences
 
 CREATING THREADS:
@@ -24,6 +25,29 @@ Then emit an action block:
 
 IMPORTANT — email is OPTIONAL. The inviteeName is the only required field. Do NOT ask for email unless the user wants Envoy to send the invite directly. If the user just says "set up a meeting with Bryan", create the thread with just the name — they can share the link themselves.
 If the user provides an email, include "inviteeEmail" in the action block. If not, omit it.
+
+ACTIONS ON EXISTING THREADS:
+When the user asks you to DO something to an existing thread (archive, cancel, change format, etc.), include an action block at the END of your message:
+
+[ACTION]{"action":"archive","params":{"sessionId":"SESSION_ID"}}[/ACTION]
+
+Available actions:
+- archive: Archive a session → {"action":"archive","params":{"sessionId":"..."}}
+- archive_bulk: Archive multiple → {"action":"archive_bulk","params":{"filter":"unconfirmed"}} (filters: "unconfirmed", "expired", "cancelled", "all")
+- unarchive: Restore archived → {"action":"unarchive","params":{"sessionId":"..."}}
+- cancel: Cancel a meeting → {"action":"cancel","params":{"sessionId":"...","reason":"..."}}
+- update_format: Change format → {"action":"update_format","params":{"sessionId":"...","format":"video"}}
+- update_time: Propose new time → {"action":"update_time","params":{"sessionId":"...","dateTime":"...","timezone":"..."}}
+- update_location: Change location → {"action":"update_location","params":{"sessionId":"...","location":"..."}}
+- create_link: Create a new invite → {"action":"create_link","params":{"inviteeName":"...","topic":"...","format":"...","duration":30}}
+
+Rules:
+- Always include the action block when the user's intent is clear
+- You can include MULTIPLE action blocks in one message
+- Always confirm what you're about to do in your conversational text BEFORE the action block
+- If the user's intent is ambiguous, ask for clarification instead of acting
+- Use session IDs from the "Active sessions" context below
+- For create_link, use the action block above (not the agentenvoy-action format) — both work but this is preferred for new links
 
 TONE: Conversational, efficient, no filler. You know the user's calendar — reference it naturally.`;
 
@@ -81,21 +105,39 @@ export async function POST(req: NextRequest) {
     contextParts.push("Calendar: Not connected");
   }
 
-  // Active threads context
-  const activeThreads = await prisma.negotiationSession.findMany({
-    where: { hostId: user.id, status: { in: ["active", "agreed"] } },
-    include: { link: true, _count: { select: { messages: true } } },
+  // Active sessions context — with IDs so the AI can reference them in actions
+  const activeSessions = await prisma.negotiationSession.findMany({
+    where: { hostId: user.id, archived: false },
+    include: { link: { select: { inviteeName: true, inviteeEmail: true, topic: true } } },
     orderBy: { updatedAt: "desc" },
-    take: 10,
+    take: 20,
   });
-  if (activeThreads.length > 0) {
-    const threadList = activeThreads.map(t =>
-      `- "${t.title || 'Untitled'}" (${t.statusLabel || t.status}, ${t._count.messages} messages)`
+  if (activeSessions.length > 0) {
+    const sessionList = activeSessions.map(s =>
+      `- "${s.title || 'Untitled'}" (ID: ${s.id}) — status: ${s.status}, guest: ${s.link.inviteeName || s.guestEmail || "unknown"}${s.statusLabel ? `, note: ${s.statusLabel}` : ""}`
     ).join('\n');
-    contextParts.push(`Active threads:\n${threadList}`);
+    contextParts.push(`Active sessions:\n${sessionList}\n\nYou can execute actions on these sessions using [ACTION] blocks.`);
   } else {
-    contextParts.push("Active threads: None");
+    contextParts.push("Active sessions: None");
   }
+
+  // Timezone reference
+  const hostPrefs = user.preferences as Record<string, unknown> | null;
+  const tz =
+    (hostPrefs?.timezone as string) ??
+    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
+    "America/Los_Angeles";
+  const now = new Date();
+  const timeStr = now.toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+    timeZone: tz,
+  });
+  contextParts.push(`Current time: ${timeStr}`);
 
   // Get conversation history
   const history = await prisma.channelMessage.findMany({
@@ -116,14 +158,24 @@ export async function POST(req: NextRequest) {
     messages,
   });
 
-  // Parse for agentenvoy-action blocks
+  // --- Parse and execute [ACTION] blocks ---
+  const actions = parseActions(text);
+  let actionResults: Awaited<ReturnType<typeof executeActions>> = [];
+  if (actions.length > 0) {
+    actionResults = await executeActions(actions, user.id, { meetSlug: user.meetSlug || undefined });
+  }
+
+  // Strip [ACTION] blocks from displayed text
+  let displayText = stripActionBlocks(text);
+
+  // --- Legacy: parse agentenvoy-action blocks (create_thread) ---
   const actionRegex = /```agentenvoy-action\s*\n?([\s\S]*?)\n?```/g;
-  const actionMatch = actionRegex.exec(text);
+  const actionMatch = actionRegex.exec(displayText);
 
-  // Strip action blocks from the visible message
-  const displayText = text.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
+  // Strip legacy action blocks from the visible message
+  displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
 
-  // Process action if found
+  // Process legacy create_thread action if found
   if (actionMatch) {
     try {
       const action = JSON.parse(actionMatch[1]);
@@ -204,11 +256,56 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(responsePayload);
       }
     } catch (e) {
-      console.error("Failed to parse/execute action:", e);
+      console.error("Failed to parse/execute legacy action:", e);
     }
   }
 
-  // No action — save envoy response as-is
+  // Check if create_link action was among the new-style actions
+  const createLinkResult = actionResults.find(
+    (r) => r.success && r.data?.url
+  );
+  if (createLinkResult?.data) {
+    const d = createLinkResult.data;
+    // Save envoy response with threadId for thread card rendering
+    await prisma.channelMessage.create({
+      data: {
+        channelId: channel.id,
+        role: "envoy",
+        content: displayText || createLinkResult.message,
+        threadId: d.sessionId as string,
+      },
+    });
+
+    return NextResponse.json({
+      message: displayText || createLinkResult.message,
+      shareNote: `Here's the link to share: ${d.url}`,
+      thread: {
+        id: d.sessionId,
+        title: d.title,
+        status: "active",
+        statusLabel: `Waiting for invitee`,
+        url: d.url,
+        code: d.code,
+        link: {
+          slug: user.meetSlug || "",
+          code: d.code,
+        },
+      },
+    });
+  }
+
+  // Append action results summary if any non-create_link actions executed
+  if (actionResults.length > 0) {
+    const summary = actionResults
+      .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
+      .join("\n");
+    // Save the action results as a system message
+    await prisma.channelMessage.create({
+      data: { channelId: channel.id, role: "system", content: summary },
+    });
+  }
+
+  // Save envoy response
   await prisma.channelMessage.create({
     data: { channelId: channel.id, role: "envoy", content: displayText || text },
   });

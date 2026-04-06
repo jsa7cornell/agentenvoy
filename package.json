@@ -8,6 +8,7 @@
     "start": "next start",
     "check": "tsc --noEmit && next lint",
     "lint": "next lint",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:e2e": "vitest run --config vitest.config.ts",
     "prepare": "husky"
   },

@@ -207,6 +207,7 @@ export default function Feed() {
 
         const displayContent = content
           .replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "")
+          .replace(/\s*\[ACTION\].*?\[\/ACTION\]\s*/g, "")
           .trim();
 
         const envoyMsg: ChannelMsg = {

@@ -40,6 +40,7 @@ export function getModelForDomain(domain: DomainType): string {
 
 export interface ComposeOptions {
   domain: DomainType;
+  sessionId?: string;
   hostName: string;
   hostPreferences?: Record<string, unknown>;
   guestName?: string;
@@ -201,8 +202,27 @@ function formatRules(rules: Record<string, unknown>): string {
 function buildSessionContext(options: ComposeOptions): string {
   const parts: string[] = [];
 
+  if (options.sessionId) parts.push(`Session ID: ${options.sessionId}`);
   if (options.role) parts.push(`Role: ${options.role}`);
   parts.push(`Host: ${options.hostName}`);
+
+  // Timezone quick reference
+  const tz =
+    (options.hostPreferences?.explicit as Record<string, unknown> | undefined)?.timezone as string | undefined ??
+    (options.hostPreferences?.timezone as string | undefined) ??
+    "America/Los_Angeles";
+  const now = new Date();
+  const currentTimeStr = now.toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+    timeZone: tz,
+  });
+  parts.push(`Current time: ${currentTimeStr}`);
+  parts.push(`Quick reference: PDT = UTC-7, EDT = UTC-4, CDT = UTC-5, MDT = UTC-6, BST = UTC+1, JST = UTC+9`);
 
   if (options.isGroupEvent) {
     const participants = options.eventParticipants || [];

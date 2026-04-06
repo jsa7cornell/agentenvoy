@@ -8,6 +8,7 @@ export type AgentRole = "coordinator" | "administrator";
 
 export interface AgentContext {
   role: AgentRole;
+  sessionId?: string;
   hostName: string;
   hostPreferences?: Record<string, unknown>;
   guestName?: string;
@@ -37,6 +38,7 @@ function buildComposeOptions(context: AgentContext) {
   const domain = getDomain(context);
   return {
     domain,
+    sessionId: context.sessionId,
     hostName: context.hostName,
     hostPreferences: context.hostPreferences,
     guestName: context.guestName,
