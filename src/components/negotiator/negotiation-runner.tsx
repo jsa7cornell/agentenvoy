@@ -102,8 +102,12 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           const agentTokens = 0;
 
           if (reader) {
+            const STREAM_TIMEOUT = 30_000; // 30s with no data = stalled
             while (true) {
-              const { done, value } = await reader.read();
+              const timeout = new Promise<{ done: true; value: undefined }>((_, reject) =>
+                setTimeout(() => reject(new Error(`${agent.name} timed out (no data for 30s)`)), STREAM_TIMEOUT)
+              );
+              const { done, value } = await Promise.race([reader.read(), timeout]);
               if (done) break;
 
               const chunk = decoder.decode(value, { stream: true });

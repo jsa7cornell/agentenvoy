@@ -44,13 +44,41 @@ ${agentContext ? `## Your Private Context (only you and the Administrator see th
       maxOutputTokens: 4096,
     });
 
-    return result.toTextStreamResponse();
+    // Wrap the stream so async provider errors (bad key, rate limit, etc.)
+    // surface as a text chunk the client can display instead of silently stalling.
+    const originalStream = result.toTextStreamResponse();
+    const reader = originalStream.body!.getReader();
+
+    const wrapped = new ReadableStream({
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            controller.close();
+          } else {
+            controller.enqueue(value);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[negotiator/research] stream error for ${agentName} (${provider}/${model}):`, msg);
+          controller.enqueue(new TextEncoder().encode(`\n\n[Error: ${msg}]`));
+          controller.close();
+        }
+      },
+      cancel() {
+        reader.cancel();
+      },
+    });
+
+    return new Response(wrapped, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[negotiator/research] ${agentName} (${provider}/${model}) error:`, message);
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
+    return new Response(`[Error: ${message}]`, {
+      status: 200,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   }
 }
