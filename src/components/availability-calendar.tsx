@@ -2,18 +2,25 @@
 
 import { useState } from "react";
 
+interface Slot {
+  start: string;
+  end: string;
+  score?: number; // 0 = explicitly free (green), 1 = open business hours (yellow)
+}
+
 interface AvailabilityCalendarProps {
-  slotsByDay: Record<string, Array<{ start: string; end: string }>>;
+  slotsByDay: Record<string, Slot[]>;
   timezone: string;
 }
 
-function getSlotColor(count: number, isPast: boolean) {
+function getSlotColor(slots: Slot[], isPast: boolean) {
   if (isPast) return "bg-zinc-900 text-zinc-700";
-  if (count === 0) return "bg-zinc-800/50 text-zinc-600";
-  if (count <= 2) return "bg-amber-900/50 text-amber-300";
-  if (count <= 4) return "bg-yellow-900/50 text-yellow-300";
-  if (count <= 6) return "bg-lime-900/50 text-lime-300";
-  return "bg-green-900/50 text-green-300";
+  if (slots.length === 0) return "bg-zinc-800/50 text-zinc-600";
+  // If any slot is score 0 (explicitly volunteered), show green
+  const hasScore0 = slots.some((s) => s.score === 0);
+  if (hasScore0) return "bg-green-900/50 text-green-300";
+  // Score 1 (standard open hours) = yellow
+  return "bg-amber-900/50 text-amber-300";
 }
 
 const DAY_HEADERS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -92,11 +99,11 @@ export function AvailabilityCalendar({
       <div className="grid grid-cols-7 gap-1">
         {cells.map((cell, i) => {
           if (!cell) return <div key={`empty-${i}`} />;
-          const count = (slotsByDay[cell.dateStr] || []).length;
+          const daySlots = slotsByDay[cell.dateStr] || [];
           const isPast = cell.dateStr < todayStr;
           const isToday = cell.dateStr === todayStr;
           const isSelected = cell.dateStr === selectedDay;
-          const colorClass = getSlotColor(count, isPast);
+          const colorClass = getSlotColor(daySlots, isPast);
 
           return (
             <button
@@ -108,7 +115,7 @@ export function AvailabilityCalendar({
                 ${colorClass}
                 ${isToday ? "ring-1 ring-indigo-500" : ""}
                 ${isSelected ? "ring-2 ring-white" : ""}
-                ${!isPast && count > 0 ? "hover:ring-1 hover:ring-zinc-500 cursor-pointer" : "cursor-default"}
+                ${!isPast && daySlots.length > 0 ? "hover:ring-1 hover:ring-zinc-500 cursor-pointer" : "cursor-default"}
               `}
             >
               {cell.day}

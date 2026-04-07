@@ -230,8 +230,17 @@ export async function getCalendarContext(
   });
   dedupedEvents.sort((a, b) => a.start.getTime() - b.start.getTime());
 
-  // Cap at ~50 events (next 7 days detailed, summarize further out)
-  const capped = dedupedEvents.slice(0, 50);
+  // Prioritize relevant events: filter declined and transparent to the end
+  // so the cap doesn't silently drop important week-2 events
+  const relevant = dedupedEvents.filter(
+    (ev) => ev.responseStatus !== "declined" && !ev.isTransparent
+  );
+  const context = dedupedEvents.filter(
+    (ev) => ev.responseStatus === "declined" || ev.isTransparent
+  );
+  // Keep up to 80 relevant events + up to 20 context events
+  const capped = [...relevant.slice(0, 80), ...context.slice(0, 20)]
+    .sort((a, b) => a.start.getTime() - b.start.getTime());
 
   return {
     connected: true,
