@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { PhaseResearch } from "./phase-research";
 import { PhaseSynthesis } from "./phase-synthesis";
 import { DecisionInput } from "./decision-input";
 import { TranscriptExport } from "./transcript-export";
 import { SimpleMarkdown } from "./simple-markdown";
+import { NegotiatorLogo } from "./negotiator-logo";
 import { isOverBudget, budgetPercent } from "@/lib/negotiator/token-budget";
 import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
 import type {
@@ -360,6 +361,34 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     }
   }, [shareCode, sharing, config, research, syntheses, humanDecisions, hostClarifications, finalResponses, adminSummary, totalTokens, transcript]);
 
+  // ─── Auto-save when complete ────────────────────────────
+  // Silently persist results so a shareable URL always exists on completion
+  useEffect(() => {
+    if (phase !== "complete" || shareCode || sharing || !transcript) return;
+    setSharing(true);
+    fetch("/api/negotiator/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: config.question,
+        agents: config.agents,
+        research,
+        syntheses,
+        humanDecisions,
+        hostClarifications,
+        finalResponses,
+        adminSummary,
+        totalTokens,
+        transcript,
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => setShareCode(data.shareCode))
+      .catch(() => {/* non-blocking */})
+      .finally(() => setSharing(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
   // ─── Start the negotiation ─────────────────────────────
   const start = useCallback(() => {
     setPhase("idle");
@@ -393,8 +422,18 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
   return (
     <div className="space-y-6">
-      {/* Token budget bar + top actions */}
+      {/* Status bar with animated logo */}
       <div className="flex items-center gap-3">
+        <NegotiatorLogo
+          mode={
+            phase === "researching" || phase === "resolving" || phase === "finalizing" ? "debating"
+            : phase === "synthesizing" ? "synthesizing"
+            : phase === "complete" ? "complete"
+            : "idle"
+          }
+          size={32}
+          className="shrink-0 text-[var(--neg-text-muted)]"
+        />
         <div className="flex-1 h-2 rounded-full bg-[var(--neg-surface-2)] overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ${
@@ -418,25 +457,27 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         </button>
       </div>
 
-      {/* Share + transcript actions — shown as soon as there's content */}
-      {transcript && (
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={handleShare}
-            disabled={sharing || !!shareCode}
-            className="px-3 py-1.5 rounded border border-[var(--neg-accent)]/40 text-xs text-[var(--neg-accent)] hover:bg-[var(--neg-accent)]/10 transition disabled:opacity-50"
-          >
-            {sharing ? "Saving..." : shareCode ? "✓ Shared" : "Share Results"}
-          </button>
-          {shareCode && (
-            <a
-              href={`/negotiate/r/${shareCode}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-[var(--neg-text-muted)] hover:text-[var(--neg-accent)] underline underline-offset-2 transition"
-            >
-              {typeof window !== "undefined" ? `${window.location.origin}/negotiate/r/${shareCode}` : `/negotiate/r/${shareCode}`}
-            </a>
+      {/* Share bar — auto-appears when saved */}
+      {(transcript || shareCode) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-[var(--neg-surface-2)] border border-[var(--neg-border)] px-3 py-2">
+          {shareCode ? (
+            <>
+              <span className="text-xs text-[var(--neg-text-muted)]">Shareable link:</span>
+              <a
+                href={`/negotiate/r/${shareCode}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-[var(--neg-accent)] hover:underline font-medium"
+              >
+                {typeof window !== "undefined"
+                  ? `${window.location.origin}/negotiate/r/${shareCode}`
+                  : `/negotiate/r/${shareCode}`}
+              </a>
+            </>
+          ) : (
+            <span className="text-xs text-[var(--neg-text-muted)] italic">
+              {sharing ? "Saving..." : "Saving results..."}
+            </span>
           )}
           <div className="flex items-center gap-2 ml-auto">
             <TranscriptExport
@@ -526,26 +567,26 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         />
       )}
 
-      {/* Synthesizing spinner */}
+      {/* Synthesizing */}
       {phase === "synthesizing" && (
-        <div className="flex items-center gap-2 text-sm text-[var(--neg-text-muted)]">
-          <div className="w-2 h-2 rounded-full bg-[var(--neg-purple)] animate-pulse" />
+        <div className="flex items-center gap-3 text-sm text-[var(--neg-text-muted)]">
+          <NegotiatorLogo mode="synthesizing" size={28} />
           Administrator synthesizing positions...
         </div>
       )}
 
-      {/* Finalizing spinner */}
+      {/* Finalizing */}
       {phase === "finalizing" && (
-        <div className="flex items-center gap-2 text-sm text-[var(--neg-text-muted)]">
-          <div className="w-2 h-2 rounded-full bg-[var(--neg-accent)] animate-pulse" />
+        <div className="flex items-center gap-3 text-sm text-[var(--neg-text-muted)]">
+          <NegotiatorLogo mode="debating" size={28} />
           Collecting final agent responses...
         </div>
       )}
 
       {/* Resolving */}
       {phase === "resolving" && (
-        <div className="flex items-center gap-2 text-sm text-[var(--neg-text-muted)]">
-          <div className="w-2 h-2 rounded-full bg-[var(--neg-accent)] animate-pulse" />
+        <div className="flex items-center gap-3 text-sm text-[var(--neg-text-muted)]">
+          <NegotiatorLogo mode="debating" size={28} />
           Incorporating your decisions...
         </div>
       )}
