@@ -34,6 +34,7 @@ export function NegotiatorResultView({
   totalTokens,
   transcript,
   createdAt,
+  shareCode,
 }: NegotiatorResultViewProps) {
   // Cast JSON fields to proper types
   const research = rawResearch as unknown as ResearchResult[];
