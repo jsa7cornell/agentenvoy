@@ -328,39 +328,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     [config, humanDecisions, syntheses]
   );
 
-  // ─── Share results ─────────────────────────────────────
-  const handleShare = useCallback(async () => {
-    if (shareCode || sharing) return;
-    setSharing(true);
-    try {
-      const res = await fetch("/api/negotiator/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: config.question,
-          agents: config.agents,
-          research,
-          syntheses,
-          humanDecisions,
-          hostClarifications,
-          finalResponses,
-          adminSummary,
-          totalTokens,
-          transcript,
-        }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setShareCode(data.shareCode);
-      const url = `${window.location.origin}/negotiate/r/${data.shareCode}`;
-      await navigator.clipboard.writeText(url);
-    } catch {
-      // Non-blocking — share is optional
-    } finally {
-      setSharing(false);
-    }
-  }, [shareCode, sharing, config, research, syntheses, humanDecisions, hostClarifications, finalResponses, adminSummary, totalTokens, transcript]);
-
   // ─── Auto-save when complete ────────────────────────────
   // Silently persist results so a shareable URL always exists on completion
   useEffect(() => {
