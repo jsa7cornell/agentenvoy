@@ -35,6 +35,7 @@ ${sharedContext ? `## Shared Context (all agents see this)\n${sharedContext}` : 
 ${agentContext ? `## Your Private Context (only you and the Administrator see this)\n${agentContext}` : ""}`;
 
   try {
+    console.log(`[negotiator/research] Starting ${agentName} (${provider}/${model})`);
     const modelInstance = getModel(provider, model, apiKey || undefined);
 
     const result = streamText({

@@ -228,25 +228,11 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           return;
         }
 
-        const needsInput =
-          synthesis.decisionPoints.length > 0 ||
-          synthesis.hostClarificationNeeded;
-
         if (synthesis.isResolved) {
           setPhase("complete");
-        } else if (needsInput) {
-          setPhase("awaiting-decision");
-        } else if (currentRound < config.maxRounds) {
-          setRound(currentRound + 1);
-          await runSynthesis(
-            researchResults,
-            currentRound + 1,
-            [...priorAgreements, ...synthesis.agreements],
-            decisions,
-            clarifications
-          );
         } else {
-          setPhase("complete");
+          // Always pause for user input — let them respond to tensions or finalize
+          setPhase("awaiting-decision");
         }
       } catch (err) {
         setError(

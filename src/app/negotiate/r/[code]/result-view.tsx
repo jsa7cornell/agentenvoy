@@ -41,6 +41,19 @@ export function NegotiatorResultView({
 
   return (
     <div className="space-y-6">
+      {/* Top CTA */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-[var(--neg-text-muted)]">
+          AgentNegotiator Result
+        </p>
+        <a
+          href="/negotiate"
+          className="text-sm px-4 py-1.5 rounded-lg border border-[var(--neg-accent)]/40 text-[var(--neg-accent)] hover:bg-[var(--neg-accent)]/10 transition"
+        >
+          Create your own &rarr;
+        </a>
+      </div>
+
       {/* Header */}
       <div>
         <h1 className="text-xl font-semibold text-[var(--neg-text)] mb-1">

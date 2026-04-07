@@ -16,21 +16,21 @@ export function getModel(
 ): LanguageModel {
   switch (provider) {
     case "anthropic": {
-      const client = createAnthropic({
-        apiKey: apiKey || process.env.NEGOTIATOR_ANTHROPIC_API_KEY || "",
-      });
+      const key = apiKey || process.env.NEGOTIATOR_ANTHROPIC_API_KEY;
+      if (!key) throw new Error("Missing NEGOTIATOR_ANTHROPIC_API_KEY");
+      const client = createAnthropic({ apiKey: key });
       return client(modelId) as unknown as LanguageModel;
     }
     case "google": {
-      const client = createGoogleGenerativeAI({
-        apiKey: apiKey || process.env.NEGOTIATOR_GOOGLE_AI_API_KEY || "",
-      });
+      const key = apiKey || process.env.NEGOTIATOR_GOOGLE_AI_API_KEY;
+      if (!key) throw new Error("Missing NEGOTIATOR_GOOGLE_AI_API_KEY");
+      const client = createGoogleGenerativeAI({ apiKey: key });
       return client(modelId) as unknown as LanguageModel;
     }
     case "openai": {
-      const client = createOpenAI({
-        apiKey: apiKey || process.env.NEGOTIATOR_OPENAI_API_KEY || "",
-      });
+      const key = apiKey || process.env.NEGOTIATOR_OPENAI_API_KEY;
+      if (!key) throw new Error("Missing NEGOTIATOR_OPENAI_API_KEY");
+      const client = createOpenAI({ apiKey: key });
       return client(modelId) as unknown as LanguageModel;
     }
     default:
