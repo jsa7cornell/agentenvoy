@@ -42,6 +42,8 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   const [error, setError] = useState("");
   const [finalResponses, setFinalResponses] = useState<FinalResponse[]>([]);
   const [adminSummary, setAdminSummary] = useState("");
+  const [shareCode, setShareCode] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
 
   // Streaming state
   const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
@@ -338,6 +340,39 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     [config, humanDecisions, syntheses]
   );
 
+  // ─── Share results ─────────────────────────────────────
+  const handleShare = useCallback(async () => {
+    if (shareCode || sharing) return;
+    setSharing(true);
+    try {
+      const res = await fetch("/api/negotiator/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: config.question,
+          agents: config.agents,
+          research,
+          syntheses,
+          humanDecisions,
+          hostClarifications,
+          finalResponses,
+          adminSummary,
+          totalTokens,
+          transcript,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setShareCode(data.shareCode);
+      const url = `${window.location.origin}/negotiate/r/${data.shareCode}`;
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Non-blocking — share is optional
+    } finally {
+      setSharing(false);
+    }
+  }, [shareCode, sharing, config, research, syntheses, humanDecisions, hostClarifications, finalResponses, adminSummary, totalTokens, transcript]);
+
   // ─── Start the negotiation ─────────────────────────────
   const start = useCallback(() => {
     setPhase("idle");
@@ -353,6 +388,8 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     setStreamingTexts({});
     setFinalResponses([]);
     setAdminSummary("");
+    setShareCode(null);
+    setSharing(false);
     runResearch();
   }, [runResearch]);
 
@@ -501,13 +538,29 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         </div>
       )}
 
-      {/* Complete or budget exceeded — show export */}
+      {/* Complete or budget exceeded — show export + share */}
       {(phase === "complete" || phase === "budget-exceeded") && transcript && (
-        <TranscriptExport
-          transcript={transcript}
-          tokensUsed={totalTokens}
-          tokenBudget={config.tokenBudget}
-        />
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 pt-4 border-t border-[var(--neg-border)]">
+            <button
+              onClick={handleShare}
+              disabled={sharing || !!shareCode}
+              className="px-4 py-2 rounded border border-[var(--neg-accent)]/40 text-sm text-[var(--neg-accent)] hover:bg-[var(--neg-accent)]/10 transition disabled:opacity-50"
+            >
+              {sharing ? "Saving..." : shareCode ? "Link copied!" : "Share Results"}
+            </button>
+            {shareCode && (
+              <span className="text-xs text-[var(--neg-text-muted)]">
+                {window.location.origin}/negotiate/r/{shareCode}
+              </span>
+            )}
+          </div>
+          <TranscriptExport
+            transcript={transcript}
+            tokensUsed={totalTokens}
+            tokenBudget={config.tokenBudget}
+          />
+        </div>
       )}
     </div>
   );

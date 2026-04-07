@@ -226,3 +226,20 @@ model ChannelMessage {
   @@index([channelId])
   @@index([threadId])
 }
+
+// NegotiatorResult: persisted results from the multi-agent negotiator tool
+model NegotiatorResult {
+  id                 String   @id @default(cuid())
+  shareCode          String   @unique
+  question           String   @db.Text
+  agents             Json     // AgentConfig[] minus apiKey
+  research           Json     // ResearchResult[]
+  syntheses          Json     // Synthesis[]
+  humanDecisions     Json     @default("[]")
+  hostClarifications Json     @default("[]")
+  finalResponses     Json     @default("[]")
+  adminSummary       String?  @db.Text
+  totalTokens        Int      @default(0)
+  transcript         String   @db.Text
+  createdAt          DateTime @default(now())
+}
