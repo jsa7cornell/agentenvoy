@@ -33,7 +33,7 @@ export function AgentCard({
 
   return (
     <div
-      className={`rounded-lg border ${providerColor} bg-[var(--neg-surface)] p-4 space-y-3`}
+      className={`rounded-lg border-2 ${providerColor} bg-[var(--neg-surface)] p-4 space-y-3 shadow-sm`}
     >
       <div className="flex items-center justify-between">
         <span className="text-xs text-[var(--neg-text-muted)] uppercase tracking-wider">
@@ -68,7 +68,7 @@ export function AgentCard({
             onChange({ ...agent, model, provider });
           }}
           disabled={disabled}
-          className="w-full bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded px-2 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50"
+          className="w-full bg-white border-2 border-[var(--neg-border)] rounded px-2 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50"
         >
           {(Object.entries(MODEL_OPTIONS) as Array<[ModelProvider, string[]]>).map(
             ([provider, models]) => (
@@ -95,7 +95,7 @@ export function AgentCard({
           placeholder="e.g. Focus on cost optimization. Assume a 3-month timeline."
           disabled={disabled}
           rows={2}
-          className="w-full bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
+          className="w-full bg-white border-2 border-[var(--neg-border)] rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/60 text-[var(--neg-text)]"
         />
       </div>
     </div>

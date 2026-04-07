@@ -81,14 +81,14 @@ export function NegotiationConfigPanel({
     <div className="space-y-6">
       {/* Question & Context */}
       <div>
-        <label className="block text-sm font-medium mb-1">What are you deciding? What context should all the agents have?</label>
+        <label className="block text-sm font-medium mb-1 text-[var(--neg-text)]">Describe your decision for the agents</label>
         <textarea
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           placeholder={"What should the agents debate and decide on? Include any relevant background, constraints, or requirements.\n\ne.g. 'What payment processor should we use for a new SaaS product? We expect $50k MRR within 6 months, need international card support, and have a 3-person engineering team.'"}
           disabled={disabled}
           rows={4}
-          className="w-full bg-[var(--neg-surface)] border border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
+          className="w-full bg-white border-2 border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/60 text-[var(--neg-text)] shadow-sm"
         />
       </div>
 
@@ -132,7 +132,7 @@ export function NegotiationConfigPanel({
                 placeholder="Your preferences, biases, private constraints..."
                 disabled={disabled}
                 rows={3}
-                className="w-full bg-[var(--neg-surface)] border border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
+                className="w-full bg-white border-2 border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/60 text-[var(--neg-text)] shadow-sm"
               />
             </div>
 
@@ -146,7 +146,7 @@ export function NegotiationConfigPanel({
                   value={tokenBudget}
                   onChange={(e) => setTokenBudget(Number(e.target.value))}
                   disabled={disabled}
-                  className="bg-[var(--neg-surface)] border border-[var(--neg-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50"
+                  className="bg-white border-2 border-[var(--neg-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 text-[var(--neg-text)] shadow-sm"
                 >
                   {BUDGET_STEPS.map((b) => (
                     <option key={b} value={b}>
@@ -163,7 +163,7 @@ export function NegotiationConfigPanel({
                   value={maxRounds}
                   onChange={(e) => setMaxRounds(Number(e.target.value))}
                   disabled={disabled}
-                  className="bg-[var(--neg-surface)] border border-[var(--neg-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50"
+                  className="bg-white border-2 border-[var(--neg-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 text-[var(--neg-text)] shadow-sm"
                 >
                   <option value={1}>1 round</option>
                   <option value={2}>2 rounds (recommended)</option>
@@ -190,7 +190,7 @@ export function NegotiationConfigPanel({
                       onChange={(e) => updateAgent(i, { ...agent, apiKey: e.target.value })}
                       placeholder="Leave empty to use server key"
                       disabled={disabled}
-                      className="w-full bg-[var(--neg-surface)] border border-[var(--neg-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 placeholder:text-[var(--neg-text-muted)]/50"
+                      className="w-full bg-white border-2 border-[var(--neg-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 placeholder:text-[var(--neg-text-muted)]/60 text-[var(--neg-text)] shadow-sm"
                     />
                   </div>
                 ))}

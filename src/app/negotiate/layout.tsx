@@ -15,19 +15,19 @@ export default function NegotiateLayout({
     <div
       className="min-h-screen"
       style={{
-        // Scoped CSS vars for negotiator UI — avoids conflicts with main app
-        "--neg-bg": "#0a0a0a",
-        "--neg-surface": "#141414",
-        "--neg-surface-2": "#1e1e1e",
-        "--neg-border": "#2a2a2a",
-        "--neg-text": "#e5e5e5",
-        "--neg-text-muted": "#888",
-        "--neg-accent": "#f97316",
-        "--neg-green": "#22c55e",
-        "--neg-yellow": "#eab308",
-        "--neg-red": "#ef4444",
-        "--neg-blue": "#3b82f6",
-        "--neg-purple": "#a855f7",
+        // Scoped CSS vars for negotiator UI — light mode
+        "--neg-bg": "#f9fafb",
+        "--neg-surface": "#ffffff",
+        "--neg-surface-2": "#f3f4f6",
+        "--neg-border": "#d1d5db",
+        "--neg-text": "#111827",
+        "--neg-text-muted": "#6b7280",
+        "--neg-accent": "#ea580c",
+        "--neg-green": "#16a34a",
+        "--neg-yellow": "#ca8a04",
+        "--neg-red": "#dc2626",
+        "--neg-blue": "#2563eb",
+        "--neg-purple": "#9333ea",
       } as React.CSSProperties}
     >
       {children}
