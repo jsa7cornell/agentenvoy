@@ -11,15 +11,14 @@ interface Slot {
 interface AvailabilityCalendarProps {
   slotsByDay: Record<string, Slot[]>;
   timezone: string;
+  onSelectSlot?: (formattedTime: string) => void; // Callback when guest clicks a time pill
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
   if (isPast) return "bg-zinc-900 text-zinc-700";
   if (slots.length === 0) return "bg-zinc-800/50 text-zinc-600";
-  // If any slot is score 0 (explicitly volunteered), show green
   const hasScore0 = slots.some((s) => s.score === 0);
   if (hasScore0) return "bg-green-900/50 text-green-300";
-  // Score 1 (standard open hours) = yellow
   return "bg-amber-900/50 text-amber-300";
 }
 
@@ -28,6 +27,7 @@ const DAY_HEADERS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 export function AvailabilityCalendar({
   slotsByDay,
   timezone,
+  onSelectSlot,
 }: AvailabilityCalendarProps) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
@@ -43,7 +43,6 @@ export function AvailabilityCalendar({
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
-  // Build grid cells
   const cells: Array<{ day: number; dateStr: string } | null> = [];
   for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) {
@@ -51,13 +50,34 @@ export function AvailabilityCalendar({
     cells.push({ day: d, dateStr });
   }
 
-  // Navigation: allow current month and next month only
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const canGoPrev = viewMonth > currentMonthStart;
   const canGoNext = viewMonth < nextMonthStart;
 
   const selectedSlots = selectedDay ? slotsByDay[selectedDay] || [] : [];
+
+  // Format a slot as a human-readable time proposal
+  const formatSlotMessage = (slot: Slot, dateStr: string) => {
+    const date = new Date(dateStr + "T12:00:00");
+    const dayStr = date.toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+    });
+    const timeStr = new Date(slot.start).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: timezone,
+    });
+    const tzAbbr = new Intl.DateTimeFormat("en-US", {
+      timeZoneName: "short",
+      timeZone: timezone,
+    })
+      .formatToParts(new Date(slot.start))
+      .find((p) => p.type === "timeZoneName")?.value ?? "";
+    return `How about ${dayStr} at ${timeStr} ${tzAbbr}?`;
+  };
 
   return (
     <div>
@@ -139,21 +159,30 @@ export function AvailabilityCalendar({
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {selectedSlots.map((slot, i) => (
-                <span
+                <button
                   key={i}
-                  className="px-2 py-1 bg-zinc-800 border border-zinc-700 rounded-md text-xs text-zinc-300"
+                  onClick={() =>
+                    onSelectSlot?.(formatSlotMessage(slot, selectedDay))
+                  }
+                  className={`px-2 py-1 bg-zinc-800 border border-zinc-700 rounded-md text-xs text-zinc-300 transition
+                    ${onSelectSlot ? "hover:bg-zinc-700 hover:border-zinc-500 hover:text-white cursor-pointer" : "cursor-default"}`}
                 >
                   {new Date(slot.start).toLocaleTimeString("en-US", {
                     hour: "numeric",
                     minute: "2-digit",
                     timeZone: timezone,
                   })}
-                </span>
+                </button>
               ))}
             </div>
           )}
         </div>
       )}
+
+      {/* Disclaimer */}
+      <p className="mt-3 text-[10px] text-zinc-600 leading-tight">
+        Times are approximate. Envoy may have additional preferences.
+      </p>
     </div>
   );
 }

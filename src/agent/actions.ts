@@ -430,15 +430,51 @@ async function handleUpdateKnowledge(
 ): Promise<ActionResult> {
   const persistent = params.persistent as string | undefined;
   const situational = params.situational as string | undefined;
+  const blockedWindows = params.blockedWindows as Array<{
+    start: string;
+    end: string;
+    days?: string[];
+    label?: string;
+    expires?: string;
+  }> | undefined;
 
-  if (!persistent && !situational) {
-    return { success: false, message: "Missing persistent or situational knowledge to update" };
+  if (!persistent && !situational && !blockedWindows) {
+    return { success: false, message: "Missing knowledge or blockedWindows to update" };
   }
 
   const updateData: Record<string, unknown> = {};
   if (persistent !== undefined) updateData.persistentKnowledge = persistent;
   if (situational !== undefined) updateData.situationalKnowledge = situational;
   updateData.lastCalibratedAt = new Date();
+
+  // Merge blocked windows with existing ones (deduplicate by start+end+days)
+  if (blockedWindows && blockedWindows.length > 0) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
+    });
+    const prefs = (user?.preferences as Record<string, unknown>) || {};
+    const explicit = (prefs.explicit as Record<string, unknown>) || {};
+    const existing = (explicit.blockedWindows as typeof blockedWindows) || [];
+
+    // Deduplicate: match on start+end+days combo
+    const merged = [...existing];
+    for (const newWindow of blockedWindows) {
+      const daysKey = newWindow.days?.sort().join(",") ?? "all";
+      const exists = merged.some(
+        (w) =>
+          w.start === newWindow.start &&
+          w.end === newWindow.end &&
+          (w.days?.sort().join(",") ?? "all") === daysKey
+      );
+      if (!exists) merged.push(newWindow);
+    }
+
+    updateData.preferences = {
+      ...prefs,
+      explicit: { ...explicit, blockedWindows: merged },
+    };
+  }
 
   await prisma.user.update({
     where: { id: userId },
@@ -448,6 +484,7 @@ async function handleUpdateKnowledge(
   const parts: string[] = [];
   if (persistent) parts.push("persistent preferences");
   if (situational) parts.push("situational context");
+  if (blockedWindows) parts.push(`${blockedWindows.length} blocked window(s)`);
 
   return {
     success: true,

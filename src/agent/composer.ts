@@ -139,6 +139,17 @@ function formatPreferences(prefs: Record<string, unknown>): string {
     if (explicit.timezone) items.push(`Timezone: ${explicit.timezone}`);
     if (explicit.blackoutDays) items.push(`Avoid days: ${JSON.stringify(explicit.blackoutDays)}`);
     if (explicit.location) items.push(`Default location: ${explicit.location}`);
+    if (explicit.blockedWindows && Array.isArray(explicit.blockedWindows)) {
+      const windows = (explicit.blockedWindows as Array<{ start: string; end: string; days?: string[]; label?: string; expires?: string }>)
+        .filter((w) => !w.expires || w.expires >= new Date().toISOString().slice(0, 10))
+        .map((w) => {
+          const days = w.days ? w.days.join("/") : "every day";
+          const label = w.label ? ` (${w.label})` : "";
+          const expires = w.expires ? `, until ${w.expires}` : "";
+          return `${w.start}–${w.end} ${days}${label}${expires}`;
+        });
+      if (windows.length > 0) items.push(`Blocked windows (do not schedule): ${windows.join("; ")}`);
+    }
     if (items.length > 0) {
       parts.push("**Explicit (host-stated):**\n" + items.map(i => `- ${i}`).join("\n"));
     }

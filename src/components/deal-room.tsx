@@ -877,6 +877,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Event card — sticky inside chat column */}
           {eventCard}
+          {/* Mobile availability toggle — hidden on desktop where sidebar shows */}
+          {slotsByDay && Object.keys(slotsByDay).length > 0 && (
+            <details className="md:hidden border-b border-zinc-800">
+              <summary className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500 cursor-pointer hover:text-zinc-400 select-none">
+                View availability
+              </summary>
+              <div className="px-4 pb-3">
+                <AvailabilityCalendar
+                  slotsByDay={slotsByDay || {}}
+                  timezone={slotTimezone}
+                  onSelectSlot={!isHost ? (msg) => {
+                    setInput(msg);
+                    document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                  } : undefined}
+                />
+              </div>
+            </details>
+          )}
           {chatContent}
         </div>
 
@@ -888,6 +906,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           <AvailabilityCalendar
             slotsByDay={slotsByDay || {}}
             timezone={slotTimezone}
+            onSelectSlot={!isHost ? (msg) => {
+              setInput(msg);
+              document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+            } : undefined}
           />
         </div>
       </div>
