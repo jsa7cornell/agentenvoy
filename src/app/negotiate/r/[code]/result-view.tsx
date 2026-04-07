@@ -3,6 +3,7 @@
 import { PhaseSynthesis } from "@/components/negotiator/phase-synthesis";
 import { PhaseResearch } from "@/components/negotiator/phase-research";
 import { TranscriptExport } from "@/components/negotiator/transcript-export";
+import { SimpleMarkdown } from "@/components/negotiator/simple-markdown";
 import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
 import type {
   ResearchResult,
@@ -71,11 +72,19 @@ export function NegotiatorResultView({
 
       {/* Final outcome */}
       {adminSummary && (
-        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-2">
-          <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
-            Final Outcome
-          </h2>
-          <p className="text-sm leading-relaxed">{adminSummary}</p>
+        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
+              Final Outcome
+            </h2>
+            <a
+              href={`/negotiate/r/${shareCode}`}
+              className="text-xs text-[var(--neg-accent)] hover:underline"
+            >
+              Shareable link →
+            </a>
+          </div>
+          <SimpleMarkdown content={adminSummary} />
         </div>
       )}
 
@@ -99,7 +108,7 @@ export function NegotiatorResultView({
                   {r.model}
                 </span>
               </div>
-              <p className="text-sm leading-relaxed">{r.content}</p>
+              <SimpleMarkdown content={r.content} />
             </div>
           ))}
         </div>

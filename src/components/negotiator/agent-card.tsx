@@ -57,59 +57,38 @@ export function AgentCard({
         )}
       </div>
 
-      {/* Provider + Model row */}
-      <div className="flex gap-2">
-        <select
-          value={agent.provider}
-          onChange={(e) => {
-            const provider = e.target.value as ModelProvider;
-            onChange({
-              ...agent,
-              provider,
-              model: DEFAULT_MODELS[provider],
-              name: PROVIDER_NAMES[provider],
-            });
-          }}
-          disabled={disabled}
-          className="flex-1 bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded px-2 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50"
-        >
-          {(Object.keys(PROVIDER_LABELS) as ModelProvider[]).map((p) => (
-            <option key={p} value={p}>
-              {PROVIDER_LABELS[p]}
-            </option>
-          ))}
-        </select>
-
+      {/* Model selector - all models available */}
+      <div>
+        <label className="text-xs text-[var(--neg-text-muted)] block mb-1">Model</label>
         <select
           value={agent.model}
-          onChange={(e) => onChange({ ...agent, model: e.target.value })}
+          onChange={(e) => {
+            const model = e.target.value;
+            // Determine provider from model
+            let provider: ModelProvider = agent.provider;
+            for (const [p, models] of Object.entries(MODEL_OPTIONS)) {
+              if (models.includes(model)) {
+                provider = p as ModelProvider;
+                break;
+              }
+            }
+            onChange({ ...agent, model, provider });
+          }}
           disabled={disabled}
-          className="flex-1 bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded px-2 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50"
+          className="w-full bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded px-2 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50"
         >
-          {MODEL_OPTIONS[agent.provider].map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
+          {(Object.entries(MODEL_OPTIONS) as Array<[ModelProvider, string[]]>).map(
+            ([provider, models]) => (
+              <optgroup key={provider} label={PROVIDER_LABELS[provider]}>
+                {models.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </optgroup>
+            )
+          )}
         </select>
-      </div>
-
-      {/* API Key */}
-      <div>
-        <div className="flex items-center gap-2 mb-1">
-          <label className="text-xs text-[var(--neg-text-muted)]">API Key</label>
-          <span className="text-xs text-[var(--neg-accent)]">
-            {agent.apiKey ? "Using your key" : "Using server key"}
-          </span>
-        </div>
-        <input
-          type="password"
-          value={agent.apiKey}
-          onChange={(e) => onChange({ ...agent, apiKey: e.target.value })}
-          placeholder="Leave empty to use server key"
-          disabled={disabled}
-          className="w-full bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 placeholder:text-[var(--neg-text-muted)]/50"
-        />
       </div>
 
       {/* Agent Context */}

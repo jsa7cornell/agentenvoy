@@ -5,6 +5,7 @@ import { PhaseResearch } from "./phase-research";
 import { PhaseSynthesis } from "./phase-synthesis";
 import { DecisionInput } from "./decision-input";
 import { TranscriptExport } from "./transcript-export";
+import { SimpleMarkdown } from "./simple-markdown";
 import { isOverBudget, budgetPercent } from "@/lib/negotiator/token-budget";
 import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
 import type {
@@ -144,7 +145,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
       setResearch(results);
 
       let txn = `# Negotiation Transcript\n\n**Question:** ${config.question}\n**Date:** ${new Date().toISOString().slice(0, 10)}\n\n`;
-      txn += `---\n\n## Round ${currentRound}: Independent Research\n\n`;
+      txn += `---\n\n## Round ${currentRound}: Agent Positions\n\n`;
       for (const r of results) {
         txn += `### ${r.agentName} (${r.provider}/${r.model})\n\n${r.content}\n\n`;
       }
@@ -392,7 +393,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
   return (
     <div className="space-y-6">
-      {/* Token budget bar */}
+      {/* Token budget bar + top actions */}
       <div className="flex items-center gap-3">
         <div className="flex-1 h-2 rounded-full bg-[var(--neg-surface-2)] overflow-hidden">
           <div
@@ -407,24 +408,66 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           />
         </div>
         <span className="text-xs text-[var(--neg-text-muted)] whitespace-nowrap">
-          Token Budget: {totalTokens.toLocaleString()} /{" "}
-          {(config.tokenBudget / 1000).toFixed(0)}k
+          {totalTokens.toLocaleString()} / {(config.tokenBudget / 1000).toFixed(0)}k tokens
         </span>
         <button
           onClick={onReset}
-          className="text-xs text-[var(--neg-text-muted)] hover:text-[var(--neg-text)] transition"
+          className="text-xs text-[var(--neg-text-muted)] hover:text-[var(--neg-text)] transition whitespace-nowrap"
         >
-          New Negotiation
+          New ↺
         </button>
       </div>
 
-      {/* Final outcome — top of results when complete */}
+      {/* Share + transcript actions — shown as soon as there's content */}
+      {transcript && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleShare}
+            disabled={sharing || !!shareCode}
+            className="px-3 py-1.5 rounded border border-[var(--neg-accent)]/40 text-xs text-[var(--neg-accent)] hover:bg-[var(--neg-accent)]/10 transition disabled:opacity-50"
+          >
+            {sharing ? "Saving..." : shareCode ? "✓ Shared" : "Share Results"}
+          </button>
+          {shareCode && (
+            <a
+              href={`/negotiate/r/${shareCode}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-[var(--neg-text-muted)] hover:text-[var(--neg-accent)] underline underline-offset-2 transition"
+            >
+              {typeof window !== "undefined" ? `${window.location.origin}/negotiate/r/${shareCode}` : `/negotiate/r/${shareCode}`}
+            </a>
+          )}
+          <div className="flex items-center gap-2 ml-auto">
+            <TranscriptExport
+              transcript={transcript}
+              tokensUsed={totalTokens}
+              tokenBudget={config.tokenBudget}
+              inline
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Final outcome */}
       {adminSummary && (
-        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-2">
-          <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
-            Final Outcome
-          </h2>
-          <p className="text-sm leading-relaxed">{adminSummary}</p>
+        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
+              Final Outcome
+            </h2>
+            {shareCode && (
+              <a
+                href={`/negotiate/r/${shareCode}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-[var(--neg-accent)] hover:underline"
+              >
+                Shareable link →
+              </a>
+            )}
+          </div>
+          <SimpleMarkdown content={adminSummary} />
         </div>
       )}
 
@@ -441,7 +484,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
                 <span className="text-sm font-medium">{r.agentName}</span>
                 <span className="text-xs text-[var(--neg-text-muted)]">{r.model}</span>
               </div>
-              <p className="text-sm leading-relaxed">{r.content}</p>
+              <SimpleMarkdown content={r.content} />
             </div>
           ))}
         </div>
@@ -524,30 +567,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         </div>
       )}
 
-      {/* Complete or budget exceeded — show export + share */}
-      {(phase === "complete" || phase === "budget-exceeded") && transcript && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3 pt-4 border-t border-[var(--neg-border)]">
-            <button
-              onClick={handleShare}
-              disabled={sharing || !!shareCode}
-              className="px-4 py-2 rounded border border-[var(--neg-accent)]/40 text-sm text-[var(--neg-accent)] hover:bg-[var(--neg-accent)]/10 transition disabled:opacity-50"
-            >
-              {sharing ? "Saving..." : shareCode ? "Link copied!" : "Share Results"}
-            </button>
-            {shareCode && (
-              <span className="text-xs text-[var(--neg-text-muted)]">
-                {window.location.origin}/negotiate/r/{shareCode}
-              </span>
-            )}
-          </div>
-          <TranscriptExport
-            transcript={transcript}
-            tokensUsed={totalTokens}
-            tokenBudget={config.tokenBudget}
-          />
-        </div>
-      )}
     </div>
   );
 }

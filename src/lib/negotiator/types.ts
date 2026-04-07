@@ -9,9 +9,9 @@ export const PROVIDER_LABELS: Record<ModelProvider, string> = {
 };
 
 export const DEFAULT_MODELS: Record<ModelProvider, string> = {
-  anthropic: "claude-sonnet-4-6",
+  anthropic: "claude-haiku-4-5",
   google: "gemini-2.5-flash",
-  openai: "gpt-4o",
+  openai: "gpt-4o-mini",
 };
 
 export const MODEL_OPTIONS: Record<ModelProvider, string[]> = {
@@ -23,8 +23,6 @@ export const MODEL_OPTIONS: Record<ModelProvider, string[]> = {
   google: [
     "gemini-2.5-pro",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-pro",
   ],
   openai: ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1"],
 };

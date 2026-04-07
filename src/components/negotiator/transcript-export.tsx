@@ -6,12 +6,14 @@ interface TranscriptExportProps {
   transcript: string;
   tokensUsed: number;
   tokenBudget: number;
+  inline?: boolean; // compact mode — no border-top, smaller buttons
 }
 
 export function TranscriptExport({
   transcript,
   tokensUsed,
   tokenBudget,
+  inline = false,
 }: TranscriptExportProps) {
   const [copied, setCopied] = useState(false);
 
@@ -31,6 +33,25 @@ export function TranscriptExport({
     URL.revokeObjectURL(url);
   }
 
+  if (inline) {
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          onClick={copyToClipboard}
+          className="px-3 py-1.5 rounded border border-[var(--neg-border)] text-xs hover:bg-[var(--neg-surface-2)] transition"
+        >
+          {copied ? "Copied!" : "Copy Transcript"}
+        </button>
+        <button
+          onClick={downloadMarkdown}
+          className="px-3 py-1.5 rounded border border-[var(--neg-border)] text-xs hover:bg-[var(--neg-surface-2)] transition"
+        >
+          Download .md
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-3 pt-4 border-t border-[var(--neg-border)]">
       <button
@@ -46,8 +67,7 @@ export function TranscriptExport({
         Download .md
       </button>
       <span className="text-xs text-[var(--neg-text-muted)] ml-auto">
-        {tokensUsed.toLocaleString()} / {(tokenBudget / 1000).toFixed(0)}k
-        tokens used
+        {tokensUsed.toLocaleString()} / {(tokenBudget / 1000).toFixed(0)}k tokens used
       </span>
     </div>
   );

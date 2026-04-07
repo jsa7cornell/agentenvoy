@@ -81,11 +81,11 @@ export function NegotiationConfigPanel({
     <div className="space-y-6">
       {/* Question & Context */}
       <div>
-        <label className="block text-sm font-medium mb-1">Question & Context</label>
+        <label className="block text-sm font-medium mb-1">What are you deciding? What context should all the agents have?</label>
         <textarea
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder={"What should the agents research? Include any relevant background, constraints, or requirements.\n\ne.g. 'What payment processor should we use for a new SaaS product? We expect $50k MRR within 6 months, need international card support, and have a 3-person engineering team.'"}
+          placeholder={"What should the agents debate and decide on? Include any relevant background, constraints, or requirements.\n\ne.g. 'What payment processor should we use for a new SaaS product? We expect $50k MRR within 6 months, need international card support, and have a 3-person engineering team.'"}
           disabled={disabled}
           rows={4}
           className="w-full bg-[var(--neg-surface)] border border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
@@ -169,6 +169,31 @@ export function NegotiationConfigPanel({
                   <option value={2}>2 rounds (recommended)</option>
                   <option value={3}>3 rounds</option>
                 </select>
+              </div>
+            </div>
+
+            {/* API Keys */}
+            <div>
+              <label className="block text-sm font-medium mb-3">API Keys (Optional)</label>
+              <p className="text-xs text-[var(--neg-text-muted)] mb-3">
+                Leave empty to use server keys. Only override if you want to use your own credentials.
+              </p>
+              <div className="space-y-3">
+                {agents.map((agent, i) => (
+                  <div key={agent.id}>
+                    <label className="text-xs text-[var(--neg-text-muted)] block mb-1">
+                      Agent {i + 1} ({agent.model})
+                    </label>
+                    <input
+                      type="password"
+                      value={agent.apiKey}
+                      onChange={(e) => updateAgent(i, { ...agent, apiKey: e.target.value })}
+                      placeholder="Leave empty to use server key"
+                      disabled={disabled}
+                      className="w-full bg-[var(--neg-surface)] border border-[var(--neg-border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 placeholder:text-[var(--neg-text-muted)]/50"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           </div>

@@ -42,7 +42,7 @@ export function PhaseResearch({
   return (
     <div className="space-y-4">
       <h2 className="text-sm font-medium text-[var(--neg-text-muted)] uppercase tracking-wider">
-        Phase 1: Independent Research
+        Phase 1: Agent Positions
       </h2>
       <div className="grid grid-cols-1 gap-4">
         {allAgents.map((agent) => (
@@ -67,7 +67,7 @@ export function PhaseResearch({
             <div className="text-sm text-[var(--neg-text)] whitespace-pre-wrap leading-relaxed max-h-[400px] overflow-y-auto">
               {agent.content || (
                 <span className="text-[var(--neg-text-muted)] italic">
-                  Researching...
+                  Formulating position...
                 </span>
               )}
             </div>
