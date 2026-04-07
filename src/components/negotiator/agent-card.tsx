@@ -4,15 +4,8 @@ import {
   type AgentConfig,
   type ModelProvider,
   PROVIDER_LABELS,
-  DEFAULT_MODELS,
   MODEL_OPTIONS,
 } from "@/lib/negotiator/types";
-
-const PROVIDER_NAMES: Record<ModelProvider, string> = {
-  anthropic: "Claude",
-  google: "Gemini",
-  openai: "GPT",
-};
 
 interface AgentCardProps {
   agent: AgentConfig;
