@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     });
 
     // Compute local day parts for a date
-    function getLocalParts(date: Date) {
+    const getLocalParts = (date: Date) => {
       const parts = new Intl.DateTimeFormat("en-US", {
         hour: "numeric",
         hour12: false,
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
       const dayName = parts.find((p) => p.type === "weekday")?.value ?? "";
       const isWeekend = dayName === "Sat" || dayName === "Sun";
       return { hour, minute, isWeekend };
-    }
+    };
 
     // Filter to blocking events only (not declined, not transparent)
     const blockingEvents = ctx.events.filter(
