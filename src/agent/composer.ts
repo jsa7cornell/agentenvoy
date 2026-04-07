@@ -45,6 +45,7 @@ export interface ComposeOptions {
   hostPreferences?: Record<string, unknown>;
   guestName?: string;
   guestEmail?: string;
+  guestTimezone?: string;
   topic?: string;
   rules?: Record<string, unknown>;
   /** @deprecated Use calendarContext instead */
@@ -239,6 +240,7 @@ function buildSessionContext(options: ComposeOptions): string {
 
   if (options.guestName) parts.push(`Guest: ${options.guestName}`);
   if (options.guestEmail) parts.push(`Guest email: ${options.guestEmail}`);
+  if (options.guestTimezone) parts.push(`Guest timezone (from browser): ${options.guestTimezone} — confirm with guest if different from host timezone`);
   if (options.topic) parts.push(`Topic: ${options.topic}`);
 
   if (options.rules && Object.keys(options.rules).length > 0) {
@@ -288,7 +290,7 @@ function buildSessionContext(options: ComposeOptions): string {
  * Format CalendarContext as a daily event view for the AI.
  * No pre-computed availability — the AI reasons about what's open.
  */
-function formatCalendarContext(ctx: CalendarContext): string {
+export function formatCalendarContext(ctx: CalendarContext): string {
   const tz = ctx.timezone;
 
   const tzLabel = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
@@ -330,6 +332,9 @@ function formatCalendarContext(ctx: CalendarContext): string {
     for (const ev of events) {
       if (ev.isAllDay) {
         const tags: string[] = [];
+        if (ev.isTransparent) tags.push("FYI — does not block time");
+        if (ev.responseStatus === "declined") tags.push("declined");
+        if (ev.responseStatus === "tentative") tags.push("tentative");
         if (ev.calendar !== ctx.calendars[0]) tags.push(`from "${ev.calendar}"`);
         const tagStr = tags.length > 0 ? ` [${tags.join(", ")}]` : "";
         lines.push(`  ${ev.summary} [all day${tagStr}]`);
@@ -337,8 +342,12 @@ function formatCalendarContext(ctx: CalendarContext): string {
         const startStr = timeFmt.format(ev.start);
         const endStr = timeFmt.format(ev.end);
         const tags: string[] = [];
+        if (ev.responseStatus === "declined") tags.push("declined");
+        if (ev.responseStatus === "tentative") tags.push("tentative");
+        if (ev.isTransparent) tags.push("FYI only");
         if (ev.location) tags.push(ev.location);
         if (ev.isRecurring) tags.push("recurring");
+        if (ev.attendeeCount && ev.attendeeCount > 2) tags.push(`${ev.attendeeCount} attendees`);
         if (ev.calendar !== ctx.calendars[0]) tags.push(`from "${ev.calendar}"`);
         const tagStr = tags.length > 0 ? ` [${tags.join(", ")}]` : "";
         lines.push(`  ${startStr}–${endStr} ${ev.summary}${tagStr}`);

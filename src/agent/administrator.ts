@@ -13,6 +13,7 @@ export interface AgentContext {
   hostPreferences?: Record<string, unknown>;
   guestName?: string;
   guestEmail?: string;
+  guestTimezone?: string; // IANA timezone from browser, e.g., "America/New_York"
   topic?: string;
   rules?: Record<string, unknown>;
   /** @deprecated Use calendarContext instead */
@@ -43,6 +44,7 @@ function buildComposeOptions(context: AgentContext) {
     hostPreferences: context.hostPreferences,
     guestName: context.guestName,
     guestEmail: context.guestEmail,
+    guestTimezone: context.guestTimezone,
     topic: context.topic,
     rules: context.rules,
     availableSlots: context.availableSlots,

@@ -4,7 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { streamText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { getAvailableSlots } from "@/lib/calendar";
+import { getCalendarContext } from "@/lib/calendar";
+import { formatCalendarContext } from "@/agent/composer";
 
 const DASHBOARD_SYSTEM = `You are Envoy, the user's scheduling agent. You help them:
 1. Create meeting links from natural language
@@ -62,7 +63,14 @@ export async function POST(req: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { name: true, meetSlug: true, preferences: true },
+    select: {
+      name: true,
+      meetSlug: true,
+      preferences: true,
+      persistentKnowledge: true,
+      situationalKnowledge: true,
+      hostDirectives: true,
+    },
   });
 
   // Check Google Calendar connection
@@ -72,26 +80,40 @@ export async function POST(req: NextRequest) {
   });
   const hasCalendar = !!account?.refresh_token;
 
-  // Fetch real availability if calendar is connected
+  // Fetch calendar context — same raw-event pipeline as deal room
+  const userPrefs = user?.preferences as Record<string, unknown> | null;
+  const tz =
+    (userPrefs?.timezone as string) ??
+    ((userPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
+    "America/Los_Angeles";
   let availabilityContext = "";
   if (hasCalendar) {
     try {
       const now = new Date();
       const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-      const slots = await getAvailableSlots(session.user.id, now, twoWeeks);
-      const topSlots = slots.slice(0, 15).map((s) => {
-        const d = s.start;
-        return `${d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} (${s.duration}min)`;
-      });
-      availabilityContext = `\nGoogle Calendar: CONNECTED — real availability loaded.\nUpcoming open slots (next 2 weeks):\n${topSlots.join("\n")}`;
+      const calCtx = await getCalendarContext(session.user.id, now, twoWeeks, tz);
+      if (calCtx.connected) {
+        availabilityContext = `\n${formatCalendarContext(calCtx)}`;
+      } else {
+        availabilityContext = "\nGoogle Calendar: CONNECTED but no events returned.";
+      }
     } catch (e) {
-      availabilityContext = `\nGoogle Calendar: CONNECTED but could not fetch slots (${e instanceof Error ? e.message : "unknown error"}). The calendar connection exists but may need re-authorization.`;
+      availabilityContext = `\nGoogle Calendar: CONNECTED but could not fetch events (${e instanceof Error ? e.message : "unknown error"}). The calendar connection exists but may need re-authorization.`;
     }
   } else {
     availabilityContext = "\nGoogle Calendar: NOT CONNECTED — the user has not granted calendar access. Suggest they connect it via the Connections menu in the header for smarter scheduling.";
   }
 
-  const contextMessage = `User: ${user?.name || "User"}\nMeet slug: ${user?.meetSlug || "not set"}\nCurrent preferences: ${JSON.stringify(user?.preferences || {})}\nBase URL: ${process.env.NEXTAUTH_URL || "https://agentenvoy.ai"}${availabilityContext}`;
+  // Knowledge base context
+  let knowledgeContext = "";
+  if (user?.persistentKnowledge) {
+    knowledgeContext += `\nHost's persistent preferences:\n${user.persistentKnowledge}`;
+  }
+  if (user?.situationalKnowledge) {
+    knowledgeContext += `\nHost's situational context:\n${user.situationalKnowledge}`;
+  }
+
+  const contextMessage = `User: ${user?.name || "User"}\nMeet slug: ${user?.meetSlug || "not set"}\nCurrent preferences: ${JSON.stringify(user?.preferences || {})}\nBase URL: ${process.env.NEXTAUTH_URL || "https://agentenvoy.ai"}${availabilityContext}${knowledgeContext}`;
 
   const result = streamText({
     model: anthropic("claude-sonnet-4-6"),

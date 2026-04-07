@@ -108,10 +108,8 @@ export const authOptions: NextAuthOptions = {
         data: {
           meetSlug: slug,
           persistentKnowledge: [
-            "- Be warm but efficient. Don't over-apologize.",
-            "- When in doubt, propose fewer options, not more.",
-            "- Never suggest meetings before 7am or after 9pm unless I explicitly allow it.",
-            "- Avoid weekends unless I or the guest specifically requests it.",
+            "- This host has not been calibrated yet. Run the onboarding calibration exercise to learn their scheduling preferences.",
+            "- Default posture: balanced — offer open slots, flag flexible blocks, ask before moving anything.",
             "- Default to 30-minute meetings unless context suggests otherwise.",
             "- Prefer consolidating meetings on fewer days over spreading them out.",
           ].join("\n"),

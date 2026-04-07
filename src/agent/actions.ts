@@ -97,6 +97,8 @@ async function executeAction(
       return handleUpdateLocation(action.params, userId, context?.sessionId);
     case "create_link":
       return handleCreateLink(action.params, userId, context?.meetSlug);
+    case "update_knowledge":
+      return handleUpdateKnowledge(action.params, userId);
     default:
       return { success: false, message: `Unknown action: ${action.action}` };
   }
@@ -419,5 +421,36 @@ async function handleCreateLink(
       url,
       title,
     },
+  };
+}
+
+async function handleUpdateKnowledge(
+  params: Record<string, unknown>,
+  userId: string
+): Promise<ActionResult> {
+  const persistent = params.persistent as string | undefined;
+  const situational = params.situational as string | undefined;
+
+  if (!persistent && !situational) {
+    return { success: false, message: "Missing persistent or situational knowledge to update" };
+  }
+
+  const updateData: Record<string, unknown> = {};
+  if (persistent !== undefined) updateData.persistentKnowledge = persistent;
+  if (situational !== undefined) updateData.situationalKnowledge = situational;
+  updateData.lastCalibratedAt = new Date();
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: updateData as Parameters<typeof prisma.user.update>[0]["data"],
+  });
+
+  const parts: string[] = [];
+  if (persistent) parts.push("persistent preferences");
+  if (situational) parts.push("situational context");
+
+  return {
+    success: true,
+    message: `Updated ${parts.join(" and ")}`,
   };
 }

@@ -20,8 +20,10 @@ export interface CalendarEvent {
   provider: string; // provider type (e.g., "google", "ical", "outlook")
   location?: string;
   attendeeCount?: number;
+  responseStatus?: string; // host's RSVP: "accepted", "declined", "tentative", "needsAction"
   isAllDay: boolean;
   isRecurring: boolean;
+  isTransparent?: boolean; // "transparent" events don't block time (FYI only)
 }
 
 export interface CreateEventParams {
@@ -54,9 +56,11 @@ class GoogleCalendarProvider implements CalendarProvider {
   readonly type = "google";
   readonly canWrite = true;
   private client: calendar_v3.Calendar;
+  private hostEmail: string;
 
-  constructor(client: calendar_v3.Calendar) {
+  constructor(client: calendar_v3.Calendar, hostEmail: string) {
     this.client = client;
+    this.hostEmail = hostEmail;
   }
 
   async listCalendars(): Promise<Array<{ id: string; name: string }>> {
@@ -91,6 +95,11 @@ class GoogleCalendarProvider implements CalendarProvider {
             ? new Date(ev.end?.date + "T00:00:00")
             : new Date(ev.end!.dateTime!);
 
+          // Find host's RSVP status from attendees list
+          const hostAttendee = ev.attendees?.find(
+            (a) => a.email === this.hostEmail || a.self
+          );
+
           allEvents.push({
             id: ev.id || crypto.randomUUID(),
             summary: ev.summary || "(no title)",
@@ -100,8 +109,10 @@ class GoogleCalendarProvider implements CalendarProvider {
             provider: "google",
             location: ev.location || undefined,
             attendeeCount: ev.attendees?.length ?? 0,
+            responseStatus: hostAttendee?.responseStatus || undefined,
             isAllDay,
             isRecurring: !!ev.recurringEventId,
+            isTransparent: ev.transparency === "transparent",
           });
         }
       } catch (e) {
@@ -153,8 +164,15 @@ async function getProviders(userId: string): Promise<CalendarProvider[]> {
 
   // Google
   try {
+    const account = await prisma.account.findFirst({
+      where: { userId, provider: "google" },
+      select: { providerAccountId: true },
+    });
+    const hostEmail = account?.providerAccountId
+      ? (await prisma.user.findUnique({ where: { id: userId }, select: { email: true } }))?.email || ""
+      : "";
     const client = await getGoogleCalendarClient(userId);
-    providers.push(new GoogleCalendarProvider(client));
+    providers.push(new GoogleCalendarProvider(client, hostEmail));
   } catch {
     // No Google account connected — that's ok
   }

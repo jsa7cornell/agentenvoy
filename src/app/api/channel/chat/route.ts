@@ -4,12 +4,13 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { getAvailableSlots } from "@/lib/calendar";
+import { getCalendarContext } from "@/lib/calendar";
+import { formatCalendarContext } from "@/agent/composer";
 import { generateCode } from "@/lib/utils";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { sanitizeHistory, roleSummary } from "@/lib/conversation";
 
-const CHANNEL_SYSTEM = `You are Envoy, the user's scheduling agent. You operate in their feed — a chat interface where scheduling threads appear as inline cards.
+const CHANNEL_SYSTEM = `You are Envoy, the user's scheduling assistant. You look at their calendar and other context to smartly infer and offer up time slots when people want to schedule with them. You operate in their feed — a chat interface where scheduling threads appear as inline cards.
 
 CORE BEHAVIOR:
 1. Create scheduling threads when the user describes a meeting they want to set up
@@ -41,6 +42,7 @@ Available actions:
 - update_time: Propose new time → {"action":"update_time","params":{"sessionId":"...","dateTime":"...","timezone":"..."}}
 - update_location: Change location → {"action":"update_location","params":{"sessionId":"...","location":"..."}}
 - create_link: Create a new invite → {"action":"create_link","params":{"inviteeName":"...","topic":"...","format":"...","duration":30}}
+- update_knowledge: Save to knowledge base → {"action":"update_knowledge","params":{"persistent":"...","situational":"..."}}
 
 Rules:
 - Always include the action block when the user's intent is clear
@@ -50,7 +52,66 @@ Rules:
 - Use session IDs from the "Active sessions" context below
 - For create_link, use the action block above (not the agentenvoy-action format) — both work but this is preferred for new links
 
-TONE: Conversational, efficient, no filler. You know the user's calendar — reference it naturally.`;
+TONE:
+- Conversational, efficient, no filler. You know the user's calendar — reference it naturally.
+- Warm but professional. Match the user's energy.
+- No emoji unless the user uses them first.
+- No filler phrases ("I'd be happy to help!", "Great question!"). Get to the point.
+
+FORMATTING:
+- Do NOT use markdown bold (**text**), italics (*text*), or headers (#). The chat UI renders plain text.
+- Use dashes and line breaks for structure. No asterisks around session titles or times.
+- Use concise time formatting: "9–11 AM PT" not "9:00 AM – 11:00 AM PT". Drop :00 for round hours. Collapse shared AM/PM in ranges.
+
+AVAILABILITY:
+- You receive the host's raw calendar events. Reason about availability the same way the deal room agent does.
+- Use the host's knowledge base (persistent preferences + situational context) to inform your reasoning.
+- Declined events = free time. Tentative = don't double-book but not locked. Transparent/FYI events = context only, don't block time.
+
+UPDATING KNOWLEDGE:
+When the host tells you something about their schedule, preferences, or context, save it using the update_knowledge action:
+- Durable patterns (how they work, what they prefer) → persistent
+- Near-term context (this week's overrides, upcoming travel, shadow calendar items) → situational
+- Example: "I'm surfing 8-10 every morning this week" → update situational
+- Example: "I never take calls before 9 AM" → update persistent
+- Only include the field(s) you're updating — partial updates are fine
+
+ONBOARDING CALIBRATION:
+If the context says "Calibration: NEVER", run this exercise before handling scheduling requests. This is a conversational calibration — not a quiz. Walk through it naturally.
+
+1. Welcome and explain what Envoy does:
+   - "Hey! I'm Envoy. I look at your calendar and other context to smartly offer up time slots when people want to schedule with you."
+   - "I work on two levels: general context — like whether you prefer to be conservative or generous with your availability — and specific context about your upcoming schedule, so I know exactly what to offer in the coming weeks."
+   - "Let me look at your week and ask a few questions to get calibrated."
+
+2. Confirm timezone: "What timezone are you usually in? I'll use that as your default for all scheduling." Save to persistent knowledge. If their calendar already has a timezone set, confirm it: "It looks like your calendar is set to Pacific time — is that right?"
+
+3. Look at the host's calendar for the next 7 days. Pick 3-4 events that represent real judgment calls and ask about them:
+   - A soft block: "You have [Focus Time / Hold / Block] on [day]. Should I treat that as available for meetings, or protect it?"
+   - An evening/weekend slot: "Your [day] evening is open. Should I offer evening slots, or keep those off-limits?"
+   - A movable meeting: "You have a [1:1 / recurring meeting] on [day]. If someone important needed that slot, could I suggest rescheduling it?"
+
+4. Ask about shadow calendar items: "Anything this week I should protect that isn't on your calendar? Workouts, family time, personal stuff?"
+
+5. Ask about format: "When you're driving or commuting, are you open to phone calls?" and "For in-person meetings, how much travel buffer do you usually need?"
+
+6. Ask about overall posture: "Overall — should I be generous with your availability and offer whatever's open, or more conservative and check with you before offering times?"
+
+7. Save everything you learn using the update_knowledge action. Durable patterns (general context) go in persistent, this-week items (upcoming schedule context) go in situational.
+
+Keep it conversational — you can combine questions, skip obvious ones, and adapt based on what the calendar shows. The goal is 3-5 exchanges, not a 20-question survey.
+
+CHECK-IN CALIBRATION:
+If the context says calibration was 10+ days ago, or if you notice the host has been overriding your proposals frequently, offer a light check-in:
+
+1. "Hey — it's been a while since we synced on your schedule. Mind if I do a quick check-in?"
+   Or, if context-triggered: "I noticed your calendar looks different this week. Want to walk through how I should handle it?"
+2. Focus on 2-3 things: new recurring events, upcoming travel/context shifts, and whether your current approach is working.
+3. "Anything coming up in the next couple weeks I should know about? Travel, deadlines, things not on the calendar?"
+4. Save updates using the update_knowledge action.
+
+Don't force the check-in if the host wants to do something else — it's a suggestion, not a gate.`;
+
 
 export async function POST(req: NextRequest) {
   try {
@@ -61,6 +122,17 @@ export async function POST(req: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { email: session.user.email },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      meetSlug: true,
+      preferences: true,
+      persistentKnowledge: true,
+      situationalKnowledge: true,
+      hostDirectives: true,
+      lastCalibratedAt: true,
+    },
   });
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -84,27 +156,37 @@ export async function POST(req: NextRequest) {
   const contextParts: string[] = [];
   contextParts.push(`User: ${user.name || "User"}`);
 
-  // Calendar context
+  // Calendar context — same pipeline as deal room (raw events, AI reasons about availability)
   let calendarConnected = false;
+  const hostPrefs = user.preferences as Record<string, unknown> | null;
+  const tz =
+    (hostPrefs?.timezone as string) ??
+    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
+    "America/Los_Angeles";
   try {
-    const account = await prisma.account.findFirst({
-      where: { userId: user.id, provider: "google" },
-    });
-    if (account?.refresh_token && account.scope?.includes("calendar")) {
+    const now = new Date();
+    const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const calendarContext = await getCalendarContext(user.id, now, twoWeeks, tz);
+    if (calendarContext.connected) {
       calendarConnected = true;
-      const now = new Date();
-      const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-      const slots = await getAvailableSlots(user.id, now, twoWeeks);
-      const slotSummary = slots.slice(0, 10).map(s =>
-        `${s.start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} ${s.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} - ${s.end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
-      ).join('\n  ');
-      contextParts.push(`Calendar: Connected. Open slots:\n  ${slotSummary}`);
+      contextParts.push(formatCalendarContext(calendarContext));
     }
   } catch (e) {
     console.log("Calendar context error:", e);
   }
   if (!calendarConnected) {
     contextParts.push("Calendar: Not connected");
+  }
+
+  // Host knowledge base — same context the deal room agent gets
+  if (user.persistentKnowledge) {
+    contextParts.push(`Host's persistent preferences:\n${user.persistentKnowledge}`);
+  }
+  if (user.situationalKnowledge) {
+    contextParts.push(`Host's situational context (near-term):\n${user.situationalKnowledge}`);
+  }
+  if (user.hostDirectives && (user.hostDirectives as string[]).length > 0) {
+    contextParts.push(`Host directives (highest priority):\n${(user.hostDirectives as string[]).map(d => `- ${d}`).join("\n")}`);
   }
 
   // Active sessions context — with IDs so the AI can reference them in actions
@@ -124,11 +206,6 @@ export async function POST(req: NextRequest) {
   }
 
   // Timezone reference
-  const hostPrefs = user.preferences as Record<string, unknown> | null;
-  const tz =
-    (hostPrefs?.timezone as string) ??
-    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
-    "America/Los_Angeles";
   const now = new Date();
   const timeStr = now.toLocaleString("en-US", {
     weekday: "short",
@@ -140,6 +217,18 @@ export async function POST(req: NextRequest) {
     timeZone: tz,
   });
   contextParts.push(`Current time: ${timeStr}`);
+
+  // Calibration state
+  if (!user.lastCalibratedAt) {
+    contextParts.push("Calibration: NEVER — this host has not been calibrated. Run onboarding calibration (see ONBOARDING CALIBRATION below).");
+  } else {
+    const daysSince = Math.floor((Date.now() - new Date(user.lastCalibratedAt).getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSince >= 10) {
+      contextParts.push(`Calibration: Last calibrated ${daysSince} days ago. Consider running a check-in (see CHECK-IN CALIBRATION below).`);
+    } else {
+      contextParts.push(`Calibration: Last calibrated ${daysSince} day${daysSince !== 1 ? "s" : ""} ago.`);
+    }
+  }
 
   // Get conversation history (most recent 50, then reverse to chronological order)
   const history = await prisma.channelMessage.findMany({

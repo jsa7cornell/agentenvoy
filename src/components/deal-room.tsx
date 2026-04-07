@@ -194,7 +194,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         const res = await fetch("/api/negotiate/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug, code }),
+          body: JSON.stringify({
+            slug,
+            code,
+            guestTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          }),
         });
 
         if (!res.ok) {

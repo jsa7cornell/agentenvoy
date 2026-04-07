@@ -10,7 +10,7 @@ import { authOptions } from "@/lib/auth";
 // Start a new negotiation session from a link click
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { slug, code } = body;
+  const { slug, code, guestTimezone } = body;
 
   if (!slug) {
     return NextResponse.json({ error: "Missing slug" }, { status: 400 });
@@ -270,6 +270,7 @@ export async function POST(req: NextRequest) {
     hostDirectives: (user.hostDirectives as string[]) || [],
     guestName: link.inviteeName || undefined,
     guestEmail: link.inviteeEmail || undefined,
+    guestTimezone: guestTimezone || undefined,
     topic: link.topic || undefined,
     rules: (link.rules as Record<string, unknown>) || {},
     calendarContext,

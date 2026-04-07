@@ -56,6 +56,7 @@ model User {
   hostDirectives   Json?     @default("[]") // string[] — global ::: directives that shape all negotiations
   persistentKnowledge  String?   @db.Text   // Long-lived: who they are, how they work, what matters
   situationalKnowledge String?   @db.Text   // Near-term: this week's overrides, upcoming context, temporary rules
+  lastCalibratedAt DateTime?              // null = never calibrated, triggers onboarding flow
   createdAt        DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
