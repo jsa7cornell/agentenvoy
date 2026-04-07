@@ -1,4 +1,5 @@
 import { google, calendar_v3 } from "googleapis";
+import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 
 // --- Calendar Provider Abstraction ---
@@ -73,54 +74,55 @@ class GoogleCalendarProvider implements CalendarProvider {
 
   async getEvents(start: Date, end: Date): Promise<CalendarEvent[]> {
     const calendars = await this.listCalendars();
-    const allEvents: CalendarEvent[] = [];
 
-    for (const cal of calendars) {
-      try {
-        const { data } = await this.client.events.list({
-          calendarId: cal.id,
-          timeMin: start.toISOString(),
-          timeMax: end.toISOString(),
-          singleEvents: true,
-          orderBy: "startTime",
-          maxResults: 100,
-        });
-
-        for (const ev of data.items ?? []) {
-          const isAllDay = !ev.start?.dateTime;
-          const evStart = isAllDay
-            ? new Date(ev.start?.date + "T00:00:00")
-            : new Date(ev.start!.dateTime!);
-          const evEnd = isAllDay
-            ? new Date(ev.end?.date + "T00:00:00")
-            : new Date(ev.end!.dateTime!);
-
-          // Find host's RSVP status from attendees list
-          const hostAttendee = ev.attendees?.find(
-            (a) => a.email === this.hostEmail || a.self
-          );
-
-          allEvents.push({
-            id: ev.id || crypto.randomUUID(),
-            summary: ev.summary || "(no title)",
-            start: evStart,
-            end: evEnd,
-            calendar: cal.name,
-            provider: "google",
-            location: ev.location || undefined,
-            attendeeCount: ev.attendees?.length ?? 0,
-            responseStatus: hostAttendee?.responseStatus || undefined,
-            isAllDay,
-            isRecurring: !!ev.recurringEventId,
-            isTransparent: ev.transparency === "transparent",
+    const results = await Promise.all(
+      calendars.map(async (cal) => {
+        try {
+          const { data } = await this.client.events.list({
+            calendarId: cal.id,
+            timeMin: start.toISOString(),
+            timeMax: end.toISOString(),
+            singleEvents: true,
+            orderBy: "startTime",
+            maxResults: 100,
           });
-        }
-      } catch (e) {
-        console.log(`Failed to fetch events for calendar ${cal.name}:`, e);
-      }
-    }
 
-    return allEvents;
+          return (data.items ?? []).map((ev) => {
+            const isAllDay = !ev.start?.dateTime;
+            const evStart = isAllDay
+              ? new Date(ev.start?.date + "T00:00:00")
+              : new Date(ev.start!.dateTime!);
+            const evEnd = isAllDay
+              ? new Date(ev.end?.date + "T00:00:00")
+              : new Date(ev.end!.dateTime!);
+
+            const hostAttendee = ev.attendees?.find(
+              (a) => a.email === this.hostEmail || a.self
+            );
+
+            return {
+              id: ev.id || crypto.randomUUID(),
+              summary: ev.summary || "(no title)",
+              start: evStart,
+              end: evEnd,
+              calendar: cal.name,
+              provider: "google",
+              location: ev.location || undefined,
+              attendeeCount: ev.attendees?.length ?? 0,
+              responseStatus: hostAttendee?.responseStatus || undefined,
+              isAllDay,
+              isRecurring: !!ev.recurringEventId,
+              isTransparent: ev.transparency === "transparent",
+            } as CalendarEvent;
+          });
+        } catch (e) {
+          console.log(`Failed to fetch events for calendar ${cal.name}:`, e);
+          return [] as CalendarEvent[];
+        }
+      })
+    );
+
+    return results.flat();
   }
 
   async createEvent(params: CreateEventParams): Promise<EventResult> {
@@ -271,21 +273,23 @@ export async function getGoogleCalendarClient(userId: string) {
     expiry_date: account.expires_at ? account.expires_at * 1000 : undefined,
   });
 
-  // Refresh token if needed
-  const { credentials } = await oauth2Client.refreshAccessToken();
-  oauth2Client.setCredentials(credentials);
+  // Refresh token only if expired or expiring within 60 seconds
+  const tokenValid = account.expires_at && account.expires_at * 1000 > Date.now() + 60_000;
+  if (!tokenValid) {
+    const { credentials } = await oauth2Client.refreshAccessToken();
+    oauth2Client.setCredentials(credentials);
 
-  // Update stored tokens
-  if (credentials.access_token) {
-    await prisma.account.update({
-      where: { id: account.id },
-      data: {
-        access_token: credentials.access_token,
-        expires_at: credentials.expiry_date
-          ? Math.floor(credentials.expiry_date / 1000)
-          : null,
-      },
-    });
+    if (credentials.access_token) {
+      await prisma.account.update({
+        where: { id: account.id },
+        data: {
+          access_token: credentials.access_token,
+          expires_at: credentials.expiry_date
+            ? Math.floor(credentials.expiry_date / 1000)
+            : null,
+        },
+      });
+    }
   }
 
   return google.calendar({ version: "v3", auth: oauth2Client });
@@ -309,6 +313,423 @@ function getLocalParts(date: Date, tz: string) {
   const dayName = parts.find((p) => p.type === "weekday")?.value ?? "";
   const isWeekend = dayName === "Sat" || dayName === "Sun";
   return { hour, minute, isWeekend };
+}
+
+// --- Calendar Sync Infrastructure ---
+
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Serializable version of CalendarEvent for JSON storage in CalendarCache.
+ */
+interface StoredCalendarEvent {
+  id: string;
+  summary: string;
+  start: string; // ISO string
+  end: string;
+  calendar: string;
+  provider: string;
+  location?: string;
+  attendeeCount?: number;
+  responseStatus?: string;
+  isAllDay: boolean;
+  isRecurring: boolean;
+  isTransparent?: boolean;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function toStored(ev: CalendarEvent): StoredCalendarEvent {
+  return {
+    ...ev,
+    start: ev.start.toISOString(),
+    end: ev.end.toISOString(),
+  };
+}
+
+function fromStored(ev: StoredCalendarEvent): CalendarEvent {
+  return {
+    ...ev,
+    start: new Date(ev.start),
+    end: new Date(ev.end),
+  };
+}
+
+/**
+ * Sync a user's calendars using Google's incremental sync (syncToken).
+ * On first call or 410 GONE, performs a full sync.
+ * Returns true if events changed (schedule should be recomputed).
+ */
+export async function syncCalendar(userId: string): Promise<{ changed: boolean; events: CalendarEvent[] }> {
+  const client = await getGoogleCalendarClient(userId);
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true },
+  });
+  const hostEmail = user?.email || "";
+
+  // Get all calendars
+  const { data: calList } = await client.calendarList.list();
+  const calendars = (calList.items ?? []).map((c) => ({
+    id: c.id || "primary",
+    name: c.summary || c.id || "primary",
+  }));
+
+  let anyChanged = false;
+
+  // Sync each calendar in parallel
+  await Promise.all(
+    calendars.map(async (cal) => {
+      try {
+        const cached = await prisma.calendarCache.findUnique({
+          where: { userId_calendarId: { userId, calendarId: cal.id } },
+        });
+
+        // Check if cache is fresh enough (skip sync)
+        if (cached && cached.lastSyncedAt.getTime() > Date.now() - CACHE_TTL_MS) {
+          return; // Still fresh
+        }
+
+        let events: StoredCalendarEvent[];
+        let newSyncToken: string | undefined;
+
+        if (cached?.syncToken) {
+          // Incremental sync
+          try {
+            const result = await incrementalSync(client, cal, cached.syncToken, cached.events as unknown as StoredCalendarEvent[], hostEmail);
+            events = result.events;
+            newSyncToken = result.syncToken;
+            if (result.changed) anyChanged = true;
+          } catch (e: unknown) {
+            // 410 GONE — syncToken expired, do full sync
+            if (e && typeof e === "object" && "code" in e && (e as { code: number }).code === 410) {
+              const result = await fullSync(client, cal, hostEmail);
+              events = result.events;
+              newSyncToken = result.syncToken;
+              anyChanged = true;
+            } else {
+              throw e;
+            }
+          }
+        } else {
+          // First sync — full fetch
+          const result = await fullSync(client, cal, hostEmail);
+          events = result.events;
+          newSyncToken = result.syncToken;
+          anyChanged = true;
+        }
+
+        // Upsert cache
+        await prisma.calendarCache.upsert({
+          where: { userId_calendarId: { userId, calendarId: cal.id } },
+          create: {
+            userId,
+            calendarId: cal.id,
+            calendarName: cal.name,
+            syncToken: newSyncToken || null,
+            events: events as unknown as Prisma.InputJsonValue,
+            lastSyncedAt: new Date(),
+          },
+          update: {
+            calendarName: cal.name,
+            syncToken: newSyncToken || null,
+            events: events as unknown as Prisma.InputJsonValue,
+            lastSyncedAt: new Date(),
+          },
+        });
+      } catch (e) {
+        console.log(`[syncCalendar] Failed to sync calendar ${cal.name}:`, e);
+      }
+    })
+  );
+
+  // Collect all events from cache
+  const allCaches = await prisma.calendarCache.findMany({
+    where: { userId },
+    select: { events: true },
+  });
+  const allEvents = allCaches.flatMap((c) =>
+    (c.events as unknown as StoredCalendarEvent[]).map(fromStored)
+  );
+
+  return { changed: anyChanged, events: allEvents };
+}
+
+/**
+ * Full sync: fetch all events in 2-week window, get initial syncToken.
+ */
+async function fullSync(
+  client: ReturnType<typeof google.calendar>,
+  cal: { id: string; name: string },
+  hostEmail: string
+): Promise<{ events: StoredCalendarEvent[]; syncToken?: string }> {
+  const now = new Date();
+  const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const events: StoredCalendarEvent[] = [];
+  let pageToken: string | undefined;
+  let syncToken: string | undefined;
+
+  do {
+    const { data } = await client.events.list({
+      calendarId: cal.id,
+      timeMin: now.toISOString(),
+      timeMax: twoWeeks.toISOString(),
+      singleEvents: true,
+      orderBy: "startTime",
+      maxResults: 250,
+      pageToken,
+    });
+
+    for (const ev of data.items ?? []) {
+      const isAllDay = !ev.start?.dateTime;
+      const hostAttendee = ev.attendees?.find((a) => a.email === hostEmail || a.self);
+
+      events.push({
+        id: ev.id || crypto.randomUUID(),
+        summary: ev.summary || "(no title)",
+        start: isAllDay
+          ? new Date(ev.start?.date + "T00:00:00").toISOString()
+          : new Date(ev.start!.dateTime!).toISOString(),
+        end: isAllDay
+          ? new Date(ev.end?.date + "T00:00:00").toISOString()
+          : new Date(ev.end!.dateTime!).toISOString(),
+        calendar: cal.name,
+        provider: "google",
+        location: ev.location || undefined,
+        attendeeCount: ev.attendees?.length ?? 0,
+        responseStatus: hostAttendee?.responseStatus || undefined,
+        isAllDay,
+        isRecurring: !!ev.recurringEventId,
+        isTransparent: ev.transparency === "transparent",
+      });
+    }
+
+    pageToken = data.nextPageToken || undefined;
+    if (!pageToken) syncToken = data.nextSyncToken || undefined;
+  } while (pageToken);
+
+  return { events, syncToken };
+}
+
+/**
+ * Incremental sync: fetch only changed events since last syncToken.
+ * Merges changes into existing event list.
+ */
+async function incrementalSync(
+  client: ReturnType<typeof google.calendar>,
+  cal: { id: string; name: string },
+  syncToken: string,
+  existingEvents: StoredCalendarEvent[],
+  hostEmail: string
+): Promise<{ events: StoredCalendarEvent[]; syncToken?: string; changed: boolean }> {
+  const changedIds = new Set<string>();
+  const newEvents: StoredCalendarEvent[] = [];
+  const deletedIds = new Set<string>();
+  let pageToken: string | undefined;
+  let newSyncToken: string | undefined;
+
+  do {
+    const { data } = await client.events.list({
+      calendarId: cal.id,
+      syncToken,
+      pageToken,
+    });
+
+    for (const ev of data.items ?? []) {
+      if (ev.status === "cancelled") {
+        deletedIds.add(ev.id!);
+        changedIds.add(ev.id!);
+      } else {
+        const isAllDay = !ev.start?.dateTime;
+        const hostAttendee = ev.attendees?.find((a) => a.email === hostEmail || a.self);
+
+        newEvents.push({
+          id: ev.id || crypto.randomUUID(),
+          summary: ev.summary || "(no title)",
+          start: isAllDay
+            ? new Date(ev.start?.date + "T00:00:00").toISOString()
+            : new Date(ev.start!.dateTime!).toISOString(),
+          end: isAllDay
+            ? new Date(ev.end?.date + "T00:00:00").toISOString()
+            : new Date(ev.end!.dateTime!).toISOString(),
+          calendar: cal.name,
+          provider: "google",
+          location: ev.location || undefined,
+          attendeeCount: ev.attendees?.length ?? 0,
+          responseStatus: hostAttendee?.responseStatus || undefined,
+          isAllDay,
+          isRecurring: !!ev.recurringEventId,
+          isTransparent: ev.transparency === "transparent",
+        });
+        changedIds.add(ev.id!);
+      }
+    }
+
+    pageToken = data.nextPageToken || undefined;
+    if (!pageToken) newSyncToken = data.nextSyncToken || undefined;
+  } while (pageToken);
+
+  const changed = changedIds.size > 0;
+
+  // Merge: remove deleted/updated events, add new versions
+  const merged = existingEvents
+    .filter((ev) => !changedIds.has(ev.id))
+    .concat(newEvents);
+
+  return { events: merged, syncToken: newSyncToken, changed };
+}
+
+/**
+ * Get cached calendar events for a user. If cache is stale, performs incremental sync.
+ * Returns the same CalendarContext shape as getCalendarContext for backward compat.
+ */
+export async function getCachedCalendarContext(
+  userId: string,
+  timezone = "America/Los_Angeles"
+): Promise<CalendarContext> {
+  try {
+    const { events } = await syncCalendar(userId);
+
+    if (events.length === 0) {
+      // Check if calendar is even connected
+      const account = await prisma.account.findFirst({
+        where: { userId, provider: "google" },
+        select: { id: true },
+      });
+      if (!account) {
+        return { connected: false, events: [], calendars: [], timezone, canWrite: false };
+      }
+    }
+
+    // Deduplicate and cap (same logic as getCalendarContext)
+    const seen = new Set<string>();
+    const deduped = events.filter((ev) => {
+      if (seen.has(ev.id)) return false;
+      seen.add(ev.id);
+      return true;
+    });
+    deduped.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+    const relevant = deduped.filter(
+      (ev) => ev.responseStatus !== "declined" && !ev.isTransparent
+    );
+    const context = deduped.filter(
+      (ev) => ev.responseStatus === "declined" || ev.isTransparent
+    );
+    const capped = [...relevant.slice(0, 80), ...context.slice(0, 20)]
+      .sort((a, b) => a.start.getTime() - b.start.getTime());
+
+    const calendarNames = Array.from(new Set(events.map((e) => e.calendar)));
+
+    return {
+      connected: true,
+      events: capped,
+      calendars: calendarNames,
+      timezone,
+      canWrite: true, // Google provider is always writable
+    };
+  } catch (e) {
+    console.log("[getCachedCalendarContext] Falling back to live fetch:", e);
+    // Fallback to live fetch if sync fails
+    const now = new Date();
+    const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+    return getCalendarContext(userId, now, twoWeeks, timezone);
+  }
+}
+
+// --- Computed Schedule ---
+
+import { computeSchedule, computeInputHash, type ScoredSlot, type UserPreferences } from "./scoring";
+
+/**
+ * Get the computed schedule for a user, recomputing only if inputs changed.
+ * This is the main entry point for both the slots endpoint and LLM prompts.
+ */
+export async function getOrComputeSchedule(userId: string): Promise<{
+  slots: ScoredSlot[];
+  events: CalendarEvent[];
+  timezone: string;
+  connected: boolean;
+  canWrite: boolean;
+  calendars: string[];
+}> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      preferences: true,
+      persistentKnowledge: true,
+      computedSchedule: true,
+    },
+  });
+
+  if (!user) throw new Error("User not found");
+
+  const prefs = (user.preferences as UserPreferences) || {};
+  const tz = prefs.explicit?.timezone ?? prefs.timezone ?? "America/Los_Angeles";
+
+  // Get cached calendar events (syncs if stale)
+  const calCtx = await getCachedCalendarContext(userId, tz);
+
+  if (!calCtx.connected) {
+    return {
+      slots: [],
+      events: [],
+      timezone: tz,
+      connected: false,
+      canWrite: false,
+      calendars: [],
+    };
+  }
+
+  // Check if recomputation is needed
+  const inputHash = computeInputHash(calCtx.events, prefs);
+  const existing = user.computedSchedule as { inputHash?: string; slots?: ScoredSlot[] } | null;
+
+  if (existing?.inputHash === inputHash && existing.slots) {
+    // Schedule is current — return cached
+    return {
+      slots: existing.slots,
+      events: calCtx.events,
+      timezone: tz,
+      connected: true,
+      canWrite: calCtx.canWrite,
+      calendars: calCtx.calendars,
+    };
+  }
+
+  // Recompute
+  const slots = computeSchedule(calCtx.events, prefs, user.persistentKnowledge);
+
+  // Store computed schedule
+  await prisma.computedSchedule.upsert({
+    where: { userId },
+    create: {
+      userId,
+      slots: slots as unknown as Prisma.InputJsonValue,
+      computedAt: new Date(),
+      inputHash,
+    },
+    update: {
+      slots: slots as unknown as Prisma.InputJsonValue,
+      computedAt: new Date(),
+      inputHash,
+    },
+  });
+
+  return {
+    slots,
+    events: calCtx.events,
+    timezone: tz,
+    connected: true,
+    canWrite: calCtx.canWrite,
+    calendars: calCtx.calendars,
+  };
+}
+
+/**
+ * Force recomputation of the schedule. Call after preference/knowledge changes.
+ */
+export async function invalidateSchedule(userId: string): Promise<void> {
+  await prisma.computedSchedule.deleteMany({ where: { userId } });
 }
 
 /** @deprecated Use getCalendarContext() instead — AI reasons over raw events */
