@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCalendarContext } from "@/lib/calendar";
-import type { CalendarEvent } from "@/lib/calendar";
 
 // GET /api/negotiate/slots?sessionId=xxx
 // Returns host's available slots grouped by day for the calendar widget
