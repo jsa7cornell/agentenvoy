@@ -443,6 +443,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
               transcript={transcript}
               tokensUsed={totalTokens}
               tokenBudget={config.tokenBudget}
+              models={config.agents.map((a) => a.model)}
               inline
             />
           </div>

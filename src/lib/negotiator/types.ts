@@ -8,6 +8,9 @@ export const PROVIDER_LABELS: Record<ModelProvider, string> = {
   openai: "OpenAI",
 };
 
+// Default for all new agents — cheapest available
+export const DEFAULT_MODEL = "gpt-4o-mini";
+
 export const DEFAULT_MODELS: Record<ModelProvider, string> = {
   anthropic: "claude-haiku-4-5",
   google: "gemini-2.5-flash",
@@ -26,6 +29,44 @@ export const MODEL_OPTIONS: Record<ModelProvider, string[]> = {
   ],
   openai: ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1"],
 };
+
+// ─── Model Pricing ($ per 1M tokens) ──────────────────────
+// Source: official pricing pages, April 2026
+export interface ModelPricing {
+  input: number;  // $ per 1M input tokens
+  output: number; // $ per 1M output tokens
+}
+
+export const MODEL_PRICING: Record<string, ModelPricing> = {
+  "gpt-4o-mini":       { input: 0.15,  output: 0.60  },
+  "gemini-2.5-flash":  { input: 0.30,  output: 2.50  },
+  "claude-haiku-4-5":  { input: 1.00,  output: 5.00  },
+  "o3-mini":           { input: 1.10,  output: 4.40  },
+  "gemini-2.5-pro":    { input: 1.25,  output: 10.00 },
+  "claude-sonnet-4-6": { input: 3.00,  output: 15.00 },
+  "gpt-4o":            { input: 2.50,  output: 10.00 },
+  "claude-opus-4-6":   { input: 5.00,  output: 25.00 },
+  "o1":                { input: 15.00, output: 60.00 },
+};
+
+// Estimate cost from token count. Assumes ~40% input / 60% output split.
+export function estimateCost(totalTokens: number, model: string): number {
+  const pricing = MODEL_PRICING[model];
+  if (!pricing || totalTokens === 0) return 0;
+  const inputTokens = totalTokens * 0.4;
+  const outputTokens = totalTokens * 0.6;
+  return (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+}
+
+// Estimate cost across multiple models (for multi-agent runs)
+export function estimateMultiModelCost(
+  totalTokens: number,
+  models: string[]
+): number {
+  if (models.length === 0 || totalTokens === 0) return 0;
+  const tokensPerModel = totalTokens / models.length;
+  return models.reduce((sum, m) => sum + estimateCost(tokensPerModel, m), 0);
+}
 
 // ─── Agent Config ─────────────────────────────────────────
 

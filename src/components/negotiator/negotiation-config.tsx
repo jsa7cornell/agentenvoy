@@ -4,22 +4,23 @@ import { useState } from "react";
 import { v4 as uuid } from "uuid";
 import { AgentCard } from "./agent-card";
 import { BUDGET_STEPS, DEFAULT_TOKEN_BUDGET } from "@/lib/negotiator/token-budget";
-import type { AgentConfig, NegotiationConfig, ModelProvider } from "@/lib/negotiator/types";
-import { DEFAULT_MODELS } from "@/lib/negotiator/types";
+import type { AgentConfig, NegotiationConfig } from "@/lib/negotiator/types";
+import { DEFAULT_MODEL } from "@/lib/negotiator/types";
 
-function createAgent(provider: ModelProvider = "anthropic"): AgentConfig {
-  const names: Record<ModelProvider, string> = {
-    anthropic: "Claude",
-    google: "Gemini",
-    openai: "GPT",
-  };
+const STARTER_CONTEXTS = [
+  "Prioritize speed and pragmatism. Advocate for the simplest solution that ships fastest, even if it means cutting corners you can fix later.",
+  "Prioritize long-term quality and scalability. Push back on shortcuts that create technical debt or operational risk down the road.",
+  "Prioritize cost and resource efficiency. Challenge any approach that isn't justified by ROI, and flag hidden costs or complexity.",
+];
+
+function createAgent(index: number = 0): AgentConfig {
   return {
     id: uuid(),
-    name: names[provider],
-    provider,
-    model: DEFAULT_MODELS[provider],
+    name: `Agent ${index + 1}`,
+    provider: "openai",
+    model: DEFAULT_MODEL,
     apiKey: "",
-    context: "",
+    context: STARTER_CONTEXTS[index % STARTER_CONTEXTS.length] ?? "",
   };
 }
 
@@ -38,9 +39,9 @@ export function NegotiationConfigPanel({
   const [maxRounds, setMaxRounds] = useState(2);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [agents, setAgents] = useState<AgentConfig[]>([
-    createAgent("anthropic"),
-    createAgent("google"),
-    createAgent("openai"),
+    createAgent(0),
+    createAgent(1),
+    createAgent(2),
   ]);
 
   const canAddAgent = agents.length < 4;
@@ -48,12 +49,7 @@ export function NegotiationConfigPanel({
 
   function addAgent() {
     if (!canAddAgent) return;
-    const used = new Set(agents.map((a) => a.provider));
-    const next: ModelProvider =
-      !used.has("openai") ? "openai" :
-      !used.has("google") ? "google" :
-      "anthropic";
-    setAgents([...agents, createAgent(next)]);
+    setAgents([...agents, createAgent(agents.length)]);
   }
 
   function updateAgent(index: number, updated: AgentConfig) {

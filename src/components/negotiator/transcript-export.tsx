@@ -1,18 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import { estimateMultiModelCost } from "@/lib/negotiator/types";
 
 interface TranscriptExportProps {
   transcript: string;
   tokensUsed: number;
   tokenBudget: number;
-  inline?: boolean; // compact mode — no border-top, smaller buttons
+  models?: string[]; // list of models used — for cost estimate
+  inline?: boolean;  // compact mode — no border-top, smaller buttons
 }
 
 export function TranscriptExport({
   transcript,
   tokensUsed,
   tokenBudget,
+  models = [],
   inline = false,
 }: TranscriptExportProps) {
   const [copied, setCopied] = useState(false);
@@ -33,6 +36,11 @@ export function TranscriptExport({
     URL.revokeObjectURL(url);
   }
 
+  const estimatedCost = estimateMultiModelCost(tokensUsed, models);
+  const costLabel = estimatedCost > 0
+    ? `~$${estimatedCost < 0.01 ? estimatedCost.toFixed(4) : estimatedCost.toFixed(3)}`
+    : null;
+
   if (inline) {
     return (
       <div className="flex items-center gap-2">
@@ -48,6 +56,11 @@ export function TranscriptExport({
         >
           Download .md
         </button>
+        {costLabel && (
+          <span className="text-xs text-[var(--neg-text-muted)]" title="Estimated cost based on token usage and model pricing">
+            {costLabel} est.
+          </span>
+        )}
       </div>
     );
   }
@@ -66,9 +79,16 @@ export function TranscriptExport({
       >
         Download .md
       </button>
-      <span className="text-xs text-[var(--neg-text-muted)] ml-auto">
-        {tokensUsed.toLocaleString()} / {(tokenBudget / 1000).toFixed(0)}k tokens used
-      </span>
+      <div className="ml-auto text-right">
+        <span className="text-xs text-[var(--neg-text-muted)] block">
+          {tokensUsed.toLocaleString()} / {(tokenBudget / 1000).toFixed(0)}k tokens used
+        </span>
+        {costLabel && (
+          <span className="text-xs text-[var(--neg-text-muted)]" title="Estimated cost based on token usage and model pricing">
+            {costLabel} estimated cost
+          </span>
+        )}
+      </div>
     </div>
   );
 }

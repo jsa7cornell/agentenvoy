@@ -86,9 +86,10 @@ export function AgentCard({
 
       {/* Agent Context */}
       <div>
-        <label className="text-xs text-[var(--neg-text-muted)] block mb-1">
-          Agent context (private to this agent + administrator)
+        <label className="text-xs font-medium text-[var(--neg-text)] block mb-0.5">
+          Starting position
         </label>
+        <p className="text-xs text-[var(--neg-text-muted)] mb-1">The perspective this agent argues from</p>
         <textarea
           value={agent.context}
           onChange={(e) => onChange({ ...agent, context: e.target.value })}
