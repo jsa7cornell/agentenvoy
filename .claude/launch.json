@@ -4,7 +4,7 @@
     {
       "name": "agentenvoy-dev",
       "runtimeExecutable": "/bin/sh",
-      "runtimeArgs": ["-c", "PATH=/opt/homebrew/bin:$PATH op run --env-file=.env.tpl -- npx next dev"],
+      "runtimeArgs": ["-c", "PATH=/opt/homebrew/bin:$PATH npx next dev"],
       "port": 3000
     }
   ]

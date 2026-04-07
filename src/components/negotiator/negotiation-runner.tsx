@@ -6,10 +6,12 @@ import { PhaseSynthesis } from "./phase-synthesis";
 import { DecisionInput } from "./decision-input";
 import { TranscriptExport } from "./transcript-export";
 import { isOverBudget, budgetPercent } from "@/lib/negotiator/token-budget";
+import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
 import type {
   NegotiationConfig,
   ResearchResult,
   Synthesis,
+  FinalResponse,
 } from "@/lib/negotiator/types";
 
 type RunPhase =
@@ -18,6 +20,7 @@ type RunPhase =
   | "synthesizing"
   | "awaiting-decision"
   | "resolving"
+  | "finalizing"
   | "complete"
   | "error"
   | "budget-exceeded";
@@ -37,6 +40,8 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   const [totalTokens, setTotalTokens] = useState(0);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState("");
+  const [finalResponses, setFinalResponses] = useState<FinalResponse[]>([]);
+  const [adminSummary, setAdminSummary] = useState("");
 
   // Streaming state
   const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
@@ -247,27 +252,17 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     [config, totalTokens]
   );
 
-  // ─── Handle human decision submission ───────────────────
-  const handleDecision = useCallback(
-    async (decisions: string[], clarification: string) => {
-      const allDecisions = [...humanDecisions, ...decisions];
+  // ─── Option A: Add context & run another round ─────────
+  const handleContinue = useCallback(
+    async (clarification: string) => {
       const allClarifications = clarification
         ? [...hostClarifications, clarification]
         : hostClarifications;
 
-      setHumanDecisions(allDecisions);
       setHostClarifications(allClarifications);
 
       setTranscript((prev) => {
-        let txn = prev + `---\n\n## Human Decisions\n\n`;
-        decisions.forEach((d, i) => {
-          txn += `${i + 1}. ${d}\n`;
-        });
-        if (clarification) {
-          txn += `\n**Clarification:** ${clarification}\n`;
-        }
-        txn += "\n";
-        return txn;
+        return prev + `---\n\n## Host Clarification\n\n${clarification}\n\n`;
       });
 
       const priorAgreements = syntheses.flatMap((s) => s.agreements);
@@ -278,11 +273,65 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         research,
         nextRound,
         priorAgreements,
-        allDecisions,
+        humanDecisions,
         allClarifications
       );
     },
-    [humanDecisions, hostClarifications, syntheses, round, research, runSynthesis]
+    [hostClarifications, syntheses, round, research, humanDecisions, runSynthesis]
+  );
+
+  // ─── Option B: Make a decision & finalize ──────────────
+  const handleDecide = useCallback(
+    async (decisions: string[]) => {
+      setPhase("finalizing");
+      const allDecisions = [...humanDecisions, ...decisions];
+      setHumanDecisions(allDecisions);
+
+      setTranscript((prev) => {
+        let txn = prev + `---\n\n## Final Decisions\n\n`;
+        decisions.forEach((d, i) => {
+          txn += `${i + 1}. ${d}\n`;
+        });
+        txn += "\n";
+        return txn;
+      });
+
+      try {
+        const latestSynth = syntheses[syntheses.length - 1];
+        const res = await fetch("/api/negotiator/finalize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agents: config.agents,
+            question: config.question,
+            decisions,
+            decisionPoints: latestSynth.decisionPoints,
+          }),
+        });
+
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+
+        setFinalResponses(data.responses);
+        setAdminSummary(data.adminSummary);
+        setTotalTokens((t) => t + (data.tokensUsed || 0));
+
+        setTranscript((prev) => {
+          let txn = prev + `---\n\n## Final Agent Responses\n\n`;
+          for (const r of data.responses) {
+            txn += `### ${r.agentName}\n${r.content}\n\n`;
+          }
+          txn += `---\n\n## Final Outcome\n\n${data.adminSummary}\n\n`;
+          return txn;
+        });
+
+        setPhase("complete");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Finalization failed");
+        setPhase("error");
+      }
+    },
+    [config, humanDecisions, syntheses]
   );
 
   // ─── Start the negotiation ─────────────────────────────
@@ -298,6 +347,8 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     setError("");
     setStreamingIds(new Set());
     setStreamingTexts({});
+    setFinalResponses([]);
+    setAdminSummary("");
     runResearch();
   }, [runResearch]);
 
@@ -329,8 +380,8 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           />
         </div>
         <span className="text-xs text-[var(--neg-text-muted)] whitespace-nowrap">
-          {totalTokens.toLocaleString()} /{" "}
-          {(config.tokenBudget / 1000).toFixed(0)}k tokens
+          Token Budget: {totalTokens.toLocaleString()} /{" "}
+          {(config.tokenBudget / 1000).toFixed(0)}k
         </span>
         <button
           onClick={onReset}
@@ -340,15 +391,60 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         </button>
       </div>
 
-      {/* Synthesis phases — above research */}
-      {syntheses.map((s, i) => (
-        <PhaseSynthesis
-          key={i}
-          synthesis={s}
-          round={i + 1}
-          prevSynthesis={i > 0 ? syntheses[i - 1] : undefined}
+      {/* Final outcome — top of results when complete */}
+      {adminSummary && (
+        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-2">
+          <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
+            Final Outcome
+          </h2>
+          <p className="text-sm leading-relaxed">{adminSummary}</p>
+        </div>
+      )}
+
+      {/* Final agent responses */}
+      {finalResponses.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-medium text-[var(--neg-text-muted)] uppercase tracking-wider">
+            Final Agent Responses
+          </h2>
+          {finalResponses.map((r) => (
+            <div key={r.agentId} className={`rounded-lg border ${PROVIDER_COLORS[r.provider]} p-4`}>
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`w-2 h-2 rounded-full ${PROVIDER_DOT[r.provider]}`} />
+                <span className="text-sm font-medium">{r.agentName}</span>
+                <span className="text-xs text-[var(--neg-text-muted)]">{r.model}</span>
+              </div>
+              <p className="text-sm leading-relaxed">{r.content}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Awaiting decision */}
+      {phase === "awaiting-decision" && latestSynthesis && (
+        <DecisionInput
+          synthesis={latestSynthesis}
+          onContinue={handleContinue}
+          onDecide={handleDecide}
         />
-      ))}
+      )}
+
+      {/* Synthesis phases — most recent first */}
+      {[...syntheses].reverse().map((s, reversedIndex) => {
+        const originalIndex = syntheses.length - 1 - reversedIndex;
+        return (
+          <div key={originalIndex}>
+            {reversedIndex > 0 && (
+              <div className="border-t border-[var(--neg-border)] my-2" />
+            )}
+            <PhaseSynthesis
+              synthesis={s}
+              round={originalIndex + 1}
+              prevSynthesis={originalIndex > 0 ? syntheses[originalIndex - 1] : undefined}
+            />
+          </div>
+        );
+      })}
 
       {/* Research phase */}
       {(phase === "researching" || research.length > 0) && (
@@ -359,19 +455,19 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         />
       )}
 
-      {/* Awaiting decision */}
-      {phase === "awaiting-decision" && latestSynthesis && (
-        <DecisionInput
-          synthesis={latestSynthesis}
-          onSubmit={handleDecision}
-        />
-      )}
-
       {/* Synthesizing spinner */}
       {phase === "synthesizing" && (
         <div className="flex items-center gap-2 text-sm text-[var(--neg-text-muted)]">
           <div className="w-2 h-2 rounded-full bg-[var(--neg-purple)] animate-pulse" />
           Administrator synthesizing positions...
+        </div>
+      )}
+
+      {/* Finalizing spinner */}
+      {phase === "finalizing" && (
+        <div className="flex items-center gap-2 text-sm text-[var(--neg-text-muted)]">
+          <div className="w-2 h-2 rounded-full bg-[var(--neg-accent)] animate-pulse" />
+          Collecting final agent responses...
         </div>
       )}
 

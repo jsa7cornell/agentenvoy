@@ -33,7 +33,6 @@ export function NegotiationConfigPanel({
   disabled,
 }: NegotiationConfigPanelProps) {
   const [question, setQuestion] = useState("");
-  const [sharedContext, setSharedContext] = useState("");
   const [hostPrivateContext, setHostPrivateContext] = useState("");
   const [tokenBudget, setTokenBudget] = useState(DEFAULT_TOKEN_BUDGET);
   const [maxRounds, setMaxRounds] = useState(2);
@@ -41,6 +40,7 @@ export function NegotiationConfigPanel({
   const [agents, setAgents] = useState<AgentConfig[]>([
     createAgent("anthropic"),
     createAgent("google"),
+    createAgent("openai"),
   ]);
 
   const canAddAgent = agents.length < 4;
@@ -69,7 +69,7 @@ export function NegotiationConfigPanel({
   function handleStart() {
     onStart({
       question: question.trim(),
-      sharedContext: sharedContext.trim(),
+      sharedContext: "",
       hostPrivateContext: hostPrivateContext.trim(),
       agents,
       tokenBudget,
@@ -79,33 +79,15 @@ export function NegotiationConfigPanel({
 
   return (
     <div className="space-y-6">
-      {/* Question */}
+      {/* Question & Context */}
       <div>
-        <label className="block text-sm font-medium mb-1">The Question</label>
+        <label className="block text-sm font-medium mb-1">Question & Context</label>
         <textarea
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder="What should these agents research and negotiate? e.g. 'What payment processor should we use for a new SaaS product?'"
+          placeholder={"What should the agents research? Include any relevant background, constraints, or requirements.\n\ne.g. 'What payment processor should we use for a new SaaS product? We expect $50k MRR within 6 months, need international card support, and have a 3-person engineering team.'"}
           disabled={disabled}
-          rows={2}
-          className="w-full bg-[var(--neg-surface)] border border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
-        />
-      </div>
-
-      {/* Shared Context */}
-      <div>
-        <label className="block text-sm font-medium mb-1">
-          Shared Context{" "}
-          <span className="text-[var(--neg-text-muted)] font-normal">
-            (all agents see this)
-          </span>
-        </label>
-        <textarea
-          value={sharedContext}
-          onChange={(e) => setSharedContext(e.target.value)}
-          placeholder="Background info, constraints, requirements..."
-          disabled={disabled}
-          rows={3}
+          rows={4}
           className="w-full bg-[var(--neg-surface)] border border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
         />
       </div>

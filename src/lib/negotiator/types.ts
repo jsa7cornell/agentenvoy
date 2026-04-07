@@ -96,6 +96,7 @@ export type PhaseType =
   | "synthesis"
   | "decision"
   | "resolution"
+  | "final-responses"
   | "complete";
 
 export interface ResearchResult {
@@ -105,6 +106,16 @@ export interface ResearchResult {
   model: string;
   content: string;
   tokensUsed: number;
+}
+
+// ─── Final Response (after host decides) ─────────────────
+
+export interface FinalResponse {
+  agentId: string;
+  agentName: string;
+  provider: ModelProvider;
+  model: string;
+  content: string; // short acknowledgement + final thoughts
 }
 
 export interface NegotiationState {

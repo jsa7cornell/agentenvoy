@@ -8,12 +8,6 @@ const TYPE_LABELS: Record<DisagreementType, string> = {
   "different-objectives": "Different Objectives",
 };
 
-const TYPE_COLORS: Record<DisagreementType, string> = {
-  miscommunication: "text-[var(--neg-blue)]",
-  "differing-assumptions": "text-[var(--neg-yellow)]",
-  "different-objectives": "text-[var(--neg-red)]",
-};
-
 interface PhaseSynthesisProps {
   synthesis: Synthesis;
   round: number;
@@ -21,7 +15,6 @@ interface PhaseSynthesisProps {
 }
 
 export function PhaseSynthesis({ synthesis, round, prevSynthesis }: PhaseSynthesisProps) {
-  // Compute what changed vs previous round
   const newAgreements = prevSynthesis
     ? synthesis.agreements.filter((a) => !prevSynthesis.agreements.includes(a))
     : synthesis.agreements;
@@ -69,7 +62,7 @@ export function PhaseSynthesis({ synthesis, round, prevSynthesis }: PhaseSynthes
           ))}
           {resolvedTopics.map((t, i) => (
             <div key={i} className="flex items-start gap-2">
-              <span className="text-[var(--neg-green)] shrink-0 text-xs mt-0.5">✓</span>
+              <span className="text-[var(--neg-green)] shrink-0 text-xs mt-0.5">&#10003;</span>
               <span className="text-sm text-[var(--neg-text)]">Tension resolved: {t}</span>
             </div>
           ))}
@@ -81,50 +74,50 @@ export function PhaseSynthesis({ synthesis, round, prevSynthesis }: PhaseSynthes
         <p className="text-sm leading-relaxed">{synthesis.summary}</p>
       </div>
 
-      {/* Agreements */}
-      {synthesis.agreements.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-xs font-medium text-[var(--neg-green)] uppercase tracking-wider">
-            Agreements
+      {/* Unified Agreements & Tensions */}
+      {(synthesis.agreements.length > 0 || synthesis.disagreements.length > 0) && (
+        <div className="space-y-1">
+          <h3 className="text-xs font-medium text-[var(--neg-text-muted)] uppercase tracking-wider mb-2">
+            Agreements & Tensions
           </h3>
-          {synthesis.agreements.map((a, i) => (
-            <div
-              key={i}
-              className="flex items-start gap-2 rounded border border-green-500/20 bg-green-500/5 px-3 py-2"
-            >
-              <span className="text-[var(--neg-green)] mt-0.5 shrink-0">&#10003;</span>
-              <span className="text-sm">{a}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Disagreements */}
-      {synthesis.disagreements.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-xs font-medium text-[var(--neg-yellow)] uppercase tracking-wider">
-            Tensions
-          </h3>
-          {synthesis.disagreements.map((d, i) => (
-            <div
-              key={i}
-              className="rounded border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 space-y-1"
-            >
-              <div className="flex items-center gap-2">
-                <span className={`text-xs font-medium ${TYPE_COLORS[d.type]}`}>
-                  {TYPE_LABELS[d.type]}
+          <div className="rounded-lg border border-[var(--neg-border)] overflow-hidden divide-y divide-[var(--neg-border)]">
+            {synthesis.agreements.map((a, i) => (
+              <div
+                key={`agree-${i}`}
+                className="flex items-start gap-3 px-4 py-2.5 bg-green-500/5"
+              >
+                <span className="text-[var(--neg-green)] mt-0.5 shrink-0">&#10003;</span>
+                <span className="text-sm flex-1">{a}</span>
+                <span className="text-xs text-[var(--neg-green)] shrink-0 uppercase tracking-wider">
+                  Agreed
                 </span>
-                <span className="text-sm font-medium">{d.topic}</span>
               </div>
-              <p className="text-sm text-[var(--neg-text-muted)]">{d.summary}</p>
-              {d.suggestedResolution && (
-                <p className="text-sm text-[var(--neg-text)]">
-                  <span className="text-[var(--neg-accent)]">Suggested:</span>{" "}
-                  {d.suggestedResolution}
-                </p>
-              )}
-            </div>
-          ))}
+            ))}
+            {synthesis.disagreements.map((d, i) => {
+              const isMajor = d.type === "different-objectives";
+              const rowBg = isMajor ? "bg-red-500/5" : "bg-yellow-500/5";
+              const dotColor = isMajor ? "text-[var(--neg-red)]" : "text-[var(--neg-yellow)]";
+              const labelColor = isMajor ? "text-[var(--neg-red)]" : "text-[var(--neg-yellow)]";
+              return (
+                <div key={`tension-${i}`} className={`px-4 py-2.5 ${rowBg} space-y-1`}>
+                  <div className="flex items-center gap-3">
+                    <span className={`${dotColor} shrink-0`}>&#9679;</span>
+                    <span className="text-sm font-medium flex-1">{d.topic}</span>
+                    <span className={`text-xs ${labelColor} shrink-0 uppercase tracking-wider`}>
+                      {TYPE_LABELS[d.type]}
+                    </span>
+                  </div>
+                  <p className="text-sm text-[var(--neg-text-muted)] pl-6">{d.summary}</p>
+                  {d.suggestedResolution && (
+                    <p className="text-sm text-[var(--neg-text)] pl-6">
+                      <span className="text-[var(--neg-accent)]">Suggested:</span>{" "}
+                      {d.suggestedResolution}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
