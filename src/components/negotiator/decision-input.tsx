@@ -76,7 +76,7 @@ export function DecisionInput({
               : "border-[var(--neg-border)] text-[var(--neg-text-muted)] hover:border-[var(--neg-text-muted)]"
           } disabled:opacity-50`}
         >
-          Add context & run another round
+          Resolve tension & run another round
         </button>
         <button
           type="button"
@@ -198,15 +198,20 @@ export function DecisionInput({
           {hasDecisionPoints ? (
             <>
               <p className="text-sm text-[var(--neg-text-muted)]">
-                Make your decisions below. Each agent will acknowledge your
-                choices and share brief final thoughts, then the Administrator
-                will wrap up.
+                The Administrator has suggested a decision for each open point below — pre-filled from the synthesis. Edit or override to make it your own, then click Finalize. Each agent will acknowledge your choices and share brief final thoughts.
               </p>
               {synthesis.decisionPoints.map((dp, i) => (
                 <div key={i}>
-                  <label className="block text-sm font-medium mb-1">
-                    {dp.topic}
-                  </label>
+                  <div className="flex items-baseline gap-2 mb-1">
+                    <label className="block text-sm font-medium">
+                      {dp.topic}
+                    </label>
+                    {dp.recommendation && (
+                      <span className="text-xs text-[var(--neg-accent)]">
+                        pre-filled from Administrator
+                      </span>
+                    )}
+                  </div>
                   <textarea
                     value={decisions[i]}
                     onChange={(e) => {

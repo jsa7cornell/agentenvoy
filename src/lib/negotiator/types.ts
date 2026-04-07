@@ -119,6 +119,7 @@ export interface DecisionPoint {
 // ─── Administrator Synthesis ──────────────────────────────
 
 export interface Synthesis {
+  agentLabels?: Record<string, string>; // agentId → one-word descriptor e.g. "Pragmatist"
   agreements: string[];
   disagreements: Disagreement[];
   decisionPoints: DecisionPoint[];

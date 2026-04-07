@@ -386,6 +386,9 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   // ─── Render ─────────────────────────────────────────────
   const latestSynthesis = syntheses[syntheses.length - 1];
   const pct = budgetPercent(totalTokens, config.tokenBudget);
+  // Collect agentLabels from first synthesis that has them
+  const agentLabels: Record<string, string> =
+    syntheses.find((s) => s.agentLabels && Object.keys(s.agentLabels).length > 0)?.agentLabels ?? {};
 
   return (
     <div className="space-y-6">
@@ -491,6 +494,11 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
               <div className="flex items-center gap-2 mb-2">
                 <div className={`w-2 h-2 rounded-full ${PROVIDER_DOT[r.provider]}`} />
                 <span className="text-sm font-medium">{r.agentName}</span>
+                {agentLabels[r.agentId] && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--neg-accent)]/10 text-[var(--neg-accent)] font-medium">
+                    {agentLabels[r.agentId]}
+                  </span>
+                )}
                 <span className="text-xs text-[var(--neg-text-muted)]">{r.model}</span>
               </div>
               <SimpleMarkdown content={r.content} />
@@ -531,6 +539,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           results={research}
           streamingAgentIds={streamingIds}
           streamingTexts={streamingTexts}
+          agentLabels={agentLabels}
         />
       )}
 

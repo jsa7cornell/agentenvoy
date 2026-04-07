@@ -7,12 +7,14 @@ interface PhaseResearchProps {
   results: ResearchResult[];
   streamingAgentIds: Set<string>;
   streamingTexts: Record<string, string>;
+  agentLabels?: Record<string, string>; // agentId → one-word label from Administrator
 }
 
 export function PhaseResearch({
   results,
   streamingAgentIds,
   streamingTexts,
+  agentLabels = {},
 }: PhaseResearchProps) {
   const allAgents = [
     ...results.map((r) => ({
@@ -55,6 +57,11 @@ export function PhaseResearch({
                 className={`w-2 h-2 rounded-full ${PROVIDER_DOT[agent.provider]} ${agent.streaming ? "animate-pulse" : ""}`}
               />
               <span className="text-sm font-medium">{agent.name}</span>
+              {agentLabels[agent.id] && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--neg-accent)]/10 text-[var(--neg-accent)] font-medium">
+                  {agentLabels[agent.id]}
+                </span>
+              )}
               <span className="text-xs text-[var(--neg-text-muted)]">
                 {agent.model}
               </span>
