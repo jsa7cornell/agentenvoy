@@ -380,8 +380,8 @@ export async function syncCalendar(userId: string): Promise<{ changed: boolean; 
   await Promise.all(
     calendars.map(async (cal) => {
       try {
-        // @ts-expect-error calendarCache pending prisma migration
-        const cached = await prisma.calendarCache.findUnique({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cached = await (prisma as any).calendarCache.findUnique({
           where: { userId_calendarId: { userId, calendarId: cal.id } },
         });
 
@@ -420,8 +420,8 @@ export async function syncCalendar(userId: string): Promise<{ changed: boolean; 
         }
 
         // Upsert cache
-        // @ts-expect-error calendarCache pending prisma migration
-        await prisma.calendarCache.upsert({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (prisma as any).calendarCache.upsert({
           where: { userId_calendarId: { userId, calendarId: cal.id } },
           create: {
             userId,
@@ -445,8 +445,8 @@ export async function syncCalendar(userId: string): Promise<{ changed: boolean; 
   );
 
   // Collect all events from cache
-  // @ts-expect-error calendarCache pending prisma migration
-  const allCaches = await prisma.calendarCache.findMany({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allCaches = await (prisma as any).calendarCache.findMany({
     where: { userId },
     select: { events: true },
   });
@@ -658,13 +658,13 @@ export async function getOrComputeSchedule(userId: string): Promise<{
 }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     select: {
       preferences: true,
       persistentKnowledge: true,
       upcomingSchedulePreferences: true,
-      // @ts-expect-error computedSchedule pending prisma migration
       computedSchedule: true,
-    },
+    } as any,
   });
 
   if (!user) throw new Error("User not found");
@@ -688,8 +688,8 @@ export async function getOrComputeSchedule(userId: string): Promise<{
 
   // Check if recomputation is needed (includes internal calendar fields)
   const inputHash = computeInputHash(calCtx.events, prefs, user.persistentKnowledge, user.upcomingSchedulePreferences);
-  // @ts-expect-error computedSchedule pending prisma migration
-  const existing = (user as Record<string, unknown>).computedSchedule as { inputHash?: string; slots?: ScoredSlot[] } | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const existing = (user as any).computedSchedule as { inputHash?: string; slots?: ScoredSlot[] } | null;
 
   if (existing?.inputHash === inputHash && existing.slots) {
     // Schedule is current — return cached
@@ -707,8 +707,8 @@ export async function getOrComputeSchedule(userId: string): Promise<{
   const slots = computeSchedule(calCtx.events, prefs, user.persistentKnowledge, user.upcomingSchedulePreferences);
 
   // Store computed schedule
-  // @ts-expect-error computedSchedule pending prisma migration
-  await prisma.computedSchedule.upsert({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma as any).computedSchedule.upsert({
     where: { userId },
     create: {
       userId,
@@ -737,8 +737,8 @@ export async function getOrComputeSchedule(userId: string): Promise<{
  * Force recomputation of the schedule. Call after preference/knowledge changes.
  */
 export async function invalidateSchedule(userId: string): Promise<void> {
-  // @ts-expect-error computedSchedule pending prisma migration
-  await prisma.computedSchedule.deleteMany({ where: { userId } });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma as any).computedSchedule.deleteMany({ where: { userId } });
 }
 
 /** @deprecated Use getCalendarContext() instead — AI reasons over raw events */
