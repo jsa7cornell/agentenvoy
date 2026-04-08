@@ -658,14 +658,15 @@ export async function getOrComputeSchedule(userId: string): Promise<{
 }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     select: {
       preferences: true,
       persistentKnowledge: true,
       upcomingSchedulePreferences: true,
-      computedSchedule: true,
-    } as any,
+    },
   });
+  // computedSchedule is a separate model pending prisma client regen
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const computedRecord = await (prisma as any).computedSchedule.findUnique({ where: { userId } });
 
   if (!user) throw new Error("User not found");
 
@@ -688,8 +689,7 @@ export async function getOrComputeSchedule(userId: string): Promise<{
 
   // Check if recomputation is needed (includes internal calendar fields)
   const inputHash = computeInputHash(calCtx.events, prefs, user.persistentKnowledge, user.upcomingSchedulePreferences);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const existing = (user as any).computedSchedule as { inputHash?: string; slots?: ScoredSlot[] } | null;
+  const existing = computedRecord as { inputHash?: string; slots?: ScoredSlot[] } | null;
 
   if (existing?.inputHash === inputHash && existing.slots) {
     // Schedule is current — return cached
