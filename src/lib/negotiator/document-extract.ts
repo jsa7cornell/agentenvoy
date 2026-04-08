@@ -64,11 +64,11 @@ export async function extractDocument(file: File): Promise<ExtractOutcome> {
 
   try {
     if (ext === ".pdf" || file.type === "application/pdf") {
-      const { PDFParse } = await import("pdf-parse");
-      const parser = new PDFParse({ data: new Uint8Array(buffer) });
-      const result = await parser.getText();
-      rawText = result.text;
-      await parser.destroy();
+      const { extractText, getDocumentProxy } = await import("unpdf");
+      const pdf = await getDocumentProxy(new Uint8Array(buffer));
+      const { text } = await extractText(pdf, { mergePages: true });
+      rawText = text;
+      pdf.cleanup();
     } else if (
       ext === ".docx" ||
       file.type ===
@@ -100,8 +100,7 @@ export async function extractDocument(file: File): Promise<ExtractOutcome> {
     };
   }
 
-  // Strip pdf-parse v2 page markers ("-- 1 of 5 --") before checking for content
-  const trimmed = rawText.replace(/--\s*\d+\s+of\s+\d+\s*--/g, "").trim();
+  const trimmed = rawText.trim();
   if (!trimmed) {
     const isPdf = ext === ".pdf" || file.type === "application/pdf";
     return {
