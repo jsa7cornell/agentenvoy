@@ -90,7 +90,7 @@ export interface NegotiationConfig {
   maxRounds: number; // default 2
 }
 
-// ─── Disagreement Taxonomy ────────────────────────────────
+// ─── Legacy types (kept for DB compat with old results) ──
 
 export type DisagreementType =
   | "miscommunication"
@@ -100,7 +100,7 @@ export type DisagreementType =
 export interface Disagreement {
   topic: string;
   type: DisagreementType;
-  parties: string[]; // agent IDs
+  parties: string[];
   summary: string;
   suggestedResolution?: string;
 }
@@ -110,23 +110,39 @@ export interface DecisionPoint {
   type: DisagreementType;
   options: Array<{
     label: string;
-    advocatedBy: string[]; // agent IDs
+    advocatedBy: string[];
     tradeoff: string;
   }>;
   recommendation?: string;
 }
 
+// ─── Competing Proposals Model ───────────────────────────
+
+export interface ProposalSummary {
+  agentId: string;
+  headline: string;
+  keyPoints: string[];
+  strengths: string[];
+  risks: string[];
+}
+
+export interface KeyDifference {
+  dimension: string;
+  proposals: Record<string, string>; // agentId → position on this dimension
+}
+
 // ─── Administrator Synthesis ──────────────────────────────
 
 export interface Synthesis {
-  agentLabels?: Record<string, string>; // agentId → one-word descriptor e.g. "Pragmatist"
-  agreements: string[];
-  disagreements: Disagreement[];
-  decisionPoints: DecisionPoint[];
+  proposals: ProposalSummary[];
+  commonGround: string[];
+  keyDifferences: KeyDifference[];
+  recommendation: {
+    agentId: string;
+    reasoning: string;
+  };
+  blendOpportunity?: string;
   summary: string;
-  isResolved: boolean;
-  recommendMoreRounds?: boolean;
-  hostClarificationNeeded?: string;
 }
 
 // ─── Transcript / Events ──────────────────────────────────

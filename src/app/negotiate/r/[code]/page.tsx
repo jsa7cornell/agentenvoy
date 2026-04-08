@@ -27,7 +27,7 @@ export default async function ResultPage({ params }: Props) {
   if (!result) notFound();
 
   return (
-    <main className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+    <main className="max-w-4xl mx-auto px-4 py-8 space-y-6 light" data-theme="light" style={{ colorScheme: "light" }}>
       <NegotiatorResultView
         question={result.question}
         agents={result.agents as Record<string, unknown>[]}
@@ -39,7 +39,6 @@ export default async function ResultPage({ params }: Props) {
         totalTokens={result.totalTokens}
         transcript={result.transcript}
         createdAt={result.createdAt.toISOString()}
-        shareCode={result.shareCode}
       />
     </main>
   );

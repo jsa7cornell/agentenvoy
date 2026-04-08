@@ -15,10 +15,6 @@ export async function POST(req: Request) {
     hostPrivateContext,
     agents,
     research,
-    priorAgreements,
-    humanDecisions,
-    hostClarifications,
-    round,
   } = body as {
     apiKey?: string;
     model?: string;
@@ -27,10 +23,6 @@ export async function POST(req: Request) {
     hostPrivateContext: string;
     agents: AgentConfig[];
     research: ResearchResult[];
-    priorAgreements?: string[];
-    humanDecisions?: string[];
-    hostClarifications?: string[];
-    round: number;
   };
 
   const adminModel = getModel(
@@ -45,17 +37,13 @@ export async function POST(req: Request) {
     hostPrivateContext,
     agents,
     research,
-    priorAgreements,
-    humanDecisions,
-    hostClarifications,
-    round,
   });
 
   const result = await generateText({
     model: adminModel,
     system: systemPrompt,
     prompt:
-      "Analyze all agent positions and produce your synthesis as a JSON object. Remember: output ONLY the JSON, no preamble or explanation.",
+      "Compare the agent proposals and produce your synthesis as a JSON object. Remember: output ONLY the JSON, no preamble or explanation.",
     maxOutputTokens: 4096,
   });
 

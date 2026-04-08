@@ -22,7 +22,6 @@ interface NegotiatorResultViewProps {
   totalTokens: number;
   transcript: string;
   createdAt: string;
-  shareCode: string;
 }
 
 export function NegotiatorResultView({
@@ -34,12 +33,12 @@ export function NegotiatorResultView({
   totalTokens,
   transcript,
   createdAt,
-  shareCode,
 }: NegotiatorResultViewProps) {
-  // Cast JSON fields to proper types
   const research = rawResearch as unknown as ResearchResult[];
   const syntheses = rawSyntheses as unknown as Synthesis[];
   const finalResponses = rawFinalResponses as unknown as FinalResponse[];
+
+  const latestSynthesis = syntheses[syntheses.length - 1];
 
   return (
     <div className="space-y-6">
@@ -74,17 +73,9 @@ export function NegotiatorResultView({
       {/* Final outcome */}
       {adminSummary && (
         <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
-              Final Outcome
-            </h2>
-            <a
-              href={`/negotiate/r/${shareCode}`}
-              className="text-xs text-[var(--neg-accent)] hover:underline"
-            >
-              Shareable link →
-            </a>
-          </div>
+          <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
+            Final Outcome
+          </h2>
           <SimpleMarkdown content={adminSummary} />
         </div>
       )}
@@ -93,7 +84,7 @@ export function NegotiatorResultView({
       {finalResponses.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-sm font-medium text-[var(--neg-text-muted)] uppercase tracking-wider">
-            Final Agent Responses
+            {finalResponses.length === 1 ? "Revised Proposal" : "Final Agent Responses"}
           </h2>
           {finalResponses.map((r) => (
             <div
@@ -115,24 +106,10 @@ export function NegotiatorResultView({
         </div>
       )}
 
-      {/* Synthesis rounds — most recent first */}
-      {[...syntheses].reverse().map((s, reversedIndex) => {
-        const originalIndex = syntheses.length - 1 - reversedIndex;
-        return (
-          <div key={originalIndex}>
-            {reversedIndex > 0 && (
-              <div className="border-t border-[var(--neg-border)] my-2" />
-            )}
-            <PhaseSynthesis
-              synthesis={s}
-              round={originalIndex + 1}
-              prevSynthesis={
-                originalIndex > 0 ? syntheses[originalIndex - 1] : undefined
-              }
-            />
-          </div>
-        );
-      })}
+      {/* Synthesis */}
+      {latestSynthesis && (
+        <PhaseSynthesis synthesis={latestSynthesis} />
+      )}
 
       {/* Research results */}
       {research.length > 0 && (

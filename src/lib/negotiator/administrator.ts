@@ -27,10 +27,6 @@ interface ComposeOptions {
   hostPrivateContext: string;
   agents: AgentConfig[];
   research: ResearchResult[];
-  priorAgreements?: string[];
-  humanDecisions?: string[];
-  hostClarifications?: string[];
-  round: number;
 }
 
 export function composeAdministratorPrompt(opts: ComposeOptions): string {
@@ -40,9 +36,7 @@ export function composeAdministratorPrompt(opts: ComposeOptions): string {
   sections.push(loadPlaybook());
 
   // 2. Scenario
-  sections.push(
-    `# Scenario\n\nQuestion: ${opts.question}\nRound: ${opts.round}`
-  );
+  sections.push(`# Scenario\n\nQuestion: ${opts.question}`);
 
   // 3. Shared context
   if (opts.sharedContext) {
@@ -75,33 +69,6 @@ export function composeAdministratorPrompt(opts: ComposeOptions): string {
 
     agentSection.push(`## Position\n${position}`);
     sections.push(agentSection.join("\n\n"));
-  }
-
-  // 6. Prior agreements (locked in from previous rounds)
-  if (opts.priorAgreements && opts.priorAgreements.length > 0) {
-    sections.push(
-      `# Locked Agreements (do not re-litigate)\n\n${opts.priorAgreements
-        .map((a, i) => `${i + 1}. ${a}`)
-        .join("\n")}`
-    );
-  }
-
-  // 7. Human decisions from previous rounds
-  if (opts.humanDecisions && opts.humanDecisions.length > 0) {
-    sections.push(
-      `# Host Decisions (from previous rounds)\n\n${opts.humanDecisions
-        .map((d, i) => `${i + 1}. ${d}`)
-        .join("\n")}`
-    );
-  }
-
-  // 8. Host clarifications
-  if (opts.hostClarifications && opts.hostClarifications.length > 0) {
-    sections.push(
-      `# Host Clarifications\n\n${opts.hostClarifications
-        .map((c, i) => `${i + 1}. ${c}`)
-        .join("\n")}`
-    );
   }
 
   return sections.join("\n\n---\n\n");
@@ -138,11 +105,11 @@ export function parseSynthesis(text: string): Synthesis {
 
     // Complete failure — return a stub
     return {
-      agreements: [],
-      disagreements: [],
-      decisionPoints: [],
+      proposals: [],
+      commonGround: [],
+      keyDifferences: [],
+      recommendation: { agentId: "", reasoning: "Failed to parse administrator response." },
       summary: "Failed to parse administrator response. Raw output: " + text.slice(0, 500),
-      isResolved: false,
     };
   }
 }
