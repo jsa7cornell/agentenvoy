@@ -4,8 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { streamText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { getCalendarContext } from "@/lib/calendar";
-import { formatCalendarContext } from "@/agent/composer";
+import { getOrComputeSchedule } from "@/lib/calendar";
+import { formatComputedSchedule } from "@/agent/composer";
 
 const DASHBOARD_SYSTEM = `You are Envoy, the user's scheduling agent. You help them:
 1. Create meeting links from natural language
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
       meetSlug: true,
       preferences: true,
       persistentKnowledge: true,
-      situationalKnowledge: true,
+      upcomingSchedulePreferences: true,
       hostDirectives: true,
     },
   });
@@ -89,11 +89,9 @@ export async function POST(req: NextRequest) {
   let availabilityContext = "";
   if (hasCalendar) {
     try {
-      const now = new Date();
-      const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-      const calCtx = await getCalendarContext(session.user.id, now, twoWeeks, tz);
-      if (calCtx.connected) {
-        availabilityContext = `\n${formatCalendarContext(calCtx)}`;
+      const schedule = await getOrComputeSchedule(session.user.id);
+      if (schedule.connected) {
+        availabilityContext = `\n${formatComputedSchedule(schedule.slots, tz, schedule.canWrite)}`;
       } else {
         availabilityContext = "\nGoogle Calendar: CONNECTED but no events returned.";
       }
@@ -109,8 +107,8 @@ export async function POST(req: NextRequest) {
   if (user?.persistentKnowledge) {
     knowledgeContext += `\nHost's persistent preferences:\n${user.persistentKnowledge}`;
   }
-  if (user?.situationalKnowledge) {
-    knowledgeContext += `\nHost's situational context:\n${user.situationalKnowledge}`;
+  if (user?.upcomingSchedulePreferences) {
+    knowledgeContext += `\nHost's situational context:\n${user.upcomingSchedulePreferences}`;
   }
 
   const contextMessage = `User: ${user?.name || "User"}\nMeet slug: ${user?.meetSlug || "not set"}\nCurrent preferences: ${JSON.stringify(user?.preferences || {})}\nBase URL: ${process.env.NEXTAUTH_URL || "https://agentenvoy.ai"}${availabilityContext}${knowledgeContext}`;

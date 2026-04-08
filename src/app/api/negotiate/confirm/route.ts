@@ -215,14 +215,14 @@ export async function POST(req: NextRequest) {
     const updates = await extractLearnings(
       transcript,
       session.host.persistentKnowledge,
-      session.host.situationalKnowledge,
+      session.host.upcomingSchedulePreferences,
       session.host.name || "host"
     );
     await prisma.user.update({
       where: { id: session.hostId },
       data: {
         persistentKnowledge: updates.persistent,
-        situationalKnowledge: updates.situational,
+        upcomingSchedulePreferences: updates.situational,
       },
     });
   } catch (e) {

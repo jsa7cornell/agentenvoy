@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCalendarContext } from "@/lib/calendar";
+import { getOrComputeSchedule } from "@/lib/calendar";
 import type { CalendarContext } from "@/lib/calendar";
 import { generateAgentResponse, AgentContext } from "@/agent/administrator";
 import { getServerSession } from "next-auth";
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   // Find the user by meetSlug
   const user = await prisma.user.findUnique({
     where: { meetSlug: slug },
-    select: { id: true, name: true, email: true, preferences: true, hostDirectives: true, meetSlug: true, persistentKnowledge: true, situationalKnowledge: true },
+    select: { id: true, name: true, email: true, preferences: true, hostDirectives: true, meetSlug: true, persistentKnowledge: true, upcomingSchedulePreferences: true },
   });
 
   if (!user) {
@@ -238,13 +238,16 @@ export async function POST(req: NextRequest) {
   // Get calendar context for the next 2 weeks
   let calendarContext: CalendarContext | undefined;
   try {
-    const now = new Date();
-    const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-    const tz =
-      (user.preferences as Record<string, unknown>)?.timezone as string ??
-      ((user.preferences as Record<string, unknown>)?.explicit as Record<string, unknown> | undefined)?.timezone as string ??
-      "America/Los_Angeles";
-    calendarContext = await getCalendarContext(user.id, now, twoWeeks, tz);
+    const schedule = await getOrComputeSchedule(user.id);
+    if (schedule.connected) {
+      calendarContext = {
+        connected: true,
+        events: schedule.events,
+        calendars: schedule.calendars,
+        timezone: schedule.timezone,
+        canWrite: schedule.canWrite,
+      };
+    }
   } catch (e) {
     // Calendar might not be connected — that's ok
     console.log("Could not fetch calendar context:", e);
@@ -275,7 +278,7 @@ export async function POST(req: NextRequest) {
     rules: (link.rules as Record<string, unknown>) || {},
     calendarContext,
     hostPersistentKnowledge: user.persistentKnowledge,
-    hostSituationalKnowledge: user.situationalKnowledge,
+    hostUpcomingSchedulePreferences: user.upcomingSchedulePreferences,
     isGroupEvent,
     eventParticipants,
     conversationHistory: [],

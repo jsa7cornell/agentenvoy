@@ -12,6 +12,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string; score?: number }>>>({});
   const [slotTimezone, setSlotTimezone] = useState("America/Los_Angeles");
+  const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -27,6 +28,7 @@ export default function DashboardPage() {
       .then((data) => {
         if (data.slotsByDay) setSlotsByDay(data.slotsByDay);
         if (data.timezone) setSlotTimezone(data.timezone);
+        if (data.currentLocation) setSlotLocation(data.currentLocation);
       })
       .catch((e) => console.log("Failed to fetch availability:", e));
   }, [status]);
@@ -61,6 +63,7 @@ export default function DashboardPage() {
           <AvailabilityCalendar
             slotsByDay={slotsByDay}
             timezone={slotTimezone}
+            currentLocation={slotLocation}
           />
         </div>
       </div>

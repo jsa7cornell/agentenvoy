@@ -45,6 +45,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // Slots state for availability calendar sidebar
   const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string }>> | null>(null);
   const [slotTimezone, setSlotTimezone] = useState("America/New_York");
+  const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -59,6 +60,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (data) {
           setSlotsByDay(data.slotsByDay);
           setSlotTimezone(data.timezone);
+          if (data.currentLocation) setSlotLocation(data.currentLocation);
         }
       })
       .catch(() => {});
@@ -887,6 +889,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 <AvailabilityCalendar
                   slotsByDay={slotsByDay || {}}
                   timezone={slotTimezone}
+                  currentLocation={slotLocation}
                   onSelectSlot={!isHost ? (msg) => {
                     setInput(msg);
                     document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
@@ -906,6 +909,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           <AvailabilityCalendar
             slotsByDay={slotsByDay || {}}
             timezone={slotTimezone}
+            currentLocation={slotLocation}
             onSelectSlot={!isHost ? (msg) => {
               setInput(msg);
               document.querySelector<HTMLTextAreaElement>("textarea")?.focus();

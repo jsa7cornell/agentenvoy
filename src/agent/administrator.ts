@@ -20,7 +20,7 @@ export interface AgentContext {
   availableSlots?: Array<{ start: string; end: string }>;
   calendarContext?: CalendarContext;
   hostPersistentKnowledge?: string | null;
-  hostSituationalKnowledge?: string | null;
+  hostUpcomingSchedulePreferences?: string | null;
   hostDirectives?: string[];
   isGroupEvent?: boolean;
   eventParticipants?: Array<{
@@ -50,7 +50,7 @@ function buildComposeOptions(context: AgentContext) {
     availableSlots: context.availableSlots,
     calendarContext: context.calendarContext,
     hostPersistentKnowledge: context.hostPersistentKnowledge,
-    hostSituationalKnowledge: context.hostSituationalKnowledge,
+    hostUpcomingSchedulePreferences: context.hostUpcomingSchedulePreferences,
     hostDirectives: context.hostDirectives,
     isGroupEvent: context.isGroupEvent,
     eventParticipants: context.eventParticipants,
@@ -201,7 +201,7 @@ export function buildKnowledgePreview(params: {
   preferences?: Record<string, unknown>;
   directives?: string[];
   persistentKnowledge?: string | null;
-  situationalKnowledge?: string | null;
+  upcomingSchedulePreferences?: string | null;
 }): string {
   const parts: string[] = [];
 
@@ -239,9 +239,9 @@ export function buildKnowledgePreview(params: {
   }
 
   // Situational Knowledge
-  if (params.situationalKnowledge) {
+  if (params.upcomingSchedulePreferences) {
     parts.push("\n## Situational Context");
-    parts.push(params.situationalKnowledge);
+    parts.push(params.upcomingSchedulePreferences);
   }
 
   return parts.length > 0 ? parts.join("\n") : "No preferences or knowledge configured yet.";

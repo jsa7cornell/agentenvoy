@@ -16,7 +16,7 @@ interface ConnectionStatus {
 
 interface KnowledgeState {
   persistentKnowledge: string;
-  situationalKnowledge: string;
+  upcomingSchedulePreferences: string;
   preview: string;
 }
 
@@ -95,7 +95,7 @@ export default function ProfilePage() {
         if (data) {
           setKnowledge(data);
           setPersistent(data.persistentKnowledge);
-          setSituational(data.situationalKnowledge);
+          setSituational(data.upcomingSchedulePreferences);
         }
       })
       .catch(() => {});
@@ -133,7 +133,7 @@ export default function ProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           persistentKnowledge: persistent,
-          situationalKnowledge: situational,
+          upcomingSchedulePreferences: situational,
         }),
       });
       if (res.ok) {

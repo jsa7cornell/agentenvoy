@@ -437,42 +437,62 @@ async function handleUpdateKnowledge(
     label?: string;
     expires?: string;
   }> | undefined;
+  const currentLocation = params.currentLocation as {
+    label: string;
+    until?: string; // ISO date "2026-04-14" — clears automatically after this date
+  } | null | undefined;
 
-  if (!persistent && !situational && !blockedWindows) {
-    return { success: false, message: "Missing knowledge or blockedWindows to update" };
+  if (!persistent && !situational && !blockedWindows && currentLocation === undefined) {
+    return { success: false, message: "Missing knowledge, blockedWindows, or currentLocation to update" };
   }
 
   const updateData: Record<string, unknown> = {};
   if (persistent !== undefined) updateData.persistentKnowledge = persistent;
-  if (situational !== undefined) updateData.situationalKnowledge = situational;
+  if (situational !== undefined) updateData.upcomingSchedulePreferences = situational;
   updateData.lastCalibratedAt = new Date();
 
-  // Merge blocked windows with existing ones (deduplicate by start+end+days)
-  if (blockedWindows && blockedWindows.length > 0) {
+  // Merge blocked windows + currentLocation into preferences.explicit
+  if ((blockedWindows && blockedWindows.length > 0) || currentLocation !== undefined) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { preferences: true },
     });
     const prefs = (user?.preferences as Record<string, unknown>) || {};
     const explicit = (prefs.explicit as Record<string, unknown>) || {};
-    const existing = (explicit.blockedWindows as typeof blockedWindows) || [];
 
-    // Deduplicate: match on start+end+days combo
-    const merged = [...existing];
-    for (const newWindow of blockedWindows) {
-      const daysKey = newWindow.days?.sort().join(",") ?? "all";
-      const exists = merged.some(
-        (w) =>
-          w.start === newWindow.start &&
-          w.end === newWindow.end &&
-          (w.days?.sort().join(",") ?? "all") === daysKey
-      );
-      if (!exists) merged.push(newWindow);
+    let newExplicit = { ...explicit };
+
+    if (blockedWindows && blockedWindows.length > 0) {
+      const existing = (explicit.blockedWindows as typeof blockedWindows) || [];
+      // Deduplicate: match on start+end+days combo
+      const merged = [...existing];
+      for (const newWindow of blockedWindows) {
+        const daysKey = newWindow.days?.sort().join(",") ?? "all";
+        const exists = merged.some(
+          (w) =>
+            w.start === newWindow.start &&
+            w.end === newWindow.end &&
+            (w.days?.sort().join(",") ?? "all") === daysKey
+        );
+        if (!exists) merged.push(newWindow);
+      }
+      newExplicit = { ...newExplicit, blockedWindows: merged };
+    }
+
+    if (currentLocation !== undefined) {
+      // null clears it, object sets it
+      if (currentLocation === null) {
+        const { currentLocation: _removed, ...rest } = newExplicit as Record<string, unknown>;
+        void _removed;
+        newExplicit = rest;
+      } else {
+        newExplicit = { ...newExplicit, currentLocation };
+      }
     }
 
     updateData.preferences = {
       ...prefs,
-      explicit: { ...explicit, blockedWindows: merged },
+      explicit: newExplicit,
     };
   }
 
@@ -481,10 +501,20 @@ async function handleUpdateKnowledge(
     data: updateData as Parameters<typeof prisma.user.update>[0]["data"],
   });
 
+  // Invalidate computed schedule when preferences/knowledge change
+  // (next request will recompute with fresh inputs)
+  if (blockedWindows || currentLocation !== undefined || persistent) {
+    const { invalidateSchedule } = await import("@/lib/calendar");
+    await invalidateSchedule(userId);
+  }
+
   const parts: string[] = [];
   if (persistent) parts.push("persistent preferences");
-  if (situational) parts.push("situational context");
+  if (situational) parts.push("upcoming schedule preferences");
   if (blockedWindows) parts.push(`${blockedWindows.length} blocked window(s)`);
+  if (currentLocation !== undefined) {
+    parts.push(currentLocation === null ? "cleared current location" : `current location: ${currentLocation.label}`);
+  }
 
   return {
     success: true,

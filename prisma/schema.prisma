@@ -55,7 +55,7 @@ model User {
   preferences      Json?     @default("{}")
   hostDirectives   Json?     @default("[]") // string[] — global ::: directives that shape all negotiations
   persistentKnowledge  String?   @db.Text   // Long-lived: who they are, how they work, what matters
-  situationalKnowledge String?   @db.Text   // Near-term: this week's overrides, upcoming context, temporary rules
+  upcomingSchedulePreferences String?   @db.Text @map("situationalKnowledge") // Near-term non-time context: mood, goals, temp rules
   lastCalibratedAt DateTime?              // null = never calibrated, triggers onboarding flow
   createdAt        DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -68,6 +68,8 @@ model User {
   participations     SessionParticipant[]
   apiKeys            ApiKey[]
   channel            Channel?
+  calendarCaches     CalendarCache[]
+  computedSchedule   ComputedSchedule?
 }
 
 model ApiKey {
@@ -188,6 +190,7 @@ model Channel {
   userId    String           @unique
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages  ChannelMessage[]
+  sessions  ChannelSession[]
   createdAt DateTime         @default(now())
 }
 
@@ -225,6 +228,46 @@ model ChannelMessage {
 
   @@index([channelId])
   @@index([threadId])
+}
+
+// CalendarCache: cached calendar events per user per calendar (incremental sync via syncToken)
+model CalendarCache {
+  id            String   @id @default(cuid())
+  userId        String
+  calendarId    String   // Google Calendar ID (e.g., "primary", "family@group.calendar.google.com")
+  calendarName  String
+  syncToken     String?  // Google's nextSyncToken for incremental sync
+  events        Json     @default("[]") // CalendarEvent[] — current state of this calendar
+  lastSyncedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, calendarId])
+  @@index([userId])
+}
+
+// ComputedSchedule: pre-scored 30-min slots for the next 2 weeks
+model ComputedSchedule {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  slots        Json     @default("[]") // ScoredSlot[] — protection scores -1 to 5
+  computedAt   DateTime @default(now())
+  inputHash    String   @default("") // hash of (events + preferences) — skip recompute if unchanged
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ChannelSession: conversational window in the host's dashboard chat
+model ChannelSession {
+  id         String   @id @default(cuid())
+  channelId  String
+  channel    Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  startedAt  DateTime @default(now())
+  expiresAt  DateTime // rolling: last message + 3 days
+  summary    String?  @db.Text // LLM-generated summary when session closes
+  closed     Boolean  @default(false)
+
+  @@index([channelId])
 }
 
 // NegotiatorResult: persisted results from the multi-agent negotiator tool
