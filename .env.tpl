@@ -14,16 +14,13 @@ NEXTAUTH_SECRET=op://Secrets/NEXTAUTH_SECRET/credential
 GOOGLE_CLIENT_ID=op://Secrets/GOOGLE_CLIENT_ID/credential
 GOOGLE_CLIENT_SECRET=op://Secrets/GOOGLE_CLIENT_SECRET/credential
 
-# ─── Envoy Core AI ────────────────────────────────────────
-ENVOY_ANTHROPIC_API_KEY=op://Secrets/ENVOY_ANTHROPIC_API_KEY/credential
+# ─── Vercel AI Gateway ─────────────────────────────────────
+# Auth for local dev. Production uses OIDC automatically (no key needed).
+# BYOK provider keys (Anthropic/Google/OpenAI) are configured in Vercel dashboard.
+AI_GATEWAY_API_KEY=op://Secrets/AI_GATEWAY_API_KEY/credential
 
 # ─── Resend ────────────────────────────────────────────────
 RESEND_API_KEY=op://Secrets/AGENTENVOY_RESEND_API_KEY/credential
-
-# ─── Negotiator (multi-agent negotiation tool) ────────────
-NEGOTIATOR_ANTHROPIC_API_KEY=op://Secrets/NEGOTIATOR_ANTHROPIC_API_KEY/credential
-NEGOTIATOR_GOOGLE_AI_API_KEY=op://Secrets/NEGOTIATOR_GOOGLE_AI_API_KEY/credential
-NEGOTIATOR_OPENAI_API_KEY=op://Secrets/NEGOTIATOR_OPENAI_API_KEY/credential
 
 # ─── Dev Auth (non-secret, dev-only) ──────────────────────
 DEV_AUTH_SECRET=dev-test-secret-local-only
