@@ -6,10 +6,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=op://Secrets/NEXT_PUBLIC_SUPABASE_ANON_KEY/credent
 POSTGRES_PRISMA_URL=op://Secrets/POSTGRES_PRISMA_URL/credential
 POSTGRES_URL_NON_POOLING=op://Secrets/POSTGRES_URL_NON_POOLING/credential
 
-# ─── Anthropic ─────────────────────────────────────────────
-ANTHROPIC_API_KEY=op://Secrets/ANTHROPIC_API_KEY/credential
-ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
-
 # ─── NextAuth ──────────────────────────────────────────────
 NEXTAUTH_URL=op://Secrets/NEXTAUTH_URL/credential
 NEXTAUTH_SECRET=op://Secrets/NEXTAUTH_SECRET/credential
@@ -17,6 +13,10 @@ NEXTAUTH_SECRET=op://Secrets/NEXTAUTH_SECRET/credential
 # ─── Google OAuth ──────────────────────────────────────────
 GOOGLE_CLIENT_ID=op://Secrets/GOOGLE_CLIENT_ID/credential
 GOOGLE_CLIENT_SECRET=op://Secrets/GOOGLE_CLIENT_SECRET/credential
+
+# ─── Anthropic ─────────────────────────────────────────────
+ANTHROPIC_API_KEY=op://Secrets/ANTHROPIC_API_KEY/credential
+ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
 
 # ─── Resend ────────────────────────────────────────────────
 RESEND_API_KEY=op://Secrets/AGENTENVOY_RESEND_API_KEY/credential
