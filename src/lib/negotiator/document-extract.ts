@@ -100,7 +100,8 @@ export async function extractDocument(file: File): Promise<ExtractOutcome> {
     };
   }
 
-  const trimmed = rawText.trim();
+  // Strip pdf-parse v2 page markers ("-- 1 of 5 --") before checking for content
+  const trimmed = rawText.replace(/--\s*\d+\s+of\s+\d+\s*--/g, "").trim();
   if (!trimmed) {
     const isPdf = ext === ".pdf" || file.type === "application/pdf";
     return {
