@@ -1,6 +1,9 @@
+import { PublicHeader } from "@/components/public-header";
+
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-zinc-100">
+      <PublicHeader />
       <div className="max-w-3xl mx-auto px-6 py-16">
         <h1 className="text-3xl font-bold mb-2">Terms of Service</h1>
         <p className="text-sm text-zinc-500 mb-12">Last updated: April 2, 2026</p>

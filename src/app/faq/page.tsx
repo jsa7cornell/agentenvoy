@@ -1,94 +1,113 @@
-import { FAQ_SECTIONS, FAQ_LAST_UPDATED, PIPELINE_DIAGRAM } from "@/content/faq-calendar";
+import { FAQ_SECTIONS, FAQ_LAST_UPDATED, FAQ_HERO } from "@/content/faq-calendar";
+import { PublicHeader } from "@/components/public-header";
 
 export const metadata = {
-  title: "How Scheduling Works | AgentEnvoy",
-  description: "Learn how Envoy manages your calendar, scores availability, and coordinates meetings.",
+  title: "How It Works | AgentEnvoy",
+  description:
+    "Learn how Envoy uses contextual awareness to negotiate the best meeting times — for one-on-ones, groups, and everything in between.",
 };
 
 export default function FaqPage() {
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-zinc-100">
-      <div className="max-w-3xl mx-auto px-6 py-16">
-        <h1 className="text-3xl font-bold mb-2">How Scheduling Works</h1>
-        <p className="text-sm text-zinc-500 mb-12">Last updated: {FAQ_LAST_UPDATED}</p>
+      <PublicHeader />
 
-        <div className="space-y-12">
-          {/* Pipeline diagram */}
-          <section className="border border-zinc-800 rounded-2xl p-8 bg-zinc-900/50">
-            <h2 className="text-xl font-bold text-zinc-100 mb-4">The Availability Pipeline</h2>
-            <p className="text-sm text-zinc-400 mb-4">
-              Envoy builds your availability from two sources, scores every slot, then applies
-              per-event context. The widget and chat always see the same data.
-            </p>
-            <pre className="text-xs text-zinc-400 bg-zinc-950 rounded-lg p-4 overflow-x-auto leading-relaxed font-mono">
-              {PIPELINE_DIAGRAM}
-            </pre>
-          </section>
+      {/* Hero */}
+      <div className="max-w-3xl mx-auto px-6 pt-16 pb-12">
+        <h1 className="text-3xl font-bold mb-3">{FAQ_HERO.headline}</h1>
+        <p className="text-base text-zinc-400 leading-relaxed max-w-2xl">
+          {FAQ_HERO.subline}
+        </p>
+        <p className="text-xs text-zinc-600 mt-4">Last updated: {FAQ_LAST_UPDATED}</p>
+      </div>
 
-          {/* Score scale visual */}
-          <section className="border border-zinc-800 rounded-2xl p-8 bg-zinc-900/50">
-            <h2 className="text-xl font-bold text-zinc-100 mb-4">Protection Score Scale</h2>
-            <p className="text-sm text-zinc-400 mb-4">
-              Every 30-minute slot gets a score. Lower = more available. Guests only see scores 2 and below.
-            </p>
-            <div className="space-y-1.5">
-              {[
-                { score: -2, label: "Exclusive", desc: "ONLY these times available", color: "bg-indigo-900/50 text-indigo-300 border-indigo-800" },
-                { score: -1, label: "Preferred", desc: "Offer these first", color: "bg-green-900/50 text-green-300 border-green-800" },
-                { score: 0, label: "Free", desc: "Declined invites, volunteered time", color: "bg-green-900/50 text-green-300 border-green-800" },
-                { score: 1, label: "Open", desc: "Empty business hours", color: "bg-emerald-900/40 text-emerald-300 border-emerald-800" },
-                { score: 2, label: "Soft hold", desc: "Focus Time, tentative small meetings", color: "bg-amber-900/50 text-amber-300 border-amber-800" },
-                { score: 3, label: "Friction", desc: "Tentative meetings, recurring 1:1s", color: "bg-orange-900/40 text-orange-300 border-orange-800", hidden: true },
-                { score: 4, label: "Protected", desc: "Confirmed meetings, blocked windows", color: "bg-red-900/30 text-red-300 border-red-800", hidden: true },
-                { score: 5, label: "Immovable", desc: "Flights, legal, sacred items", color: "bg-red-900/50 text-red-200 border-red-800", hidden: true },
-              ].map((s) => (
+      {/* Section nav */}
+      <div className="max-w-3xl mx-auto px-6 pb-8">
+        <nav className="flex flex-wrap gap-2">
+          {FAQ_SECTIONS.map((section) => (
+            <a
+              key={section.id}
+              href={`#${section.id}`}
+              className="text-xs px-3 py-1.5 rounded-full border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition"
+            >
+              {section.title}
+            </a>
+          ))}
+        </nav>
+      </div>
+
+      {/* Awareness layers visual */}
+      <div className="max-w-3xl mx-auto px-6 pb-12">
+        <div className="border border-zinc-800 rounded-2xl overflow-hidden">
+          {[
+            {
+              label: "Layer 1",
+              title: "Calendar",
+              desc: "Google Calendar events, synced in real-time",
+              color: "border-emerald-800 bg-emerald-950/30",
+              accent: "text-emerald-400",
+            },
+            {
+              label: "Layer 2",
+              title: "Preferences",
+              desc: "General habits, blocked windows, current context",
+              color: "border-indigo-800 bg-indigo-950/30",
+              accent: "text-indigo-400",
+            },
+            {
+              label: "Layer 3",
+              title: "Event Context",
+              desc: "Per-invite rules, VIP treatment, exclusive slots",
+              color: "border-amber-800 bg-amber-950/30",
+              accent: "text-amber-400",
+            },
+          ].map((layer, i) => (
+            <div
+              key={i}
+              className={`px-6 py-4 border-b last:border-b-0 ${layer.color}`}
+            >
+              <div className="flex items-baseline gap-3">
+                <span className={`text-[10px] uppercase tracking-widest font-bold ${layer.accent}`}>
+                  {layer.label}
+                </span>
+                <span className="text-sm font-semibold text-zinc-100">{layer.title}</span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1">{layer.desc}</p>
+            </div>
+          ))}
+          <div className="px-6 py-3 bg-zinc-900/50 text-center">
+            <span className="text-xs text-zinc-500">
+              Each layer builds on the last. More context = smarter availability.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* FAQ sections */}
+      <div className="max-w-3xl mx-auto px-6 pb-20 space-y-16">
+        {FAQ_SECTIONS.map((section) => (
+          <section key={section.id} id={section.id} className="scroll-mt-20">
+            <h2 className="text-xl font-bold text-zinc-100 mb-2">{section.title}</h2>
+            {section.intro && (
+              <p className="text-sm text-zinc-400 mb-6 leading-relaxed">{section.intro}</p>
+            )}
+            <div className="space-y-5">
+              {section.items.map((item) => (
                 <div
-                  key={s.score}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-sm ${s.color}`}
+                  key={item.question}
+                  className="border border-zinc-800 rounded-xl p-5 bg-zinc-900/30"
                 >
-                  <span className="font-mono font-bold w-6 text-right">{s.score}</span>
-                  <span className="font-semibold w-24">{s.label}</span>
-                  <span className="text-xs opacity-80 flex-1">{s.desc}</span>
-                  {s.hidden && (
-                    <span className="text-[10px] uppercase tracking-wider opacity-60">hidden from guests</span>
-                  )}
+                  <h3 className="text-sm font-semibold text-zinc-100 mb-2">
+                    {item.question}
+                  </h3>
+                  <p className="text-sm text-zinc-400 leading-relaxed whitespace-pre-line">
+                    {item.answer}
+                  </p>
                 </div>
               ))}
             </div>
           </section>
-
-          {/* FAQ sections */}
-          {FAQ_SECTIONS.map((section) => (
-            <section key={section.title}>
-              <h2 className="text-xl font-bold text-zinc-100 mb-6">{section.title}</h2>
-              <div className="space-y-6">
-                {section.items.map((item) => (
-                  <div
-                    key={item.question}
-                    className="border border-zinc-800 rounded-xl p-6 bg-zinc-900/30"
-                  >
-                    <h3 className="text-base font-semibold text-zinc-100 mb-3">
-                      {item.question}
-                    </h3>
-                    <p className="text-sm text-zinc-400 leading-relaxed whitespace-pre-line">
-                      {item.answer}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        {/* Back link */}
-        <div className="mt-16 pt-8 border-t border-zinc-800">
-          <a
-            href="/"
-            className="text-sm text-zinc-500 hover:text-zinc-300 transition"
-          >
-            &larr; Back to AgentEnvoy
-          </a>
-        </div>
+        ))}
       </div>
     </div>
   );
