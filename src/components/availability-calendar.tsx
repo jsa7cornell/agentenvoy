@@ -12,14 +12,31 @@ interface AvailabilityCalendarProps {
   slotsByDay: Record<string, Slot[]>;
   timezone: string;
   onSelectSlot?: (formattedTime: string) => void; // Callback when guest clicks a time pill
+  currentLocation?: { label: string; until?: string } | null;
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
   if (isPast) return "bg-zinc-900 text-zinc-700";
   if (slots.length === 0) return "bg-zinc-800/50 text-zinc-600";
-  const hasScore0 = slots.some((s) => s.score === 0);
-  if (hasScore0) return "bg-green-900/50 text-green-300";
-  return "bg-amber-900/50 text-amber-300";
+  const best = Math.min(...slots.map((s) => s.score ?? 1));
+  if (best <= -2) return "bg-indigo-900/50 text-indigo-300"; // exclusive
+  if (best === -1) return "bg-green-900/50 text-green-300"; // preferred
+  if (best === 0) return "bg-green-900/50 text-green-300"; // explicitly free
+  if (best === 1) return "bg-emerald-900/40 text-emerald-300"; // open
+  if (best === 2) return "bg-amber-900/50 text-amber-300"; // soft hold
+  if (best === 3) return "bg-orange-900/40 text-orange-300"; // moderate friction (host view)
+  return "bg-red-900/30 text-red-300"; // 4-5: protected/immovable (host view)
+}
+
+function getSlotPillColor(score: number | undefined) {
+  const s = score ?? 1;
+  if (s <= -2) return "border-indigo-600 text-indigo-300 hover:border-indigo-400";
+  if (s === -1) return "border-green-600 text-green-300 hover:border-green-400";
+  if (s === 0) return "border-green-700 text-green-300 hover:border-green-500";
+  if (s === 1) return "border-emerald-700 text-emerald-300 hover:border-emerald-500";
+  if (s === 2) return "border-amber-700 text-amber-300 hover:border-amber-500";
+  if (s === 3) return "border-orange-700 text-orange-300 hover:border-orange-500";
+  return "border-red-700 text-red-300 hover:border-red-500";
 }
 
 const DAY_HEADERS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -28,6 +45,7 @@ export function AvailabilityCalendar({
   slotsByDay,
   timezone,
   onSelectSlot,
+  currentLocation,
 }: AvailabilityCalendarProps) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
@@ -164,8 +182,9 @@ export function AvailabilityCalendar({
                   onClick={() =>
                     onSelectSlot?.(formatSlotMessage(slot, selectedDay))
                   }
-                  className={`px-2 py-1 bg-zinc-800 border border-zinc-700 rounded-md text-xs text-zinc-300 transition
-                    ${onSelectSlot ? "hover:bg-zinc-700 hover:border-zinc-500 hover:text-white cursor-pointer" : "cursor-default"}`}
+                  className={`px-2 py-1 bg-zinc-800 border rounded-md text-xs transition
+                    ${getSlotPillColor(slot.score)}
+                    ${onSelectSlot ? "hover:bg-zinc-700 cursor-pointer" : "cursor-default"}`}
                 >
                   {new Date(slot.start).toLocaleTimeString("en-US", {
                     hour: "numeric",
@@ -176,6 +195,18 @@ export function AvailabilityCalendar({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Location notice */}
+      {currentLocation && (
+        <div className="mt-3 flex items-start gap-1.5 rounded-md bg-amber-950/40 border border-amber-900/50 px-2 py-1.5">
+          <span className="text-amber-400 text-[11px] mt-px">📍</span>
+          <p className="text-[10px] text-amber-300 leading-tight">
+            Currently in {currentLocation.label}
+            {currentLocation.until ? ` until ${currentLocation.until}` : ""}.
+            In-person meetings not available.
+          </p>
         </div>
       )}
 

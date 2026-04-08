@@ -2,7 +2,7 @@
  * Availability Scoring Engine
  *
  * Computes protection scores for 30-min slots across a 2-week window.
- * Scores range from -1 (host-preferred) to 5 (immovable).
+ * Scores range from -2 (exclusive) to 5 (immovable).
  *
  * Base scores are deterministic given calendar events + preferences.
  * Event-level overrides (per-thread) are applied at query time by the slots endpoint.
@@ -16,7 +16,7 @@ import type { CalendarEvent } from "./calendar";
 export interface ScoredSlot {
   start: string; // ISO datetime
   end: string; // ISO datetime
-  score: number; // -1 to 5
+  score: number; // -2 to 5 (-2=exclusive, -1=preferred, 0=free, 1=open, 2=soft, 3=friction, 4=protected, 5=immovable)
   confidence: "high" | "low";
   reason: string; // e.g. "declined invite", "Focus Time", "blocked: surfing"
   eventSummary?: string; // what's in this slot (if score > 1)
@@ -294,6 +294,76 @@ function scoreSlot(
   };
 }
 
+// --- Temporal Extraction from Knowledge Base ---
+
+interface TemporalOverrides {
+  extraBlockedWindows: BlockedWindow[];
+  adjustedBizHours?: { start?: number; end?: number };
+}
+
+/**
+ * Extract hard temporal signals from free-text knowledge fields.
+ * Conservative — only extracts clear time-based patterns, not ambiguous preferences.
+ * Ambiguous preferences ("I prefer afternoons") stay in the LLM prompt layer.
+ */
+export function extractTemporalOverrides(
+  persistentKnowledge: string | null,
+  upcomingSchedulePreferences: string | null
+): TemporalOverrides {
+  const extraBlockedWindows: BlockedWindow[] = [];
+  let adjustedBizHours: { start?: number; end?: number } | undefined;
+
+  const texts = [persistentKnowledge, upcomingSchedulePreferences].filter(Boolean) as string[];
+
+  for (const text of texts) {
+    const lower = text.toLowerCase();
+
+    // Pattern: "no meetings before X" or "no calls before X"
+    const noBeforeMatch = lower.match(/no (?:meetings?|calls?) before (\d{1,2})(?::(\d{2}))?\s*(?:am|AM)?/);
+    if (noBeforeMatch) {
+      const hour = parseInt(noBeforeMatch[1], 10);
+      adjustedBizHours = { ...adjustedBizHours, start: hour };
+    }
+
+    // Pattern: "no meetings after X" or "no calls after X PM"
+    const noAfterMatch = lower.match(/no (?:meetings?|calls?) after (\d{1,2})(?::(\d{2}))?\s*(?:pm|PM)?/);
+    if (noAfterMatch) {
+      let hour = parseInt(noAfterMatch[1], 10);
+      if (hour <= 12 && lower.includes("pm")) hour += 12;
+      if (hour < 12) hour += 12; // assume PM for "no meetings after 5"
+      adjustedBizHours = { ...adjustedBizHours, end: hour };
+    }
+
+    // Pattern: "I surf/run/workout [time]-[time]" or "surf from X to Y"
+    const activityMatch = text.match(
+      /(?:i |my )?(?:surf|run|workout|exercise|gym|swim|yoga|meditat(?:e|ion))(?:s|ing)?\s+(?:from\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:[-–to]+)\s*(\d{1,2})(?::(\d{2}))?\s*(?:am|AM|pm|PM)?/i
+    );
+    if (activityMatch) {
+      const startH = parseInt(activityMatch[1], 10);
+      const startM = activityMatch[2] ? parseInt(activityMatch[2], 10) : 0;
+      const endH = parseInt(activityMatch[3], 10);
+      const endM = activityMatch[4] ? parseInt(activityMatch[4], 10) : 0;
+      const label = activityMatch[0].trim().replace(/^(?:i |my )/i, "");
+      extraBlockedWindows.push({
+        start: `${String(startH).padStart(2, "0")}:${String(startM).padStart(2, "0")}`,
+        end: `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`,
+        label,
+      });
+    }
+
+    // Pattern: "out of office [date] to/through [date]" or "OOO [date]-[date]"
+    const oooMatch = text.match(
+      /(?:out of office|ooo|away|traveling|travel)\s+(?:from\s+)?(\w+ \d{1,2})\s*(?:[-–]|to|through)\s*(\w+ \d{1,2})/i
+    );
+    if (oooMatch) {
+      // Store as a note — actual date parsing requires knowing the year context
+      // This pattern is best handled by the LLM + blockedWindows set via chat
+    }
+  }
+
+  return { extraBlockedWindows, adjustedBizHours };
+}
+
 // --- Schedule Computation ---
 
 /**
@@ -303,16 +373,19 @@ function scoreSlot(
 export function computeSchedule(
   events: CalendarEvent[],
   preferences: UserPreferences,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  persistentKnowledge: string | null
+  persistentKnowledge: string | null,
+  upcomingSchedulePreferences?: string | null
 ): ScoredSlot[] {
   const tz = preferences.explicit?.timezone ?? preferences.timezone ?? "America/Los_Angeles";
-  const blockedWindows = (preferences.explicit?.blockedWindows ?? []) as BlockedWindow[];
-  const bizStart = preferences.explicit?.businessHoursStart ?? 9;
-  const bizEnd = preferences.explicit?.businessHoursEnd ?? 18;
+  const blockedWindows = [...((preferences.explicit?.blockedWindows ?? []) as BlockedWindow[])];
+  let bizStart = preferences.explicit?.businessHoursStart ?? 9;
+  let bizEnd = preferences.explicit?.businessHoursEnd ?? 18;
 
-  // Check persistent knowledge for sacred items
-  // (These could override scores, but for now we rely on event title matching)
+  // Extract temporal overrides from free-text knowledge fields
+  const temporal = extractTemporalOverrides(persistentKnowledge, upcomingSchedulePreferences ?? null);
+  blockedWindows.push(...temporal.extraBlockedWindows);
+  if (temporal.adjustedBizHours?.start !== undefined) bizStart = temporal.adjustedBizHours.start;
+  if (temporal.adjustedBizHours?.end !== undefined) bizEnd = temporal.adjustedBizHours.end;
 
   const now = new Date();
   const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -356,7 +429,9 @@ export function computeSchedule(
  */
 export function computeInputHash(
   events: CalendarEvent[],
-  preferences: UserPreferences
+  preferences: UserPreferences,
+  persistentKnowledge?: string | null,
+  upcomingSchedulePreferences?: string | null
 ): string {
   const data = JSON.stringify({
     events: events.map((e) => ({
@@ -373,6 +448,8 @@ export function computeInputHash(
     businessHoursStart: preferences.explicit?.businessHoursStart,
     businessHoursEnd: preferences.explicit?.businessHoursEnd,
     blackoutDays: preferences.explicit?.blackoutDays,
+    persistentKnowledge: persistentKnowledge || null,
+    upcomingSchedulePreferences: upcomingSchedulePreferences || null,
   });
   return createHash("sha256").update(data).digest("hex").slice(0, 16);
 }
@@ -382,7 +459,7 @@ export function computeInputHash(
 export interface SlotOverride {
   start: string; // ISO datetime
   end: string;
-  score: number; // -1 (preferred) or 5 (locked out)
+  score: number; // -2 (exclusive), -1 (preferred), or 5 (locked out)
   label?: string;
 }
 
@@ -394,7 +471,8 @@ export interface LinkRules {
   preferredTimeStart?: string; // "09:00"
   preferredTimeEnd?: string; // "12:00"
   slotOverrides?: SlotOverride[];
-  exclusiveSlots?: boolean; // if true, only slotOverrides with score -1 are shown
+  /** @deprecated Use score -2 in slotOverrides instead. Kept for backward compat. */
+  exclusiveSlots?: boolean;
 }
 
 /**
@@ -408,11 +486,15 @@ export function applyEventOverrides(
 ): ScoredSlot[] {
   let slots = [...baseSlots];
 
-  // If exclusiveSlots, only return slots that match slotOverrides with score -1
-  if (rules.exclusiveSlots && rules.slotOverrides?.length) {
-    const preferred = rules.slotOverrides.filter((o) => o.score === -1);
+  // Exclusive mode: score -2 in overrides, or legacy exclusiveSlots boolean
+  const hasExclusive = rules.slotOverrides?.some((o) => o.score === -2);
+  const isExclusiveMode = hasExclusive || (rules.exclusiveSlots && rules.slotOverrides?.length);
+
+  if (isExclusiveMode && rules.slotOverrides?.length) {
+    // In exclusive mode, only keep slots matching -2 or -1 overrides
+    const exclusiveOverrides = rules.slotOverrides.filter((o) => o.score <= -1);
     slots = slots.filter((slot) =>
-      preferred.some((o) => {
+      exclusiveOverrides.some((o) => {
         const oStart = new Date(o.start).getTime();
         const oEnd = new Date(o.end).getTime();
         const sStart = new Date(slot.start).getTime();
@@ -420,8 +502,24 @@ export function applyEventOverrides(
         return sStart >= oStart && sEnd <= oEnd;
       })
     );
-    // Override scores to -1 for matched slots
-    return slots.map((s) => ({ ...s, score: -1, reason: "host preferred", confidence: "high" as const }));
+    // Apply override scores: -2 for exclusive, -1 for preferred
+    return slots.map((s) => {
+      const match = exclusiveOverrides.find((o) => {
+        const oStart = new Date(o.start).getTime();
+        const oEnd = new Date(o.end).getTime();
+        const sStart = new Date(s.start).getTime();
+        const sEnd = new Date(s.end).getTime();
+        return sStart >= oStart && sEnd <= oEnd;
+      });
+      // Legacy exclusiveSlots: treat -1 overrides as -2
+      const score = hasExclusive ? (match?.score ?? -1) : -2;
+      return {
+        ...s,
+        score,
+        reason: match?.label || (score === -2 ? "host exclusive" : "host preferred"),
+        confidence: "high" as const,
+      };
+    });
   }
 
   // Apply preferredDays filter

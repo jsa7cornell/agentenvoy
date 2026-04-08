@@ -25,10 +25,18 @@ export async function GET() {
     return NextResponse.json({ messages: [] });
   }
 
-  const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  // Scope to active channel session (or fall back to 3-day window)
+  const activeSession = await prisma.channelSession.findFirst({
+    where: { channelId: channel.id, closed: false },
+    orderBy: { startedAt: "desc" },
+  });
+  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  const sessionStart = activeSession?.startedAt
+    ? (activeSession.startedAt > threeDaysAgo ? activeSession.startedAt : threeDaysAgo)
+    : threeDaysAgo;
 
   const messages = await prisma.channelMessage.findMany({
-    where: { channelId: channel.id, createdAt: { gte: oneWeekAgo } },
+    where: { channelId: channel.id, createdAt: { gte: sessionStart } },
     orderBy: { createdAt: "asc" },
     include: {
       thread: {

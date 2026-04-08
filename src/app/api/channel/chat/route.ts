@@ -4,8 +4,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
-import { getCalendarContext } from "@/lib/calendar";
-import { formatCalendarContext } from "@/agent/composer";
+import { getOrComputeSchedule } from "@/lib/calendar";
+import { formatComputedSchedule } from "@/agent/composer";
 import { generateCode } from "@/lib/utils";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { sanitizeHistory, roleSummary } from "@/lib/conversation";
@@ -28,12 +28,21 @@ Then emit an action block:
 IMPORTANT — email is OPTIONAL. The inviteeName is the only required field. Do NOT ask for email unless the user wants Envoy to send the invite directly. If the user just says "set up a meeting with Bryan", create the thread with just the name — they can share the link themselves.
 If the user provides an email, include "inviteeEmail" in the action block. If not, omit it.
 
-WHEN TO PROPOSE TIMES BEFORE CREATING:
-For simple invites (standard 30-min duration, flexible timing, phone/video), create the thread immediately.
-For non-standard invites — longer duration (60+ min), in-person format, specific location, or any signal that scheduling will be tricky — propose 2-3 times from the host's calendar BEFORE creating the thread. Ask something like: "I see a few good windows for a 3-hour block — Wednesday afternoon or Thursday morning. Want me to suggest one of those?"
-If a location is involved, look at the host's calendar for times when they're already in or near that location and suggest those first. This avoids unnecessary travel.
-Only create the thread after the host confirms timing or says "just send it."
-WHY: A 30-min phone call fits almost anywhere. A 3-hour in-person meeting at a specific location needs the host to think about timing, travel, and logistics. Creating the thread prematurely means Envoy might propose times the host wouldn't have chosen.
+AFTER CREATING A THREAD:
+Default assumption: the host will share the link themselves. Just confirm it's done and offer email as an option.
+Good: "Done — drop Nathan's email if you'd like me to send it directly."
+Good: "Card's ready. Share the link when you want, or give me Nathan's email and I'll send it."
+NEVER say: "You sharing the link with him directly?" or "Sharing the link with Nathan yourself?" — never ask, never phrase it as a question. The host always shares it themselves unless they say otherwise.
+
+WHEN TO CREATE:
+Default: create the thread immediately. You can always ask clarifying questions AFTER creating — the card appears in the feed and the host can see it while you continue the conversation.
+
+Good pattern: create first, then ask: "Card's ready — how long are you thinking for the ride? I'll let Nathan know."
+Good pattern: create first, then note what you assumed: "Done — defaulted to 1 hour, let me know if you want a longer window."
+
+The only reason to ask BEFORE creating is timing — if the invite needs to restrict availability to specific windows (e.g., "when I'm in Portola Valley") and you're not sure which dates those are. In that case, clarify the window, then create. Once the host gives any signal of what works ("mornings", "week of Apr 21", "whenever"), create immediately.
+
+Never block creation on duration, format details, or email — those can all be clarified after the card exists.
 
 ACTIONS ON EXISTING THREADS:
 When the user asks you to DO something to an existing thread (archive, cancel, change format, etc.), include an action block at the END of your message:
@@ -49,7 +58,7 @@ Available actions:
 - update_time: Propose new time → {"action":"update_time","params":{"sessionId":"...","dateTime":"...","timezone":"..."}}
 - update_location: Change location → {"action":"update_location","params":{"sessionId":"...","location":"..."}}
 - create_link: Create a new invite → {"action":"create_link","params":{"inviteeName":"...","topic":"...","format":"...","duration":30}}
-- update_knowledge: Save to knowledge base → {"action":"update_knowledge","params":{"persistent":"...","situational":"..."}}
+- update_knowledge: Save to knowledge base → {"action":"update_knowledge","params":{"persistent":"...","situational":"...","currentLocation":{"label":"Baja","until":"2026-04-14"}}}
 
 Rules:
 - Always include the action block when the user's intent is clear
@@ -71,40 +80,74 @@ FORMATTING:
 - Use concise time formatting: "9–11 AM PT" not "9:00 AM – 11:00 AM PT". Drop :00 for round hours. Collapse shared AM/PM in ranges.
 
 AVAILABILITY:
-- You receive the host's raw calendar events. Reason about availability the same way the deal room agent does.
-- Use the host's knowledge base (persistent preferences + situational context) to inform your reasoning.
-- Declined events = free time. Tentative = don't double-book but not locked. Transparent/FYI events = context only, don't block time.
+You receive a pre-scored schedule — every 30-min slot has a protection score from -1 to 5. These scores already account for calendar events, blocked windows, and preferences. You do NOT need to cross-reference manually.
+
+Protection scores:
+- -2: Exclusive — ONLY these slots are available for this event. Never propose other times.
+- -1: Preferred — host actively wants to fill these. Offer first.
+- 0: Explicitly free (declined invites). Offer freely.
+- 1: Open business hours. Offer freely.
+- 2: Soft hold (Focus Time, etc.) [low confidence]. Available with light friction.
+- 3: Moderate friction (tentative meeting, recurring 1:1) [low confidence]. Available but not ideal.
+- 4: Protected (confirmed meeting, blocked window, weekend). Do NOT offer to guests. Only the host can override.
+- 5: Immovable (flights, sacred items). Never offer.
+
+Low-confidence scores (2, 3) are starting points — adjust based on context:
+- Phone format reduces friction by 1 point (can take calls during soft holds).
+- VIP guest or high-priority meeting reduces friction by 1 point.
+- But never present a protected (4+) slot as available without the host explicitly overriding it.
+
+Non-primary calendars (tagged "from Family Calendar" or similar): these are OTHER PEOPLE'S events. They provide household context but do not block the host's time.
+currentLocation in preferences is the authoritative source for where the host is.
+
+PROPOSING TIMES FOR CUSTOM EVENTS:
+When the host asks you to find time for a specific meeting, be an active collaborator:
+- Lead with preferred (-1) and open (0-1) slots first.
+- If tight, offer soft holds (2-3) with the tradeoff named ("10–11 is clear, or 9–10 if you skip surf").
+- If the host is already active during a normally protected time, note that — "since you're up now, 8–9 could work too if morning is flexible."
+- Propose times directly — don't ask if they want you to "set it up." Example: "10–11 is your cleanest window" not "want me to set it up for 10?"
+- When creating a thread, you can mark specific slots as preferred (score -1) using slotOverrides in the link rules. This makes the widget highlight those slots for the guest.
 
 UPDATING KNOWLEDGE:
 When the host tells you something about their schedule, preferences, or context, save it using the update_knowledge action:
 - Durable patterns (how they work, what they prefer) → persistent
-- Near-term context (this week's overrides, upcoming travel, shadow calendar items) → situational
-- Example: "I'm surfing 8-10 every morning this week" → update situational
-- Example: "I never take calls before 9 AM" → update persistent
+- Non-time situational context (mood, goals, relationships, temporary non-schedule rules) → situational
+- Current location (when host is away from home base) → currentLocation: { label: "Baja", until: "2026-04-14" }
+  - Always save this when the host mentions they're traveling or away. It prevents in-person meeting proposals.
+  - Set until to the date they return (ISO format). Pass null to clear it when they're home.
+- RULE: Any time commitment → blockedWindows, NEVER just situational text.
+  If the host says they're doing something at specific times, that MUST become a blockedWindow so the slots engine and your availability reasoning both respect it. Situational text is for non-time context only.
+  - "I'm surfing 8-10 every morning this week" → blockedWindows: [{ start: "08:00", end: "10:00", days: ["Mon","Tue","Wed","Thu","Fri"], label: "surfing", expires: "2026-04-14" }]
+  - "I'm in Baja through the 14th" → currentLocation + situational (no time block needed)
+  - "I never take calls before 9 AM" → persistent + blockedWindows: [{ start: "00:00", end: "09:00", days: ["Mon","Tue","Wed","Thu","Fri"], label: "no calls before 9" }]
+  - "Katie is evaluating AgentEnvoy" → situational (no time component)
 - Only include the field(s) you're updating — partial updates are fine
 
 ONBOARDING CALIBRATION:
 If the context says "Calibration: NEVER", run this exercise before handling scheduling requests. This is a conversational calibration — not a quiz. Walk through it naturally.
 
-1. Welcome and explain what Envoy does:
-   - "Hey! I'm Envoy. I look at your calendar and other context to smartly offer up time slots when people want to schedule with you."
-   - "I work on two levels: general context — like whether you prefer to be conservative or generous with your availability — and specific context about your upcoming schedule, so I know exactly what to offer in the coming weeks."
+1. Welcome and explain how Envoy works:
+   - "Hey! I'm Envoy. I build your availability from two sources: your Google Calendar and your preferences here. Every 30-minute slot gets a protection score — from -2 (exclusive) to 5 (immovable). Guests only see the open slots; everything else is hidden."
+   - "The more context I have, the smarter I am. Calendar events are automatic. But things not on your calendar — workouts, commutes, personal time — I need you to tell me about. I'll save those as blocked windows so they're protected just like calendar events."
    - "Let me look at your week and ask a few questions to get calibrated."
 
 2. Confirm timezone: "What timezone are you usually in? I'll use that as your default for all scheduling." Save to persistent knowledge. If their calendar already has a timezone set, confirm it: "It looks like your calendar is set to Pacific time — is that right?"
 
 3. Look at the host's calendar for the next 7 days. Pick 3-4 events that represent real judgment calls and ask about them:
-   - A soft block: "You have [Focus Time / Hold / Block] on [day]. Should I treat that as available for meetings, or protect it?"
+   - A soft block: "You have [Focus Time / Hold / Block] on [day]. Should I treat that as available for meetings, or protect it?" (This determines whether it stays score 2 or goes to 4.)
    - An evening/weekend slot: "Your [day] evening is open. Should I offer evening slots, or keep those off-limits?"
    - A movable meeting: "You have a [1:1 / recurring meeting] on [day]. If someone important needed that slot, could I suggest rescheduling it?"
 
-4. Ask about shadow calendar items: "Anything this week I should protect that isn't on your calendar? Workouts, family time, personal stuff?"
+4. Ask about shadow calendar items: "Anything this week I should protect that isn't on your calendar? Workouts, family time, personal stuff? I'll save these as blocked windows so they show up as protected in both the calendar widget and my scheduling."
+   - IMPORTANT: When the host mentions ANY recurring time commitment (surfing, gym, commute), immediately save it as a blockedWindow using update_knowledge. This is critical — if it's not a blockedWindow, it won't show on the calendar widget or affect scoring.
+
+4b. If non-primary calendars are visible (e.g., Family Calendar), ask: "I can see your Family Calendar — should I treat those as your commitments, or just as context for other people's schedules?" Save the answer to persistent knowledge.
 
 5. Ask about format: "When you're driving or commuting, are you open to phone calls?" and "For in-person meetings, how much travel buffer do you usually need?"
 
 6. Ask about overall posture: "Overall — should I be generous with your availability and offer whatever's open, or more conservative and check with you before offering times?"
 
-7. Save everything you learn using the update_knowledge action. Durable patterns (general context) go in persistent, this-week items (upcoming schedule context) go in situational.
+7. Save everything you learn using the update_knowledge action. Durable patterns (general context) go in persistent, this-week items (upcoming schedule context) go in situational. Any time commitment MUST also be a blockedWindow — never just text.
 
 Keep it conversational — you can combine questions, skip obvious ones, and adapt based on what the calendar shows. The goal is 3-5 exchanges, not a 20-question survey.
 
@@ -136,7 +179,7 @@ export async function POST(req: NextRequest) {
       meetSlug: true,
       preferences: true,
       persistentKnowledge: true,
-      situationalKnowledge: true,
+      upcomingSchedulePreferences: true,
       hostDirectives: true,
       lastCalibratedAt: true,
     },
@@ -163,7 +206,7 @@ export async function POST(req: NextRequest) {
   const contextParts: string[] = [];
   contextParts.push(`User: ${user.name || "User"}`);
 
-  // Calendar context — same pipeline as deal room (raw events, AI reasons about availability)
+  // Scored schedule — pre-computed slots with protection scores
   let calendarConnected = false;
   const hostPrefs = user.preferences as Record<string, unknown> | null;
   const tz =
@@ -171,15 +214,13 @@ export async function POST(req: NextRequest) {
     ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
     "America/Los_Angeles";
   try {
-    const now = new Date();
-    const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-    const calendarContext = await getCalendarContext(user.id, now, twoWeeks, tz);
-    if (calendarContext.connected) {
+    const schedule = await getOrComputeSchedule(user.id);
+    if (schedule.connected) {
       calendarConnected = true;
-      contextParts.push(formatCalendarContext(calendarContext));
+      contextParts.push(formatComputedSchedule(schedule.slots, tz, schedule.canWrite));
     }
   } catch (e) {
-    console.log("Calendar context error:", e);
+    console.log("Schedule context error:", e);
   }
   if (!calendarConnected) {
     contextParts.push("Calendar: Not connected");
@@ -189,8 +230,8 @@ export async function POST(req: NextRequest) {
   if (user.persistentKnowledge) {
     contextParts.push(`Host's persistent preferences:\n${user.persistentKnowledge}`);
   }
-  if (user.situationalKnowledge) {
-    contextParts.push(`Host's situational context (near-term):\n${user.situationalKnowledge}`);
+  if (user.upcomingSchedulePreferences) {
+    contextParts.push(`Host's situational context (near-term):\n${user.upcomingSchedulePreferences}`);
   }
   if (user.hostDirectives && (user.hostDirectives as string[]).length > 0) {
     contextParts.push(`Host directives (highest priority):\n${(user.hostDirectives as string[]).map(d => `- ${d}`).join("\n")}`);
@@ -237,9 +278,81 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Get conversation history (most recent 50, then reverse to chronological order)
+  // --- Channel session lifecycle (3-day rolling window) ---
+  const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+  let activeSession = await prisma.channelSession.findFirst({
+    where: { channelId: channel.id, closed: false },
+    orderBy: { startedAt: "desc" },
+  });
+
+  let previousSummary: string | null = null;
+
+  if (activeSession && activeSession.expiresAt < now) {
+    // Session expired — close it with a summary and start fresh
+    // Generate summary from recent messages
+    const recentMsgs = await prisma.channelMessage.findMany({
+      where: {
+        channelId: channel.id,
+        createdAt: { gte: activeSession.startedAt },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 30,
+    });
+    const summaryText = recentMsgs
+      .filter((m) => m.role !== "system")
+      .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
+      .join("\n");
+
+    // Quick LLM summary
+    try {
+      const summaryResult = await generateText({
+        model: anthropic("claude-sonnet-4-6"),
+        system: "Summarize this scheduling conversation in 2-3 sentences. Focus on what was decided, what's pending, and any preferences learned.",
+        messages: [{ role: "user", content: summaryText }],
+      });
+      previousSummary = summaryResult.text;
+      await prisma.channelSession.update({
+        where: { id: activeSession.id },
+        data: { closed: true, summary: previousSummary },
+      });
+    } catch {
+      await prisma.channelSession.update({
+        where: { id: activeSession.id },
+        data: { closed: true },
+      });
+    }
+    activeSession = null;
+  }
+
+  if (!activeSession) {
+    // Start new session
+    activeSession = await prisma.channelSession.create({
+      data: {
+        channelId: channel.id,
+        expiresAt: new Date(Date.now() + THREE_DAYS_MS),
+      },
+    });
+  } else {
+    // Extend rolling window
+    await prisma.channelSession.update({
+      where: { id: activeSession.id },
+      data: { expiresAt: new Date(Date.now() + THREE_DAYS_MS) },
+    });
+  }
+
+  // Add previous session summary to context if starting fresh
+  if (previousSummary) {
+    contextParts.push(`Previous session summary: ${previousSummary}`);
+  }
+
+  // Get conversation history — hard cap at 3 days to keep thread context lean
+  const threeDaysAgo = new Date(Date.now() - THREE_DAYS_MS);
+  const historyStart = activeSession.startedAt > threeDaysAgo ? activeSession.startedAt : threeDaysAgo;
   const history = await prisma.channelMessage.findMany({
-    where: { channelId: channel.id },
+    where: {
+      channelId: channel.id,
+      createdAt: { gte: historyStart },
+    },
     orderBy: { createdAt: "desc" },
     take: 50,
   });

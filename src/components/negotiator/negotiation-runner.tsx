@@ -46,6 +46,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   const [adminSummary, setAdminSummary] = useState("");
   const [shareCode, setShareCode] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- used in error display section
   const [agentErrors, setAgentErrors] = useState<Record<string, string>>({});
 
   // Streaming state

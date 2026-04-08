@@ -52,7 +52,7 @@ export interface ComposeOptions {
   availableSlots?: Array<{ start: string; end: string }>;
   calendarContext?: CalendarContext;
   hostPersistentKnowledge?: string | null;
-  hostSituationalKnowledge?: string | null;
+  hostUpcomingSchedulePreferences?: string | null;
   hostDirectives?: string[];
   isGroupEvent?: boolean;
   eventParticipants?: Array<{
@@ -108,9 +108,9 @@ export function composeSystemPrompt(options: ComposeOptions): string {
       `## Persistent Preferences\nWho this host is, how they work, and what matters to them. This rarely changes.\n\n${options.hostPersistentKnowledge}`
     );
   }
-  if (options.hostSituationalKnowledge) {
+  if (options.hostUpcomingSchedulePreferences) {
     knowledgeParts.push(
-      `## Situational Context\nWhat's happening right now — near-term overrides, upcoming events, temporary rules. This changes frequently. If situational context conflicts with persistent preferences, situational wins.\n\n${options.hostSituationalKnowledge}`
+      `## Situational Context\nWhat's happening right now — near-term overrides, upcoming events, temporary rules. This changes frequently. If situational context conflicts with persistent preferences, situational wins.\n\n${options.hostUpcomingSchedulePreferences}`
     );
   }
   if (knowledgeParts.length > 0) {
@@ -149,6 +149,17 @@ function formatPreferences(prefs: Record<string, unknown>): string {
           return `${w.start}–${w.end} ${days}${label}${expires}`;
         });
       if (windows.length > 0) items.push(`Blocked windows (do not schedule): ${windows.join("; ")}`);
+    }
+    if (explicit.currentLocation) {
+      const loc = explicit.currentLocation as { label: string; until?: string };
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const isActive = !loc.until || loc.until >= todayStr;
+      if (isActive) {
+        const untilStr = loc.until ? ` (until ${loc.until})` : "";
+        items.push(
+          `Current location: ${loc.label}${untilStr}. The host is NOT at their home base. Do not propose in-person meetings unless the guest is specifically near ${loc.label}. For video/phone, this location has no effect on availability.`
+        );
+      }
     }
     if (items.length > 0) {
       parts.push("**Explicit (host-stated):**\n" + items.map(i => `- ${i}`).join("\n"));
@@ -373,6 +384,182 @@ export function formatCalendarContext(ctx: CalendarContext): string {
   }
 
   return lines.join("\n");
+}
+
+// --- Computed Schedule Format (compact, scored) ---
+
+import type { ScoredSlot, LinkRules } from "@/lib/scoring";
+import { applyEventOverrides } from "@/lib/scoring";
+
+/**
+ * Format a computed schedule (pre-scored slots) for the LLM prompt.
+ * Groups slots by day, then by score tier: Preferred → Open → Soft → Protected.
+ * Merges contiguous same-score slots into ranges for compactness.
+ */
+export function formatComputedSchedule(
+  slots: ScoredSlot[],
+  tz: string,
+  canWrite: boolean,
+  linkRules?: LinkRules
+): string {
+  const tzLabel = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
+    .formatToParts(new Date())
+    .find((p) => p.type === "timeZoneName")?.value ?? tz;
+
+  const utcOffset = getUtcOffsetString(tz);
+
+  // Apply event-level overrides if provided
+  const finalSlots = linkRules ? applyEventOverrides(slots, linkRules, tz) : slots;
+
+  // Group by day
+  const dayFmt = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: tz,
+  });
+
+  const timeFmt = (date: Date): string => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: tz,
+    }).formatToParts(date);
+    const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+    const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+    return m === 0 ? `${h}` : `${h}:${String(m).padStart(2, "0")}`;
+  };
+
+  const dayMap = new Map<string, ScoredSlot[]>();
+  for (const slot of finalSlots) {
+    const dayKey = dayFmt.format(new Date(slot.start));
+    if (!dayMap.has(dayKey)) dayMap.set(dayKey, []);
+    dayMap.get(dayKey)!.push(slot);
+  }
+
+  const lines: string[] = [
+    `Schedule (${tzLabel}, ${utcOffset}):`,
+    `Use UTC offset "${utcOffset}" and timezone "${tz}" in CONFIRMATION_PROPOSAL — e.g., "2026-04-03T16:00:00${utcOffset}".`,
+    `Protection scores: -2=exclusive (ONLY these), -1=preferred (offer first), 0=explicitly free, 1=open, 2=soft hold [low confidence], 3=moderate friction [low confidence], 4=protected (host only), 5=immovable.`,
+    `Low-confidence scores (2,3): adjust based on context. Phone format = -1 friction. VIP guest = -1 friction.`,
+  ];
+
+  // Check for exclusive mode
+  const hasExclusive = finalSlots.some((s) => s.score === -2);
+  if (hasExclusive) {
+    lines.push(`EXCLUSIVE MODE: Only offer Exclusive (-2) and Preferred (-1) slots. All other times are hidden from this guest.`);
+  }
+  lines.push(``);
+
+  // Score tier labels and groupings
+  const tiers = [
+    { label: "Exclusive", min: -2, max: -2 },
+    { label: "Preferred", min: -1, max: -1 },
+    { label: "Open", min: 0, max: 1 },
+    { label: "Soft", min: 2, max: 3 },
+    { label: "Protected", min: 4, max: 5 },
+  ];
+
+  for (const [day, daySlots] of Array.from(dayMap)) {
+    const tierLines: string[] = [];
+
+    for (const tier of tiers) {
+      const tierSlots = daySlots.filter(
+        (s) => s.score >= tier.min && s.score <= tier.max
+      );
+      if (tierSlots.length === 0) continue;
+
+      // Merge contiguous same-score slots into ranges
+      const ranges = mergeSlotRanges(tierSlots, tz, timeFmt);
+      const rangeStrs = ranges.map((r) => {
+        const confStr = r.confidence === "low" ? ", low" : "";
+        const summaryStr = r.eventSummary ? ` ${r.eventSummary}` : "";
+        return `${r.timeRange}${summaryStr} [${r.score}${confStr}]`;
+      });
+
+      tierLines.push(`  ${tier.label}: ${rangeStrs.join(", ")}`);
+    }
+
+    if (tierLines.length > 0) {
+      lines.push(`${day}:`);
+      lines.push(...tierLines);
+    }
+  }
+
+  if (!canWrite) {
+    lines.push(
+      "\nCalendar is read-only. Confirmation sends .ics email instead of creating event directly."
+    );
+  }
+
+  return lines.join("\n");
+}
+
+interface MergedRange {
+  timeRange: string;
+  score: number;
+  confidence: "high" | "low";
+  eventSummary?: string;
+}
+
+function mergeSlotRanges(
+  slots: ScoredSlot[],
+  tz: string,
+  timeFmt: (date: Date) => string
+): MergedRange[] {
+  if (slots.length === 0) return [];
+
+  // Sort by start time
+  const sorted = [...slots].sort(
+    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
+  );
+
+  const ranges: MergedRange[] = [];
+  let rangeStart = new Date(sorted[0].start);
+  let rangeEnd = new Date(sorted[0].end);
+  let currentScore = sorted[0].score;
+  let currentConfidence = sorted[0].confidence;
+  let currentSummary = sorted[0].eventSummary;
+
+  for (let i = 1; i < sorted.length; i++) {
+    const slot = sorted[i];
+    const slotStart = new Date(slot.start);
+
+    // Contiguous and same score/summary → extend range
+    if (
+      slotStart.getTime() === rangeEnd.getTime() &&
+      slot.score === currentScore &&
+      slot.eventSummary === currentSummary
+    ) {
+      rangeEnd = new Date(slot.end);
+      // Take lowest confidence in range
+      if (slot.confidence === "low") currentConfidence = "low";
+    } else {
+      // Flush current range
+      ranges.push({
+        timeRange: `${timeFmt(rangeStart)}–${timeFmt(rangeEnd)}`,
+        score: currentScore,
+        confidence: currentConfidence,
+        eventSummary: currentSummary,
+      });
+      rangeStart = slotStart;
+      rangeEnd = new Date(slot.end);
+      currentScore = slot.score;
+      currentConfidence = slot.confidence;
+      currentSummary = slot.eventSummary;
+    }
+  }
+
+  // Flush last range
+  ranges.push({
+    timeRange: `${timeFmt(rangeStart)}–${timeFmt(rangeEnd)}`,
+    score: currentScore,
+    confidence: currentConfidence,
+    eventSummary: currentSummary,
+  });
+
+  return ranges;
 }
 
 // --- Timezone helpers ---

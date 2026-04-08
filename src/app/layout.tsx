@@ -41,6 +41,8 @@ export default function RootLayout({
             <a href="/privacy" className="hover:text-zinc-400 transition">Privacy</a>
             <span>&middot;</span>
             <a href="/terms" className="hover:text-zinc-400 transition">Terms</a>
+            <span>&middot;</span>
+            <a href="/faq" className="hover:text-zinc-400 transition">How It Works</a>
           </footer>
         </Providers>
       </body>
