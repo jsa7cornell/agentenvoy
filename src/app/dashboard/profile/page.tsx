@@ -2,7 +2,7 @@
 
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { AvailabilityCalendar } from "@/components/availability-calendar";
 import Link from "next/link";
@@ -68,7 +68,13 @@ function InfoBubble({ text }: { text: string }) {
 
 // --- Bullet display for preferences ---
 function BulletDisplay({ text, placeholder, onClick }: { text: string; placeholder: string; onClick: () => void }) {
-  const lines = text.split("\n").filter((l) => l.trim());
+  // Split by newlines first; if that yields a single block, split by sentence boundaries
+  let lines = text.split("\n").filter((l) => l.trim());
+  if (lines.length <= 1 && text.trim()) {
+    lines = text
+      .split(/(?<=\.)\s+/)
+      .filter((l) => l.trim());
+  }
   if (lines.length === 0) {
     return (
       <button
@@ -108,6 +114,8 @@ export default function ProfilePage() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [editingGeneral, setEditingGeneral] = useState(false);
+  const [calendarView, setCalendarView] = useState<"guest" | "all">("guest");
+  const [ambiguities, setAmbiguities] = useState<string[]>([]);
 
   // Availability calendar state
   const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string; score?: number }>>>({});
@@ -139,11 +147,12 @@ export default function ProfilePage() {
 
     fetch("/api/agent/knowledge")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: KnowledgeState | null) => {
+      .then((data) => {
         if (data) {
           setKnowledge(data);
           setPersistent(data.persistentKnowledge);
           setSituational(data.upcomingSchedulePreferences);
+          if (data.ambiguities?.length) setAmbiguities(data.ambiguities);
         }
       })
       .catch(() => {});
@@ -208,9 +217,11 @@ export default function ProfilePage() {
         }),
       });
       if (res.ok) {
+        const data = await res.json();
         setSaveMessage("Saved");
         setEditingSchedule(false);
         setEditingGeneral(false);
+        setAmbiguities(data.ambiguities ?? []);
         fetchSlots();
         setTimeout(() => setSaveMessage(""), 2000);
       } else {
@@ -244,6 +255,17 @@ export default function ProfilePage() {
     return s.link.code ? `/meet/${s.link.slug}/${s.link.code}` : `/meet/${s.link.slug}`;
   }
 
+  // Filter slots for guest view: hide score 3+ (friction/protected/immovable)
+  const filteredSlotsByDay = useMemo(() => {
+    if (calendarView === "all") return slotsByDay;
+    const filtered: Record<string, Array<{ start: string; end: string; score?: number }>> = {};
+    for (const [day, slots] of Object.entries(slotsByDay)) {
+      const guestSlots = slots.filter((s) => (s.score ?? 1) <= 2);
+      if (guestSlots.length > 0) filtered[day] = guestSlots;
+    }
+    return filtered;
+  }, [slotsByDay, calendarView]);
+
   if (status === "loading" || !session) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
@@ -254,11 +276,19 @@ export default function ProfilePage() {
 
   const calendarWidget = (
     <>
-      <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
-        Generic availability
-      </h4>
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+          {calendarView === "guest" ? "Guest view" : "All slots"}
+        </h4>
+        <button
+          onClick={() => setCalendarView((v) => (v === "guest" ? "all" : "guest"))}
+          className="text-[10px] text-zinc-600 hover:text-zinc-400 transition"
+        >
+          {calendarView === "guest" ? "Show all" : "Guest view"}
+        </button>
+      </div>
       <AvailabilityCalendar
-        slotsByDay={slotsByDay}
+        slotsByDay={filteredSlotsByDay}
         timezone={slotTimezone}
         currentLocation={slotLocation}
       />
@@ -445,6 +475,23 @@ export default function ProfilePage() {
                   {saving ? "Saving..." : "Save preferences"}
                 </button>
               </div>
+
+              {/* Ambiguity warnings */}
+              {ambiguities.length > 0 && (
+                <div className="mt-3 rounded-lg bg-amber-950/30 border border-amber-900/40 px-4 py-3">
+                  <p className="text-[11px] font-semibold text-amber-400 mb-1.5">
+                    Envoy couldn&apos;t fully interpret some preferences:
+                  </p>
+                  <ul className="space-y-1">
+                    {ambiguities.map((a, i) => (
+                      <li key={i} className="flex items-start gap-2 text-xs text-amber-300/80">
+                        <span className="mt-0.5">&#x2022;</span>
+                        <span>{a}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </section>
 
             {/* Active Meetings */}

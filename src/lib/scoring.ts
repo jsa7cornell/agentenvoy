@@ -9,6 +9,8 @@
  */
 
 import { createHash } from "crypto";
+import { generateText } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
 import type { CalendarEvent } from "./calendar";
 
 // --- Types ---
@@ -42,6 +44,110 @@ export interface UserPreferences {
     currentLocation?: { label: string; until?: string };
   };
   learned?: Record<string, unknown>;
+}
+
+export interface CompiledRules {
+  blockedWindows: BlockedWindow[];
+  businessHoursStart?: number;
+  businessHoursEnd?: number;
+  blackoutDays?: string[]; // ISO dates "YYYY-MM-DD"
+  ambiguities: string[];
+  compiledAt: string; // ISO datetime
+}
+
+// --- Preference Compiler ---
+
+/**
+ * Use an LLM to compile free-text preferences into deterministic scheduling rules.
+ * Called on preference save — results are stored on the user record and consumed by computeSchedule().
+ */
+export async function compilePreferenceRules(
+  persistentKnowledge: string | null,
+  upcomingSchedulePreferences: string | null,
+  timezone?: string
+): Promise<CompiledRules> {
+  const tz = timezone ?? "America/Los_Angeles";
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: tz,
+  });
+
+  const texts: string[] = [];
+  if (persistentKnowledge?.trim()) texts.push(`General preferences:\n${persistentKnowledge}`);
+  if (upcomingSchedulePreferences?.trim()) texts.push(`Schedule context:\n${upcomingSchedulePreferences}`);
+
+  if (texts.length === 0) {
+    return { blockedWindows: [], ambiguities: [], compiledAt: new Date().toISOString() };
+  }
+
+  const { text } = await generateText({
+    model: anthropic("claude-haiku-4-5-20251001"),
+    system: `You extract deterministic scheduling rules from natural-language preferences.
+Today is ${today}. The host's timezone is ${tz}.
+
+Return ONLY valid JSON matching this schema — no markdown, no explanation:
+{
+  "blockedWindows": [
+    {
+      "start": "HH:MM",       // 24-hour, e.g. "00:00"
+      "end": "HH:MM",         // 24-hour, e.g. "10:00"
+      "days": ["Mon","Tue"],   // optional — short day names, omit for all days
+      "label": "surfing",      // brief reason
+      "expires": "YYYY-MM-DD"  // optional — omit if permanent
+    }
+  ],
+  "businessHoursStart": 7,     // optional — hour (24h) when availability begins
+  "businessHoursEnd": 21,      // optional — hour (24h) when availability ends
+  "blackoutDays": ["YYYY-MM-DD"],  // optional — specific dates with no availability
+  "ambiguities": ["description of unclear item"]  // things you cannot resolve confidently
+}
+
+Rules:
+- Convert relative dates ("next week", "this Thursday") to absolute dates using today's date.
+- "protect until 10am" = blocked window 00:00–10:00
+- "never before 7am" = businessHoursStart: 7
+- "no calls after 9pm" = businessHoursEnd: 21
+- "out of office Apr 10-12" = blackoutDays for each date
+- Date-bounded rules (trips, events) MUST have "expires" set to the last date.
+- Day-bounded rules (daily activities) should use "days" array.
+- If a preference is ambiguous (unclear timezone, vague duration, contradictory), add to "ambiguities" and DO NOT generate a rule for it — err on the side of caution.
+- Only extract what is clearly stated. Do not infer unstated preferences.`,
+    prompt: texts.join("\n\n"),
+  });
+
+  try {
+    // Strip markdown code fences if the LLM wrapped its response
+    const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      blockedWindows: (parsed.blockedWindows ?? []).map((w: Record<string, unknown>) => ({
+        start: String(w.start ?? "00:00"),
+        end: String(w.end ?? "23:59"),
+        ...(w.days ? { days: w.days as string[] } : {}),
+        ...(w.label ? { label: String(w.label) } : {}),
+        ...(w.expires ? { expires: String(w.expires) } : {}),
+      })),
+      businessHoursStart: typeof parsed.businessHoursStart === "number" ? parsed.businessHoursStart : undefined,
+      businessHoursEnd: typeof parsed.businessHoursEnd === "number" ? parsed.businessHoursEnd : undefined,
+      blackoutDays: Array.isArray(parsed.blackoutDays) ? parsed.blackoutDays.map(String) : undefined,
+      ambiguities: Array.isArray(parsed.ambiguities) ? parsed.ambiguities.map(String) : [],
+      compiledAt: new Date().toISOString(),
+    };
+  } catch (e) {
+    console.error("[compilePreferenceRules] LLM parse failed:", e, "Raw text:", text);
+    // LLM returned unparseable response — fall back to regex extraction
+    const fallback = extractTemporalOverrides(persistentKnowledge, upcomingSchedulePreferences);
+    return {
+      blockedWindows: fallback.extraBlockedWindows,
+      businessHoursStart: fallback.adjustedBizHours?.start,
+      businessHoursEnd: fallback.adjustedBizHours?.end,
+      ambiguities: ["Preference compiler returned invalid response — using regex fallback"],
+      compiledAt: new Date().toISOString(),
+    };
+  }
 }
 
 // --- Constants ---
@@ -381,11 +487,26 @@ export function computeSchedule(
   let bizStart = preferences.explicit?.businessHoursStart ?? 9;
   let bizEnd = preferences.explicit?.businessHoursEnd ?? 18;
 
-  // Extract temporal overrides from free-text knowledge fields
-  const temporal = extractTemporalOverrides(persistentKnowledge, upcomingSchedulePreferences ?? null);
-  blockedWindows.push(...temporal.extraBlockedWindows);
-  if (temporal.adjustedBizHours?.start !== undefined) bizStart = temporal.adjustedBizHours.start;
-  if (temporal.adjustedBizHours?.end !== undefined) bizEnd = temporal.adjustedBizHours.end;
+  // Use compiled rules from LLM preference compiler (stored on user.preferences.compiled)
+  const compiled = (preferences as Record<string, unknown>).compiled as CompiledRules | undefined;
+  if (compiled) {
+    blockedWindows.push(...(compiled.blockedWindows ?? []));
+    if (compiled.businessHoursStart !== undefined) bizStart = compiled.businessHoursStart;
+    if (compiled.businessHoursEnd !== undefined) bizEnd = compiled.businessHoursEnd;
+    if (compiled.blackoutDays?.length) {
+      const existingBlackout = preferences.explicit?.blackoutDays ?? [];
+      preferences = {
+        ...preferences,
+        explicit: { ...preferences.explicit, blackoutDays: [...existingBlackout, ...compiled.blackoutDays] },
+      };
+    }
+  } else {
+    // Fallback: regex extraction if no compiled rules available
+    const temporal = extractTemporalOverrides(persistentKnowledge, upcomingSchedulePreferences ?? null);
+    blockedWindows.push(...temporal.extraBlockedWindows);
+    if (temporal.adjustedBizHours?.start !== undefined) bizStart = temporal.adjustedBizHours.start;
+    if (temporal.adjustedBizHours?.end !== undefined) bizEnd = temporal.adjustedBizHours.end;
+  }
 
   const now = new Date();
   const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -450,6 +571,7 @@ export function computeInputHash(
     blackoutDays: preferences.explicit?.blackoutDays,
     persistentKnowledge: persistentKnowledge || null,
     upcomingSchedulePreferences: upcomingSchedulePreferences || null,
+    compiled: (preferences as Record<string, unknown>).compiled ?? null,
   });
   return createHash("sha256").update(data).digest("hex").slice(0, 16);
 }

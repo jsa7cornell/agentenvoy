@@ -117,6 +117,15 @@ export function composeSystemPrompt(options: ComposeOptions): string {
     sections.push(`# Host Knowledge Base\n\n${knowledgeParts.join("\n\n")}`);
   }
 
+  // Layer 4d: Unresolved preference ambiguities — be conservative
+  const compiled = (options.hostPreferences as Record<string, unknown>)?.compiled as { ambiguities?: string[] } | undefined;
+  if (compiled?.ambiguities?.length) {
+    const ambiguityList = compiled.ambiguities.map((a) => `- ${a}`).join("\n");
+    sections.push(
+      `# Unresolved Preferences\n\nThe following aspects of the host's preferences are ambiguous. Be conservative — do NOT offer times that fall in ambiguous ranges. If a scheduling question directly relates to one of these, mention the uncertainty to the guest and propose a safe alternative.\n\n${ambiguityList}`
+    );
+  }
+
   // Layer 5: Session Context (includes calendar)
   const context = buildSessionContext(options);
   sections.push(`# Session Context\n\n${context}`);
