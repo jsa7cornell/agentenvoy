@@ -278,20 +278,37 @@ export default function ProfilePage() {
     <>
       <div className="flex items-center justify-between mb-2">
         <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-          {calendarView === "guest" ? "Guest view" : "All slots"}
+          Availability
         </h4>
-        <button
-          onClick={() => setCalendarView((v) => (v === "guest" ? "all" : "guest"))}
-          className="text-[10px] text-zinc-600 hover:text-zinc-400 transition"
-        >
-          {calendarView === "guest" ? "Show all" : "Guest view"}
-        </button>
+        <div className="flex rounded-full bg-zinc-800 p-0.5">
+          <button
+            onClick={() => setCalendarView("guest")}
+            className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium transition ${
+              calendarView === "guest"
+                ? "bg-zinc-600 text-zinc-100 shadow-sm"
+                : "text-zinc-500 hover:text-zinc-400"
+            }`}
+          >
+            Guest
+          </button>
+          <button
+            onClick={() => setCalendarView("all")}
+            className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium transition ${
+              calendarView === "all"
+                ? "bg-zinc-600 text-zinc-100 shadow-sm"
+                : "text-zinc-500 hover:text-zinc-400"
+            }`}
+          >
+            All
+          </button>
+        </div>
       </div>
       <AvailabilityCalendar
         slotsByDay={filteredSlotsByDay}
         timezone={slotTimezone}
         currentLocation={slotLocation}
       />
+      <p className="text-[10px] text-zinc-600 mt-2">Update your schedule preferences to change your availability.</p>
     </>
   );
 
@@ -423,7 +440,7 @@ export default function ProfilePage() {
                       onChange={(e) => setSituational(e.target.value)}
                       autoFocus
                       rows={4}
-                      placeholder="e.g. In Mexico next week — no morning meetings. Training for a race this month, 7am calls are fine. Out of office Apr 10-12."
+                      placeholder={"e.g.\n- In Mexico next week — no morning meetings\n- Training for a race this month, 7am calls are fine\n- Out of office Apr 10-12"}
                       className="w-full bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-purple-500/50 transition resize-y min-h-[80px]"
                     />
                   ) : (
@@ -447,7 +464,7 @@ export default function ProfilePage() {
                       onChange={(e) => setPersistent(e.target.value)}
                       autoFocus
                       rows={6}
-                      placeholder="e.g. I prefer mornings for calls. Budget 30 min travel for in-person meetings. I like to stack calls on MWF."
+                      placeholder={"e.g.\n- Default timezone: America/Los_Angeles\n- I prefer mornings for calls\n- Budget 30 min travel for in-person meetings\n- Stack calls on MWF"}
                       className="w-full bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-purple-500/50 transition resize-y min-h-[100px]"
                     />
                   ) : (
@@ -480,7 +497,7 @@ export default function ProfilePage() {
               {ambiguities.length > 0 && (
                 <div className="mt-3 rounded-lg bg-amber-950/30 border border-amber-900/40 px-4 py-3">
                   <p className="text-[11px] font-semibold text-amber-400 mb-1.5">
-                    Envoy couldn&apos;t fully interpret some preferences:
+                    Envoy couldn&apos;t fully interpret some preferences — please clarify when you get a chance:
                   </p>
                   <ul className="space-y-1">
                     {ambiguities.map((a, i) => (

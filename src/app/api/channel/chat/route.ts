@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateText } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule } from "@/agent/composer";
 import { generateCode } from "@/lib/utils";
@@ -306,7 +306,7 @@ export async function POST(req: NextRequest) {
     // Quick LLM summary
     try {
       const summaryResult = await generateText({
-        model: anthropic("claude-sonnet-4-6"),
+        model: envoyModel("claude-sonnet-4-6"),
         system: "Summarize this scheduling conversation in 2-3 sentences. Focus on what was decided, what's pending, and any preferences learned.",
         messages: [{ role: "user", content: summaryText }],
       });
@@ -371,7 +371,7 @@ export async function POST(req: NextRequest) {
   let text: string;
   try {
     const result = await generateText({
-      model: anthropic("claude-sonnet-4-6"),
+      model: envoyModel("claude-sonnet-4-6"),
       system: CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n"),
       messages,
     });

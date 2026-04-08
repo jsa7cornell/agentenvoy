@@ -1,5 +1,5 @@
 import { streamText, generateText } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { envoyModel } from "@/lib/model";
 import { composeSystemPrompt, getModelForDomain } from "./composer";
 import type { DomainType } from "./composer";
 import type { CalendarContext } from "@/lib/calendar";
@@ -63,7 +63,7 @@ export async function streamAgentResponse(context: AgentContext) {
   const systemPrompt = composeSystemPrompt(opts);
 
   return streamText({
-    model: anthropic(getModelForDomain(opts.domain)),
+    model: envoyModel(getModelForDomain(opts.domain)),
     system: systemPrompt,
     messages: context.conversationHistory.map((m) => ({
       role: m.role as "user" | "assistant",
@@ -77,7 +77,7 @@ export async function generateAgentResponse(context: AgentContext) {
   const systemPrompt = composeSystemPrompt(opts);
 
   const { text } = await generateText({
-    model: anthropic(getModelForDomain(opts.domain)),
+    model: envoyModel(getModelForDomain(opts.domain)),
     system: systemPrompt,
     messages: context.conversationHistory.map((m) => ({
       role: m.role as "user" | "assistant",
@@ -92,7 +92,7 @@ export async function parsePreferences(
   userPrompt: string
 ): Promise<Record<string, unknown>> {
   const { text } = await generateText({
-    model: anthropic("claude-sonnet-4-6"),
+    model: envoyModel("claude-sonnet-4-6"),
     system: `You parse natural language scheduling preferences into structured JSON. Extract:
 - preferredDays: array of day names or "any"
 - preferredTimes: array of time ranges like "morning", "afternoon", "9am-12pm"
@@ -129,7 +129,7 @@ export async function extractLearnings(
   hostName: string
 ): Promise<{ persistent: string; situational: string }> {
   const { text } = await generateText({
-    model: anthropic("claude-sonnet-4-6"),
+    model: envoyModel("claude-sonnet-4-6"),
     system: `You analyze completed scheduling negotiation transcripts to extract learnings about the host (${hostName}).
 
 You maintain two knowledge layers:
@@ -180,7 +180,7 @@ export async function extractAvailabilitySummary(
 
   try {
     const { text } = await generateText({
-      model: anthropic("claude-haiku-4-5-20251001"),
+      model: envoyModel("claude-haiku-4-5-20251001"),
       system: `Extract a 1-2 sentence availability summary from this scheduling conversation. Focus on: what days/times work, what doesn't work, format preferences. If no availability has been stated yet, return "NO_AVAILABILITY". Return ONLY the summary text, no explanation.`,
       prompt: transcript,
     });

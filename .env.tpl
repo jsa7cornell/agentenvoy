@@ -14,9 +14,8 @@ NEXTAUTH_SECRET=op://Secrets/NEXTAUTH_SECRET/credential
 GOOGLE_CLIENT_ID=op://Secrets/GOOGLE_CLIENT_ID/credential
 GOOGLE_CLIENT_SECRET=op://Secrets/GOOGLE_CLIENT_SECRET/credential
 
-# ─── Anthropic ─────────────────────────────────────────────
-ANTHROPIC_API_KEY=op://Secrets/ANTHROPIC_API_KEY/credential
-ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
+# ─── Envoy Core AI ────────────────────────────────────────
+ENVOY_ANTHROPIC_API_KEY=op://Secrets/ENVOY_ANTHROPIC_API_KEY/credential
 
 # ─── Resend ────────────────────────────────────────────────
 RESEND_API_KEY=op://Secrets/AGENTENVOY_RESEND_API_KEY/credential

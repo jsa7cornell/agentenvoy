@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { streamText } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule } from "@/agent/composer";
 
@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
   const contextMessage = `User: ${user?.name || "User"}\nMeet slug: ${user?.meetSlug || "not set"}\nCurrent preferences: ${JSON.stringify(user?.preferences || {})}\nBase URL: ${process.env.NEXTAUTH_URL || "https://agentenvoy.ai"}${availabilityContext}${knowledgeContext}`;
 
   const result = streamText({
-    model: anthropic("claude-sonnet-4-6"),
+    model: envoyModel("claude-sonnet-4-6"),
     system: DASHBOARD_SYSTEM + "\n\nCONTEXT:\n" + contextMessage,
     messages,
   });

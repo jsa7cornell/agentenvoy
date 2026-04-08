@@ -11,7 +11,7 @@
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { generateText } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { envoyModel } from "@/lib/model";
 import { composeSystemPrompt, getModelForDomain, getPlaybookInfo } from "../composer";
 import type { DomainType } from "../composer";
 
@@ -125,7 +125,7 @@ async function runCase(evalCase: EvalCase, modelOverride?: string): Promise<Eval
   const start = Date.now();
 
   const { text, usage } = await generateText({
-    model: anthropic(model),
+    model: envoyModel(model),
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });

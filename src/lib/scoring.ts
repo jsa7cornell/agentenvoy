@@ -10,7 +10,7 @@
 
 import { createHash } from "crypto";
 import { generateText } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { envoyModel } from "@/lib/model";
 import type { CalendarEvent } from "./calendar";
 
 // --- Types ---
@@ -84,7 +84,7 @@ export async function compilePreferenceRules(
   }
 
   const { text } = await generateText({
-    model: anthropic("claude-haiku-4-5-20251001"),
+    model: envoyModel("claude-haiku-4-5-20251001"),
     system: `You extract deterministic scheduling rules from natural-language preferences.
 Today is ${today}. The host's timezone is ${tz}.
 
