@@ -681,7 +681,24 @@ export default function ProfilePage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-zinc-100 mb-1">Which calendars affect your availability?</h3>
-            <p className="text-xs text-zinc-500 mb-4">Only checked calendars will be used when scheduling. Unchecked calendars are ignored.</p>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs text-zinc-500">Only checked calendars will be used when scheduling.</p>
+              <div className="flex gap-2 flex-shrink-0 ml-3">
+                <button
+                  onClick={() => setActiveCalendarIds(googleCalendars.map((c) => c.id))}
+                  className="text-[10px] text-zinc-500 hover:text-zinc-300 transition"
+                >
+                  All
+                </button>
+                <span className="text-[10px] text-zinc-700">·</span>
+                <button
+                  onClick={() => setActiveCalendarIds([])}
+                  className="text-[10px] text-zinc-500 hover:text-zinc-300 transition"
+                >
+                  None
+                </button>
+              </div>
+            </div>
 
             {googleCalendars.length === 0 ? (
               <div className="text-xs text-zinc-500 py-4 text-center">Loading calendars...</div>
