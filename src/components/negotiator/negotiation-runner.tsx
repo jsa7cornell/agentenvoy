@@ -46,6 +46,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   const [adminSummary, setAdminSummary] = useState("");
   const [shareCode, setShareCode] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [agentErrors, setAgentErrors] = useState<Record<string, string>>({});
 
   // Streaming state
   const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
@@ -77,9 +78,13 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    try {
-      await Promise.all(
-        config.agents.map(async (agent) => {
+    const newAgentErrors: Record<string, string> = {};
+
+    // Run all agents — failures are caught per-agent so one bad API key
+    // doesn't kill the whole run. Content is validated before synthesis.
+    await Promise.all(
+      config.agents.map(async (agent) => {
+        try {
           const res = await fetch("/api/negotiator/research", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -97,70 +102,98 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
           if (!res.ok) {
             const errText = await res.text();
-            throw new Error(`${agent.name} failed: ${errText}`);
+            throw new Error(`HTTP ${res.status}: ${errText}`);
           }
 
           const reader = res.body?.getReader();
           const decoder = new TextDecoder();
           let fullText = "";
-          const agentTokens = 0;
 
           if (reader) {
-            const STREAM_TIMEOUT = 30_000; // 30s with no data = stalled
+            const STREAM_TIMEOUT = 60_000; // 60s with no chunk = stalled
             while (true) {
               const timeout = new Promise<{ done: true; value: undefined }>((_, reject) =>
-                setTimeout(() => reject(new Error(`${agent.name} timed out (no data for 30s)`)), STREAM_TIMEOUT)
+                setTimeout(() => reject(new Error(`No response for 60s — the model may be overloaded. Try a faster model (gpt-4o-mini) or retry.`)), STREAM_TIMEOUT)
               );
               const { done, value } = await Promise.race([reader.read(), timeout]);
               if (done) break;
-
               const chunk = decoder.decode(value, { stream: true });
               fullText += chunk;
-              setStreamingTexts((prev) => ({
-                ...prev,
-                [agent.id]: fullText,
-              }));
+              setStreamingTexts((prev) => ({ ...prev, [agent.id]: fullText }));
             }
           }
 
-          const result: ResearchResult = {
-            agentId: agent.id,
-            agentName: agent.name,
-            provider: agent.provider,
-            model: agent.model,
-            content: fullText,
-            tokensUsed: agentTokens,
-          };
-
-          results.push(result);
-          setTotalTokens((t) => t + agentTokens);
-
+          // Detect error content returned as 200 (provider errors streamed as text)
+          const trimmed = fullText.trim();
+          if (trimmed.startsWith("[Error:") || trimmed.length < 20) {
+            const errMsg = trimmed.startsWith("[Error:")
+              ? trimmed.replace(/^\[Error:\s*/, "").replace(/\]$/, "")
+              : "Empty response — check your API key and model availability.";
+            newAgentErrors[agent.id] = errMsg;
+            // Show the error in the agent card rather than blank
+            setStreamingTexts((prev) => ({
+              ...prev,
+              [agent.id]: `⚠️ ${errMsg}`,
+            }));
+          } else {
+            results.push({
+              agentId: agent.id,
+              agentName: agent.name,
+              provider: agent.provider,
+              model: agent.model,
+              content: fullText,
+              tokensUsed: 0,
+            });
+          }
+        } catch (err) {
+          if (controller.signal.aborted) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          newAgentErrors[agent.id] = msg;
+          setStreamingTexts((prev) => ({ ...prev, [agent.id]: `⚠️ ${msg}` }));
+        } finally {
           setStreamingIds((prev) => {
             const next = new Set(prev);
             next.delete(agent.id);
             return next;
           });
-        })
-      );
+        }
+      })
+    );
 
-      setResearch(results);
+    if (controller.signal.aborted) return;
 
-      let txn = `# Negotiation Transcript\n\n**Question:** ${config.question}\n**Date:** ${new Date().toISOString().slice(0, 10)}\n\n`;
-      txn += `---\n\n## Round ${currentRound}: Agent Positions\n\n`;
-      for (const r of results) {
-        txn += `### ${r.agentName} (${r.provider}/${r.model})\n\n${r.content}\n\n`;
-      }
-      setTranscript(txn);
+    // If any agents failed, surface errors and stop — don't run synthesis on garbage
+    if (Object.keys(newAgentErrors).length > 0) {
+      setAgentErrors(newAgentErrors);
+      setResearch(results); // show whatever succeeded
+      setPhase("error");
+      const names = config.agents
+        .filter((a) => newAgentErrors[a.id])
+        .map((a) => `${a.name} (${a.model})`)
+        .join(", ");
+      setError(`${Object.keys(newAgentErrors).length} agent(s) failed: ${names}`);
+      return;
+    }
 
-      if (isOverBudget(totalTokens, config.tokenBudget)) {
-        setPhase("budget-exceeded");
-        return;
-      }
+    setResearch(results);
+    setAgentErrors({});
 
+    let txn = `# Negotiation Transcript\n\n**Question:** ${config.question}\n**Date:** ${new Date().toISOString().slice(0, 10)}\n\n`;
+    txn += `---\n\n## Round ${currentRound}: Agent Positions\n\n`;
+    for (const r of results) {
+      txn += `### ${r.agentName} (${r.provider}/${r.model})\n\n${r.content}\n\n`;
+    }
+    setTranscript(txn);
+
+    if (isOverBudget(totalTokens, config.tokenBudget)) {
+      setPhase("budget-exceeded");
+      return;
+    }
+
+    try {
       await runSynthesis(results, currentRound, [], [], []);
     } catch (err) {
-      if (controller.signal.aborted) return;
-      setError(err instanceof Error ? err.message : "Research phase failed");
+      setError(err instanceof Error ? err.message : "Synthesis failed");
       setPhase("error");
     }
   }, [config, round, totalTokens]);
@@ -373,6 +406,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     setAdminSummary("");
     setShareCode(null);
     setSharing(false);
+    setAgentErrors({});
     runResearch();
   }, [runResearch]);
 
@@ -580,8 +614,40 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
       {/* Error */}
       {phase === "error" && (
-        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm">
-          <span className="font-medium text-[var(--neg-red)]">Error:</span> {error}
+        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-4 space-y-3">
+          <div className="text-sm">
+            <span className="font-medium text-[var(--neg-red)]">Error:</span> {error}
+          </div>
+          {/* Per-agent error details */}
+          {Object.keys(agentErrors).length > 0 && (
+            <div className="space-y-2">
+              {config.agents
+                .filter((a) => agentErrors[a.id])
+                .map((a) => (
+                  <div key={a.id} className="text-xs rounded bg-red-500/10 border border-red-500/20 px-3 py-2">
+                    <span className="font-medium text-[var(--neg-red)]">{a.name} ({a.model})</span>
+                    <span className="text-[var(--neg-text-muted)] ml-2">{agentErrors[a.id]}</span>
+                  </div>
+                ))}
+              <p className="text-xs text-[var(--neg-text-muted)]">
+                Common fixes: check your API key is valid and has credits, or switch to a different model (gpt-4o-mini is most reliable).
+              </p>
+            </div>
+          )}
+          <button
+            onClick={() => {
+              setPhase("idle");
+              setError("");
+              setAgentErrors({});
+              setResearch([]);
+              setStreamingIds(new Set());
+              setStreamingTexts({});
+              runResearch();
+            }}
+            className="px-4 py-2 rounded-lg bg-[var(--neg-accent)] text-black font-semibold text-sm hover:bg-[var(--neg-accent)]/90 transition"
+          >
+            Retry
+          </button>
         </div>
       )}
 

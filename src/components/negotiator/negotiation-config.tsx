@@ -20,7 +20,7 @@ function createAgent(index: number = 0): AgentConfig {
     provider: "openai",
     model: DEFAULT_MODEL,
     apiKey: "",
-    context: STARTER_CONTEXTS[index % STARTER_CONTEXTS.length] ?? "",
+    context: "", // blank — starter contexts shown as placeholder hints
   };
 }
 
@@ -225,6 +225,7 @@ export function NegotiationConfigPanel({
               onRemove={() => removeAgent(i)}
               canRemove={agents.length > 2}
               disabled={disabled}
+              placeholder={STARTER_CONTEXTS[i % STARTER_CONTEXTS.length]}
             />
           ))}
         </div>

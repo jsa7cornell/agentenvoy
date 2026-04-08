@@ -2,7 +2,7 @@ import { streamText } from "ai";
 import { getModel } from "@/lib/negotiator/providers";
 import type { ModelProvider } from "@/lib/negotiator/types";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   const body = await req.json();
@@ -42,7 +42,7 @@ ${agentContext ? `## Your Private Context (only you and the Administrator see th
       model: modelInstance,
       system: systemPrompt,
       prompt: question,
-      maxOutputTokens: 4096,
+      maxOutputTokens: 1500,
     });
 
     // Wrap the stream so async provider errors (bad key, rate limit, etc.)

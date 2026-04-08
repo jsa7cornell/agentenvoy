@@ -14,6 +14,7 @@ interface AgentCardProps {
   onRemove: () => void;
   canRemove: boolean;
   disabled?: boolean;
+  placeholder?: string;
 }
 
 export function AgentCard({
@@ -23,6 +24,8 @@ export function AgentCard({
   onRemove,
   canRemove,
   disabled,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- used in textarea below
+  placeholder = "e.g. Focus on cost optimization. Assume a 3-month timeline.",
 }: AgentCardProps) {
   const providerColor =
     agent.provider === "anthropic"
@@ -93,7 +96,7 @@ export function AgentCard({
         <textarea
           value={agent.context}
           onChange={(e) => onChange({ ...agent, context: e.target.value })}
-          placeholder="e.g. Focus on cost optimization. Assume a 3-month timeline."
+          placeholder={placeholder}
           disabled={disabled}
           rows={2}
           className="w-full bg-white border-2 border-[var(--neg-border)] rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/60 text-[var(--neg-text)]"
