@@ -115,6 +115,8 @@ export default function ProfilePage() {
   const [calendarFilterModal, setCalendarFilterModal] = useState(false);
   const [googleCalendars, setGoogleCalendars] = useState<Array<{ id: string; name: string; primary: boolean; backgroundColor: string | null }>>([]);
   const [activeCalendarIds, setActiveCalendarIds] = useState<string[]>([]);
+  // modalSelectedIds is the working selection inside the modal (always explicit, never empty-means-all)
+  const [modalSelectedIds, setModalSelectedIds] = useState<string[]>([]);
   const [savingCalendarFilter, setSavingCalendarFilter] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [editingGeneral, setEditingGeneral] = useState(false);
@@ -396,8 +398,18 @@ export default function ProfilePage() {
                         if (googleCalendars.length === 0) {
                           fetch("/api/connections/google-calendars")
                             .then((r) => r.json())
-                            .then((d) => { if (d.calendars) setGoogleCalendars(d.calendars); })
+                            .then((d) => {
+                              if (d.calendars) {
+                                setGoogleCalendars(d.calendars);
+                                // Initialize modal selection: expand [] (all) to explicit list
+                                const ids = d.calendars.map((c: { id: string }) => c.id);
+                                setModalSelectedIds(activeCalendarIds.length > 0 ? activeCalendarIds : ids);
+                              }
+                            })
                             .catch(() => {});
+                        } else {
+                          // Calendars already loaded, just sync modal state
+                          setModalSelectedIds(activeCalendarIds.length > 0 ? activeCalendarIds : googleCalendars.map((c) => c.id));
                         }
                         setCalendarFilterModal(true);
                       }}
@@ -681,49 +693,41 @@ export default function ProfilePage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-zinc-100 mb-1">Which calendars affect your availability?</h3>
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs text-zinc-500">Only checked calendars will be used when scheduling.</p>
-              <div className="flex gap-2 flex-shrink-0 ml-3">
-                <button
-                  onClick={() => setActiveCalendarIds(googleCalendars.map((c) => c.id))}
-                  className="text-[10px] text-zinc-500 hover:text-zinc-300 transition"
-                >
-                  All
-                </button>
-                <span className="text-[10px] text-zinc-700">·</span>
-                <button
-                  onClick={() => setActiveCalendarIds([])}
-                  className="text-[10px] text-zinc-500 hover:text-zinc-300 transition"
-                >
-                  None
-                </button>
-              </div>
-            </div>
+            <p className="text-xs text-zinc-500 mb-4">Only checked calendars will be used when scheduling.</p>
 
             {googleCalendars.length === 0 ? (
               <div className="text-xs text-zinc-500 py-4 text-center">Loading calendars...</div>
             ) : (
-              <ul className="space-y-2 mb-5 max-h-64 overflow-y-auto">
-                {googleCalendars.map((cal) => {
-                  const isActive = activeCalendarIds.length === 0 || activeCalendarIds.includes(cal.id);
-                  return (
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Calendars</span>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setModalSelectedIds(googleCalendars.map((c) => c.id))}
+                      className="text-[10px] text-zinc-500 hover:text-zinc-200 transition"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      onClick={() => setModalSelectedIds([])}
+                      className="text-[10px] text-zinc-500 hover:text-zinc-200 transition"
+                    >
+                      Select none
+                    </button>
+                  </div>
+                </div>
+                <ul className="space-y-2 mb-5 max-h-64 overflow-y-auto">
+                  {googleCalendars.map((cal) => (
                     <li key={cal.id}>
-                      <label className="flex items-center gap-3 cursor-pointer group">
+                      <label className="flex items-center gap-3 cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={isActive}
+                          checked={modalSelectedIds.includes(cal.id)}
                           onChange={(e) => {
                             if (e.target.checked) {
-                              // If all were active (empty = all), switching one off means we need to explicitly list the rest
-                              const base = activeCalendarIds.length === 0
-                                ? googleCalendars.map((c) => c.id)
-                                : activeCalendarIds;
-                              setActiveCalendarIds([...base, cal.id].filter((v, i, a) => a.indexOf(v) === i));
+                              setModalSelectedIds((prev) => [...prev, cal.id]);
                             } else {
-                              const base = activeCalendarIds.length === 0
-                                ? googleCalendars.map((c) => c.id)
-                                : activeCalendarIds;
-                              setActiveCalendarIds(base.filter((id) => id !== cal.id));
+                              setModalSelectedIds((prev) => prev.filter((id) => id !== cal.id));
                             }
                           }}
                           className="w-4 h-4 rounded accent-purple-500"
@@ -738,9 +742,9 @@ export default function ProfilePage() {
                         </span>
                       </label>
                     </li>
-                  );
-                })}
-              </ul>
+                  ))}
+                </ul>
+              </>
             )}
 
             <div className="flex gap-2">
@@ -754,8 +758,8 @@ export default function ProfilePage() {
                 onClick={async () => {
                   setSavingCalendarFilter(true);
                   try {
-                    // If all calendars are checked, save as empty (= use all)
-                    const toSave = activeCalendarIds.length === googleCalendars.length ? [] : activeCalendarIds;
+                    // If all calendars selected, save as [] (= use all, backward compat)
+                    const toSave = modalSelectedIds.length === googleCalendars.length ? [] : modalSelectedIds;
                     await fetch("/api/connections/calendar-filter", {
                       method: "PUT",
                       headers: { "Content-Type": "application/json" },
