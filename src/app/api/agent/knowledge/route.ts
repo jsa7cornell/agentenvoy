@@ -38,12 +38,14 @@ export async function GET() {
   });
 
   const compiled = ((user.preferences as Record<string, unknown>)?.compiled ?? null) as { ambiguities?: string[] } | null;
+  const prefs = (user.preferences as UserPreferences) || {};
 
   return NextResponse.json({
     persistentKnowledge: user.persistentKnowledge || "",
     upcomingSchedulePreferences: user.upcomingSchedulePreferences || "",
     preview,
     ambiguities: compiled?.ambiguities ?? [],
+    activeCalendarIds: prefs.explicit?.activeCalendarIds ?? [],
   });
 }
 

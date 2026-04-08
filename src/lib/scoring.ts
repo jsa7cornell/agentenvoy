@@ -42,6 +42,7 @@ export interface UserPreferences {
     blackoutDays?: string[];
     blockedWindows?: BlockedWindow[];
     currentLocation?: { label: string; until?: string };
+    activeCalendarIds?: string[]; // if set, only these calendars affect availability
   };
   learned?: Record<string, unknown>;
 }

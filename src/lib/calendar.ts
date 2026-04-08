@@ -191,7 +191,8 @@ export async function getCalendarContext(
   userId: string,
   startDate: Date,
   endDate: Date,
-  timezone = "America/Los_Angeles"
+  timezone = "America/Los_Angeles",
+  activeCalendarIds?: string[]
 ): Promise<CalendarContext> {
   const providers = await getProviders(userId);
 
@@ -212,10 +213,18 @@ export async function getCalendarContext(
   for (const provider of providers) {
     try {
       const calendars = await provider.listCalendars();
-      allCalendars.push(...calendars.map((c) => c.name));
+      const filteredCalendars =
+        activeCalendarIds && activeCalendarIds.length > 0
+          ? calendars.filter((c) => activeCalendarIds.includes(c.id))
+          : calendars;
+      allCalendars.push(...filteredCalendars.map((c) => c.name));
 
       const events = await provider.getEvents(startDate, endDate);
-      allEvents.push(...events);
+      const filteredEvents =
+        activeCalendarIds && activeCalendarIds.length > 0
+          ? events.filter((ev) => filteredCalendars.some((c) => c.name === ev.calendar))
+          : events;
+      allEvents.push(...filteredEvents);
 
       if (provider.canWrite) canWrite = true;
     } catch (e) {
@@ -359,7 +368,7 @@ function fromStored(ev: StoredCalendarEvent): CalendarEvent {
  * On first call or 410 GONE, performs a full sync.
  * Returns true if events changed (schedule should be recomputed).
  */
-export async function syncCalendar(userId: string): Promise<{ changed: boolean; events: CalendarEvent[] }> {
+export async function syncCalendar(userId: string, activeCalendarIds?: string[]): Promise<{ changed: boolean; events: CalendarEvent[] }> {
   const client = await getGoogleCalendarClient(userId);
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -367,12 +376,16 @@ export async function syncCalendar(userId: string): Promise<{ changed: boolean; 
   });
   const hostEmail = user?.email || "";
 
-  // Get all calendars
+  // Get all calendars, then filter to active set if configured
   const { data: calList } = await client.calendarList.list();
-  const calendars = (calList.items ?? []).map((c) => ({
+  const allCalendars = (calList.items ?? []).map((c) => ({
     id: c.id || "primary",
     name: c.summary || c.id || "primary",
   }));
+  const calendars =
+    activeCalendarIds && activeCalendarIds.length > 0
+      ? allCalendars.filter((c) => activeCalendarIds.includes(c.id))
+      : allCalendars;
 
   let anyChanged = false;
 
@@ -591,7 +604,15 @@ export async function getCachedCalendarContext(
   timezone = "America/Los_Angeles"
 ): Promise<CalendarContext> {
   try {
-    const { events } = await syncCalendar(userId);
+    // Read activeCalendarIds from user preferences
+    const userPrefs = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
+    });
+    const prefs = (userPrefs?.preferences as import("./scoring").UserPreferences) || {};
+    const activeCalendarIds = prefs.explicit?.activeCalendarIds;
+
+    const { events } = await syncCalendar(userId, activeCalendarIds);
 
     if (events.length === 0) {
       // Check if calendar is even connected

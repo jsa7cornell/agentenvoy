@@ -112,6 +112,10 @@ export default function ProfilePage() {
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [calendarModal, setCalendarModal] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [calendarFilterModal, setCalendarFilterModal] = useState(false);
+  const [googleCalendars, setGoogleCalendars] = useState<Array<{ id: string; name: string; primary: boolean; backgroundColor: string | null }>>([]);
+  const [activeCalendarIds, setActiveCalendarIds] = useState<string[]>([]);
+  const [savingCalendarFilter, setSavingCalendarFilter] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [editingGeneral, setEditingGeneral] = useState(false);
   const [calendarView, setCalendarView] = useState<"guest" | "all">("guest");
@@ -153,6 +157,7 @@ export default function ProfilePage() {
           setPersistent(data.persistentKnowledge);
           setSituational(data.upcomingSchedulePreferences);
           if (data.ambiguities?.length) setAmbiguities(data.ambiguities);
+          if (data.activeCalendarIds) setActiveCalendarIds(data.activeCalendarIds);
         }
       })
       .catch(() => {});
@@ -353,37 +358,55 @@ export default function ProfilePage() {
               </h2>
               <div className="flex gap-2 overflow-x-auto pb-2">
                 {/* Google Calendar */}
-                <button
-                  onClick={() => {
-                    if (calendarConnected) {
-                      setCalendarModal(true);
-                    } else {
-                      signIn("google", { callbackUrl: "/dashboard/profile" });
-                    }
-                  }}
-                  className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition flex-shrink-0 w-36 ${
-                    calendarConnected
-                      ? "bg-emerald-900/10 border border-emerald-700/30 hover:border-emerald-600/50"
-                      : "bg-zinc-900/50 border border-zinc-800 hover:border-zinc-700"
-                  }`}
-                >
-                  <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center flex-shrink-0">
-                    <svg viewBox="0 0 24 24" className="w-4 h-4">
-                      <path d="M18.316 5.684H24v12.632h-5.684V5.684z" fill="#1967D2" />
-                      <path d="M5.684 18.316V5.684L0 5.684v12.632l5.684 0z" fill="#188038" />
-                      <path d="M18.316 24V18.316H5.684V24h12.632z" fill="#1967D2" />
-                      <path d="M18.316 5.684V0H5.684v5.684h12.632z" fill="#EA4335" />
-                      <path d="M18.316 18.316H5.684V5.684h12.632v12.632z" fill="#fff" />
-                      <path d="M9.2 15.7V9.1h1.5v2.4h2.6V9.1h1.5v6.6h-1.5v-2.8h-2.6v2.8H9.2z" fill="#1967D2" />
-                    </svg>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium text-zinc-200">Google</div>
-                    <div className={`text-[10px] ${calendarConnected ? "text-emerald-400" : "text-zinc-600"}`}>
-                      {calendarConnected ? "Connected" : "Connect"}
+                <div className={`flex flex-col rounded-xl flex-shrink-0 w-36 overflow-hidden border transition ${
+                  calendarConnected
+                    ? "bg-emerald-900/10 border-emerald-700/30"
+                    : "bg-zinc-900/50 border-zinc-800"
+                }`}>
+                  <button
+                    onClick={() => {
+                      if (calendarConnected) {
+                        setCalendarModal(true);
+                      } else {
+                        signIn("google", { callbackUrl: "/dashboard/profile" });
+                      }
+                    }}
+                    className="flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-white/5 transition"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center flex-shrink-0">
+                      <svg viewBox="0 0 24 24" className="w-4 h-4">
+                        <path d="M18.316 5.684H24v12.632h-5.684V5.684z" fill="#1967D2" />
+                        <path d="M5.684 18.316V5.684L0 5.684v12.632l5.684 0z" fill="#188038" />
+                        <path d="M18.316 24V18.316H5.684V24h12.632z" fill="#1967D2" />
+                        <path d="M18.316 5.684V0H5.684v5.684h12.632z" fill="#EA4335" />
+                        <path d="M18.316 18.316H5.684V5.684h12.632v12.632z" fill="#fff" />
+                        <path d="M9.2 15.7V9.1h1.5v2.4h2.6V9.1h1.5v6.6h-1.5v-2.8h-2.6v2.8H9.2z" fill="#1967D2" />
+                      </svg>
                     </div>
-                  </div>
-                </button>
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-zinc-200">Google</div>
+                      <div className={`text-[10px] ${calendarConnected ? "text-emerald-400" : "text-zinc-600"}`}>
+                        {calendarConnected ? "Connected" : "Connect"}
+                      </div>
+                    </div>
+                  </button>
+                  {calendarConnected && (
+                    <button
+                      onClick={() => {
+                        if (googleCalendars.length === 0) {
+                          fetch("/api/connections/google-calendars")
+                            .then((r) => r.json())
+                            .then((d) => { if (d.calendars) setGoogleCalendars(d.calendars); })
+                            .catch(() => {});
+                        }
+                        setCalendarFilterModal(true);
+                      }}
+                      className="px-3 py-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 border-t border-emerald-800/30 text-left transition hover:bg-white/5"
+                    >
+                      Manage calendars
+                    </button>
+                  )}
+                </div>
 
                 {/* Other Calendars */}
                 <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-zinc-900/50 border border-zinc-800 opacity-50 flex-shrink-0 w-36">
@@ -644,6 +667,96 @@ export default function ProfilePage() {
                 className="flex-1 px-3 py-2 text-xs font-medium text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition disabled:opacity-50"
               >
                 {disconnecting ? "Disconnecting..." : "Disconnect Calendar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Calendar Filter Modal */}
+      {calendarFilterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setCalendarFilterModal(false)}>
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Which calendars affect your availability?</h3>
+            <p className="text-xs text-zinc-500 mb-4">Only checked calendars will be used when scheduling. Unchecked calendars are ignored.</p>
+
+            {googleCalendars.length === 0 ? (
+              <div className="text-xs text-zinc-500 py-4 text-center">Loading calendars...</div>
+            ) : (
+              <ul className="space-y-2 mb-5 max-h-64 overflow-y-auto">
+                {googleCalendars.map((cal) => {
+                  const isActive = activeCalendarIds.length === 0 || activeCalendarIds.includes(cal.id);
+                  return (
+                    <li key={cal.id}>
+                      <label className="flex items-center gap-3 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={isActive}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              // If all were active (empty = all), switching one off means we need to explicitly list the rest
+                              const base = activeCalendarIds.length === 0
+                                ? googleCalendars.map((c) => c.id)
+                                : activeCalendarIds;
+                              setActiveCalendarIds([...base, cal.id].filter((v, i, a) => a.indexOf(v) === i));
+                            } else {
+                              const base = activeCalendarIds.length === 0
+                                ? googleCalendars.map((c) => c.id)
+                                : activeCalendarIds;
+                              setActiveCalendarIds(base.filter((id) => id !== cal.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded accent-purple-500"
+                        />
+                        <span
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: cal.backgroundColor || "#6366f1" }}
+                        />
+                        <span className="text-sm text-zinc-300 truncate">
+                          {cal.name}
+                          {cal.primary && <span className="ml-1.5 text-[10px] text-zinc-500">(primary)</span>}
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCalendarFilterModal(false)}
+                className="flex-1 px-3 py-2 text-xs font-medium text-zinc-400 border border-zinc-700 rounded-lg hover:border-zinc-600 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setSavingCalendarFilter(true);
+                  try {
+                    // If all calendars are checked, save as empty (= use all)
+                    const toSave = activeCalendarIds.length === googleCalendars.length ? [] : activeCalendarIds;
+                    await fetch("/api/connections/calendar-filter", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ activeCalendarIds: toSave }),
+                    });
+                    setActiveCalendarIds(toSave);
+                    setCalendarFilterModal(false);
+                    fetchSlots();
+                  } catch {
+                    // ignore
+                  } finally {
+                    setSavingCalendarFilter(false);
+                  }
+                }}
+                disabled={savingCalendarFilter || googleCalendars.length === 0}
+                className="flex-1 px-3 py-2 text-xs font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition disabled:opacity-40"
+              >
+                {savingCalendarFilter ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
