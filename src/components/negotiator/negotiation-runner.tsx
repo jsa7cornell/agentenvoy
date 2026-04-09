@@ -337,7 +337,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         return txn;
       });
 
-      const finalizeStart = Date.now();
       try {
         const res = await fetch("/api/negotiator/finalize", {
           method: "POST",
@@ -356,15 +355,21 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
         setFinalResponses(data.responses || []);
         setAdminSummary(data.adminSummary);
-        const finalizeTokens = data.tokensUsed || 0;
-        setTotalTokens((t) => t + finalizeTokens);
-        setUsageRows((prev) => [...prev, {
-          label: "Finalize",
-          model: config.adminModel,
-          tokens: finalizeTokens,
-          cost: estimateCost(finalizeTokens, config.adminModel),
-          durationMs: Date.now() - finalizeStart,
-        }]);
+        setTotalTokens((t) => t + (data.tokensUsed || 0));
+
+        // Add per-agent and admin usage rows from finalize
+        if (data.usage && Array.isArray(data.usage)) {
+          const finalizeRows: UsageRow[] = data.usage.map(
+            (u: { label: string; model: string; tokens: number; durationMs: number }) => ({
+              label: u.label,
+              model: u.model,
+              tokens: u.tokens,
+              cost: estimateCost(u.tokens, u.model),
+              durationMs: u.durationMs,
+            })
+          );
+          setUsageRows((prev) => [...prev, ...finalizeRows]);
+        }
 
         setTranscript((prev) => {
           let txn = prev;
@@ -535,8 +540,8 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         {/* Segmented step progress */}
         <div className="flex gap-1">
           {STEPS.map((step, i) => {
-            const isDone = status.stepIndex > i;
-            const isCurrent = status.stepIndex === i;
+            const isDone = status.stepIndex > i || (phase === "complete" && status.stepIndex === i);
+            const isCurrent = status.stepIndex === i && phase !== "complete";
             return (
               <div key={step.key} className="flex-1 space-y-1">
                 <div
@@ -659,6 +664,50 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         </div>
       )}
 
+      {/* Synthesizing placeholder — above proposals */}
+      {phase === "synthesizing" && (
+        <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-6">
+          <div className="flex items-center gap-3">
+            <NegotiatorLogo mode="synthesizing" size={24} className="shrink-0" />
+            <div>
+              <h2 className="text-sm font-medium text-[var(--neg-purple)]">
+                Administrator Synthesis
+              </h2>
+              <p className="text-xs text-[var(--neg-text-muted)] mt-0.5">
+                Comparing proposals and preparing recommendation<span className="animate-pulse">...</span>
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-full" />
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-4/5" />
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-3/5" />
+          </div>
+        </div>
+      )}
+
+      {/* Finalizing placeholder — above proposals */}
+      {phase === "finalizing" && (
+        <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-6">
+          <div className="flex items-center gap-3">
+            <NegotiatorLogo mode="debating" size={24} className="shrink-0" />
+            <div>
+              <h2 className="text-sm font-medium text-[var(--neg-purple)]">
+                Final Outcome
+              </h2>
+              <p className="text-xs text-[var(--neg-text-muted)] mt-0.5">
+                Selected agent refining proposal, others responding<span className="animate-pulse">...</span>
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-full" />
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-3/4" />
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-5/6" />
+          </div>
+        </div>
+      )}
+
       {/* Awaiting decision — AFTER synthesis */}
       {phase === "awaiting-decision" && synthesis && (
         <>
@@ -685,50 +734,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           streamingTexts={streamingTexts}
           agentLabels={agentLabels}
         />
-      )}
-
-      {/* Synthesizing placeholder */}
-      {phase === "synthesizing" && (
-        <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-6">
-          <div className="flex items-center gap-3">
-            <NegotiatorLogo mode="synthesizing" size={24} className="shrink-0" />
-            <div>
-              <h2 className="text-sm font-medium text-[var(--neg-purple)]">
-                Administrator Synthesis
-              </h2>
-              <p className="text-xs text-[var(--neg-text-muted)] mt-0.5">
-                Comparing proposals and preparing recommendation<span className="animate-pulse">...</span>
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 space-y-2">
-            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-full" />
-            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-4/5" />
-            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-3/5" />
-          </div>
-        </div>
-      )}
-
-      {/* Finalizing placeholder */}
-      {phase === "finalizing" && (
-        <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-6">
-          <div className="flex items-center gap-3">
-            <NegotiatorLogo mode="debating" size={24} className="shrink-0" />
-            <div>
-              <h2 className="text-sm font-medium text-[var(--neg-purple)]">
-                Final Outcome
-              </h2>
-              <p className="text-xs text-[var(--neg-text-muted)] mt-0.5">
-                Selected agent refining proposal, others responding<span className="animate-pulse">...</span>
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 space-y-2">
-            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-full" />
-            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-3/4" />
-            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-5/6" />
-          </div>
-        </div>
       )}
 
       {/* Budget exceeded */}

@@ -22,10 +22,13 @@ export async function POST(req: Request) {
   let totalTokens = 0;
   const responses: FinalResponse[] = [];
   const errors: string[] = [];
+  // Per-step usage for the cost table
+  const usage: Array<{ label: string; model: string; tokens: number; durationMs: number }> = [];
 
   const hasFeedback = feedback && feedback.trim().length > 0;
 
   // Step 1: Chosen agent refines their proposal
+  const chosenStart = Date.now();
   try {
     const chosenModel = getModel(chosenAgent.provider, chosenAgent.model, chosenAgent.apiKey || undefined);
     const chosenResult = await generateText({
@@ -38,7 +41,9 @@ export async function POST(req: Request) {
       prompt: hasFeedback ? feedback : "Provide your final refined proposal.",
       maxOutputTokens: 1024,
     });
-    totalTokens += (chosenResult.usage?.inputTokens || 0) + (chosenResult.usage?.outputTokens || 0);
+    const chosenTokens = (chosenResult.usage?.inputTokens || 0) + (chosenResult.usage?.outputTokens || 0);
+    totalTokens += chosenTokens;
+    usage.push({ label: chosenAgent.name, model: chosenAgent.model, tokens: chosenTokens, durationMs: Date.now() - chosenStart });
 
     const content = chosenResult.text?.trim();
     if (!content) {
@@ -69,6 +74,7 @@ export async function POST(req: Request) {
   if (otherAgents.length > 0) {
     await Promise.allSettled(
       otherAgents.map(async (agent) => {
+        const agentStart = Date.now();
         try {
           const model = getModel(agent.provider, agent.model, agent.apiKey || undefined);
           const result = await generateText({
@@ -77,7 +83,9 @@ export async function POST(req: Request) {
             prompt: `The host selected ${chosenAgent.name}'s proposal.${hasFeedback ? `\n\nHost's feedback:\n${feedback}` : ""}`,
             maxOutputTokens: 512,
           });
-          totalTokens += (result.usage?.inputTokens || 0) + (result.usage?.outputTokens || 0);
+          const agentTokens = (result.usage?.inputTokens || 0) + (result.usage?.outputTokens || 0);
+          totalTokens += agentTokens;
+          usage.push({ label: agent.name, model: agent.model, tokens: agentTokens, durationMs: Date.now() - agentStart });
 
           const content = result.text?.trim();
           responses.push({
@@ -104,9 +112,9 @@ export async function POST(req: Request) {
 
   // Step 3: Administrator final summary
   let adminSummary = "";
+  const adminStart = Date.now();
+  const selectedAdminModel = adminModel || "claude-sonnet-4-6";
   try {
-    const selectedAdminModel = adminModel || "claude-sonnet-4-6";
-    // Determine provider from model name
     const adminProvider = selectedAdminModel.startsWith("gemini") ? "google"
       : selectedAdminModel.startsWith("gpt") || selectedAdminModel.startsWith("o1") || selectedAdminModel.startsWith("o3") ? "openai"
       : "anthropic";
@@ -122,7 +130,9 @@ export async function POST(req: Request) {
       maxOutputTokens: 512,
     });
 
-    totalTokens += (adminResult.usage?.inputTokens || 0) + (adminResult.usage?.outputTokens || 0);
+    const adminTokens = (adminResult.usage?.inputTokens || 0) + (adminResult.usage?.outputTokens || 0);
+    totalTokens += adminTokens;
+    usage.push({ label: "Administrator", model: selectedAdminModel, tokens: adminTokens, durationMs: Date.now() - adminStart });
     adminSummary = adminResult.text;
   } catch (err) {
     adminSummary = `Failed to generate summary: ${err instanceof Error ? err.message : String(err)}`;
@@ -132,6 +142,7 @@ export async function POST(req: Request) {
     responses,
     adminSummary,
     tokensUsed: totalTokens,
+    usage,
     errors: errors.length > 0 ? errors : undefined,
   });
 }
