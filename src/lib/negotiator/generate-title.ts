@@ -1,7 +1,7 @@
 /** Generate a short title from the question (5 words max, no filler) */
 export function generateTitle(question: string): string {
   // Strip filler phrases
-  let q = question
+  const q = question
     .replace(
       /^(we need to |we're |our |we want to |should (we|i) |what |how should |decide |help me )/i,
       ""
