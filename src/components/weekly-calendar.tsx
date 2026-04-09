@@ -42,21 +42,21 @@ const TOTAL_ROWS = (HOUR_END - HOUR_START) * 2;
 const ROW_HEIGHT = 28; // px per 30-min row
 
 function getScoreColor(score: number): string {
-  if (score <= 0) return "bg-emerald-700/50";
-  if (score === 1) return "bg-emerald-800/40";
-  if (score === 2) return "bg-amber-700/40";
-  if (score === 3) return "bg-orange-700/40";
-  if (score === 4) return "bg-red-700/35";
-  return "bg-red-800/50";
+  if (score <= 0) return "bg-emerald-600/60";
+  if (score === 1) return "bg-emerald-700/50";
+  if (score === 2) return "bg-amber-600/50";
+  if (score === 3) return "bg-orange-600/50";
+  if (score === 4) return "bg-red-600/45";
+  return "bg-red-700/60";
 }
 
 function getScoreBorder(score: number): string {
-  if (score <= 0) return "border-emerald-500";
-  if (score === 1) return "border-emerald-600";
-  if (score === 2) return "border-amber-500";
-  if (score === 3) return "border-orange-500";
-  if (score === 4) return "border-red-600";
-  return "border-red-700";
+  if (score <= 0) return "border-emerald-400";
+  if (score === 1) return "border-emerald-500";
+  if (score === 2) return "border-amber-400";
+  if (score === 3) return "border-orange-400";
+  if (score === 4) return "border-red-500";
+  return "border-red-600";
 }
 
 function getEventAccent(responseStatus?: string, isTransparent?: boolean): string {
@@ -67,9 +67,9 @@ function getEventAccent(responseStatus?: string, isTransparent?: boolean): strin
 }
 
 function getEventBg(responseStatus?: string, isTransparent?: boolean): string {
-  if (isTransparent || responseStatus === "declined") return "bg-zinc-800/60";
-  if (responseStatus === "tentative") return "bg-amber-950/40";
-  return "bg-indigo-950/50";
+  if (isTransparent || responseStatus === "declined") return "bg-zinc-700/70";
+  if (responseStatus === "tentative") return "bg-amber-900/70";
+  return "bg-indigo-900/80";
 }
 
 function formatHour(hour: number): string {
@@ -218,11 +218,11 @@ export function WeeklyCalendar({
       {/* Score legend */}
       <div className="flex items-center gap-4 px-4 py-2 border-b border-zinc-800 text-[11px] text-zinc-500 shrink-0">
         <span className="text-zinc-400 font-medium">Scores:</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-700/50 border border-emerald-500" /> Open</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-700/40 border border-amber-500" /> Soft hold</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-orange-700/40 border border-orange-500" /> Friction</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-700/35 border border-red-600" /> Protected</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-800/50 border border-red-700" /> Immovable</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-600/60 border border-emerald-400" /> Open</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-600/50 border border-amber-400" /> Soft hold</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-orange-600/50 border border-orange-400" /> Friction</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-600/45 border border-red-500" /> Protected</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-700/60 border border-red-600" /> Immovable</span>
       </div>
 
       {/* Scrollable calendar area */}
@@ -255,7 +255,7 @@ export function WeeklyCalendar({
               {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (
                 <div
                   key={i}
-                  className="absolute right-2 text-[10px] text-zinc-600 leading-none"
+                  className="absolute right-2 text-[10px] text-zinc-500 leading-none"
                   style={{ top: i * 2 * ROW_HEIGHT - 6 }}
                 >
                   {formatHour(HOUR_START + i)}
@@ -274,14 +274,14 @@ export function WeeklyCalendar({
                 {Array.from({ length: TOTAL_ROWS }, (_, row) => {
                   const mins = gridStartMin + row * 30;
                   const slot = slotIndex[`${day}-${mins}`];
-                  const scoreColor = slot ? getScoreColor(slot.score) : "bg-zinc-900/20";
+                  const scoreColor = slot ? getScoreColor(slot.score) : "bg-zinc-800/30";
                   const scoreBorder = slot ? getScoreBorder(slot.score) : "";
                   const isHourBoundary = row % 2 === 0;
 
                   return (
                     <div
                       key={row}
-                      className={`absolute inset-x-0 ${scoreColor} ${isHourBoundary ? "border-t border-zinc-800/50" : ""} cursor-pointer hover:brightness-125 transition-all group`}
+                      className={`absolute inset-x-0 ${scoreColor} ${isHourBoundary ? "border-t border-zinc-700/60" : ""} cursor-pointer hover:brightness-125 transition-all group`}
                       style={{ top: row * ROW_HEIGHT, height: ROW_HEIGHT }}
                       title={slot ? `Score ${slot.score}: ${slot.reason}${slot.eventSummary ? ` — ${slot.eventSummary}` : ""}` : "No data"}
                       onClick={() => {
@@ -325,11 +325,11 @@ export function WeeklyCalendar({
                       style={{ top, height, width, left }}
                     >
                       <div className="px-1.5 py-0.5">
-                        <div className="text-[10px] font-medium text-zinc-200 truncate leading-tight">
+                        <div className="text-[10px] font-medium text-zinc-100 truncate leading-tight">
                           {ev.summary}
                         </div>
                         {height > ROW_HEIGHT * 1.5 && ev.location && (
-                          <div className="text-[9px] text-zinc-500 truncate">{ev.location}</div>
+                          <div className="text-[9px] text-zinc-400 truncate">{ev.location}</div>
                         )}
                       </div>
                     </div>
