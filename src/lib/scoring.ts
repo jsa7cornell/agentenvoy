@@ -195,6 +195,20 @@ const SACRED_KEYWORDS = ["sacred", "immovable", "do not move", "court", "legal",
 // --- Helpers ---
 
 /**
+ * Get the current date as YYYY-MM-DD in a specific IANA timezone.
+ * Critical: must use Intl, NOT toISOString() which returns UTC date.
+ */
+function getLocalDateStr(date: Date, tz: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: tz,
+  }).format(date); // en-CA formats as YYYY-MM-DD
+  return parts;
+}
+
+/**
  * Get local time parts for a Date in a specific IANA timezone.
  * Uses Intl so it works on UTC servers (Vercel).
  */
@@ -258,7 +272,7 @@ function scoreSlot(
   tz: string
 ): ScoredSlot {
   const { hour, minute, dayName, isWeekend } = getLocalParts(slotStart, tz);
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = getLocalDateStr(new Date(), tz);
   const bizStart = prefs.explicit?.businessHoursStart ?? 9;
   const bizEnd = prefs.explicit?.businessHoursEnd ?? 18;
 
@@ -291,10 +305,13 @@ function scoreSlot(
     };
   }
 
-  // Check blackout days
+  // Check blackout days (ISO date strings like "2026-04-14")
   const blackoutDays = prefs.explicit?.blackoutDays;
-  if (blackoutDays && blackoutDays.includes(dayName)) {
-    return { ...base, score: 4, reason: `blackout day: ${dayName}` };
+  if (blackoutDays && blackoutDays.length > 0) {
+    const slotDateStr = getLocalDateStr(slotStart, tz);
+    if (blackoutDays.includes(slotDateStr)) {
+      return { ...base, score: 4, reason: `blackout day: ${slotDateStr}` };
+    }
   }
 
   // Find overlapping calendar events

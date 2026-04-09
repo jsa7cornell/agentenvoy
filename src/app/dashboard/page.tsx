@@ -50,8 +50,8 @@ export default function DashboardPage() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Feed — main content */}
-        <div className="flex-1 overflow-hidden">
-          <div className="max-w-3xl mx-auto h-full">
+        <div className="flex-1 overflow-hidden min-h-0">
+          <div className="max-w-3xl mx-auto h-full min-h-0">
             <Feed />
           </div>
         </div>

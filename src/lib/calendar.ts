@@ -743,8 +743,11 @@ export async function getOrComputeSchedule(userId: string): Promise<{
   // Auto-expire stale currentLocation from DB if until date has passed
   const manualLocation = prefs.explicit?.currentLocation as { label: string; until?: string } | undefined;
   if (manualLocation?.until) {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (manualLocation.until < todayStr) {
+    // Use timezone-aware date, not UTC
+    const todayParts = new Intl.DateTimeFormat("en-CA", {
+      year: "numeric", month: "2-digit", day: "2-digit", timeZone: tz,
+    }).format(new Date()); // en-CA = YYYY-MM-DD
+    if (manualLocation.until < todayParts) {
       const { currentLocation: _removed, ...explicitWithout } = (prefs.explicit || {}) as Record<string, unknown>;
       void _removed;
       await prisma.user.update({
