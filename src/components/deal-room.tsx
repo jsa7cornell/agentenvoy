@@ -27,6 +27,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isHost, setIsHost] = useState(false);
   const [topic, setTopic] = useState("");
   const [linkFormat, setLinkFormat] = useState("");
+  const [inviteeName, setInviteeName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [archivedData, setArchivedData] = useState<{ hostEmail: string | null; hostName: string | null } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -221,6 +222,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setIsHost(data.isHost || false);
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
+        setInviteeName(data.link?.inviteeName || "");
         setSessionStatus(data.status || "active");
         setSessionStatusLabel(data.statusLabel || "");
         if (data.isGroupEvent) setIsGroupEvent(true);
@@ -407,8 +409,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   // --- Contextual event title ---
   function getEventTitle() {
-    if (topic && hostName) return `${topic} with ${hostName}`;
-    if (linkFormat === "phone" && hostName) return `Call with ${hostName}`;
+    const hostFirst = hostName ? hostName.split(" ")[0] : "";
+    const guestFirst = inviteeName ? inviteeName.split(" ")[0] : "";
+
+    if (topic && guestFirst && hostFirst) return `${topic} — ${guestFirst} & ${hostFirst}`;
+    if (topic && hostFirst) return `${topic} with ${hostFirst}`;
+    if ((linkFormat === "phone" || linkFormat === "video") && guestFirst && hostFirst) return `Call — ${guestFirst} & ${hostFirst}`;
+    if ((linkFormat === "phone" || linkFormat === "video") && hostName) return `Call with ${hostName}`;
+    if (guestFirst && hostFirst) return `${guestFirst} & ${hostFirst}`;
     if (hostName) return `Meet with ${hostName}`;
     return "Meeting";
   }

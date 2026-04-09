@@ -222,7 +222,11 @@ function formatRules(rules: Record<string, unknown>): string {
   const lines: string[] = ["Special rules for this negotiation:"];
 
   if (rules.format) {
-    lines.push(`- Default format: ${rules.format}`);
+    lines.push(`- Format (decided by host): ${rules.format}. State as fact — do NOT ask the guest about format.`);
+  }
+
+  if (rules.duration) {
+    lines.push(`- Duration (decided by host): ${rules.duration} minutes. State as fact — do NOT ask the guest about duration.`);
   }
 
   const conditional = rules.conditionalRules as Array<{ condition: string; rule: string }> | undefined;
@@ -238,7 +242,7 @@ function formatRules(rules: Record<string, unknown>): string {
   }
 
   // Include any other rules not already handled
-  const handled = new Set(["format", "conditionalRules", "lastResort"]);
+  const handled = new Set(["format", "duration", "conditionalRules", "lastResort"]);
   for (const [key, value] of Object.entries(rules)) {
     if (!handled.has(key) && value !== null && value !== undefined) {
       lines.push(`- ${key}: ${JSON.stringify(value)}`);

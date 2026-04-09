@@ -11,6 +11,7 @@ Never show all options at once. Start narrow, expand only when needed.
 - Within the next 5 business days
 - Preferred format and time windows
 - Show 2-3 specific options maximum
+- Present broad windows, not per-day breakdowns: "Tuesday and Wednesday mornings, or Thursday all day" — not a day-by-day analysis of what's happening on each day
 
 **Tier 2 — Acceptable (show if Tier 1 rejected):**
 - Wider time window (next 10 business days)

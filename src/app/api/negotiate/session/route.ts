@@ -287,7 +287,7 @@ export async function POST(req: NextRequest) {
   // Generate greeting
   const greetingPrompt = isGroupEvent
     ? `A new participant just opened the deal room for a group event. Generate your initial greeting following your GREETING STRATEGY and GROUP EVENT COORDINATION instructions. Mention the group context — how many others are involved, who has responded, any emerging time overlaps. Use all context you have — name, topic, format, timing, available slots. Be efficient.`
-    : `A new visitor just opened the deal room. Generate your initial greeting following your GREETING STRATEGY instructions. Use all context you have — name, topic, format, timing, available slots. Propose specific times if you have calendar data and preferences. Be efficient.`;
+    : `A new visitor just opened the deal room. You are delivering the host's scheduling request. Format, duration, and timing preferences are already decided by the host — present them as facts, not questions. Propose 2-3 broad time windows from the scored schedule. Follow your GREETING STRATEGY and CONTEXT SHARING rules. Be concise — 3-5 sentences.`;
 
   const greeting = await generateAgentResponse({
     ...context,

@@ -27,12 +27,22 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const link = await getLinkData(slug, code);
 
   const hostName = link?.user?.name ?? "Someone";
+  const hostFirst = hostName.split(" ")[0];
+  const guestName = link?.inviteeName;
+  const guestFirst = guestName ? guestName.split(" ")[0] : null;
   const topic = link?.topic;
   const baseUrl = process.env.NEXTAUTH_URL ?? "https://agentenvoy.ai";
 
-  const title = topic
-    ? `${topic} — ${hostName} via AgentEnvoy`
-    : `Meeting with ${hostName} via AgentEnvoy`;
+  let title: string;
+  if (topic && guestFirst) {
+    title = `${topic} — ${guestFirst} & ${hostFirst} via AgentEnvoy`;
+  } else if (topic) {
+    title = `${topic} — ${hostFirst} via AgentEnvoy`;
+  } else if (guestFirst) {
+    title = `${guestFirst} & ${hostFirst} via AgentEnvoy`;
+  } else {
+    title = `Meeting with ${hostFirst} via AgentEnvoy`;
+  }
 
   const description = topic
     ? `${hostName} is coordinating: ${topic}. Find a time that works.`
