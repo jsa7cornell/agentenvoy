@@ -48,13 +48,16 @@ const PHASE_STATUS: Record<string, { text: string; stepIndex: number }> = {
   "budget-exceeded":  { text: "Budget exceeded",                    stepIndex: -1 },
 };
 
-/** Generate an interim label from agent context, e.g. "Agent 1: Speed and pragmatism" */
+/** Generate a label from agent context, e.g. "Agent 1: Speed and Pragmatism" */
 function interimLabel(index: number, context: string, fallback: string): string {
-  if (!context) return fallback;
-  const words = context
-    .replace(/^(prioritize|focus on|advocate for|push for)\s+/i, "")
-    .split(/\s+/).filter((w) => w.length > 1).slice(0, 3).join(" ");
-  return `Agent ${index + 1}: ${words.charAt(0).toUpperCase() + words.slice(1)}`;
+  if (!context || context.trim().split(/\s+/).length < 3) return fallback;
+  const cleaned = context
+    .replace(/^(prioritize|focus on|advocate for|push for|you should|argue for|emphasize)\s+/i, "")
+    .trim();
+  // Title-case the first 3 meaningful words
+  const words = cleaned.split(/\s+/).filter((w) => w.length > 1).slice(0, 3);
+  const title = words.map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  return `Agent ${index + 1}: ${title}`;
 }
 
 interface NegotiationRunnerProps {

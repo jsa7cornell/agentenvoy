@@ -41,8 +41,6 @@ const HOUR_END = 21;
 const TOTAL_ROWS = (HOUR_END - HOUR_START) * 2;
 const ROW_HEIGHT = 28; // px per 30-min row
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
 function getScoreColor(score: number): string {
   if (score <= 0) return "bg-emerald-900/40";
   if (score === 1) return "bg-emerald-900/25";
