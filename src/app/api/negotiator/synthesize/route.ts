@@ -25,9 +25,13 @@ export async function POST(req: Request) {
     research: ResearchResult[];
   };
 
+  const selectedModel = model || "claude-sonnet-4-6";
+  const adminProvider = selectedModel.startsWith("gemini") ? "google"
+    : selectedModel.startsWith("gpt") || selectedModel.startsWith("o1") || selectedModel.startsWith("o3") ? "openai"
+    : "anthropic";
   const adminModel = getModel(
-    "anthropic",
-    model || "claude-sonnet-4-6",
+    adminProvider,
+    selectedModel,
     apiKey || undefined
   );
 

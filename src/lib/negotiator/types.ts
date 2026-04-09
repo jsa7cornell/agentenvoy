@@ -114,6 +114,17 @@ export interface NegotiationConfig {
   agents: AgentConfig[];
   tokenBudget: number; // max tokens across entire negotiation
   maxRounds: number; // default 2
+  adminModel: string; // model used for administrator synthesis + final summary
+}
+
+// ─── Usage Stats ─────────────────────────────────────────
+
+export interface UsageRow {
+  label: string;
+  model: string;
+  tokens: number;
+  cost: number;
+  durationMs: number;
 }
 
 // ─── Legacy types (kept for DB compat with old results) ──

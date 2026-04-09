@@ -9,12 +9,13 @@ import { SimpleMarkdown } from "./simple-markdown";
 import { NegotiatorLogo } from "./negotiator-logo";
 import { isOverBudget } from "@/lib/negotiator/token-budget";
 import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
-import { estimateMultiModelCost } from "@/lib/negotiator/types";
+import { estimateCost } from "@/lib/negotiator/types";
 import type {
   NegotiationConfig,
   ResearchResult,
   Synthesis,
   FinalResponse,
+  UsageRow,
 } from "@/lib/negotiator/types";
 
 type RunPhase =
@@ -68,6 +69,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   const [agentErrors, setAgentErrors] = useState<Record<string, string>>({});
   const [hostClarifications, setHostClarifications] = useState<string[]>([]);
   const [phaseStartTime, setPhaseStartTime] = useState<number>(Date.now());
+  const [usageRows, setUsageRows] = useState<UsageRow[]>([]);
 
   // Streaming state
   const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
@@ -82,13 +84,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     ? typeof window !== "undefined"
       ? `${window.location.origin}/negotiate/r/${shareCode}`
       : `/negotiate/r/${shareCode}`
-    : null;
-
-  // Cost estimate
-  const models = config.agents.map((a) => a.model);
-  const estimatedCost = estimateMultiModelCost(totalTokens, models);
-  const costLabel = estimatedCost > 0
-    ? `~$${estimatedCost < 0.01 ? estimatedCost.toFixed(4) : estimatedCost.toFixed(3)}`
     : null;
 
   // Track phase start for elapsed timer
@@ -135,8 +130,11 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
       ? `${config.question}\n\n## Host Feedback (Round ${currentRound})\n${additionalContext}`
       : config.question;
 
+    const agentUsageRows: UsageRow[] = [];
+
     await Promise.all(
       config.agents.map(async (agent) => {
+        const agentStart = Date.now();
         try {
           const res = await fetch("/api/negotiator/research", {
             method: "POST",
@@ -187,13 +185,22 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
               [agent.id]: `⚠️ ${errMsg}`,
             }));
           } else {
+            // Estimate tokens from text length (~4 chars/token)
+            const estTokens = Math.round(fullText.length / 4);
             results.push({
               agentId: agent.id,
               agentName: agent.name,
               provider: agent.provider,
               model: agent.model,
               content: fullText,
-              tokensUsed: 0,
+              tokensUsed: estTokens,
+            });
+            agentUsageRows.push({
+              label: agent.name,
+              model: agent.model,
+              tokens: estTokens,
+              cost: estimateCost(estTokens, agent.model),
+              durationMs: Date.now() - agentStart,
             });
           }
         } catch (err) {
@@ -210,6 +217,9 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         }
       })
     );
+
+    // Record agent usage rows
+    setUsageRows((prev) => [...prev, ...agentUsageRows]);
 
     if (controller.signal.aborted) return;
 
@@ -244,6 +254,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
     // Run synthesis
     setPhase("synthesizing");
+    const synthStart = Date.now();
     try {
       const adminKey =
         config.agents.find((a) => a.provider === "anthropic")?.apiKey || "";
@@ -253,6 +264,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           apiKey: adminKey || undefined,
+          model: config.adminModel,
           question: config.question,
           sharedContext: config.sharedContext,
           hostPrivateContext: config.hostPrivateContext,
@@ -272,6 +284,13 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
       setTotalTokens((t) => t + synthTokens);
       setSynthesis(synth);
+      setUsageRows((prev) => [...prev, {
+        label: "Administrator",
+        model: config.adminModel,
+        tokens: synthTokens,
+        cost: estimateCost(synthTokens, config.adminModel),
+        durationMs: Date.now() - synthStart,
+      }]);
 
       setTranscript((prev) => {
         let txn = prev + `---\n\n## Round ${currentRound}: Administrator Synthesis\n\n`;
@@ -306,6 +325,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         return txn;
       });
 
+      const finalizeStart = Date.now();
       try {
         const res = await fetch("/api/negotiator/finalize", {
           method: "POST",
@@ -315,6 +335,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
             question: config.question,
             chosenAgentId: agentId,
             feedback: feedback || undefined,
+            adminModel: config.adminModel,
           }),
         });
 
@@ -323,7 +344,15 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
         setFinalResponses(data.responses || []);
         setAdminSummary(data.adminSummary);
-        setTotalTokens((t) => t + (data.tokensUsed || 0));
+        const finalizeTokens = data.tokensUsed || 0;
+        setTotalTokens((t) => t + finalizeTokens);
+        setUsageRows((prev) => [...prev, {
+          label: "Finalize",
+          model: config.adminModel,
+          tokens: finalizeTokens,
+          cost: estimateCost(finalizeTokens, config.adminModel),
+          durationMs: Date.now() - finalizeStart,
+        }]);
 
         setTranscript((prev) => {
           let txn = prev;
@@ -427,6 +456,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     setSharing(false);
     setAgentErrors({});
     setHostClarifications([]);
+    setUsageRows([]);
     runResearch(1);
   }, [runResearch]);
 
@@ -517,19 +547,53 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         </div>
       </div>
 
-      {/* Final outcome — cost at top, share + download at bottom */}
+      {/* Final outcome — usage stats table + summary + transcript */}
       {adminSummary && (
         <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
+          <div className="flex items-start justify-between gap-4">
+            <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider shrink-0 pt-0.5">
               Final Outcome
             </h2>
-            <div className="flex items-center gap-3 text-xs text-[var(--neg-text-muted)]">
-              {costLabel && (
-                <span title="Estimated total cost">{costLabel} est.</span>
-              )}
-              <span>{totalTokens.toLocaleString()} tokens</span>
-            </div>
+            {/* Usage stats mini-table */}
+            {usageRows.length > 0 && (
+              <table className="text-[10px] text-[var(--neg-text-muted)] border-collapse shrink-0">
+                <thead>
+                  <tr>
+                    <th className="text-left pr-3 pb-0.5 font-medium"></th>
+                    <th className="text-right pr-3 pb-0.5 font-medium">Tokens</th>
+                    <th className="text-right pr-3 pb-0.5 font-medium">Cost</th>
+                    <th className="text-right pb-0.5 font-medium">Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usageRows.map((row, i) => (
+                    <tr key={i}>
+                      <td className="text-left pr-3 py-px">{row.label}</td>
+                      <td className="text-right pr-3 py-px tabular-nums">{row.tokens.toLocaleString()}</td>
+                      <td className="text-right pr-3 py-px tabular-nums">
+                        {row.cost < 0.001 ? `$${row.cost.toFixed(4)}` : `$${row.cost.toFixed(3)}`}
+                      </td>
+                      <td className="text-right py-px tabular-nums">{(row.durationMs / 1000).toFixed(1)}s</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t border-purple-500/20 font-medium text-[var(--neg-text)]">
+                    <td className="text-left pr-3 pt-0.5">Total</td>
+                    <td className="text-right pr-3 pt-0.5 tabular-nums">
+                      {usageRows.reduce((s, r) => s + r.tokens, 0).toLocaleString()}
+                    </td>
+                    <td className="text-right pr-3 pt-0.5 tabular-nums">
+                      {(() => {
+                        const t = usageRows.reduce((s, r) => s + r.cost, 0);
+                        return t < 0.01 ? `$${t.toFixed(4)}` : `$${t.toFixed(3)}`;
+                      })()}
+                    </td>
+                    <td className="text-right pt-0.5 tabular-nums">
+                      {(Math.max(...usageRows.map((r) => r.durationMs)) / 1000).toFixed(1)}s
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
           </div>
           <SimpleMarkdown content={adminSummary} />
           {/* Share + transcript export at bottom */}
@@ -538,7 +602,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
               transcript={transcript}
               tokensUsed={totalTokens}
               tokenBudget={config.tokenBudget}
-              models={models}
               inline
             />
             {shareUrl && (

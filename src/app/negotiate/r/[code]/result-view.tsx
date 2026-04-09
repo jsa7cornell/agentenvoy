@@ -91,19 +91,17 @@ export function NegotiatorResultView({
         </p>
       </div>
 
-      {/* Final outcome — cost at top, transcript at bottom */}
+      {/* Final outcome */}
       {adminSummary && (
         <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
               Final Outcome
             </h2>
-            <div className="flex items-center gap-3 text-xs text-[var(--neg-text-muted)]">
-              {costLabel && (
-                <span title="Estimated total cost">{costLabel} est.</span>
-              )}
-              <span>{totalTokens.toLocaleString()} tokens</span>
-            </div>
+            <span className="text-[10px] text-[var(--neg-text-muted)]">
+              {totalTokens.toLocaleString()} tokens
+              {costLabel && ` · ${costLabel} est.`}
+            </span>
           </div>
           <SimpleMarkdown content={adminSummary} />
           <div className="pt-2 border-t border-purple-500/20">

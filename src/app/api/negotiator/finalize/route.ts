@@ -6,11 +6,12 @@ export const maxDuration = 120; // longer timeout for multi-agent finalize
 
 export async function POST(req: Request) {
   const body = await req.json();
-  const { agents, question, chosenAgentId, feedback } = body as {
+  const { agents, question, chosenAgentId, feedback, adminModel } = body as {
     agents: AgentConfig[];
     question: string;
     chosenAgentId: string;
     feedback?: string;
+    adminModel?: string;
   };
 
   const chosenAgent = agents.find((a) => a.id === chosenAgentId);
@@ -104,13 +105,18 @@ export async function POST(req: Request) {
   // Step 3: Administrator final summary
   let adminSummary = "";
   try {
-    const adminModel = getModel("anthropic", "claude-sonnet-4-6");
+    const selectedAdminModel = adminModel || "claude-sonnet-4-6";
+    // Determine provider from model name
+    const adminProvider = selectedAdminModel.startsWith("gemini") ? "google"
+      : selectedAdminModel.startsWith("gpt") || selectedAdminModel.startsWith("o1") || selectedAdminModel.startsWith("o3") ? "openai"
+      : "anthropic";
+    const adminModelInstance = getModel(adminProvider, selectedAdminModel);
     const agentResponsesSummary = responses
       .map((r) => `**${r.agentName}${r.agentId === chosenAgentId ? " (selected)" : ""}:** ${r.content}`)
       .join("\n\n");
 
     const adminResult = await generateText({
-      model: adminModel,
+      model: adminModelInstance,
       system: `You are the Administrator — a neutral facilitator. The host selected ${chosenAgent.name}'s proposal for "${question}". Write a concise final summary in bullet points: what was decided, key action items from the selected agent's refined proposal, and any important caveats from the other agents worth noting. Keep it actionable.`,
       prompt: `Agent responses:\n${agentResponsesSummary}`,
       maxOutputTokens: 512,

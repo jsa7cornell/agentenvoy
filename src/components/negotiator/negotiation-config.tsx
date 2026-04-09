@@ -5,8 +5,8 @@ import { v4 as uuid } from "uuid";
 import { AgentCard } from "./agent-card";
 import { UploadModal, type DocumentInfo } from "./upload-modal";
 import { BUDGET_STEPS, DEFAULT_TOKEN_BUDGET } from "@/lib/negotiator/token-budget";
-import type { AgentConfig, NegotiationConfig } from "@/lib/negotiator/types";
-import { DEFAULT_MODEL } from "@/lib/negotiator/types";
+import type { AgentConfig, NegotiationConfig, ModelProvider } from "@/lib/negotiator/types";
+import { DEFAULT_MODEL, MODEL_OPTIONS, PROVIDER_LABELS, formatEstCost } from "@/lib/negotiator/types";
 import { getRandomScenario } from "@/lib/negotiator/scenarios";
 
 const STARTER_CONTEXTS = [
@@ -43,6 +43,7 @@ export function NegotiationConfigPanel({
   const [documentInfo, setDocumentInfo] = useState<DocumentInfo | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [adminModel, setAdminModel] = useState("claude-sonnet-4-6");
   const [agents, setAgents] = useState<AgentConfig[]>([
     createAgent(0),
     createAgent(1),
@@ -86,6 +87,7 @@ export function NegotiationConfigPanel({
       agents,
       tokenBudget,
       maxRounds,
+      adminModel,
     });
   }
 
@@ -210,7 +212,7 @@ export function NegotiationConfigPanel({
               />
             </div>
 
-            {/* Budget + Rounds row */}
+            {/* Budget + Rounds + Admin model row */}
             <div className="flex flex-wrap gap-6 items-end">
               <div>
                 <label className="block text-xs text-[var(--neg-text-muted)] mb-1">
@@ -242,6 +244,32 @@ export function NegotiationConfigPanel({
                   <option value={1}>1 round</option>
                   <option value={2}>2 rounds (recommended)</option>
                   <option value={3}>3 rounds</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-[var(--neg-text-muted)] mb-1">
+                  Administrator Model
+                </label>
+                <select
+                  value={adminModel}
+                  onChange={(e) => setAdminModel(e.target.value)}
+                  disabled={disabled}
+                  className="bg-white border-2 border-[var(--neg-border)] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 text-[var(--neg-text)] shadow-sm"
+                >
+                  {(Object.entries(MODEL_OPTIONS) as Array<[ModelProvider, string[]]>).map(
+                    ([provider, models]) => (
+                      <optgroup key={provider} label={PROVIDER_LABELS[provider]}>
+                        {models.map((m) => {
+                          const cost = formatEstCost(m);
+                          return (
+                            <option key={m} value={m}>
+                              {m}{cost ? ` (${cost}/round)` : ""}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    )
+                  )}
                 </select>
               </div>
             </div>

@@ -56,11 +56,6 @@ export function TranscriptExport({
         >
           Download .md
         </button>
-        {costLabel && (
-          <span className="text-xs text-[var(--neg-text-muted)]" title="Estimated cost based on token usage and model pricing">
-            {costLabel} est.
-          </span>
-        )}
       </div>
     );
   }
