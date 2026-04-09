@@ -55,23 +55,23 @@ export function DashboardHeader() {
   }
 
   return (
-    <header className="sticky top-0 z-50 bg-[#0a0a0f]/95 backdrop-blur-sm border-b border-zinc-800 flex-shrink-0">
+    <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0">
       <div className="px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
         {/* Left: Logo */}
         <Link href="/" className="flex-shrink-0">
-          <LogoFull height={24} className="text-zinc-100" />
+          <LogoFull height={24} className="text-primary" />
         </Link>
 
         {/* Center: Meet link pill */}
         {meetUrl && (
           <button
             onClick={copyLink}
-            className="hidden sm:flex items-center gap-2 bg-zinc-800/60 border border-zinc-700/50 rounded-full px-3.5 py-1.5 hover:border-purple-500/40 transition group max-w-[280px]"
+            className="hidden sm:flex items-center gap-2 bg-surface-secondary/60 border border-surface-tertiary/50 rounded-full px-3.5 py-1.5 hover:border-purple-500/40 transition group max-w-[280px]"
           >
             <code className="text-purple-400 font-mono text-xs truncate">
               /meet/{meetSlug}
             </code>
-            <span className="text-[10px] text-zinc-600 group-hover:text-zinc-400 transition flex-shrink-0">
+            <span className="text-[10px] text-muted group-hover:text-secondary transition flex-shrink-0">
               {copied ? (
                 <span className="text-emerald-400">Copied!</span>
               ) : (
@@ -85,7 +85,7 @@ export function DashboardHeader() {
         {meetUrl && (
           <button
             onClick={copyLink}
-            className="flex sm:hidden items-center justify-center w-8 h-8 rounded-lg bg-zinc-800/60 border border-zinc-700/50 hover:border-purple-500/40 transition"
+            className="flex sm:hidden items-center justify-center w-8 h-8 rounded-lg bg-surface-secondary/60 border border-surface-tertiary/50 hover:border-purple-500/40 transition"
             title="Copy invite link"
           >
             {copied ? (
@@ -109,7 +109,7 @@ export function DashboardHeader() {
               className="hidden sm:flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 rounded-full px-3 py-1 hover:border-amber-500/40 transition"
             >
               <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-[11px] font-medium text-amber-300">
+              <span className="text-[11px] font-medium text-amber-600 dark:text-amber-300">
                 {actions[0].label}
               </span>
             </Link>
@@ -121,7 +121,7 @@ export function DashboardHeader() {
               className="flex sm:hidden items-center justify-center w-8 h-8 rounded-lg relative"
               title={actions[0].label}
             >
-              <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-5 h-5 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
               </svg>
               <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400" />
@@ -133,7 +133,7 @@ export function DashboardHeader() {
             href="/dashboard/profile"
             className="flex items-center gap-2 hover:opacity-80 transition"
           >
-            <span className="text-xs text-zinc-500 hidden sm:inline">
+            <span className="text-xs text-muted hidden sm:inline">
               {session?.user?.name}
             </span>
             {session?.user?.image ? (

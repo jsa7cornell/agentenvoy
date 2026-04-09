@@ -72,12 +72,12 @@ export function ConnectionsMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl shadow-black/50 z-50 overflow-hidden">
-          <div className="px-4 py-3 border-b border-zinc-800">
-            <h3 className="text-sm font-semibold text-zinc-100">
+        <div className="absolute right-0 top-full mt-2 w-80 bg-surface-inset border border-DEFAULT rounded-xl shadow-2xl shadow-black/50 z-50 overflow-hidden">
+          <div className="px-4 py-3 border-b border-secondary">
+            <h3 className="text-sm font-semibold text-primary">
               Connections
             </h3>
-            <p className="text-xs text-zinc-500 mt-0.5">
+            <p className="text-xs text-muted mt-0.5">
               Connect services so AgentEnvoy can schedule smarter
             </p>
           </div>
@@ -88,7 +88,7 @@ export function ConnectionsMenu() {
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg ${
                 calendarConnected
                   ? "bg-emerald-900/10"
-                  : "bg-zinc-800/50 hover:bg-zinc-800"
+                  : "bg-surface-secondary/50 hover:bg-surface-secondary"
               }`}
             >
               <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center flex-shrink-0">
@@ -120,12 +120,12 @@ export function ConnectionsMenu() {
                 </svg>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-zinc-200">
+                <div className="text-sm font-medium text-primary">
                   Google Calendar
                 </div>
                 <div
                   className={`text-xs mt-0.5 ${
-                    calendarConnected ? "text-emerald-400" : "text-zinc-500"
+                    calendarConnected ? "text-emerald-400" : "text-muted"
                   }`}
                 >
                   {calendarConnected
@@ -154,7 +154,7 @@ export function ConnectionsMenu() {
                   onClick={() => {
                     signIn("google", { callbackUrl: "/dashboard" });
                   }}
-                  className="px-3 py-1 text-xs font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition flex-shrink-0"
+                  className="px-3 py-1 text-xs font-medium rounded-lg bg-accent hover:bg-accent-hover text-white transition flex-shrink-0"
                 >
                   Connect
                 </button>
@@ -162,10 +162,10 @@ export function ConnectionsMenu() {
             </div>
 
             {/* Future: Agent connection */}
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-800/50 opacity-60">
-              <div className="w-8 h-8 rounded-lg bg-zinc-700 flex items-center justify-center flex-shrink-0">
+            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-secondary/50 opacity-60">
+              <div className="w-8 h-8 rounded-lg bg-surface-tertiary flex items-center justify-center flex-shrink-0">
                 <svg
-                  className="w-4 h-4 text-zinc-400"
+                  className="w-4 h-4 text-secondary"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -179,20 +179,20 @@ export function ConnectionsMenu() {
                 </svg>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-zinc-400">
+                <div className="text-sm font-medium text-secondary">
                   AI Agent
                 </div>
-                <div className="text-xs text-zinc-600 mt-0.5">
+                <div className="text-xs text-muted mt-0.5">
                   Coming soon — connect your own agent
                 </div>
               </div>
             </div>
 
             {/* Future: Other calendars */}
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-800/50 opacity-60">
-              <div className="w-8 h-8 rounded-lg bg-zinc-700 flex items-center justify-center flex-shrink-0">
+            <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-secondary/50 opacity-60">
+              <div className="w-8 h-8 rounded-lg bg-surface-tertiary flex items-center justify-center flex-shrink-0">
                 <svg
-                  className="w-4 h-4 text-zinc-400"
+                  className="w-4 h-4 text-secondary"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -206,18 +206,18 @@ export function ConnectionsMenu() {
                 </svg>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-zinc-400">
+                <div className="text-sm font-medium text-secondary">
                   Outlook / iCal
                 </div>
-                <div className="text-xs text-zinc-600 mt-0.5">
+                <div className="text-xs text-muted mt-0.5">
                   Coming soon
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="px-4 py-2.5 border-t border-zinc-800 bg-zinc-900/50">
-            <p className="text-[10px] text-zinc-600">
+          <div className="px-4 py-2.5 border-t border-secondary bg-surface-inset/50">
+            <p className="text-[10px] text-muted">
               Connections let AgentEnvoy read your availability and create events on your behalf.
             </p>
           </div>

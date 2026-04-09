@@ -50,20 +50,20 @@ export function DashboardSidebar({
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Meet Link Section */}
       <div className="px-4 pt-4 pb-3">
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3">
+        <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
           Your invite link
         </h4>
         {meetUrl ? (
           <div className="space-y-2">
             <button
               onClick={copyLink}
-              className="w-full text-left bg-zinc-800/60 border border-zinc-700/50 rounded-xl px-3.5 py-3 hover:border-purple-500/40 transition group"
+              className="w-full text-left bg-surface-secondary/60 border border-surface-tertiary/50 rounded-xl px-3.5 py-3 hover:border-purple-500/40 transition group"
             >
               <div className="flex items-center justify-between">
                 <code className="text-purple-400 font-mono text-xs">
                   /meet/{meetSlug}
                 </code>
-                <span className="text-[10px] text-zinc-600 group-hover:text-zinc-400 transition">
+                <span className="text-[10px] text-muted group-hover:text-secondary transition">
                   {copied ? (
                     <span className="text-emerald-400">Copied!</span>
                   ) : (
@@ -71,25 +71,25 @@ export function DashboardSidebar({
                   )}
                 </span>
               </div>
-              <p className="text-[10px] text-zinc-600 mt-1.5">
+              <p className="text-[10px] text-muted mt-1.5">
                 Anyone with this link can schedule with you
               </p>
             </button>
 
           </div>
         ) : (
-          <div className="text-xs text-zinc-600 bg-zinc-800/40 rounded-xl px-3.5 py-3 border border-zinc-800">
+          <div className="text-xs text-muted bg-surface-secondary/40 rounded-xl px-3.5 py-3 border border-secondary">
             No meet link configured
           </div>
         )}
       </div>
 
       {/* Divider */}
-      <div className="mx-4 border-t border-zinc-800/60" />
+      <div className="mx-4 border-t border-secondary/60" />
 
       {/* Connections Section */}
       <div className="px-4 pt-3 pb-3">
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3">
+        <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
           Connections
         </h4>
         <div className="space-y-1.5">
@@ -98,7 +98,7 @@ export function DashboardSidebar({
             className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${
               calendarConnected
                 ? "bg-emerald-900/10 border border-emerald-700/30"
-                : "bg-zinc-800/40 border border-zinc-800 hover:border-zinc-700"
+                : "bg-surface-secondary/40 border border-secondary hover:border-DEFAULT"
             } transition`}
           >
             <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center flex-shrink-0">
@@ -130,12 +130,12 @@ export function DashboardSidebar({
               </svg>
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-zinc-200">
+              <div className="text-xs font-medium text-primary">
                 Google Calendar
               </div>
               <div
                 className={`text-[10px] mt-0.5 ${
-                  calendarConnected ? "text-emerald-400" : "text-zinc-600"
+                  calendarConnected ? "text-emerald-400" : "text-muted"
                 }`}
               >
                 {calendarConnected ? "Connected" : "Not connected"}
@@ -160,7 +160,7 @@ export function DashboardSidebar({
             ) : (
               <button
                 onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
-                className="px-2.5 py-1 text-[10px] font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition flex-shrink-0"
+                className="px-2.5 py-1 text-[10px] font-medium rounded-lg bg-accent hover:bg-accent-hover text-white transition flex-shrink-0"
               >
                 Connect
               </button>
@@ -168,10 +168,10 @@ export function DashboardSidebar({
           </div>
 
           {/* AI Agent — coming soon */}
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-800/40 border border-zinc-800 opacity-50">
-            <div className="w-7 h-7 rounded-lg bg-zinc-700 flex items-center justify-center flex-shrink-0">
+          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-secondary/40 border border-secondary opacity-50">
+            <div className="w-7 h-7 rounded-lg bg-surface-tertiary flex items-center justify-center flex-shrink-0">
               <svg
-                className="w-3.5 h-3.5 text-zinc-400"
+                className="w-3.5 h-3.5 text-secondary"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -185,18 +185,18 @@ export function DashboardSidebar({
               </svg>
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-zinc-400">AI Agent</div>
-              <div className="text-[10px] text-zinc-600 mt-0.5">
+              <div className="text-xs font-medium text-secondary">AI Agent</div>
+              <div className="text-[10px] text-muted mt-0.5">
                 Coming soon
               </div>
             </div>
           </div>
 
           {/* Outlook / iCal — coming soon */}
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-800/40 border border-zinc-800 opacity-50">
-            <div className="w-7 h-7 rounded-lg bg-zinc-700 flex items-center justify-center flex-shrink-0">
+          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-secondary/40 border border-secondary opacity-50">
+            <div className="w-7 h-7 rounded-lg bg-surface-tertiary flex items-center justify-center flex-shrink-0">
               <svg
-                className="w-3.5 h-3.5 text-zinc-400"
+                className="w-3.5 h-3.5 text-secondary"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -210,10 +210,10 @@ export function DashboardSidebar({
               </svg>
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-zinc-400">
+              <div className="text-xs font-medium text-secondary">
                 Outlook / iCal
               </div>
-              <div className="text-[10px] text-zinc-600 mt-0.5">
+              <div className="text-[10px] text-muted mt-0.5">
                 Coming soon
               </div>
             </div>
@@ -222,25 +222,25 @@ export function DashboardSidebar({
       </div>
 
       {/* Divider */}
-      <div className="mx-4 border-t border-zinc-800/60" />
+      <div className="mx-4 border-t border-secondary/60" />
 
       {/* Agent Info */}
       <div className="px-4 pt-3 pb-4">
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3">
+        <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
           Your agent
         </h4>
-        <div className="bg-zinc-800/40 border border-zinc-800 rounded-xl px-3.5 py-3">
+        <div className="bg-surface-secondary/40 border border-secondary rounded-xl px-3.5 py-3">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
               <span className="text-[9px] font-bold text-white">
                 {userName?.charAt(0)?.toUpperCase() || "?"}
               </span>
             </div>
-            <span className="text-xs font-medium text-zinc-200">
+            <span className="text-xs font-medium text-primary">
               {userName ? `${userName}'s Envoy` : "Your Envoy"}
             </span>
           </div>
-          <p className="text-[10px] text-zinc-600 leading-relaxed">
+          <p className="text-[10px] text-muted leading-relaxed">
             Your AgentEnvoy administrator handles all scheduling negotiations.
             Configure preferences by chatting in the feed.
           </p>
@@ -248,8 +248,8 @@ export function DashboardSidebar({
       </div>
 
       {/* Footer disclaimer */}
-      <div className="mt-auto px-4 py-3 border-t border-zinc-800/40">
-        <p className="text-[9px] text-zinc-700 leading-relaxed">
+      <div className="mt-auto px-4 py-3 border-t border-secondary/40">
+        <p className="text-[9px] text-muted leading-relaxed">
           AgentEnvoy reads your calendar availability and creates events on your
           behalf. Your data is never shared with other users.
         </p>

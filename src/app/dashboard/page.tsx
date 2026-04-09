@@ -36,8 +36,8 @@ export default function DashboardPage() {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="text-zinc-500">Loading...</div>
+      <div className="min-h-screen bg-surface flex items-center justify-center">
+        <div className="text-muted">Loading...</div>
       </div>
     );
   }
@@ -45,7 +45,7 @@ export default function DashboardPage() {
   if (!session) return null;
 
   return (
-    <div className="h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col overflow-hidden">
+    <div className="h-screen bg-surface text-primary flex flex-col overflow-hidden">
       <DashboardHeader />
 
       <div className="flex-1 flex overflow-hidden">
@@ -57,8 +57,8 @@ export default function DashboardPage() {
         </div>
 
         {/* Availability sidebar — desktop only, matches deal room pattern */}
-        <div className="hidden md:flex w-64 flex-shrink-0 border-l border-zinc-800 p-4 overflow-y-auto flex-col">
-          <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
+        <div className="hidden md:flex w-64 flex-shrink-0 border-l border-secondary p-4 overflow-y-auto flex-col">
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">
             Your availability
           </h4>
           <AvailabilityCalendar
@@ -66,7 +66,7 @@ export default function DashboardPage() {
             timezone={slotTimezone}
             currentLocation={slotLocation}
           />
-          <Link href="/dashboard/tuner" className="text-xs text-zinc-500 hover:text-zinc-300 underline mt-2 inline-block">
+          <Link href="/dashboard/tuner" className="text-xs text-muted hover:text-secondary underline mt-2 inline-block">
             Fine-tune availability
           </Link>
         </div>
