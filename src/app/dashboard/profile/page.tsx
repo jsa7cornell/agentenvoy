@@ -364,18 +364,19 @@ export default function ProfilePage() {
                 )}
                 <div>
                   <h1 className="text-lg font-semibold">{session.user?.name}</h1>
-                  <p className="text-sm text-muted">{session.user?.email}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm text-muted">{session.user?.email}</p>
+                    <span className="text-muted">·</span>
+                    <button
+                      onClick={() => signOut({ callbackUrl: "/" })}
+                      className="text-xs text-muted hover:text-secondary transition"
+                    >
+                      Sign out
+                    </button>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
-                <ThemeToggle />
-                <button
-                  onClick={() => signOut({ callbackUrl: "/" })}
-                  className="text-xs text-muted hover:text-secondary transition"
-                >
-                  Sign out
-                </button>
-              </div>
+              <ThemeToggle />
             </div>
 
             {/* Connections — horizontal scroll row */}
