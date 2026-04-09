@@ -5,6 +5,7 @@ import {
   type ModelProvider,
   PROVIDER_LABELS,
   MODEL_OPTIONS,
+  formatEstCost,
 } from "@/lib/negotiator/types";
 
 interface AgentCardProps {
@@ -76,11 +77,14 @@ export function AgentCard({
           {(Object.entries(MODEL_OPTIONS) as Array<[ModelProvider, string[]]>).map(
             ([provider, models]) => (
               <optgroup key={provider} label={PROVIDER_LABELS[provider]}>
-                {models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
+                {models.map((m) => {
+                  const cost = formatEstCost(m);
+                  return (
+                    <option key={m} value={m}>
+                      {m}{cost ? ` (${cost}/round)` : ""}
+                    </option>
+                  );
+                })}
               </optgroup>
             )
           )}

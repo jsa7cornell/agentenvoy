@@ -68,6 +68,32 @@ export function estimateMultiModelCost(
   return models.reduce((sum, m) => sum + estimateCost(tokensPerModel, m), 0);
 }
 
+/**
+ * Estimated cost per agent per round, for display in model dropdown.
+ * Based on observed average of ~2,500 tokens per agent per round
+ * (roughly 1,000 input + 1,500 output). Updated 2026-04-09.
+ */
+const EST_INPUT_TOKENS_PER_ROUND = 1000;
+const EST_OUTPUT_TOKENS_PER_ROUND = 1500;
+
+export function estimatePerAgentRoundCost(model: string): number {
+  const pricing = MODEL_PRICING[model];
+  if (!pricing) return 0;
+  return (
+    (EST_INPUT_TOKENS_PER_ROUND * pricing.input +
+      EST_OUTPUT_TOKENS_PER_ROUND * pricing.output) /
+    1_000_000
+  );
+}
+
+export function formatEstCost(model: string): string {
+  const cost = estimatePerAgentRoundCost(model);
+  if (cost === 0) return "";
+  if (cost < 0.001) return `~$${cost.toFixed(4)}`;
+  if (cost < 0.01) return `~$${cost.toFixed(3)}`;
+  return `~$${cost.toFixed(2)}`;
+}
+
 // ─── Agent Config ─────────────────────────────────────────
 
 export interface AgentConfig {
