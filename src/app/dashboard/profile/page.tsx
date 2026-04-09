@@ -324,6 +324,14 @@ export default function ProfilePage() {
         slotsByDay={filteredSlotsByDay}
         timezone={slotTimezone}
         currentLocation={slotLocation}
+        onClearLocation={() => {
+          fetch("/api/debug/clear-location", { method: "POST" })
+            .then(() => {
+              setSlotLocation(null);
+              fetchSlots();
+            })
+            .catch(() => {});
+        }}
       />
       <p className="text-[10px] text-zinc-600 mt-2">Update your schedule preferences to change your availability.</p>
     </>

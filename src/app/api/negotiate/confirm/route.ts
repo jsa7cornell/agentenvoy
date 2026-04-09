@@ -4,8 +4,6 @@ import { createCalendarEvent } from "@/lib/calendar";
 import { extractLearnings } from "@/agent/administrator";
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 // POST /api/negotiate/confirm
 // Confirm an agreed-upon time — creates calendar events, sends emails
 export async function POST(req: NextRequest) {
@@ -248,6 +246,7 @@ export async function POST(req: NextRequest) {
     : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
 
   try {
+    const resend = new Resend(process.env.RESEND_API_KEY);
     await resend.emails.send({
       from: "AgentEnvoy <noreply@agentenvoy.ai>",
       to: emailRecipients,

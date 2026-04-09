@@ -25,6 +25,7 @@ export interface CalendarEvent {
   isAllDay: boolean;
   isRecurring: boolean;
   isTransparent?: boolean; // "transparent" events don't block time (FYI only)
+  eventType?: string; // "default", "workingLocation", "outOfOffice", etc.
 }
 
 export interface CreateEventParams {
@@ -344,6 +345,7 @@ interface StoredCalendarEvent {
   isAllDay: boolean;
   isRecurring: boolean;
   isTransparent?: boolean;
+  eventType?: string;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -494,11 +496,26 @@ async function fullSync(
       orderBy: "startTime",
       maxResults: 250,
       pageToken,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      eventTypes: ["default", "workingLocation", "outOfOffice"] as any,
     });
 
     for (const ev of data.items ?? []) {
       const isAllDay = !ev.start?.dateTime;
       const hostAttendee = ev.attendees?.find((a) => a.email === hostEmail || a.self);
+      const evType = (ev as Record<string, unknown>).eventType as string | undefined;
+
+      // For workingLocation events, extract the label from the structured field
+      let locationLabel = ev.location || undefined;
+      if (evType === "workingLocation") {
+        const wl = (ev as Record<string, unknown>).workingLocation as Record<string, unknown> | undefined;
+        locationLabel =
+          (wl?.customLocation as Record<string, unknown> | undefined)?.label as string ||
+          (wl?.officeLocation as Record<string, unknown> | undefined)?.label as string ||
+          (wl?.homeOffice !== undefined ? "Home" : undefined) ||
+          ev.summary ||
+          "Working remotely";
+      }
 
       events.push({
         id: ev.id || crypto.randomUUID(),
@@ -511,12 +528,13 @@ async function fullSync(
           : new Date(ev.end!.dateTime!).toISOString(),
         calendar: cal.name,
         provider: "google",
-        location: ev.location || undefined,
+        location: locationLabel,
         attendeeCount: ev.attendees?.length ?? 0,
         responseStatus: hostAttendee?.responseStatus || undefined,
         isAllDay,
         isRecurring: !!ev.recurringEventId,
         isTransparent: ev.transparency === "transparent",
+        eventType: evType,
       });
     }
 
@@ -558,6 +576,18 @@ async function incrementalSync(
       } else {
         const isAllDay = !ev.start?.dateTime;
         const hostAttendee = ev.attendees?.find((a) => a.email === hostEmail || a.self);
+        const evType = (ev as Record<string, unknown>).eventType as string | undefined;
+
+        let locationLabel = ev.location || undefined;
+        if (evType === "workingLocation") {
+          const wl = (ev as Record<string, unknown>).workingLocation as Record<string, unknown> | undefined;
+          locationLabel =
+            (wl?.customLocation as Record<string, unknown> | undefined)?.label as string ||
+            (wl?.officeLocation as Record<string, unknown> | undefined)?.label as string ||
+            (wl?.homeOffice !== undefined ? "Home" : undefined) ||
+            ev.summary ||
+            "Working remotely";
+        }
 
         newEvents.push({
           id: ev.id || crypto.randomUUID(),
@@ -570,12 +600,13 @@ async function incrementalSync(
             : new Date(ev.end!.dateTime!).toISOString(),
           calendar: cal.name,
           provider: "google",
-          location: ev.location || undefined,
+          location: locationLabel,
           attendeeCount: ev.attendees?.length ?? 0,
           responseStatus: hostAttendee?.responseStatus || undefined,
           isAllDay,
           isRecurring: !!ev.recurringEventId,
           isTransparent: ev.transparency === "transparent",
+          eventType: evType,
         });
         changedIds.add(ev.id!);
       }
@@ -645,12 +676,26 @@ export async function getCachedCalendarContext(
 
     const calendarNames = Array.from(new Set(events.map((e) => e.calendar)));
 
+    // Detect active working location from Google Calendar's workingLocation events
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+    const activeWorkingLocation = deduped.find(
+      (ev) =>
+        ev.eventType === "workingLocation" &&
+        ev.start <= todayEnd &&
+        ev.end > todayStart &&
+        ev.location
+    );
+    const hostLocation = activeWorkingLocation?.location;
+
     return {
       connected: true,
       events: capped,
       calendars: calendarNames,
       timezone,
       canWrite: true, // Google provider is always writable
+      hostLocation,
     };
   } catch (e) {
     console.log("[getCachedCalendarContext] Falling back to live fetch:", e);
@@ -676,6 +721,7 @@ export async function getOrComputeSchedule(userId: string): Promise<{
   connected: boolean;
   canWrite: boolean;
   calendars: string[];
+  hostLocation?: string;
 }> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -693,6 +739,27 @@ export async function getOrComputeSchedule(userId: string): Promise<{
 
   const prefs = (user.preferences as UserPreferences) || {};
   const tz = prefs.explicit?.timezone ?? prefs.timezone ?? "America/Los_Angeles";
+
+  // Auto-expire stale currentLocation from DB if until date has passed
+  const manualLocation = prefs.explicit?.currentLocation as { label: string; until?: string } | undefined;
+  if (manualLocation?.until) {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (manualLocation.until < todayStr) {
+      const { currentLocation: _removed, ...explicitWithout } = (prefs.explicit || {}) as Record<string, unknown>;
+      void _removed;
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          preferences: {
+            ...prefs,
+            explicit: explicitWithout,
+          } as unknown as Prisma.InputJsonValue,
+        },
+      });
+      // Update local prefs so recomputation uses the cleaned state
+      if (prefs.explicit) delete (prefs.explicit as Record<string, unknown>).currentLocation;
+    }
+  }
 
   // Get cached calendar events (syncs if stale)
   const calCtx = await getCachedCalendarContext(userId, tz);
@@ -721,6 +788,7 @@ export async function getOrComputeSchedule(userId: string): Promise<{
       connected: true,
       canWrite: calCtx.canWrite,
       calendars: calCtx.calendars,
+      hostLocation: calCtx.hostLocation,
     };
   }
 
@@ -751,6 +819,7 @@ export async function getOrComputeSchedule(userId: string): Promise<{
     connected: true,
     canWrite: calCtx.canWrite,
     calendars: calCtx.calendars,
+    hostLocation: calCtx.hostLocation,
   };
 }
 

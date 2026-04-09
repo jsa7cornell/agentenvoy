@@ -85,7 +85,7 @@ export function composeSystemPrompt(options: ComposeOptions): string {
 
   // Layer 4: User Preferences (explicit + learned)
   if (options.hostPreferences && Object.keys(options.hostPreferences).length > 0) {
-    const prefsSection = formatPreferences(options.hostPreferences);
+    const prefsSection = formatPreferences(options.hostPreferences, options.calendarContext?.hostLocation);
     if (prefsSection) {
       sections.push(`# Host Preferences\n\n${prefsSection}`);
     }
@@ -133,7 +133,7 @@ export function composeSystemPrompt(options: ComposeOptions): string {
   return sections.filter(Boolean).join("\n\n---\n\n");
 }
 
-function formatPreferences(prefs: Record<string, unknown>): string {
+function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: string): string {
   const parts: string[] = [];
 
   const explicit = prefs.explicit as Record<string, unknown> | undefined;
@@ -159,16 +159,33 @@ function formatPreferences(prefs: Record<string, unknown>): string {
         });
       if (windows.length > 0) items.push(`Blocked windows (do not schedule): ${windows.join("; ")}`);
     }
-    if (explicit.currentLocation) {
-      const loc = explicit.currentLocation as { label: string; until?: string };
-      const todayStr = new Date().toISOString().slice(0, 10);
-      const isActive = !loc.until || loc.until >= todayStr;
-      if (isActive) {
-        const untilStr = loc.until ? ` (until ${loc.until})` : "";
+    // Location: both Google workingLocation and preferences are signals — pass both if they differ
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const prefLoc = explicit.currentLocation as { label: string; until?: string } | undefined;
+    const activePrefLoc = prefLoc && (!prefLoc.until || prefLoc.until >= todayStr) ? prefLoc : undefined;
+
+    if (calHostLocation && activePrefLoc) {
+      const locNormalized = (s: string) => s.trim().toLowerCase();
+      if (locNormalized(calHostLocation) === locNormalized(activePrefLoc.label)) {
+        // Signals agree
         items.push(
-          `Current location: ${loc.label}${untilStr}. The host is NOT at their home base. Do not propose in-person meetings unless the guest is specifically near ${loc.label}. For video/phone, this location has no effect on availability.`
+          `Current location: ${activePrefLoc.label} (confirmed by both Google Calendar and preferences). Host is away from home base — no in-person unless guest is nearby.`
+        );
+      } else {
+        // Signals conflict — surface both, let LLM apply playbook rules
+        items.push(
+          `Location signals conflict: Google Calendar working location says "${calHostLocation}", preferences say "${activePrefLoc.label}". If location matters for this meeting (in-person format, travel buffers), clarify with the host. If there is no active dialog (generic invite), be conservative and assume the host is traveling.`
         );
       }
+    } else if (calHostLocation) {
+      items.push(
+        `Current location: ${calHostLocation} (Google Calendar working location). Host is away from home base — no in-person unless guest is nearby.`
+      );
+    } else if (activePrefLoc) {
+      const untilStr = activePrefLoc.until ? ` (until ${activePrefLoc.until})` : "";
+      items.push(
+        `Current location: ${activePrefLoc.label}${untilStr} (host-stated preference). Host is away from home base — no in-person unless guest is nearby.`
+      );
     }
     if (items.length > 0) {
       parts.push("**Explicit (host-stated):**\n" + items.map(i => `- ${i}`).join("\n"));

@@ -13,6 +13,7 @@ interface AvailabilityCalendarProps {
   timezone: string;
   onSelectSlot?: (formattedTime: string) => void; // Callback when guest clicks a time pill
   currentLocation?: { label: string; until?: string } | null;
+  onClearLocation?: () => void; // Optional: show a dismiss button on the location notice
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
@@ -46,6 +47,7 @@ export function AvailabilityCalendar({
   timezone,
   onSelectSlot,
   currentLocation,
+  onClearLocation,
 }: AvailabilityCalendarProps) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
@@ -202,11 +204,20 @@ export function AvailabilityCalendar({
       {currentLocation && (
         <div className="mt-3 flex items-start gap-1.5 rounded-md bg-amber-950/40 border border-amber-900/50 px-2 py-1.5">
           <span className="text-amber-400 text-[11px] mt-px">📍</span>
-          <p className="text-[10px] text-amber-300 leading-tight">
+          <p className="text-[10px] text-amber-300 leading-tight flex-1">
             Currently in {currentLocation.label}
             {currentLocation.until ? ` until ${currentLocation.until}` : ""}.
             In-person meetings not available.
           </p>
+          {onClearLocation && (
+            <button
+              onClick={onClearLocation}
+              className="text-amber-600 hover:text-amber-400 text-[11px] leading-none mt-px ml-1 transition"
+              title="Clear location"
+            >
+              ×
+            </button>
+          )}
         </div>
       )}
 

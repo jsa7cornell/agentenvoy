@@ -58,21 +58,33 @@ export async function GET(req: NextRequest) {
     (prefs.timezone as string) ||
     "America/Los_Angeles";
 
-  // Current location — returned to widget so it can show a notice
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const rawLocation = explicit?.currentLocation as { label: string; until?: string } | undefined;
-  const currentLocation =
-    rawLocation && (!rawLocation.until || rawLocation.until >= todayStr)
-      ? rawLocation
-      : null;
-
   const slotsByDay: Record<
     string,
     Array<{ start: string; end: string; score: number }>
   > = {};
 
+  let currentLocation: { label: string; until?: string } | null = null;
+
   try {
     const schedule = await getOrComputeSchedule(hostId);
+
+    // Widget display: combine both signals — neither suppresses the other
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const rawLocation = explicit?.currentLocation as { label: string; until?: string } | undefined;
+    const activePrefLocation = rawLocation && (!rawLocation.until || rawLocation.until >= todayStr) ? rawLocation : null;
+    const googleLocation = schedule.hostLocation;
+
+    if (activePrefLocation && googleLocation) {
+      const norm = (s: string) => s.trim().toLowerCase();
+      if (norm(activePrefLocation.label) === norm(googleLocation)) {
+        currentLocation = activePrefLocation; // agree — show once
+      } else {
+        // differ — show both so host sees the full picture
+        currentLocation = { label: `${activePrefLocation.label} (preferences) · ${googleLocation} (calendar)`, until: activePrefLocation.until };
+      }
+    } else {
+      currentLocation = activePrefLocation ?? (googleLocation ? { label: googleLocation } : null);
+    }
 
     if (!schedule.connected) {
       return NextResponse.json({ slotsByDay: {}, timezone });
