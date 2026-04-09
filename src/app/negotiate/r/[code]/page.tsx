@@ -10,12 +10,25 @@ interface Props {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const result = await prisma.negotiatorResult.findUnique({
     where: { shareCode: params.code },
-    select: { question: true },
+    select: { question: true, adminSummary: true },
   });
+
+  if (!result) return { title: "Not Found" };
+
+  const title = result.question.slice(0, 60);
+  // Use admin summary as OG description for social preview (WhatsApp, etc.)
+  const description = result.adminSummary
+    ? result.adminSummary.replace(/[#*_\-\[\]]/g, "").slice(0, 200)
+    : `Multi-agent negotiation: ${result.question.slice(0, 150)}`;
+
   return {
-    title: result
-      ? `Negotiation: ${result.question.slice(0, 60)}`
-      : "Not Found",
+    title: `Negotiation: ${title}`,
+    description,
+    openGraph: {
+      title: `Negotiation: ${title}`,
+      description,
+      siteName: "AgentNegotiator by AgentEnvoy",
+    },
   };
 }
 

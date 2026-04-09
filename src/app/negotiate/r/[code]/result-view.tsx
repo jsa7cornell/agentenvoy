@@ -45,9 +45,9 @@ export function NegotiatorResultView({
     <div className="space-y-6">
       {/* Top CTA */}
       <div className="flex items-center justify-between">
-        <p className="text-xs text-[var(--neg-text-muted)]">
-          AgentNegotiator Result
-        </p>
+        <a href="/negotiate" className="text-xs text-[var(--neg-accent)] hover:opacity-80 transition font-medium">
+          AgentNegotiator
+        </a>
         <a
           href="/negotiate"
           className="text-sm px-4 py-1.5 rounded-lg border border-[var(--neg-accent)]/40 text-[var(--neg-accent)] hover:bg-[var(--neg-accent)]/10 transition"
@@ -71,13 +71,21 @@ export function NegotiatorResultView({
         </p>
       </div>
 
-      {/* Final outcome */}
+      {/* Final outcome — with transcript buttons inside */}
       {adminSummary && (
         <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
           <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
             Final Outcome
           </h2>
           <SimpleMarkdown content={adminSummary} />
+          <div className="pt-2 border-t border-purple-500/20">
+            <TranscriptExport
+              transcript={transcript}
+              tokensUsed={totalTokens}
+              tokenBudget={0}
+              inline
+            />
+          </div>
         </div>
       )}
 
@@ -85,7 +93,7 @@ export function NegotiatorResultView({
       {finalResponses.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-sm font-medium text-[var(--neg-text-muted)] uppercase tracking-wider">
-            {finalResponses.length === 1 ? "Revised Proposal" : "Final Agent Responses"}
+            Agent Responses
           </h2>
           {finalResponses.map((r) => (
             <div
@@ -120,15 +128,9 @@ export function NegotiatorResultView({
           results={research}
           streamingAgentIds={new Set()}
           streamingTexts={{}}
+          agentLabels={agentLabels}
         />
       )}
-
-      {/* Transcript export */}
-      <TranscriptExport
-        transcript={transcript}
-        tokensUsed={totalTokens}
-        tokenBudget={0}
-      />
 
       {/* Back link */}
       <div className="text-center pt-4">

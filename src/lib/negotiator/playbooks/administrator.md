@@ -49,11 +49,11 @@ Produce ONLY a JSON object (no markdown fencing, no preamble, no explanation out
 
 ## Agent Naming Rules
 
-In `agentLabels`, assign each agent a short descriptive name (2-4 words, Title Case) that captures their approach based on their private context AND the content of their proposal. The name should help the host instantly understand what each agent stands for.
+In `agentLabels`, assign each agent a name that starts with "Agent N:" followed by a short descriptive title (2-4 words, Title Case) that captures their approach based on their private context AND the content of their proposal. N is the agent's number in order of appearance (1, 2, 3...). The name should help the host instantly understand which agent is which.
 
-Good examples: "Speed-First Builder", "Cost-Conscious Analyst", "Enterprise Architect", "Lean MVP Advocate", "Risk-Averse Planner"
+Good examples: "Agent 1: Speed-First Builder", "Agent 2: Cost-Conscious Analyst", "Agent 3: Enterprise Architect"
 
-Bad examples: "Agent 1", "Pragmatist" (too vague), "The Best One" (biased)
+Bad examples: "Pragmatist" (no number, too vague), "The Best One" (biased), "Agent 1" (no descriptor)
 
 Use the agent IDs (not the names) as keys in the agentLabels object.
 

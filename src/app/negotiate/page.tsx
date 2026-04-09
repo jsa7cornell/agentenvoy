@@ -13,10 +13,15 @@ export default function NegotiatePage() {
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:gap-6 border-b border-[var(--neg-border)] pb-5">
         <div className="shrink-0">
-          <h1 className="text-xl font-bold tracking-tight text-[var(--neg-accent)]">
+          <a href="/negotiate" className="text-xl font-bold tracking-tight text-[var(--neg-accent)] hover:opacity-80 transition">
             AgentNegotiator
-          </h1>
-          <p className="text-[var(--neg-text-muted)] text-xs mt-0.5">by AgentEnvoy</p>
+          </a>
+          <p className="text-xs mt-0.5">
+            <span className="text-[var(--neg-text-muted)]">by </span>
+            <a href="https://agentenvoy.ai" target="_blank" rel="noopener noreferrer" className="text-[var(--neg-text-muted)] hover:text-[var(--neg-accent)] transition">
+              AgentEnvoy
+            </a>
+          </p>
         </div>
         <ol className="text-[var(--neg-text-muted)] text-xs space-y-1 mt-3 sm:mt-1 list-decimal list-inside">
           <li>Describe your decision — give agents shared context and individual positions to argue</li>

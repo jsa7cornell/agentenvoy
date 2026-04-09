@@ -5,8 +5,8 @@ import type { Synthesis } from "@/lib/negotiator/types";
 
 interface DecisionInputProps {
   synthesis: Synthesis;
-  onFinalize: (agentId: string, requests: string, clarification: string) => void;
-  onAnotherRound: (requests: string, clarification: string) => void;
+  onFinalize: (agentId: string, feedback: string) => void;
+  onAnotherRound: (feedback: string) => void;
   disabled?: boolean;
   round: number;
 }
@@ -22,8 +22,7 @@ export function DecisionInput({
   const [selectedAgent, setSelectedAgent] = useState(
     synthesis.recommendation.agentId
   );
-  const [requests, setRequests] = useState("");
-  const [clarification, setClarification] = useState("");
+  const [feedback, setFeedback] = useState("");
 
   const label = (agentId: string) =>
     synthesis.agentLabels?.[agentId] || agentId;
@@ -62,11 +61,11 @@ export function DecisionInput({
         </button>
       </div>
 
-      {/* Option A: Pick agent + clarify */}
+      {/* Option A: Pick agent + feedback */}
       {mode === "finalize" && (
         <div className="rounded-lg border border-[var(--neg-border)] bg-[var(--neg-surface)] p-4 space-y-4">
           <p className="text-sm text-[var(--neg-text-muted)]">
-            Go with an agent&apos;s proposal. They&apos;ll get your requests and a chance to
+            Go with an agent&apos;s proposal. They&apos;ll get your feedback and a chance to
             refine. Other agents will see the decision and can reply with final thoughts.
           </p>
 
@@ -114,38 +113,23 @@ export function DecisionInput({
             })}
           </div>
 
-          {/* Requests for chosen agent */}
+          {/* Single feedback field */}
           <div>
             <label className="block text-xs text-[var(--neg-text-muted)] mb-1">
-              Requests for {label(selectedAgent)} (optional)
+              Requests, context, or clarification for {label(selectedAgent)} (optional)
             </label>
             <textarea
-              value={requests}
-              onChange={(e) => setRequests(e.target.value)}
-              placeholder={`e.g. "Address the scalability concern" or "Include a phased timeline"...`}
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              placeholder={`e.g. "Address the scalability concern and include a phased timeline"...`}
               disabled={disabled}
-              rows={2}
-              className="w-full bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
-            />
-          </div>
-
-          {/* Clarification */}
-          <div>
-            <label className="block text-xs text-[var(--neg-text-muted)] mb-1">
-              Additional context or clarification (optional)
-            </label>
-            <textarea
-              value={clarification}
-              onChange={(e) => setClarification(e.target.value)}
-              placeholder="Any constraints, preferences, or context the agents should know..."
-              disabled={disabled}
-              rows={2}
+              rows={3}
               className="w-full bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
             />
           </div>
 
           <button
-            onClick={() => onFinalize(selectedAgent, requests.trim(), clarification.trim())}
+            onClick={() => onFinalize(selectedAgent, feedback.trim())}
             disabled={disabled}
             className="px-6 py-2 rounded-lg bg-[var(--neg-accent)] text-black font-semibold text-sm hover:bg-[var(--neg-accent)]/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -162,38 +146,23 @@ export function DecisionInput({
             each agent will see it and refine their proposal.
           </p>
 
-          {/* Requests for all agents */}
+          {/* Single feedback field */}
           <div>
             <label className="block text-xs text-[var(--neg-text-muted)] mb-1">
-              Requests for all agents (optional)
+              Requests, context, or clarification for all agents (optional)
             </label>
             <textarea
-              value={requests}
-              onChange={(e) => setRequests(e.target.value)}
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
               placeholder={`e.g. "Focus more on cost comparison" or "Consider a 6-month timeline instead"...`}
               disabled={disabled}
-              rows={2}
-              className="w-full bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
-            />
-          </div>
-
-          {/* Clarification */}
-          <div>
-            <label className="block text-xs text-[var(--neg-text-muted)] mb-1">
-              Additional context or clarification (optional)
-            </label>
-            <textarea
-              value={clarification}
-              onChange={(e) => setClarification(e.target.value)}
-              placeholder="Any constraints, preferences, or context the agents should know..."
-              disabled={disabled}
-              rows={2}
+              rows={3}
               className="w-full bg-[var(--neg-surface-2)] border border-[var(--neg-border)] rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-[var(--neg-accent)] disabled:opacity-50 resize-y placeholder:text-[var(--neg-text-muted)]/50"
             />
           </div>
 
           <button
-            onClick={() => onAnotherRound(requests.trim(), clarification.trim())}
+            onClick={() => onAnotherRound(feedback.trim())}
             disabled={disabled}
             className="px-6 py-2 rounded-lg bg-[var(--neg-accent)] text-black font-semibold text-sm hover:bg-[var(--neg-accent)]/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >

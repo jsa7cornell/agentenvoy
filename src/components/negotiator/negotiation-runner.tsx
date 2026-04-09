@@ -55,6 +55,13 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
   const abortRef = useRef<AbortController | null>(null);
 
+  // Build the full shareable URL
+  const shareUrl = shareCode
+    ? typeof window !== "undefined"
+      ? `${window.location.origin}/negotiate/r/${shareCode}`
+      : `/negotiate/r/${shareCode}`
+    : null;
+
   // ─── Research phase: call all agents in parallel ────────
   const runResearch = useCallback(async (
     currentRound: number,
@@ -243,7 +250,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
   // ─── Option A: Pick agent & finalize ──────────────────
   const handleFinalize = useCallback(
-    async (agentId: string, requests: string, clarification: string) => {
+    async (agentId: string, feedback: string) => {
       setPhase("finalizing");
 
       const agentName = synthesis?.agentLabels?.[agentId] ||
@@ -251,8 +258,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
       setTranscript((prev) => {
         let txn = prev + `---\n\n## Decision\n\nSelected: ${agentName}\n`;
-        if (requests) txn += `Requests: ${requests}\n`;
-        if (clarification) txn += `Clarification: ${clarification}\n`;
+        if (feedback) txn += `Feedback: ${feedback}\n`;
         txn += "\n";
         return txn;
       });
@@ -265,8 +271,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
             agents: config.agents,
             question: config.question,
             chosenAgentId: agentId,
-            requests: requests || undefined,
-            clarification: clarification || undefined,
+            feedback: feedback || undefined,
           }),
         });
 
@@ -300,20 +305,14 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
   // ─── Option B: Another round with all agents ──────────
   const handleAnotherRound = useCallback(
-    async (requests: string, clarification: string) => {
-      const parts: string[] = [];
-      if (requests) parts.push(requests);
-      if (clarification) parts.push(clarification);
-      const additionalContext = parts.join("\n\n");
-
-      if (additionalContext) {
-        setHostClarifications((prev) => [...prev, additionalContext]);
+    async (feedback: string) => {
+      if (feedback) {
+        setHostClarifications((prev) => [...prev, feedback]);
       }
 
       setTranscript((prev) => {
         let txn = prev + `---\n\n## Host: Another Round\n\n`;
-        if (requests) txn += `Requests: ${requests}\n`;
-        if (clarification) txn += `Clarification: ${clarification}\n`;
+        if (feedback) txn += `Feedback: ${feedback}\n`;
         txn += "\n";
         return txn;
       });
@@ -321,7 +320,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
       const nextRound = round + 1;
       setRound(nextRound);
 
-      await runResearch(nextRound, additionalContext || undefined);
+      await runResearch(nextRound, feedback || undefined);
     },
     [round, runResearch]
   );
@@ -352,6 +351,15 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
       .finally(() => setSharing(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
+
+  // ─── Append share URL to transcript when available ─────
+  useEffect(() => {
+    if (!shareUrl) return;
+    setTranscript((prev) => {
+      if (prev.includes(shareUrl)) return prev; // already appended
+      return prev + `---\n\n**Shareable link:** ${shareUrl}\n`;
+    });
+  }, [shareUrl]);
 
   // ─── Start the negotiation ─────────────────────────────
   const start = useCallback(() => {
@@ -421,29 +429,27 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         </button>
       </div>
 
-      {/* Share bar — auto-appears when saved */}
-      {(transcript || shareCode) && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-[var(--neg-surface-2)] border border-[var(--neg-border)] px-3 py-2">
-          {shareCode ? (
-            <>
-              <span className="text-xs text-[var(--neg-text-muted)]">Shareable link:</span>
+      {/* Final outcome — includes share link and transcript buttons */}
+      {adminSummary && (
+        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
+              Final Outcome
+            </h2>
+            {shareUrl && (
               <a
-                href={`/negotiate/r/${shareCode}`}
+                href={shareUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs text-[var(--neg-accent)] hover:underline font-medium"
               >
-                {typeof window !== "undefined"
-                  ? `${window.location.origin}/negotiate/r/${shareCode}`
-                  : `/negotiate/r/${shareCode}`}
+                Share &rarr;
               </a>
-            </>
-          ) : (
-            <span className="text-xs text-[var(--neg-text-muted)] italic">
-              {sharing ? "Saving..." : "Saving results..."}
-            </span>
-          )}
-          <div className="flex items-center gap-2 ml-auto">
+            )}
+          </div>
+          <SimpleMarkdown content={adminSummary} />
+          {/* Transcript export inside final outcome box */}
+          <div className="pt-2 border-t border-purple-500/20">
             <TranscriptExport
               transcript={transcript}
               tokensUsed={totalTokens}
@@ -452,16 +458,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
               inline
             />
           </div>
-        </div>
-      )}
-
-      {/* Final outcome */}
-      {adminSummary && (
-        <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
-          <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
-            Final Outcome
-          </h2>
-          <SimpleMarkdown content={adminSummary} />
         </div>
       )}
 
