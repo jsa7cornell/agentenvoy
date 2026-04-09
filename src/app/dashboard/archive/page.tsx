@@ -67,27 +67,27 @@ export default function ArchivePage() {
 
   if (status === "loading" || !session) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="text-zinc-500">Loading...</div>
+      <div className="min-h-screen bg-surface flex items-center justify-center">
+        <div className="text-muted">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-zinc-100 flex flex-col">
+    <div className="min-h-screen bg-surface text-primary flex flex-col">
       <DashboardHeader />
 
       <div className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-lg font-semibold">Archived Meetings</h1>
-            <p className="text-sm text-zinc-500 mt-0.5">
+            <p className="text-sm text-muted mt-0.5">
               Past and completed negotiations
             </p>
           </div>
           <button
             onClick={() => router.push("/dashboard")}
-            className="text-xs text-zinc-500 hover:text-zinc-300 transition"
+            className="text-xs text-muted hover:text-secondary transition"
           >
             &larr; Back to dashboard
           </button>
@@ -95,12 +95,12 @@ export default function ArchivePage() {
 
         {loading ? (
           <div className="text-center py-12">
-            <div className="text-zinc-500 text-sm">Loading...</div>
+            <div className="text-muted text-sm">Loading...</div>
           </div>
         ) : sessions.length === 0 ? (
-          <div className="text-center py-12 bg-zinc-900/50 border border-zinc-800 rounded-xl">
-            <p className="text-zinc-500 text-sm">No archived meetings yet</p>
-            <p className="text-zinc-600 text-xs mt-1">
+          <div className="text-center py-12 bg-surface-inset/50 border border-secondary rounded-xl">
+            <p className="text-muted text-sm">No archived meetings yet</p>
+            <p className="text-muted text-xs mt-1">
               Completed meetings can be archived from your dashboard
             </p>
           </div>
@@ -109,14 +109,14 @@ export default function ArchivePage() {
             {sessions.map((s) => (
               <div
                 key={s.id}
-                className="bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3.5 hover:border-zinc-700 transition"
+                className="bg-surface-inset/50 border border-secondary rounded-xl px-4 py-3.5 hover:border-DEFAULT transition"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-zinc-200 truncate">
+                    <div className="text-sm font-medium text-primary truncate">
                       {s.title || "Meeting"}
                     </div>
-                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-zinc-500">
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted">
                       {(s.link.inviteeEmail || s.guestEmail) && (
                         <span>{s.link.inviteeEmail || s.guestEmail}</span>
                       )}
@@ -138,7 +138,7 @@ export default function ArchivePage() {
                   </div>
                   <button
                     onClick={() => handleUnarchive(s.id)}
-                    className="flex-shrink-0 px-2.5 py-1 text-[11px] font-medium text-zinc-500 hover:text-zinc-300 border border-zinc-800 hover:border-zinc-600 rounded-lg transition"
+                    className="flex-shrink-0 px-2.5 py-1 text-[11px] font-medium text-muted hover:text-secondary border border-secondary hover:border-DEFAULT rounded-lg transition"
                   >
                     Unarchive
                   </button>
