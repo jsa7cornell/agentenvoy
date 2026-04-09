@@ -29,6 +29,7 @@ interface NegotiatorResultViewProps {
 
 export function NegotiatorResultView({
   question,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   agents,
   research: rawResearch,
   syntheses: rawSyntheses,
