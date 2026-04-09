@@ -24,9 +24,11 @@ export async function POST(req: Request) {
     question: string;
   };
 
-  const systemPrompt = `You are ${agentName}, an independent research agent participating in a multi-agent negotiation.
+  const systemPrompt = `You are ${agentName}, a research agent competing in a multi-agent negotiation.
 
-Your task: Research the question below thoroughly and produce your position. Be honest about tradeoffs — acknowledge weaknesses in your approach where relevant. Your goal is the best outcome, not winning an argument.
+Your goal is to be SELECTED by the host as the winning proposal. A neutral Administrator will compare all agents' proposals side-by-side and recommend one to the host. The host then picks which agent to follow.
+
+Produce a clear, compelling proposal. Be specific about what you recommend and why. Acknowledge tradeoffs honestly — the Administrator will see through handwaving. Structure your response with a clear recommendation up front, followed by supporting reasoning.
 
 At the end of your response, include a section called "Key Assumptions" listing any assumptions you made that might differ from other agents' assumptions.
 

@@ -7,11 +7,22 @@ interface PhaseSynthesisProps {
 }
 
 export function PhaseSynthesis({ synthesis }: PhaseSynthesisProps) {
+  const label = (agentId: string) =>
+    synthesis.agentLabels?.[agentId] || agentId;
+
   return (
     <div className="space-y-4">
-      <h2 className="text-sm font-medium text-[var(--neg-text-muted)] uppercase tracking-wider">
-        Administrator Synthesis
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-[var(--neg-text-muted)] uppercase tracking-wider">
+          Administrator Synthesis
+        </h2>
+        <a
+          href="#recommendation"
+          className="text-xs text-[var(--neg-accent)] hover:underline"
+        >
+          Skip to recommendation &darr;
+        </a>
+      </div>
 
       {/* Summary */}
       <div className="rounded-lg border border-[var(--neg-border)] bg-[var(--neg-surface)] p-4">
@@ -22,6 +33,7 @@ export function PhaseSynthesis({ synthesis }: PhaseSynthesisProps) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {synthesis.proposals.map((p) => {
           const isRecommended = synthesis.recommendation.agentId === p.agentId;
+          const agentName = label(p.agentId);
           return (
             <div
               key={p.agentId}
@@ -31,13 +43,18 @@ export function PhaseSynthesis({ synthesis }: PhaseSynthesisProps) {
                   : "border-[var(--neg-border)] bg-[var(--neg-surface)]"
               }`}
             >
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold">{p.headline}</span>
-                {isRecommended && (
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--neg-accent)]/15 text-[var(--neg-accent)] font-medium shrink-0">
-                    Recommended
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-[var(--neg-accent)] uppercase tracking-wider">
+                    {agentName}
                   </span>
-                )}
+                  {isRecommended && (
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--neg-accent)]/15 text-[var(--neg-accent)] font-medium shrink-0">
+                      Recommended
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm font-medium">{p.headline}</p>
               </div>
 
               {/* Key Points */}
@@ -48,7 +65,7 @@ export function PhaseSynthesis({ synthesis }: PhaseSynthesisProps) {
                 <ul className="mt-1 space-y-1">
                   {p.keyPoints.map((kp, i) => (
                     <li key={i} className="text-sm flex items-start gap-2">
-                      <span className="text-[var(--neg-text-muted)] shrink-0">•</span>
+                      <span className="text-[var(--neg-text-muted)] shrink-0">&bull;</span>
                       <span>{kp}</span>
                     </li>
                   ))}
@@ -78,7 +95,7 @@ export function PhaseSynthesis({ synthesis }: PhaseSynthesisProps) {
                 <ul className="mt-1 space-y-1">
                   {p.risks.map((r, i) => (
                     <li key={i} className="text-sm flex items-start gap-2">
-                      <span className="text-[var(--neg-red)] shrink-0">−</span>
+                      <span className="text-[var(--neg-red)] shrink-0">&minus;</span>
                       <span>{r}</span>
                     </li>
                   ))}
@@ -122,9 +139,9 @@ export function PhaseSynthesis({ synthesis }: PhaseSynthesisProps) {
                   {synthesis.proposals.map((p) => (
                     <th
                       key={p.agentId}
-                      className="text-left px-4 py-2 text-xs font-medium text-[var(--neg-text-muted)] uppercase tracking-wider"
+                      className="text-left px-4 py-2 text-xs font-medium text-[var(--neg-accent)] uppercase tracking-wider"
                     >
-                      {p.headline.split(" ").slice(0, 3).join(" ")}
+                      {label(p.agentId)}
                     </th>
                   ))}
                 </tr>
@@ -147,11 +164,26 @@ export function PhaseSynthesis({ synthesis }: PhaseSynthesisProps) {
       )}
 
       {/* Recommendation */}
-      <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-4 space-y-2">
+      <div id="recommendation" className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-4 space-y-2">
         <h3 className="text-xs font-medium text-[var(--neg-purple)] uppercase tracking-wider">
-          Administrator Recommendation
+          Administrator Recommendation — {label(synthesis.recommendation.agentId)}
         </h3>
         <p className="text-sm leading-relaxed">{synthesis.recommendation.reasoning}</p>
+        {synthesis.recommendation.clarificationRequests && synthesis.recommendation.clarificationRequests.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-purple-500/20">
+            <span className="text-xs font-medium text-[var(--neg-text-muted)] uppercase tracking-wider">
+              Suggested clarifications for {label(synthesis.recommendation.agentId)}
+            </span>
+            <ul className="mt-1 space-y-1">
+              {synthesis.recommendation.clarificationRequests.map((q, i) => (
+                <li key={i} className="text-sm flex items-start gap-2">
+                  <span className="text-[var(--neg-purple)] shrink-0">?</span>
+                  <span>{q}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {synthesis.blendOpportunity && (
           <div className="mt-2 pt-2 border-t border-purple-500/20">
             <span className="text-xs font-medium text-[var(--neg-accent)]">

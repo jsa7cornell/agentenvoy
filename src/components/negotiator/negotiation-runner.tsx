@@ -33,6 +33,7 @@ interface NegotiationRunnerProps {
 
 export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   const [phase, setPhase] = useState<RunPhase>("idle");
+  const [round, setRound] = useState(0);
   const [research, setResearch] = useState<ResearchResult[]>([]);
   const [synthesis, setSynthesis] = useState<Synthesis | null>(null);
   const [totalTokens, setTotalTokens] = useState(0);
@@ -44,6 +45,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   const [sharing, setSharing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- used in error display section
   const [agentErrors, setAgentErrors] = useState<Record<string, string>>({});
+  const [hostClarifications, setHostClarifications] = useState<string[]>([]);
 
   // Streaming state
   const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
@@ -54,7 +56,10 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   const abortRef = useRef<AbortController | null>(null);
 
   // ─── Research phase: call all agents in parallel ────────
-  const runResearch = useCallback(async () => {
+  const runResearch = useCallback(async (
+    currentRound: number,
+    additionalContext?: string,
+  ) => {
     setPhase("researching");
 
     const results: ResearchResult[] = [];
@@ -75,6 +80,11 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
     const newAgentErrors: Record<string, string> = {};
 
+    // Build question with any additional context from host
+    const fullQuestion = additionalContext
+      ? `${config.question}\n\n## Host Feedback (Round ${currentRound})\n${additionalContext}`
+      : config.question;
+
     await Promise.all(
       config.agents.map(async (agent) => {
         try {
@@ -88,7 +98,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
               agentName: agent.name,
               agentContext: agent.context,
               sharedContext: config.sharedContext,
-              question: config.question,
+              question: fullQuestion,
             }),
             signal: controller.signal,
           });
@@ -168,12 +178,14 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     setResearch(results);
     setAgentErrors({});
 
-    let txn = `# Negotiation Transcript\n\n**Question:** ${config.question}\n**Date:** ${new Date().toISOString().slice(0, 10)}\n\n`;
-    txn += `---\n\n## Agent Proposals\n\n`;
-    for (const r of results) {
-      txn += `### ${r.agentName} (${r.provider}/${r.model})\n\n${r.content}\n\n`;
-    }
-    setTranscript(txn);
+    setTranscript((prev) => {
+      let txn = prev || `# Negotiation Transcript\n\n**Question:** ${config.question}\n**Date:** ${new Date().toISOString().slice(0, 10)}\n\n`;
+      txn += `---\n\n## Round ${currentRound}: Agent Proposals\n\n`;
+      for (const r of results) {
+        txn += `### ${r.agentName} (${r.provider}/${r.model})\n\n${r.content}\n\n`;
+      }
+      return txn;
+    });
 
     if (isOverBudget(totalTokens, config.tokenBudget)) {
       setPhase("budget-exceeded");
@@ -212,12 +224,13 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
       setSynthesis(synth);
 
       setTranscript((prev) => {
-        let txn = prev + `---\n\n## Administrator Synthesis\n\n`;
+        let txn = prev + `---\n\n## Round ${currentRound}: Administrator Synthesis\n\n`;
         txn += `**Summary:** ${synth.summary}\n\n`;
         if (synth.commonGround.length > 0) {
           txn += `**Common Ground:**\n${synth.commonGround.map((a) => `- ${a}`).join("\n")}\n\n`;
         }
-        txn += `**Recommendation:** Follow ${synth.recommendation.agentId} — ${synth.recommendation.reasoning}\n\n`;
+        const recLabel = synth.agentLabels?.[synth.recommendation.agentId] || synth.recommendation.agentId;
+        txn += `**Recommendation:** Follow ${recLabel} — ${synth.recommendation.reasoning}\n\n`;
         return txn;
       });
 
@@ -228,14 +241,20 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     }
   }, [config, totalTokens]);
 
-  // ─── Pick an agent directly ───────────────────────────
-  const handlePickAgent = useCallback(
-    async (agentId: string) => {
+  // ─── Option A: Pick agent & finalize ──────────────────
+  const handleFinalize = useCallback(
+    async (agentId: string, requests: string, clarification: string) => {
       setPhase("finalizing");
 
+      const agentName = synthesis?.agentLabels?.[agentId] ||
+        config.agents.find((a) => a.id === agentId)?.name || agentId;
+
       setTranscript((prev) => {
-        const agent = config.agents.find((a) => a.id === agentId);
-        return prev + `---\n\n## Decision\n\nFollowing ${agent?.name || agentId}'s proposal.\n\n`;
+        let txn = prev + `---\n\n## Decision\n\nSelected: ${agentName}\n`;
+        if (requests) txn += `Requests: ${requests}\n`;
+        if (clarification) txn += `Clarification: ${clarification}\n`;
+        txn += "\n";
+        return txn;
       });
 
       try {
@@ -246,6 +265,8 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
             agents: config.agents,
             question: config.question,
             chosenAgentId: agentId,
+            requests: requests || undefined,
+            clarification: clarification || undefined,
           }),
         });
 
@@ -259,7 +280,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         setTranscript((prev) => {
           let txn = prev;
           if (data.responses?.length > 0) {
-            txn += `---\n\n## Agent Responses\n\n`;
+            txn += `---\n\n## Final Responses\n\n`;
             for (const r of data.responses) {
               txn += `### ${r.agentName}\n${r.content}\n\n`;
             }
@@ -274,57 +295,35 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         setPhase("error");
       }
     },
-    [config]
+    [config, synthesis]
   );
 
-  // ─── Blend proposals ──────────────────────────────────
-  const handleBlend = useCallback(
-    async (baseAgentId: string, blendInstruction: string) => {
-      setPhase("finalizing");
+  // ─── Option B: Another round with all agents ──────────
+  const handleAnotherRound = useCallback(
+    async (requests: string, clarification: string) => {
+      const parts: string[] = [];
+      if (requests) parts.push(requests);
+      if (clarification) parts.push(clarification);
+      const additionalContext = parts.join("\n\n");
+
+      if (additionalContext) {
+        setHostClarifications((prev) => [...prev, additionalContext]);
+      }
 
       setTranscript((prev) => {
-        const agent = config.agents.find((a) => a.id === baseAgentId);
-        return prev + `---\n\n## Decision\n\nBlending: base = ${agent?.name || baseAgentId}\nModification: ${blendInstruction}\n\n`;
+        let txn = prev + `---\n\n## Host: Another Round\n\n`;
+        if (requests) txn += `Requests: ${requests}\n`;
+        if (clarification) txn += `Clarification: ${clarification}\n`;
+        txn += "\n";
+        return txn;
       });
 
-      try {
-        const res = await fetch("/api/negotiator/finalize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            agents: config.agents,
-            question: config.question,
-            chosenAgentId: baseAgentId,
-            blendInstruction,
-          }),
-        });
+      const nextRound = round + 1;
+      setRound(nextRound);
 
-        if (!res.ok) throw new Error(await res.text());
-        const data = await res.json();
-
-        setFinalResponses(data.responses || []);
-        setAdminSummary(data.adminSummary);
-        setTotalTokens((t) => t + (data.tokensUsed || 0));
-
-        setTranscript((prev) => {
-          let txn = prev;
-          if (data.responses?.length > 0) {
-            txn += `---\n\n## Revised Proposal\n\n`;
-            for (const r of data.responses) {
-              txn += `### ${r.agentName}\n${r.content}\n\n`;
-            }
-          }
-          txn += `---\n\n## Final Outcome\n\n${data.adminSummary}\n\n`;
-          return txn;
-        });
-
-        setPhase("complete");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Finalization failed");
-        setPhase("error");
-      }
+      await runResearch(nextRound, additionalContext || undefined);
     },
-    [config]
+    [round, runResearch]
   );
 
   // ─── Auto-save when complete ────────────────────────────
@@ -340,7 +339,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         research,
         syntheses: synthesis ? [synthesis] : [],
         humanDecisions: [],
-        hostClarifications: [],
+        hostClarifications,
         finalResponses,
         adminSummary,
         totalTokens,
@@ -357,6 +356,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   // ─── Start the negotiation ─────────────────────────────
   const start = useCallback(() => {
     setPhase("idle");
+    setRound(1);
     setResearch([]);
     setSynthesis(null);
     setTotalTokens(0);
@@ -369,7 +369,8 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     setShareCode(null);
     setSharing(false);
     setAgentErrors({});
-    runResearch();
+    setHostClarifications([]);
+    runResearch(1);
   }, [runResearch]);
 
   // Auto-start on mount
@@ -381,6 +382,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
   // ─── Render ─────────────────────────────────────────────
   const pct = budgetPercent(totalTokens, config.tokenBudget);
+  const agentLabels = synthesis?.agentLabels ?? {};
 
   return (
     <div className="space-y-6">
@@ -409,7 +411,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           />
         </div>
         <span className="text-xs text-[var(--neg-text-muted)] whitespace-nowrap">
-          {totalTokens.toLocaleString()} / {(config.tokenBudget / 1000).toFixed(0)}k tokens
+          {round > 1 ? `R${round} · ` : ""}{totalTokens.toLocaleString()} / {(config.tokenBudget / 1000).toFixed(0)}k tokens
         </span>
         <button
           onClick={onReset}
@@ -467,13 +469,15 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
       {finalResponses.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-sm font-medium text-[var(--neg-text-muted)] uppercase tracking-wider">
-            {finalResponses.length === 1 ? "Revised Proposal" : "Final Agent Responses"}
+            Agent Responses
           </h2>
           {finalResponses.map((r) => (
             <div key={r.agentId} className={`rounded-lg border ${PROVIDER_COLORS[r.provider]} p-4`}>
               <div className="flex items-center gap-2 mb-2">
                 <div className={`w-2 h-2 rounded-full ${PROVIDER_DOT[r.provider]}`} />
-                <span className="text-sm font-medium">{r.agentName}</span>
+                <span className="text-sm font-medium">
+                  {agentLabels[r.agentId] || r.agentName}
+                </span>
                 <span className="text-xs text-[var(--neg-text-muted)]">{r.model}</span>
               </div>
               <SimpleMarkdown content={r.content} />
@@ -482,17 +486,21 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         </div>
       )}
 
-      {/* Awaiting decision */}
+      {/* Awaiting decision — AFTER synthesis */}
       {phase === "awaiting-decision" && synthesis && (
-        <DecisionInput
-          synthesis={synthesis}
-          onPickAgent={handlePickAgent}
-          onBlend={handleBlend}
-        />
+        <>
+          <PhaseSynthesis synthesis={synthesis} />
+          <DecisionInput
+            synthesis={synthesis}
+            onFinalize={handleFinalize}
+            onAnotherRound={handleAnotherRound}
+            round={round}
+          />
+        </>
       )}
 
-      {/* Synthesis */}
-      {synthesis && (
+      {/* Synthesis only (when complete, show without decision input) */}
+      {phase === "complete" && synthesis && (
         <PhaseSynthesis synthesis={synthesis} />
       )}
 
@@ -502,6 +510,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           results={research}
           streamingAgentIds={streamingIds}
           streamingTexts={streamingTexts}
+          agentLabels={agentLabels}
         />
       )}
 
@@ -517,7 +526,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
       {phase === "finalizing" && (
         <div className="flex items-center gap-3 text-sm text-[var(--neg-text-muted)]">
           <NegotiatorLogo mode="debating" size={28} />
-          Finalizing decision...
+          Finalizing — selected agent refining, others responding...
         </div>
       )}
 
@@ -561,7 +570,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
               setResearch([]);
               setStreamingIds(new Set());
               setStreamingTexts({});
-              runResearch();
+              runResearch(round);
             }}
             className="px-4 py-2 rounded-lg bg-[var(--neg-accent)] text-black font-semibold text-sm hover:bg-[var(--neg-accent)]/90 transition"
           >

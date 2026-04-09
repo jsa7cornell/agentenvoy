@@ -134,12 +134,14 @@ export interface KeyDifference {
 // ─── Administrator Synthesis ──────────────────────────────
 
 export interface Synthesis {
+  agentLabels: Record<string, string>; // agentId → descriptive name e.g. "Speed-First Builder"
   proposals: ProposalSummary[];
   commonGround: string[];
   keyDifferences: KeyDifference[];
   recommendation: {
     agentId: string;
     reasoning: string;
+    clarificationRequests?: string[]; // what the admin suggests asking the chosen agent
   };
   blendOpportunity?: string;
   summary: string;

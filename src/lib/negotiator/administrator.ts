@@ -105,6 +105,7 @@ export function parseSynthesis(text: string): Synthesis {
 
     // Complete failure — return a stub
     return {
+      agentLabels: {},
       proposals: [],
       commonGround: [],
       keyDifferences: [],

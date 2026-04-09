@@ -39,6 +39,7 @@ export function NegotiatorResultView({
   const finalResponses = rawFinalResponses as unknown as FinalResponse[];
 
   const latestSynthesis = syntheses[syntheses.length - 1];
+  const agentLabels = latestSynthesis?.agentLabels ?? {};
 
   return (
     <div className="space-y-6">
@@ -95,7 +96,9 @@ export function NegotiatorResultView({
                 <div
                   className={`w-2 h-2 rounded-full ${PROVIDER_DOT[r.provider]}`}
                 />
-                <span className="text-sm font-medium">{r.agentName}</span>
+                <span className="text-sm font-medium">
+                  {agentLabels[r.agentId] || r.agentName}
+                </span>
                 <span className="text-xs text-[var(--neg-text-muted)]">
                   {r.model}
                 </span>
