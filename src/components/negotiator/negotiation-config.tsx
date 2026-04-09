@@ -7,6 +7,7 @@ import { UploadModal, type DocumentInfo } from "./upload-modal";
 import { BUDGET_STEPS, DEFAULT_TOKEN_BUDGET } from "@/lib/negotiator/token-budget";
 import type { AgentConfig, NegotiationConfig } from "@/lib/negotiator/types";
 import { DEFAULT_MODEL } from "@/lib/negotiator/types";
+import { getRandomScenario } from "@/lib/negotiator/scenarios";
 
 const STARTER_CONTEXTS = [
   "Prioritize speed and pragmatism. Advocate for the simplest solution that ships fastest, even if it means cutting corners you can fix later.",
@@ -51,6 +52,17 @@ export function NegotiationConfigPanel({
   const canAddAgent = agents.length < 4;
   const canStart = question.trim().length > 0 && agents.length >= 2;
 
+  function generateScenario() {
+    const scenario = getRandomScenario();
+    setQuestion(scenario.question);
+    // Ensure we have exactly 3 agents
+    const newAgents = scenario.agents.map((context, i) => ({
+      ...createAgent(i),
+      context,
+    }));
+    setAgents(newAgents);
+  }
+
   function addAgent() {
     if (!canAddAgent) return;
     setAgents([...agents, createAgent(agents.length)]);
@@ -81,7 +93,17 @@ export function NegotiationConfigPanel({
     <div className="space-y-6">
       {/* Question & Context */}
       <div>
-        <label className="block text-sm font-medium mb-1 text-[var(--neg-text)]">Describe your decision for the agents</label>
+        <div className="flex items-baseline justify-between mb-1">
+          <label className="text-sm font-medium text-[var(--neg-text)]">Describe your decision for the agents</label>
+          <button
+            type="button"
+            onClick={generateScenario}
+            disabled={disabled}
+            className="text-xs text-[var(--neg-accent)] hover:text-[var(--neg-accent)]/80 transition disabled:opacity-50"
+          >
+            Generate one for me &rarr;
+          </button>
+        </div>
         <textarea
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
