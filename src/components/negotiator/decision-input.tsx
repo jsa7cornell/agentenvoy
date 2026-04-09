@@ -19,6 +19,7 @@ export function DecisionInput({
   round,
 }: DecisionInputProps) {
   const recommendedRoute = synthesis.recommendation.route || "pick";
+  const confidence = synthesis.recommendation.confidence ?? null;
   const [mode, setMode] = useState<"finalize" | "another-round">(
     recommendedRoute === "another-round" ? "another-round" : "finalize"
   );
@@ -49,9 +50,9 @@ export function DecisionInput({
           } disabled:opacity-50`}
         >
           A) Pick an agent & finalize
-          {recommendedRoute === "pick" && (
+          {recommendedRoute === "pick" && confidence !== null && (
             <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-[var(--neg-accent)]/15 text-[var(--neg-accent)]">
-              Recommended
+              {confidence}% confident
             </span>
           )}
         </button>
@@ -66,9 +67,9 @@ export function DecisionInput({
           } disabled:opacity-50`}
         >
           B) Another round with all agents
-          {recommendedRoute === "another-round" && (
+          {recommendedRoute === "another-round" && confidence !== null && (
             <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-[var(--neg-accent)]/15 text-[var(--neg-accent)]">
-              Recommended
+              {confidence}% confident
             </span>
           )}
         </button>

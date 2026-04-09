@@ -165,12 +165,19 @@ export function PhaseSynthesis({ synthesis }: PhaseSynthesisProps) {
 
       {/* Recommendation */}
       <div id="recommendation" className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-4 space-y-2">
-        <h3 className="text-xs font-medium text-[var(--neg-purple)] uppercase tracking-wider">
-          Administrator Recommendation
-          {synthesis.recommendation.route === "another-round"
-            ? " — Another Round"
-            : ` — ${label(synthesis.recommendation.agentId)}`}
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-medium text-[var(--neg-purple)] uppercase tracking-wider">
+            Administrator Recommendation
+            {synthesis.recommendation.route === "another-round"
+              ? " — Another Round"
+              : ` — ${label(synthesis.recommendation.agentId)}`}
+          </h3>
+          {synthesis.recommendation.confidence != null && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-[var(--neg-purple)] font-medium">
+              {synthesis.recommendation.confidence}% confident
+            </span>
+          )}
+        </div>
         <p className="text-sm leading-relaxed">{synthesis.recommendation.reasoning}</p>
         {synthesis.recommendation.clarificationRequests && synthesis.recommendation.clarificationRequests.length > 0 && (
           <div className="mt-2 pt-2 border-t border-purple-500/20">

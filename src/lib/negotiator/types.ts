@@ -177,6 +177,7 @@ export interface Synthesis {
   keyDifferences: KeyDifference[];
   recommendation: {
     route: "pick" | "another-round"; // admin recommends host action
+    confidence: number; // 0-100, how confident the admin is in this route
     agentId: string; // recommended agent (when route = "pick")
     reasoning: string;
     clarificationRequests?: string[]; // what the admin suggests asking the chosen agent

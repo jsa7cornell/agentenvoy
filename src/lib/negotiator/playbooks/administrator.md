@@ -40,6 +40,7 @@ Produce ONLY a JSON object (no markdown fencing, no preamble, no explanation out
   ],
   "recommendation": {
     "route": "pick | another-round",
+    "confidence": 82,
     "agentId": "agent-id-of-recommended-proposal-or-frontrunner",
     "reasoning": "Why you recommend this route. Be honest and direct.",
     "clarificationRequests": ["Specific question or request to pose to the chosen agent to strengthen the proposal"]
@@ -76,6 +77,8 @@ Use the agent IDs (not the names) as keys in the agentLabels object.
    - The proposals would benefit from seeing each other's arguments (which happens in round 2)
 
    Do NOT default to "pick" just because one proposal is marginally better. A mediocre winner is worse than a refined second round. When recommending `"another-round"`, set `agentId` to the current frontrunner and explain specifically what you want agents to address or improve in the next round. When recommending `"pick"`, set `agentId` to your recommended agent and cite the specific argument that convinced you.
+
+   **Confidence score:** Set `recommendation.confidence` to a number 0–100 representing how confident you are in your recommended route. Guidelines: 90+ = obvious choice, no contest; 70–89 = clear winner but with caveats; 50–69 = leaning one way but could go either; below 50 = you should probably be recommending `"another-round"` instead.
 5. **Clarification requests.** In the recommendation, include 1-3 specific questions or requests you'd pose to the chosen agent to strengthen their proposal. These should address gaps, assumptions, or risks you identified. e.g. "Can you provide a specific timeline for phase 2?" or "Address the scalability concern raised by the other agent."
 6. **Blend when possible.** If the weaker proposal has a specific element that would improve the recommendation, call it out in blendOpportunity. Be concrete: "Take Agent B's phased rollout timeline and apply it to Agent A's architecture."
 7. **Keep it scannable.** The host should understand the choice in 10 seconds from the summary.
