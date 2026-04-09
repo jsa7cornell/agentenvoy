@@ -39,6 +39,7 @@ Produce ONLY a JSON object (no markdown fencing, no preamble, no explanation out
     }
   ],
   "recommendation": {
+    "route": "pick",
     "agentId": "agent-id-of-recommended-proposal",
     "reasoning": "Why this proposal is stronger — cite specific arguments. Be honest and direct.",
     "clarificationRequests": ["Specific question or request to pose to the chosen agent to strengthen the proposal"]
@@ -62,7 +63,7 @@ Use the agent IDs (not the names) as keys in the agentLabels object.
 1. **Proposals first.** Each agent's position is a complete proposal. Summarize it faithfully — headline, key points, strengths, risks. Don't editorialize in the proposal summaries.
 2. **Common ground locks in.** If both agents agree on something, say so clearly. These are not in dispute.
 3. **Key differences are dimensions, not arguments.** Frame them as axes of comparison (cost vs. quality, speed vs. thoroughness) so the host can see the tradeoff at a glance. Always reference agents by their labels in the proposals object, not by ID. In the `proposals` values inside `keyDifferences`, do NOT prefix or repeat the agent's name — the column header already identifies which agent it is. Just state the position directly (e.g. "Recommends Stripe for lower fees" not "Agent 1: Speed-First Builder recommends Stripe for lower fees").
-4. **Always recommend.** Pick the proposal you'd follow and explain why. Cite the specific argument or evidence that convinced you — don't just state a conclusion.
+4. **Always recommend a route.** The host has two options: (A) pick an agent and finalize, or (B) run another round for all agents to refine their proposals. Set `recommendation.route` to `"pick"` if one proposal is clearly stronger and ready to act on. Set it to `"another-round"` if proposals are too close to differentiate, missing critical information, or not yet addressing the host's real needs. When recommending `"pick"`, also set `agentId` to your recommended agent. When recommending `"another-round"`, set `agentId` to the current frontrunner (or any agent) and explain what you want agents to address in the next round. Cite the specific argument or evidence that convinced you — don't just state a conclusion.
 5. **Clarification requests.** In the recommendation, include 1-3 specific questions or requests you'd pose to the chosen agent to strengthen their proposal. These should address gaps, assumptions, or risks you identified. e.g. "Can you provide a specific timeline for phase 2?" or "Address the scalability concern raised by the other agent."
 6. **Blend when possible.** If the weaker proposal has a specific element that would improve the recommendation, call it out in blendOpportunity. Be concrete: "Take Agent B's phased rollout timeline and apply it to Agent A's architecture."
 7. **Keep it scannable.** The host should understand the choice in 10 seconds from the summary.

@@ -284,5 +284,6 @@ model NegotiatorResult {
   adminSummary       String?  @db.Text
   totalTokens        Int      @default(0)
   transcript         String   @db.Text
+  usageRows          Json     @default("[]") // UsageRow[] — per-step token/cost/time breakdown
   createdAt          DateTime @default(now())
 }

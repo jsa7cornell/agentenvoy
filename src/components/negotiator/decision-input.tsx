@@ -18,7 +18,10 @@ export function DecisionInput({
   disabled,
   round,
 }: DecisionInputProps) {
-  const [mode, setMode] = useState<"finalize" | "another-round">("finalize");
+  const recommendedRoute = synthesis.recommendation.route || "pick";
+  const [mode, setMode] = useState<"finalize" | "another-round">(
+    recommendedRoute === "another-round" ? "another-round" : "finalize"
+  );
   const [selectedAgent, setSelectedAgent] = useState(
     synthesis.recommendation.agentId
   );
@@ -46,6 +49,11 @@ export function DecisionInput({
           } disabled:opacity-50`}
         >
           A) Pick an agent & finalize
+          {recommendedRoute === "pick" && (
+            <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-[var(--neg-accent)]/15 text-[var(--neg-accent)]">
+              Recommended
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -58,6 +66,11 @@ export function DecisionInput({
           } disabled:opacity-50`}
         >
           B) Another round with all agents
+          {recommendedRoute === "another-round" && (
+            <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-[var(--neg-accent)]/15 text-[var(--neg-accent)]">
+              Recommended
+            </span>
+          )}
         </button>
       </div>
 

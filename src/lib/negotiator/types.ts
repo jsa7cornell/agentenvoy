@@ -176,7 +176,8 @@ export interface Synthesis {
   commonGround: string[];
   keyDifferences: KeyDifference[];
   recommendation: {
-    agentId: string;
+    route: "pick" | "another-round"; // admin recommends host action
+    agentId: string; // recommended agent (when route = "pick")
     reasoning: string;
     clarificationRequests?: string[]; // what the admin suggests asking the chosen agent
   };

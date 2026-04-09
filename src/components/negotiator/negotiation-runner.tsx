@@ -415,6 +415,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         adminSummary,
         totalTokens,
         transcript,
+        usageRows,
       }),
     })
       .then((r) => r.json())
@@ -526,7 +527,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
                       : isCurrent
                         ? phase === "error"
                           ? "bg-[var(--neg-red)]"
-                          : "bg-[var(--neg-accent)]"
+                          : "bg-[var(--neg-accent)] animate-pulse"
                         : "bg-[var(--neg-surface-2)]"
                   }`}
                 />
@@ -667,19 +668,47 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
         />
       )}
 
-      {/* Synthesizing */}
+      {/* Synthesizing placeholder */}
       {phase === "synthesizing" && (
-        <div className="flex items-center gap-3 text-sm text-[var(--neg-text-muted)]">
-          <NegotiatorLogo mode="synthesizing" size={28} />
-          Administrator comparing proposals...
+        <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-6">
+          <div className="flex items-center gap-3">
+            <NegotiatorLogo mode="synthesizing" size={24} className="shrink-0" />
+            <div>
+              <h2 className="text-sm font-medium text-[var(--neg-purple)]">
+                Administrator Synthesis
+              </h2>
+              <p className="text-xs text-[var(--neg-text-muted)] mt-0.5">
+                Comparing proposals and preparing recommendation<span className="animate-pulse">...</span>
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-full" />
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-4/5" />
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-3/5" />
+          </div>
         </div>
       )}
 
-      {/* Finalizing */}
+      {/* Finalizing placeholder */}
       {phase === "finalizing" && (
-        <div className="flex items-center gap-3 text-sm text-[var(--neg-text-muted)]">
-          <NegotiatorLogo mode="debating" size={28} />
-          Finalizing — selected agent refining, others responding...
+        <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-6">
+          <div className="flex items-center gap-3">
+            <NegotiatorLogo mode="debating" size={24} className="shrink-0" />
+            <div>
+              <h2 className="text-sm font-medium text-[var(--neg-purple)]">
+                Final Outcome
+              </h2>
+              <p className="text-xs text-[var(--neg-text-muted)] mt-0.5">
+                Selected agent refining proposal, others responding<span className="animate-pulse">...</span>
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-full" />
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-3/4" />
+            <div className="h-3 bg-purple-500/10 rounded animate-pulse w-5/6" />
+          </div>
         </div>
       )}
 

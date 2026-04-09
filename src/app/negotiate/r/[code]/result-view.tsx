@@ -6,11 +6,11 @@ import { TranscriptExport } from "@/components/negotiator/transcript-export";
 import { SimpleMarkdown } from "@/components/negotiator/simple-markdown";
 import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
 import { generateTitle } from "@/lib/negotiator/generate-title";
-import { estimateMultiModelCost } from "@/lib/negotiator/types";
 import type {
   ResearchResult,
   Synthesis,
   FinalResponse,
+  UsageRow,
 } from "@/lib/negotiator/types";
 
 interface NegotiatorResultViewProps {
@@ -23,6 +23,7 @@ interface NegotiatorResultViewProps {
   adminSummary: string | null;
   totalTokens: number;
   transcript: string;
+  usageRows?: Record<string, unknown>[];
   createdAt: string;
 }
 
@@ -35,6 +36,7 @@ export function NegotiatorResultView({
   adminSummary,
   totalTokens,
   transcript,
+  usageRows: rawUsageRows,
   createdAt,
 }: NegotiatorResultViewProps) {
   const research = rawResearch as unknown as ResearchResult[];
@@ -44,19 +46,7 @@ export function NegotiatorResultView({
   const latestSynthesis = syntheses[syntheses.length - 1];
   const agentLabels = latestSynthesis?.agentLabels ?? {};
   const title = generateTitle(question);
-
-  // Cost estimate from models used
-  const models = (agents as Array<{ model?: string }>)
-    .map((a) => a.model)
-    .filter((m): m is string => !!m);
-  const cost = totalTokens > 0 && models.length > 0
-    ? estimateMultiModelCost(totalTokens, models)
-    : 0;
-  const costLabel = cost > 0
-    ? cost < 0.01
-      ? `$${cost.toFixed(4)}`
-      : `$${cost.toFixed(2)}`
-    : null;
+  const usageRows = (rawUsageRows || []) as unknown as UsageRow[];
 
   return (
     <div className="space-y-6">
@@ -94,14 +84,53 @@ export function NegotiatorResultView({
       {/* Final outcome */}
       {adminSummary && (
         <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
+          <div className="flex items-start justify-between gap-4">
+            <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider shrink-0 pt-0.5">
               Final Outcome
             </h2>
-            <span className="text-[10px] text-[var(--neg-text-muted)]">
-              {totalTokens.toLocaleString()} tokens
-              {costLabel && ` · ${costLabel} est.`}
-            </span>
+            {usageRows.length > 0 ? (
+              <table className="text-[10px] text-[var(--neg-text-muted)] border-collapse shrink-0">
+                <thead>
+                  <tr>
+                    <th className="text-left pr-3 pb-0.5 font-medium"></th>
+                    <th className="text-right pr-3 pb-0.5 font-medium">Tokens</th>
+                    <th className="text-right pr-3 pb-0.5 font-medium">Cost</th>
+                    <th className="text-right pb-0.5 font-medium">Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usageRows.map((row, i) => (
+                    <tr key={i}>
+                      <td className="text-left pr-3 py-px">{row.label}</td>
+                      <td className="text-right pr-3 py-px tabular-nums">{row.tokens.toLocaleString()}</td>
+                      <td className="text-right pr-3 py-px tabular-nums">
+                        {row.cost < 0.001 ? `$${row.cost.toFixed(4)}` : `$${row.cost.toFixed(3)}`}
+                      </td>
+                      <td className="text-right py-px tabular-nums">{(row.durationMs / 1000).toFixed(1)}s</td>
+                    </tr>
+                  ))}
+                  <tr className="border-t border-purple-500/20 font-medium text-[var(--neg-text)]">
+                    <td className="text-left pr-3 pt-0.5">Total</td>
+                    <td className="text-right pr-3 pt-0.5 tabular-nums">
+                      {usageRows.reduce((s, r) => s + r.tokens, 0).toLocaleString()}
+                    </td>
+                    <td className="text-right pr-3 pt-0.5 tabular-nums">
+                      {(() => {
+                        const t = usageRows.reduce((s, r) => s + r.cost, 0);
+                        return t < 0.01 ? `$${t.toFixed(4)}` : `$${t.toFixed(3)}`;
+                      })()}
+                    </td>
+                    <td className="text-right pt-0.5 tabular-nums">
+                      {(Math.max(...usageRows.map((r) => r.durationMs)) / 1000).toFixed(1)}s
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            ) : (
+              <span className="text-[10px] text-[var(--neg-text-muted)]">
+                {totalTokens.toLocaleString()} tokens
+              </span>
+            )}
           </div>
           <SimpleMarkdown content={adminSummary} />
           <div className="pt-2 border-t border-purple-500/20">

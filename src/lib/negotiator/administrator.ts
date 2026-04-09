@@ -109,7 +109,7 @@ export function parseSynthesis(text: string): Synthesis {
       proposals: [],
       commonGround: [],
       keyDifferences: [],
-      recommendation: { agentId: "", reasoning: "Failed to parse administrator response." },
+      recommendation: { route: "pick", agentId: "", reasoning: "Failed to parse administrator response." },
       summary: "Failed to parse administrator response. Raw output: " + text.slice(0, 500),
     };
   }

@@ -15,6 +15,7 @@ export async function POST(req: Request) {
     adminSummary,
     totalTokens,
     transcript,
+    usageRows,
   } = body;
 
   if (!question || !agents || !research || !syntheses || !transcript) {
@@ -66,6 +67,7 @@ export async function POST(req: Request) {
       adminSummary: adminSummary || null,
       totalTokens: totalTokens || 0,
       transcript,
+      usageRows: usageRows || [],
     },
   });
 

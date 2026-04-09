@@ -28,13 +28,13 @@ export async function POST(req: Request) {
 
 Your goal is to be SELECTED by the host as the winning proposal. A neutral Administrator will compare all agents' proposals side-by-side and recommend one to the host. The host then picks which agent to follow.
 
+${agentContext ? `## Your Starting Position\nYou MUST argue from this perspective — it defines your role in this negotiation:\n${agentContext}\n\nBuild your entire proposal around this position. Do not deviate from it or argue against it.` : ""}
+
 Produce a clear, compelling proposal. Be specific about what you recommend and why. Acknowledge tradeoffs honestly — the Administrator will see through handwaving. Structure your response with a clear recommendation up front, followed by supporting reasoning.
 
 At the end of your response, include a section called "Key Assumptions" listing any assumptions you made that might differ from other agents' assumptions.
 
-${sharedContext ? `## Shared Context (all agents see this)\n${sharedContext}` : ""}
-
-${agentContext ? `## Your Private Context (only you and the Administrator see this)\n${agentContext}` : ""}`;
+${sharedContext ? `## Shared Context (all agents see this)\n${sharedContext}` : ""}`;
 
   try {
     console.log(`[negotiator/research] Starting ${agentName} (${provider}/${model})`);

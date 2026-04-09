@@ -44,7 +44,7 @@ export function PhaseResearch({
   return (
     <div className="space-y-4">
       <h2 className="text-sm font-medium text-[var(--neg-text-muted)] uppercase tracking-wider">
-        Phase 1: Agent Positions
+        Agent Proposals
       </h2>
       <div className="grid grid-cols-1 gap-4">
         {allAgents.map((agent) => (
@@ -56,12 +56,9 @@ export function PhaseResearch({
               <div
                 className={`w-2 h-2 rounded-full ${PROVIDER_DOT[agent.provider]} ${agent.streaming ? "animate-pulse" : ""}`}
               />
-              <span className="text-sm font-medium">{agent.name}</span>
-              {agentLabels[agent.id] && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--neg-accent)]/10 text-[var(--neg-accent)] font-medium">
-                  {agentLabels[agent.id]}
-                </span>
-              )}
+              <span className="text-sm font-medium">
+                {agentLabels[agent.id] || agent.name}
+              </span>
               <span className="text-xs text-[var(--neg-text-muted)]">
                 {agent.model}
               </span>

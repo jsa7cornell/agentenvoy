@@ -166,7 +166,10 @@ export function PhaseSynthesis({ synthesis }: PhaseSynthesisProps) {
       {/* Recommendation */}
       <div id="recommendation" className="rounded-lg border border-purple-500/20 bg-purple-500/5 p-4 space-y-2">
         <h3 className="text-xs font-medium text-[var(--neg-purple)] uppercase tracking-wider">
-          Administrator Recommendation — {label(synthesis.recommendation.agentId)}
+          Administrator Recommendation
+          {synthesis.recommendation.route === "another-round"
+            ? " — Another Round"
+            : ` — ${label(synthesis.recommendation.agentId)}`}
         </h3>
         <p className="text-sm leading-relaxed">{synthesis.recommendation.reasoning}</p>
         {synthesis.recommendation.clarificationRequests && synthesis.recommendation.clarificationRequests.length > 0 && (

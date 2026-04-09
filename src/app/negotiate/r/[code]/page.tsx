@@ -51,6 +51,7 @@ export default async function ResultPage({ params }: Props) {
         adminSummary={result.adminSummary}
         totalTokens={result.totalTokens}
         transcript={result.transcript}
+        usageRows={(result.usageRows as Record<string, unknown>[]) || []}
         createdAt={result.createdAt.toISOString()}
       />
     </main>
