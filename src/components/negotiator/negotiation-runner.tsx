@@ -48,6 +48,15 @@ const PHASE_STATUS: Record<string, { text: string; stepIndex: number }> = {
   "budget-exceeded":  { text: "Budget exceeded",                    stepIndex: -1 },
 };
 
+/** Generate an interim label from agent context, e.g. "Agent 1: Speed and pragmatism" */
+function interimLabel(index: number, context: string, fallback: string): string {
+  if (!context) return fallback;
+  const words = context
+    .replace(/^(prioritize|focus on|advocate for|push for)\s+/i, "")
+    .split(/\s+/).filter((w) => w.length > 1).slice(0, 3).join(" ");
+  return `Agent ${index + 1}: ${words.charAt(0).toUpperCase() + words.slice(1)}`;
+}
+
 interface NegotiationRunnerProps {
   config: NegotiationConfig;
   onReset: () => void;
@@ -112,9 +121,9 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
     const newStreamingTexts: Record<string, string> = {};
 
     const ids = new Set(config.agents.map((a) => a.id));
-    config.agents.forEach((a) => {
+    config.agents.forEach((a, i) => {
       newStreamingTexts[a.id] = "";
-      newStreamingTexts[`${a.id}_name`] = a.name;
+      newStreamingTexts[`${a.id}_name`] = interimLabel(i, a.context, a.name);
       newStreamingTexts[`${a.id}_provider`] = a.provider;
       newStreamingTexts[`${a.id}_model`] = a.model;
     });
@@ -469,7 +478,14 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   }
 
   // ─── Render ─────────────────────────────────────────────
-  const agentLabels = synthesis?.agentLabels ?? {};
+  // Build agent labels: interim context-based labels, overridden by admin once synthesis exists
+  const agentLabels: Record<string, string> = {};
+  config.agents.forEach((a, i) => {
+    agentLabels[a.id] = interimLabel(i, a.context, a.name);
+  });
+  if (synthesis?.agentLabels) {
+    Object.assign(agentLabels, synthesis.agentLabels);
+  }
   const status = PHASE_STATUS[phase] || PHASE_STATUS.idle;
   const completedAgents = config.agents.length - streamingIds.size;
   const isActive = phase !== "complete" && phase !== "error" && phase !== "budget-exceeded" && phase !== "awaiting-decision";
