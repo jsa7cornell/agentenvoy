@@ -3,7 +3,7 @@ import { getModel } from "@/lib/negotiator/providers";
 import { composeAdministratorPrompt, parseSynthesis } from "@/lib/negotiator/administrator";
 import type { AgentConfig, ResearchResult } from "@/lib/negotiator/types";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   const body = await req.json();

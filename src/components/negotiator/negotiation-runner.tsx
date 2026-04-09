@@ -10,7 +10,6 @@ import { NegotiatorLogo } from "./negotiator-logo";
 import { isOverBudget } from "@/lib/negotiator/token-budget";
 import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
 import { estimateMultiModelCost } from "@/lib/negotiator/types";
-import { generateTitle } from "@/lib/negotiator/generate-title";
 import type {
   NegotiationConfig,
   ResearchResult,
@@ -29,17 +28,24 @@ type RunPhase =
   | "budget-exceeded";
 
 // ─── Progress bar config ─────────────────────────────────
-const PHASE_CONFIG: Record<string, { label: string; step: number; estimate?: string }> = {
-  idle:               { label: "Starting...",                        step: 0 },
-  researching:        { label: "Agents writing proposals",           step: 1, estimate: "~30s" },
-  synthesizing:       { label: "Administrator comparing proposals",  step: 2, estimate: "~15s" },
-  "awaiting-decision":{ label: "Waiting for your decision",          step: 3 },
-  finalizing:         { label: "Agents responding to decision",      step: 4, estimate: "~20s" },
-  complete:           { label: "Complete",                            step: 5 },
-  error:              { label: "Error",                               step: 0 },
-  "budget-exceeded":  { label: "Budget exceeded",                     step: 0 },
+const STEPS = [
+  { key: "researching",       label: "Proposals" },
+  { key: "synthesizing",      label: "Synthesis" },
+  { key: "awaiting-decision", label: "Decision" },
+  { key: "finalizing",        label: "Finalize" },
+  { key: "complete",          label: "Done" },
+] as const;
+
+const PHASE_STATUS: Record<string, { text: string; stepIndex: number }> = {
+  idle:               { text: "Starting",                          stepIndex: -1 },
+  researching:        { text: "Agents writing proposals",          stepIndex: 0 },
+  synthesizing:       { text: "Administrator comparing proposals", stepIndex: 1 },
+  "awaiting-decision":{ text: "Waiting for your decision",         stepIndex: 2 },
+  finalizing:         { text: "Agents responding to decision",     stepIndex: 3 },
+  complete:           { text: "Complete",                           stepIndex: 4 },
+  error:              { text: "Error",                              stepIndex: -1 },
+  "budget-exceeded":  { text: "Budget exceeded",                    stepIndex: -1 },
 };
-const TOTAL_STEPS = 5;
 
 interface NegotiationRunnerProps {
   config: NegotiationConfig;
@@ -70,9 +76,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   );
 
   const abortRef = useRef<AbortController | null>(null);
-
-  // Generated title from the question
-  const title = generateTitle(config.question);
 
   // Build the full shareable URL
   const shareUrl = shareCode
@@ -436,19 +439,41 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
   // ─── Render ─────────────────────────────────────────────
   const agentLabels = synthesis?.agentLabels ?? {};
-  const phaseInfo = PHASE_CONFIG[phase] || PHASE_CONFIG.idle;
-  const progressPct = Math.min(100, (phaseInfo.step / TOTAL_STEPS) * 100);
+  const status = PHASE_STATUS[phase] || PHASE_STATUS.idle;
   const completedAgents = config.agents.length - streamingIds.size;
+  const isActive = phase !== "complete" && phase !== "error" && phase !== "budget-exceeded" && phase !== "awaiting-decision";
 
   return (
     <div className="space-y-6">
       {/* Progress header */}
-      <div className="space-y-2">
-        {/* Title + New button */}
+      <div className="space-y-3">
+        {/* Title + status text + New button */}
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-[var(--neg-text)] truncate">
-            {title}
-          </h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <NegotiatorLogo
+              mode={
+                phase === "researching" || phase === "finalizing" ? "debating"
+                : phase === "synthesizing" ? "synthesizing"
+                : phase === "complete" ? "complete"
+                : "idle"
+              }
+              size={20}
+              className="shrink-0 text-[var(--neg-text-muted)]"
+            />
+            <span className="text-sm text-[var(--neg-text)] truncate">
+              {status.text}
+              {phase === "researching" && completedAgents < config.agents.length
+                ? ` (${completedAgents}/${config.agents.length})`
+                : ""}
+              {isActive && <span className="animate-pulse">...</span>}
+              {elapsed > 0 && isActive && (
+                <span className="text-[var(--neg-text-muted)] ml-1.5">{elapsed}s</span>
+              )}
+              {round > 1 && (
+                <span className="text-[var(--neg-text-muted)] ml-1.5">· Round {round}</span>
+              )}
+            </span>
+          </div>
           <button
             onClick={onReset}
             className="text-xs text-[var(--neg-text-muted)] hover:text-[var(--neg-text)] transition whitespace-nowrap shrink-0 ml-3"
@@ -457,49 +482,38 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
           </button>
         </div>
 
-        {/* Progress bar */}
-        <div className="flex items-center gap-3">
-          <NegotiatorLogo
-            mode={
-              phase === "researching" || phase === "finalizing" ? "debating"
-              : phase === "synthesizing" ? "synthesizing"
-              : phase === "complete" ? "complete"
-              : "idle"
-            }
-            size={24}
-            className="shrink-0 text-[var(--neg-text-muted)]"
-          />
-          <div className="flex-1 h-1.5 rounded-full bg-[var(--neg-surface-2)] overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-700 ${
-                phase === "complete"
-                  ? "bg-[var(--neg-green)]"
-                  : phase === "error"
-                    ? "bg-[var(--neg-red)]"
-                    : "bg-[var(--neg-accent)]"
-              }`}
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Status text */}
-        <div className="flex items-center justify-between text-xs text-[var(--neg-text-muted)]">
-          <span>
-            {phaseInfo.label}
-            {phase === "researching" && completedAgents < config.agents.length
-              ? ` (${completedAgents}/${config.agents.length})`
-              : ""}
-          </span>
-          <span>
-            {phase !== "complete" && phase !== "awaiting-decision" && phase !== "error" && elapsed > 0
-              ? `${elapsed}s`
-              : ""}
-            {phase !== "complete" && phaseInfo.estimate && elapsed === 0
-              ? phaseInfo.estimate
-              : ""}
-            {round > 1 ? ` · Round ${round}` : ""}
-          </span>
+        {/* Segmented step progress */}
+        <div className="flex gap-1">
+          {STEPS.map((step, i) => {
+            const isDone = status.stepIndex > i;
+            const isCurrent = status.stepIndex === i;
+            return (
+              <div key={step.key} className="flex-1 space-y-1">
+                <div
+                  className={`h-1.5 rounded-full transition-all duration-500 ${
+                    isDone
+                      ? "bg-[var(--neg-green)]"
+                      : isCurrent
+                        ? phase === "error"
+                          ? "bg-[var(--neg-red)]"
+                          : "bg-[var(--neg-accent)]"
+                        : "bg-[var(--neg-surface-2)]"
+                  }`}
+                />
+                <span
+                  className={`block text-center text-[10px] leading-tight transition-colors ${
+                    isDone
+                      ? "text-[var(--neg-green)]"
+                      : isCurrent
+                        ? "text-[var(--neg-text)] font-medium"
+                        : "text-[var(--neg-text-muted)]/50"
+                  }`}
+                >
+                  {step.label}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
