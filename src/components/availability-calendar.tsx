@@ -17,27 +17,27 @@ interface AvailabilityCalendarProps {
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
-  if (isPast) return "bg-zinc-900 text-zinc-700";
-  if (slots.length === 0) return "bg-zinc-800/50 text-zinc-600";
+  if (isPast) return "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700";
+  if (slots.length === 0) return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600";
   const best = Math.min(...slots.map((s) => s.score ?? 1));
-  if (best <= -2) return "bg-indigo-900/50 text-indigo-300"; // exclusive
-  if (best === -1) return "bg-green-900/50 text-green-300"; // preferred
-  if (best === 0) return "bg-green-900/50 text-green-300"; // explicitly free
-  if (best === 1) return "bg-emerald-900/40 text-emerald-300"; // open
-  if (best === 2) return "bg-amber-900/50 text-amber-300"; // soft hold
-  if (best === 3) return "bg-orange-900/40 text-orange-300"; // moderate friction (host view)
-  return "bg-red-900/30 text-red-300"; // 4-5: protected/immovable (host view)
+  if (best <= -2) return "bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300"; // exclusive
+  if (best === -1) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300"; // preferred
+  if (best === 0) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300"; // explicitly free
+  if (best === 1) return "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300"; // open
+  if (best === 2) return "bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-300"; // soft hold
+  if (best === 3) return "bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-300"; // moderate friction (host view)
+  return "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300"; // 4-5: protected/immovable (host view)
 }
 
 function getSlotPillColor(score: number | undefined) {
   const s = score ?? 1;
-  if (s <= -2) return "border-indigo-600 text-indigo-300 hover:border-indigo-400";
-  if (s === -1) return "border-green-600 text-green-300 hover:border-green-400";
-  if (s === 0) return "border-green-700 text-green-300 hover:border-green-500";
-  if (s === 1) return "border-emerald-700 text-emerald-300 hover:border-emerald-500";
-  if (s === 2) return "border-amber-700 text-amber-300 hover:border-amber-500";
-  if (s === 3) return "border-orange-700 text-orange-300 hover:border-orange-500";
-  return "border-red-700 text-red-300 hover:border-red-500";
+  if (s <= -2) return "border-indigo-300 dark:border-indigo-600 text-indigo-600 dark:text-indigo-300 hover:border-indigo-400";
+  if (s === -1) return "border-green-300 dark:border-green-600 text-green-600 dark:text-green-300 hover:border-green-400";
+  if (s === 0) return "border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 hover:border-green-500";
+  if (s === 1) return "border-emerald-400 dark:border-emerald-700 text-emerald-600 dark:text-emerald-300 hover:border-emerald-500";
+  if (s === 2) return "border-amber-400 dark:border-amber-700 text-amber-600 dark:text-amber-300 hover:border-amber-500";
+  if (s === 3) return "border-orange-400 dark:border-orange-700 text-orange-600 dark:text-orange-300 hover:border-orange-500";
+  return "border-red-400 dark:border-red-700 text-red-600 dark:text-red-300 hover:border-red-500";
 }
 
 const DAY_HEADERS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -105,19 +105,19 @@ export function AvailabilityCalendar({
       <div className="flex items-center justify-between mb-2">
         <button
           onClick={() => setViewMonth(new Date(year, month - 1, 1))}
-          className={`p-1 rounded hover:bg-zinc-800 transition ${!canGoPrev ? "opacity-30 cursor-default" : ""}`}
+          className={`p-1 rounded hover:bg-surface-secondary transition ${!canGoPrev ? "opacity-30 cursor-default" : ""}`}
           disabled={!canGoPrev}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
-        <span className="text-xs font-medium text-zinc-300">
+        <span className="text-xs font-medium text-primary">
           {viewMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
         </span>
         <button
           onClick={() => setViewMonth(new Date(year, month + 1, 1))}
-          className={`p-1 rounded hover:bg-zinc-800 transition ${!canGoNext ? "opacity-30 cursor-default" : ""}`}
+          className={`p-1 rounded hover:bg-surface-secondary transition ${!canGoNext ? "opacity-30 cursor-default" : ""}`}
           disabled={!canGoNext}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -129,7 +129,7 @@ export function AvailabilityCalendar({
       {/* Day headers */}
       <div className="grid grid-cols-7 gap-1 mb-1">
         {DAY_HEADERS.map((d) => (
-          <div key={d} className="text-[10px] text-zinc-500 text-center font-medium">
+          <div key={d} className="text-[10px] text-muted text-center font-medium">
             {d}
           </div>
         ))}
@@ -154,8 +154,8 @@ export function AvailabilityCalendar({
                 aspect-square rounded-md text-xs font-medium flex items-center justify-center transition-all
                 ${colorClass}
                 ${isToday ? "ring-1 ring-indigo-500" : ""}
-                ${isSelected ? "ring-2 ring-white" : ""}
-                ${!isPast && daySlots.length > 0 ? "hover:ring-1 hover:ring-zinc-500 cursor-pointer" : "cursor-default"}
+                ${isSelected ? "ring-2 ring-foreground" : ""}
+                ${!isPast && daySlots.length > 0 ? "hover:ring-1 hover:ring-secondary cursor-pointer" : "cursor-default"}
               `}
             >
               {cell.day}
@@ -167,7 +167,7 @@ export function AvailabilityCalendar({
       {/* Selected day time slots */}
       {selectedDay && (
         <div className="mt-3 space-y-1.5">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-muted">
             {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
               weekday: "long",
               month: "short",
@@ -175,7 +175,7 @@ export function AvailabilityCalendar({
             })}
           </div>
           {selectedSlots.length === 0 ? (
-            <p className="text-xs text-zinc-600">No available slots</p>
+            <p className="text-xs text-muted">No available slots</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {selectedSlots.map((slot, i) => (
@@ -184,9 +184,9 @@ export function AvailabilityCalendar({
                   onClick={() =>
                     onSelectSlot?.(formatSlotMessage(slot, selectedDay))
                   }
-                  className={`px-2 py-1 bg-zinc-800 border rounded-md text-xs transition
+                  className={`px-2 py-1 bg-surface-secondary border rounded-md text-xs transition
                     ${getSlotPillColor(slot.score)}
-                    ${onSelectSlot ? "hover:bg-zinc-700 cursor-pointer" : "cursor-default"}`}
+                    ${onSelectSlot ? "hover:bg-surface-tertiary cursor-pointer" : "cursor-default"}`}
                 >
                   {new Date(slot.start).toLocaleTimeString("en-US", {
                     hour: "numeric",
@@ -222,7 +222,7 @@ export function AvailabilityCalendar({
       )}
 
       {/* Disclaimer */}
-      <p className="mt-3 text-[10px] text-zinc-600 leading-tight">
+      <p className="mt-3 text-[10px] text-muted leading-tight">
         Times are approximate. Envoy may have additional preferences.
       </p>
     </div>

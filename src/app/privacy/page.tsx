@@ -2,25 +2,25 @@ import { PublicHeader } from "@/components/public-header";
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-zinc-100">
+    <div className="min-h-screen bg-surface text-primary">
       <PublicHeader />
       <div className="max-w-3xl mx-auto px-6 py-16">
         <h1 className="text-3xl font-bold mb-2">Privacy at AgentEnvoy</h1>
-        <p className="text-sm text-zinc-500 mb-12">Last updated: April 2, 2026</p>
+        <p className="text-sm text-muted mb-12">Last updated: April 2, 2026</p>
 
-        <div className="prose prose-invert prose-zinc max-w-none space-y-10 text-sm leading-relaxed text-zinc-300">
+        <div className="prose prose-invert prose-zinc max-w-none space-y-10 text-sm leading-relaxed text-secondary dark:text-zinc-300">
 
           {/* --- CONSTITUTION --- */}
-          <section className="border border-zinc-800 rounded-2xl p-8 bg-zinc-900/50">
-            <h2 className="text-xl font-bold text-zinc-100 mb-6">Our Principles</h2>
-            <p className="text-zinc-400 mb-6">
+          <section className="border border-secondary rounded-2xl p-8 bg-surface-inset/50">
+            <h2 className="text-xl font-bold text-primary mb-6">Our Principles</h2>
+            <p className="text-secondary mb-6">
               These principles govern every decision we make about your data. They are not
               aspirational &mdash; they are operational. Our systems are built to enforce them.
             </p>
 
             <div className="space-y-6">
               <div>
-                <h3 className="text-base font-semibold text-zinc-100">
+                <h3 className="text-base font-semibold text-primary">
                   I. We treat your information as if it were our own.
                 </h3>
                 <p className="mt-1">
@@ -31,7 +31,7 @@ export default function PrivacyPage() {
               </div>
 
               <div>
-                <h3 className="text-base font-semibold text-zinc-100">
+                <h3 className="text-base font-semibold text-primary">
                   II. We learn only what the negotiation requires.
                 </h3>
                 <p className="mt-1">
@@ -42,7 +42,7 @@ export default function PrivacyPage() {
               </div>
 
               <div>
-                <h3 className="text-base font-semibold text-zinc-100">
+                <h3 className="text-base font-semibold text-primary">
                   III. We never advantage one party using the other&apos;s private data.
                 </h3>
                 <p className="mt-1">
@@ -56,15 +56,15 @@ export default function PrivacyPage() {
 
           {/* --- WHAT WE ACCESS --- */}
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">What We Access</h2>
+            <h2 className="text-lg font-semibold text-primary">What We Access</h2>
 
-            <h3 className="text-base font-semibold text-zinc-200 mt-6">Your Google account</h3>
+            <h3 className="text-base font-semibold text-primary mt-6">Your Google account</h3>
             <p>
               When you sign in, we receive your name, email address, and profile picture from Google.
               We store a refresh token to maintain your connection.
             </p>
 
-            <h3 className="text-base font-semibold text-zinc-200 mt-6">Your calendar (hosts)</h3>
+            <h3 className="text-base font-semibold text-primary mt-6">Your calendar (hosts)</h3>
             <p>
               By default, we read only <strong>free/busy time blocks</strong> from your Google Calendar &mdash;
               not event titles, attendees, descriptions, or any other details. We see &ldquo;busy 9&ndash;10am,&rdquo;
@@ -85,7 +85,7 @@ export default function PrivacyPage() {
               parties have agreed to.
             </p>
 
-            <h3 className="text-base font-semibold text-zinc-200 mt-6">Your calendar (guests)</h3>
+            <h3 className="text-base font-semibold text-primary mt-6">Your calendar (guests)</h3>
             <p>
               When a guest connects their calendar, we request <strong>read-only</strong> access.
               We read your free/busy availability to find mutual times. We cannot create, modify,
@@ -95,7 +95,7 @@ export default function PrivacyPage() {
 
           {/* --- AI AND YOUR DATA --- */}
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">AI and Your Data</h2>
+            <h2 className="text-lg font-semibold text-primary">AI and Your Data</h2>
             <p>
               AgentEnvoy uses an AI scheduling agent (&ldquo;Envoy&rdquo;) powered by Anthropic&apos;s Claude.
               Here is exactly what the AI sees:
@@ -116,7 +116,7 @@ export default function PrivacyPage() {
 
           {/* --- DATA RETENTION --- */}
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">Data Retention</h2>
+            <h2 className="text-lg font-semibold text-primary">Data Retention</h2>
             <p>
               We keep data only as long as it serves a purpose.
             </p>
@@ -141,7 +141,7 @@ export default function PrivacyPage() {
 
           {/* --- WHAT WE NEVER DO --- */}
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">What We Never Do</h2>
+            <h2 className="text-lg font-semibold text-primary">What We Never Do</h2>
             <ul className="list-disc pl-6 space-y-1">
               <li>Sell, share, or transfer your data to third parties for advertising or marketing</li>
               <li>Share one party&apos;s event details, calendar content, or private context with the other party</li>
@@ -154,7 +154,7 @@ export default function PrivacyPage() {
 
           {/* --- THIRD PARTIES --- */}
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">Services We Use</h2>
+            <h2 className="text-lg font-semibold text-primary">Services We Use</h2>
             <p>We rely on a small number of infrastructure providers to operate:</p>
             <ul className="list-disc pl-6 space-y-1 mt-2">
               <li><strong>Google APIs</strong> &mdash; Authentication and calendar access</li>
@@ -171,7 +171,7 @@ export default function PrivacyPage() {
 
           {/* --- YOUR RIGHTS --- */}
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">Your Rights</h2>
+            <h2 className="text-lg font-semibold text-primary">Your Rights</h2>
             <ul className="list-disc pl-6 space-y-1">
               <li>
                 <strong>Revoke access</strong> at any time via{" "}
@@ -187,7 +187,7 @@ export default function PrivacyPage() {
 
           {/* --- GOOGLE API COMPLIANCE --- */}
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">Google API Services User Data Policy</h2>
+            <h2 className="text-lg font-semibold text-primary">Google API Services User Data Policy</h2>
             <p>
               AgentEnvoy&apos;s use and transfer of information received from Google APIs adheres to the{" "}
               <a href="https://developers.google.com/terms/api-services-user-data-policy" className="text-indigo-400 hover:text-indigo-300" target="_blank" rel="noopener noreferrer">
@@ -199,7 +199,7 @@ export default function PrivacyPage() {
 
           {/* --- CONTACT --- */}
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">Contact</h2>
+            <h2 className="text-lg font-semibold text-primary">Contact</h2>
             <p>
               Questions about this policy or your data:{" "}
               <a href="mailto:privacy@agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300">

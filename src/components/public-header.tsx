@@ -7,7 +7,7 @@ import { LogoFull } from "./logo";
  */
 export function PublicHeader() {
   return (
-    <header className="sticky top-0 z-50 bg-[#0a0a0f]/95 backdrop-blur-sm border-b border-zinc-800">
+    <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary">
       <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
         <Link href="/" className="text-indigo-400 hover:text-indigo-300 transition">
           <LogoFull height={28} />
@@ -15,7 +15,7 @@ export function PublicHeader() {
         <div className="flex items-center gap-4">
           <Link
             href="/faq"
-            className="text-xs text-zinc-400 hover:text-zinc-200 transition"
+            className="text-xs text-secondary hover:text-primary transition"
           >
             How It Works
           </Link>

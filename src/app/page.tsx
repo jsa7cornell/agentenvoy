@@ -16,9 +16,9 @@ export default function Home() {
   }, [status, router]);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex flex-col items-center justify-center px-4">
+    <div className="min-h-screen bg-surface flex flex-col items-center justify-center px-4">
       {/* Background gradient */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,#1a1a2e_0%,#0a0a0f_70%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,#e8e8f0_0%,#ffffff_70%)] dark:bg-[radial-gradient(ellipse_at_center,#1a1a2e_0%,#0a0a0f_70%)]" />
 
       <div className="relative z-10 text-center max-w-2xl">
         <div className="flex items-center justify-center gap-4 mb-2">
@@ -31,9 +31,9 @@ export default function Home() {
           </div>
         </div>
 
-        <p className="mt-10 text-xl md:text-2xl font-light text-zinc-400 leading-relaxed">
-          From <span className="text-zinc-200 font-medium">scheduling meetings</span> to{" "}
-          <span className="text-zinc-200 font-medium">navigating proposals</span> — your
+        <p className="mt-10 text-xl md:text-2xl font-light text-secondary leading-relaxed">
+          From <span className="text-primary font-medium">scheduling meetings</span> to{" "}
+          <span className="text-primary font-medium">navigating proposals</span> — your
           AI negotiates so you don&apos;t have to.
         </p>
 
@@ -65,7 +65,7 @@ export default function Home() {
 
           <a
             href="/demo.html"
-            className="px-8 py-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-lg font-semibold transition border border-zinc-700"
+            className="px-8 py-4 bg-surface-secondary hover:bg-surface-tertiary text-primary rounded-xl text-lg font-semibold transition border border-DEFAULT"
           >
             Watch Demo
           </a>
@@ -80,7 +80,7 @@ export default function Home() {
           ].map((feat) => (
             <div key={feat.label} className="text-center">
               <div className="text-2xl mb-1">{feat.icon}</div>
-              <div className="text-xs text-zinc-500">{feat.label}</div>
+              <div className="text-xs text-muted">{feat.label}</div>
             </div>
           ))}
         </div>

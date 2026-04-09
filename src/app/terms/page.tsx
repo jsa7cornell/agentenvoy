@@ -2,16 +2,16 @@ import { PublicHeader } from "@/components/public-header";
 
 export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-zinc-100">
+    <div className="min-h-screen bg-surface text-primary">
       <PublicHeader />
       <div className="max-w-3xl mx-auto px-6 py-16">
         <h1 className="text-3xl font-bold mb-2">Terms of Service</h1>
-        <p className="text-sm text-zinc-500 mb-12">Last updated: April 2, 2026</p>
+        <p className="text-sm text-muted mb-12">Last updated: April 2, 2026</p>
 
-        <div className="prose prose-invert prose-zinc max-w-none space-y-8 text-sm leading-relaxed text-zinc-300">
+        <div className="prose prose-invert prose-zinc max-w-none space-y-8 text-sm leading-relaxed text-secondary dark:text-zinc-300">
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">1. What AgentEnvoy Is</h2>
+            <h2 className="text-lg font-semibold text-primary">1. What AgentEnvoy Is</h2>
             <p>
               AgentEnvoy is an AI-powered scheduling and negotiation platform. An AI agent
               (&ldquo;Envoy&rdquo;) acts as a neutral administrator &mdash; it coordinates between
@@ -20,7 +20,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">2. Our Commitments</h2>
+            <h2 className="text-lg font-semibold text-primary">2. Our Commitments</h2>
             <p>
               AgentEnvoy operates under the principles described in our{" "}
               <a href="/privacy" className="text-indigo-400 hover:text-indigo-300">Privacy Policy</a>.
@@ -34,7 +34,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">3. Accounts</h2>
+            <h2 className="text-lg font-semibold text-primary">3. Accounts</h2>
             <ul className="list-disc pl-6 space-y-1">
               <li>Sign in with a valid Google account to create an AgentEnvoy account</li>
               <li>You are responsible for maintaining the security of your account and API keys</li>
@@ -43,7 +43,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">4. Calendar Access</h2>
+            <h2 className="text-lg font-semibold text-primary">4. Calendar Access</h2>
             <p>
               By connecting your Google Calendar, you grant AgentEnvoy permission to:
             </p>
@@ -62,7 +62,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">5. AI Agent Behavior</h2>
+            <h2 className="text-lg font-semibold text-primary">5. AI Agent Behavior</h2>
             <p>
               Envoy assists with scheduling and negotiations. While we build for accuracy, the AI
               may occasionally misunderstand context. You are responsible for reviewing and confirming
@@ -72,7 +72,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">6. Acceptable Use</h2>
+            <h2 className="text-lg font-semibold text-primary">6. Acceptable Use</h2>
             <p>Do not:</p>
             <ul className="list-disc pl-6 space-y-1 mt-2">
               <li>Use the service for unlawful purposes</li>
@@ -83,7 +83,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">7. Data Retention</h2>
+            <h2 className="text-lg font-semibold text-primary">7. Data Retention</h2>
             <p>
               Negotiation session data is retained for 30 days after completion, then permanently
               deleted. Account data persists for the life of your account. Full details in our{" "}
@@ -92,7 +92,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">8. Intellectual Property</h2>
+            <h2 className="text-lg font-semibold text-primary">8. Intellectual Property</h2>
             <p>
               The service is owned by AgentEnvoy. Your data remains yours &mdash; we do not claim
               ownership of your calendar data, messages, or other content.
@@ -100,7 +100,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">9. Limitation of Liability</h2>
+            <h2 className="text-lg font-semibold text-primary">9. Limitation of Liability</h2>
             <p>
               The service is provided &ldquo;as is.&rdquo; AgentEnvoy is not liable for indirect,
               incidental, or consequential damages resulting from your use of the service, including
@@ -109,7 +109,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">10. Termination</h2>
+            <h2 className="text-lg font-semibold text-primary">10. Termination</h2>
             <p>
               We may suspend access for violation of these terms. You may delete your account at
               any time by contacting us. Upon termination, your data is deleted per our retention policy.
@@ -117,14 +117,14 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">11. Changes</h2>
+            <h2 className="text-lg font-semibold text-primary">11. Changes</h2>
             <p>
               We may update these terms. Continued use after changes constitutes acceptance.
             </p>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-zinc-100">12. Contact</h2>
+            <h2 className="text-lg font-semibold text-primary">12. Contact</h2>
             <p>
               Questions:{" "}
               <a href="mailto:support@agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300">
