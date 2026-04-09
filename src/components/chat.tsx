@@ -123,7 +123,7 @@ export function Chat({
               className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                 message.role === "user"
                   ? "bg-indigo-600 text-white rounded-br-sm"
-                  : "bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-bl-sm"
+                  : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm"
               }`}
             >
               {message.role === "assistant" && (
@@ -141,14 +141,14 @@ export function Chat({
         ))}
         {isLoading && messages[messages.length - 1]?.role === "user" && (
           <div className="flex justify-start">
-            <div className="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-bl-sm px-4 py-3">
+            <div className="bg-surface-secondary border border-DEFAULT rounded-2xl rounded-bl-sm px-4 py-3">
               <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
                 Envoy
               </div>
               <div className="flex gap-1">
-                <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
-                <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.1s]" />
-                <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.2s]" />
+                <div className="w-2 h-2 rounded-full bg-muted animate-bounce" />
+                <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.1s]" />
+                <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.2s]" />
               </div>
             </div>
           </div>
@@ -156,7 +156,7 @@ export function Chat({
         <div ref={messagesEndRef} />
       </div>
 
-      <form onSubmit={handleSubmit} className="p-4 border-t border-zinc-800">
+      <form onSubmit={handleSubmit} className="p-4 border-t border-secondary">
         <div className="flex gap-2">
           <textarea
             value={input}
@@ -169,12 +169,12 @@ export function Chat({
             }}
             placeholder={placeholder}
             rows={1}
-            className="flex-1 resize-none bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition"
+            className="flex-1 resize-none bg-surface-secondary border border-DEFAULT rounded-xl px-4 py-3 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition"
           />
           <button
             type="submit"
             disabled={isLoading || !input.trim()}
-            className="px-4 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600 text-white rounded-xl text-sm font-medium transition"
+            className="px-4 py-3 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:hover:bg-accent text-white rounded-xl text-sm font-medium transition"
           >
             Send
           </button>

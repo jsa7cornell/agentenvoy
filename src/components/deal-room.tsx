@@ -424,19 +424,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // --- Archived state ---
   if (archivedData) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+      <div className="min-h-screen bg-surface flex items-center justify-center">
         <div className="text-center max-w-md">
-          <div className="w-16 h-16 mx-auto mb-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
-            <svg className="w-7 h-7 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <div className="w-16 h-16 mx-auto mb-5 rounded-full bg-surface-secondary border border-DEFAULT flex items-center justify-center">
+            <svg className="w-7 h-7 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
             </svg>
           </div>
-          <h1 className="text-xl font-bold text-zinc-100 mb-2">Meeting Archived</h1>
-          <p className="text-sm text-zinc-500 mb-4">
+          <h1 className="text-xl font-bold text-primary mb-2">Meeting Archived</h1>
+          <p className="text-sm text-muted mb-4">
             This meeting has been archived by {archivedData.hostName || "the host"}.
           </p>
           {archivedData.hostEmail && (
-            <p className="text-sm text-zinc-400">
+            <p className="text-sm text-secondary">
               Contact{" "}
               <a href={`mailto:${archivedData.hostEmail}`} className="text-indigo-400 hover:text-indigo-300">
                 {archivedData.hostEmail}
@@ -452,11 +452,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // --- Error state ---
   if (error) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+      <div className="min-h-screen bg-surface flex items-center justify-center">
         <div className="text-center">
           <div className="text-4xl mb-4">&#128533;</div>
-          <h1 className="text-xl font-bold text-zinc-100 mb-2">Link not found</h1>
-          <p className="text-zinc-500">{error}</p>
+          <h1 className="text-xl font-bold text-primary mb-2">Link not found</h1>
+          <p className="text-muted">{error}</p>
         </div>
       </div>
     );
@@ -553,15 +553,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
 
   const eventCard = (
-    <div className={`z-10 mx-0 px-4 sm:px-5 py-3 sm:py-4 bg-[#0a0a0f]/95 backdrop-blur-sm border-b ${statusConfig.border} flex-shrink-0 transition-all duration-500 ${statusAnimating ? "ring-1 ring-inset " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-500/40 bg-amber-500/5") : ""}`}>
+    <div className={`z-10 mx-0 px-4 sm:px-5 py-3 sm:py-4 bg-surface/95 backdrop-blur-sm border-b ${statusConfig.border} flex-shrink-0 transition-all duration-500 ${statusAnimating ? "ring-1 ring-inset " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-500/40 bg-amber-500/5") : ""}`}>
       <div className="max-w-3xl mx-auto">
         {/* Row 1: Title + status */}
         <div className="flex items-center gap-2.5 mb-1.5">
           <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />
-          <span className="text-sm font-semibold text-zinc-100 truncate">{getEventTitle()}</span>
+          <span className="text-sm font-semibold text-primary truncate">{getEventTitle()}</span>
           <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color} flex-shrink-0`}>{statusConfig.label}</span>
           {sessionStatusLabel && (
-            <span className="text-[10px] text-zinc-500 ml-2">{sessionStatusLabel}</span>
+            <span className="text-[10px] text-muted ml-2">{sessionStatusLabel}</span>
           )}
         </div>
 
@@ -569,7 +569,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         {isGroupEvent && participants.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 ml-5 mb-1">
             {participants.map((p, i) => (
-              <span key={i} className="flex items-center gap-1 text-xs text-zinc-400">
+              <span key={i} className="flex items-center gap-1 text-xs text-secondary">
                 <span className={`w-1.5 h-1.5 rounded-full ${
                   p.status === "agreed" ? "bg-emerald-400" :
                   p.status === "active" ? "bg-amber-400" :
@@ -582,7 +582,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         )}
 
         {/* Row 2: Details */}
-        <div className="flex flex-wrap gap-x-4 gap-y-0.5 ml-5 text-xs text-zinc-400">
+        <div className="flex flex-wrap gap-x-4 gap-y-0.5 ml-5 text-xs text-secondary">
           {eventFormat && (
             <span>{eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat} &middot; {eventDuration} min</span>
           )}
@@ -615,7 +615,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   }
                 } catch {}
               }}
-              className={`text-xs transition ${isGroupEvent ? "text-zinc-600 cursor-default" : "text-indigo-400 hover:text-indigo-300"}`}
+              className={`text-xs transition ${isGroupEvent ? "text-muted cursor-default" : "text-indigo-400 hover:text-indigo-300"}`}
               disabled={isGroupEvent}
             >
               {isGroupEvent ? "Group link active — share link to add people" : "+ Add participant (make group link)"}
@@ -630,7 +630,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               <>
                 {/* Google Calendar */}
                 {googleCalUrl && (
-                  <a href={googleCalUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700 hover:border-zinc-600 transition text-xs text-zinc-300">
+                  <a href={googleCalUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-secondary/80 border border-DEFAULT hover:border-zinc-600 transition text-xs text-primary">
                     <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0">
                       <path d="M18.316 5.684H24v12.632h-5.684V5.684z" fill="#1967D2" />
                       <path d="M5.684 18.316V5.684L0 5.684v12.632l5.684 0z" fill="#188038" />
@@ -643,7 +643,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   </a>
                 )}
                 {/* ICS download */}
-                <button onClick={downloadIcs} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700 hover:border-zinc-600 transition text-xs text-zinc-300">
+                <button onClick={downloadIcs} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-secondary/80 border border-DEFAULT hover:border-zinc-600 transition text-xs text-primary">
                   <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
                   </svg>
@@ -665,7 +665,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             {hasExtraDetails && (
               <button
                 onClick={() => setShowDetailsModal(true)}
-                className="text-xs text-zinc-500 hover:text-zinc-400 transition"
+                className="text-xs text-muted hover:text-secondary transition"
               >
                 Details
               </button>
@@ -676,7 +676,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         {/* Signup CTA — guests only, after confirmation */}
         {confirmed && !isHost && (
           <div className="ml-5 mt-3 p-3 rounded-xl bg-purple-500/8 border border-purple-500/20">
-            <p className="text-xs text-zinc-300">
+            <p className="text-xs text-primary">
               Want your own AI negotiator?{" "}
               <a href="/api/auth/signin" className="text-purple-400 hover:text-purple-300 font-semibold transition">
                 Create a free AgentEnvoy account
@@ -692,25 +692,25 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // --- Details modal ---
   const detailsModal = showDetailsModal ? (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowDetailsModal(false)}>
-      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-zinc-100 mb-4">Meeting Details</h3>
-        <div className="space-y-3 text-sm text-zinc-300">
-          <div><span className="text-zinc-500">Title:</span> {getEventTitle()}</div>
-          {eventDateTime && <div><span className="text-zinc-500">When:</span> {new Date(eventDateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {new Date(eventDateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</div>}
-          {eventFormat && <div><span className="text-zinc-500">Format:</span> {eventFormat.charAt(0).toUpperCase() + eventFormat.slice(1)} &middot; {eventDuration} min</div>}
-          {eventLocation && <div><span className="text-zinc-500">Location:</span> {eventLocation}</div>}
-          {eventMeetLink && <div><span className="text-zinc-500">Link:</span> <a href={eventMeetLink} className="text-indigo-400 hover:text-indigo-300" target="_blank" rel="noopener noreferrer">{eventMeetLink}</a></div>}
-          {hostName && <div><span className="text-zinc-500">Host:</span> {hostName}</div>}
+      <div className="bg-surface-inset border border-DEFAULT rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-primary mb-4">Meeting Details</h3>
+        <div className="space-y-3 text-sm text-primary">
+          <div><span className="text-muted">Title:</span> {getEventTitle()}</div>
+          {eventDateTime && <div><span className="text-muted">When:</span> {new Date(eventDateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {new Date(eventDateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</div>}
+          {eventFormat && <div><span className="text-muted">Format:</span> {eventFormat.charAt(0).toUpperCase() + eventFormat.slice(1)} &middot; {eventDuration} min</div>}
+          {eventLocation && <div><span className="text-muted">Location:</span> {eventLocation}</div>}
+          {eventMeetLink && <div><span className="text-muted">Link:</span> <a href={eventMeetLink} className="text-indigo-400 hover:text-indigo-300" target="_blank" rel="noopener noreferrer">{eventMeetLink}</a></div>}
+          {hostName && <div><span className="text-muted">Host:</span> {hostName}</div>}
         </div>
         {confirmed && (
           <div className="flex gap-2 mt-4">
-            <button onClick={downloadIcs} className="flex-1 px-3 py-2 text-xs font-medium bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-lg hover:border-zinc-600 transition">Download .ics</button>
+            <button onClick={downloadIcs} className="flex-1 px-3 py-2 text-xs font-medium bg-surface-secondary text-primary border border-DEFAULT rounded-lg hover:border-zinc-600 transition">Download .ics</button>
             {googleCalUrl && (
               <a href={googleCalUrl} target="_blank" rel="noopener noreferrer" className="flex-1 px-3 py-2 text-xs font-medium bg-emerald-900/40 text-emerald-300 border border-emerald-500/20 rounded-lg hover:border-emerald-500/40 transition text-center">Add to Google</a>
             )}
           </div>
         )}
-        <button onClick={() => setShowDetailsModal(false)} className="w-full mt-3 px-3 py-2 text-xs text-zinc-500 border border-zinc-800 rounded-lg hover:border-zinc-700 transition">Close</button>
+        <button onClick={() => setShowDetailsModal(false)} className="w-full mt-3 px-3 py-2 text-xs text-muted border border-secondary rounded-lg hover:border-DEFAULT transition">Close</button>
       </div>
     </div>
   ) : null;
@@ -722,9 +722,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         {isLoading ? (
           <div className="flex justify-center py-12">
             <div className="flex gap-1">
-              <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
-              <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.1s]" />
-              <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.2s]" />
+              <div className="w-2 h-2 rounded-full bg-muted animate-bounce" />
+              <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.1s]" />
+              <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.2s]" />
             </div>
           </div>
         ) : (
@@ -759,7 +759,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   ? "bg-indigo-600 text-white rounded-br-sm"
                   : msg.role === "system"
                     ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
-                    : "bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-bl-sm";
+                    : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
 
             const senderLabel =
               msg.role === "host"
@@ -794,7 +794,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   <div className="flex justify-start mt-2">
                     <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Proposed meeting</div>
-                      <div className="space-y-1 text-sm text-zinc-300">
+                      <div className="space-y-1 text-sm text-primary">
                         <p>&#128197; {new Date(proposal.dateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
                         <p>&#128336; {new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} ({proposal.duration} min)</p>
                         <p>&#128241; {proposal.format.charAt(0).toUpperCase() + proposal.format.slice(1)}</p>
@@ -816,12 +816,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         )}
         {isSending && (
           <div className="flex justify-start">
-            <div className="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-bl-sm px-4 py-3">
+            <div className="bg-surface-secondary border border-DEFAULT rounded-2xl rounded-bl-sm px-4 py-3">
               <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">Envoy</div>
               <div className="flex gap-1">
-                <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
-                <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.1s]" />
-                <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.2s]" />
+                <div className="w-2 h-2 rounded-full bg-muted animate-bounce" />
+                <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.1s]" />
+                <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.2s]" />
               </div>
             </div>
           </div>
@@ -830,7 +830,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSend} className="p-4 border-t border-zinc-800">
+      <form onSubmit={handleSend} className="p-4 border-t border-secondary">
         <div className="flex gap-2">
           <textarea
             value={input}
@@ -844,19 +844,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             placeholder={isHost ? `Message as ${hostName || "Host"}...` : "Type your message..."}
             rows={1}
             disabled={isLoading}
-            className="flex-1 resize-none bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
+            className="flex-1 resize-none bg-surface-secondary border border-DEFAULT rounded-xl px-4 py-3 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={isSending || !input.trim() || isLoading}
-            className="px-4 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition"
+            className="px-4 py-3 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white rounded-xl text-sm font-medium transition"
           >
             Send
           </button>
         </div>
         {isHost && (
-          <p className="text-[10px] text-zinc-600 mt-1.5">
-            Prefix with <code className="text-zinc-500">::</code> for private notes to Envoy
+          <p className="text-[10px] text-muted mt-1.5">
+            Prefix with <code className="text-muted">::</code> for private notes to Envoy
           </p>
         )}
       </form>
@@ -864,18 +864,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   );
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f] text-zinc-100 flex flex-col overflow-hidden z-20">
+    <div className="fixed inset-0 bg-surface text-primary flex flex-col overflow-hidden z-20">
       {/* Header */}
-      <header className="border-b border-zinc-800 px-6 py-3 flex items-center justify-between flex-shrink-0">
+      <header className="border-b border-secondary px-6 py-3 flex items-center justify-between flex-shrink-0">
         <a href="/">
-          <LogoFull height={24} className="text-zinc-100" />
+          <LogoFull height={24} className="text-primary" />
         </a>
         {isHost ? (
-          <Link href="/dashboard" className="text-xs text-zinc-500 hover:text-zinc-300 transition">
+          <Link href="/dashboard" className="text-xs text-muted hover:text-primary transition">
             &larr; Dashboard
           </Link>
         ) : (
-          <a href="/" className="text-xs text-zinc-500 hover:text-zinc-300 transition">
+          <a href="/" className="text-xs text-muted hover:text-primary transition">
             Sign in
           </a>
         )}
@@ -889,8 +889,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           {eventCard}
           {/* Mobile availability toggle — hidden on desktop where sidebar shows */}
           {slotsByDay && Object.keys(slotsByDay).length > 0 && (
-            <details className="md:hidden border-b border-zinc-800">
-              <summary className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500 cursor-pointer hover:text-zinc-400 select-none">
+            <details className="md:hidden border-b border-secondary">
+              <summary className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-muted cursor-pointer hover:text-secondary select-none">
                 View availability
               </summary>
               <div className="px-4 pb-3">
@@ -910,8 +910,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         </div>
 
         {/* Availability sidebar — desktop only */}
-        <div className="hidden md:flex w-64 flex-shrink-0 border-l border-zinc-800 p-4 overflow-y-auto flex-col">
-          <h4 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">
+        <div className="hidden md:flex w-64 flex-shrink-0 border-l border-secondary p-4 overflow-y-auto flex-col">
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">
             Availability
           </h4>
           <AvailabilityCalendar
