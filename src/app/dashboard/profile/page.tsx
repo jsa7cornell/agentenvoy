@@ -334,6 +334,9 @@ export default function ProfilePage() {
         }}
       />
       <p className="text-[10px] text-zinc-600 mt-2">Update your schedule preferences to change your availability.</p>
+      <Link href="/dashboard/tuner" className="text-sm text-zinc-500 hover:text-zinc-300 underline mt-2 inline-block">
+        Availability Tuner
+      </Link>
     </>
   );
 

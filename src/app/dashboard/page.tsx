@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import Feed from "@/components/feed";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { AvailabilityCalendar } from "@/components/availability-calendar";
+import Link from "next/link";
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
@@ -65,6 +66,9 @@ export default function DashboardPage() {
             timezone={slotTimezone}
             currentLocation={slotLocation}
           />
+          <Link href="/dashboard/tuner" className="text-xs text-zinc-500 hover:text-zinc-300 underline mt-2 inline-block">
+            Fine-tune availability
+          </Link>
         </div>
       </div>
     </div>

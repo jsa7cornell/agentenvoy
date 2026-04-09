@@ -28,8 +28,24 @@ export function parseActions(text: string): ActionRequest[] {
   const regex = new RegExp(ACTION_REGEX.source, ACTION_REGEX.flags);
   while ((match = regex.exec(text)) !== null) {
     try {
-      const parsed = JSON.parse(match[1]);
-      if (parsed.action && typeof parsed.action === "string") {
+      let raw = match[1].trim();
+      // Fix common LLM JSON errors: trailing extra braces
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        // Try removing trailing extra closing braces
+        while (raw.endsWith("}}") || raw.endsWith("}]")) {
+          const trimmed = raw.slice(0, -1);
+          try {
+            parsed = JSON.parse(trimmed);
+            break;
+          } catch {
+            raw = trimmed;
+          }
+        }
+      }
+      if (parsed?.action && typeof parsed.action === "string") {
         actions.push({
           action: parsed.action,
           params: parsed.params || {},
