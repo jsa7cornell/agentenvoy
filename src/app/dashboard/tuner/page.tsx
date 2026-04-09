@@ -183,35 +183,35 @@ export default function TunerPage() {
 
   if (status === "loading" || isLoading) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="text-zinc-500">Loading...</div>
+      <div className="min-h-screen bg-surface flex items-center justify-center">
+        <div className="text-muted">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen bg-[#0a0a0f] flex flex-col overflow-hidden">
+    <div className="h-screen bg-surface flex flex-col overflow-hidden">
       <DashboardHeader />
 
       {/* Week navigation bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-secondary shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-sm font-semibold text-zinc-200">Availability Tuner</h1>
+          <h1 className="text-sm font-semibold text-primary">Availability Tuner</h1>
           <div className="flex items-center gap-1">
             <button
               onClick={() => shiftWeek(-1)}
               disabled={!canGoPrev}
-              className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
+              className="px-2 py-1 text-xs text-secondary hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition"
             >
               &larr;
             </button>
-            <span className="text-sm text-zinc-300 min-w-[160px] text-center">
+            <span className="text-sm text-primary min-w-[160px] text-center">
               {formatWeekRange(weekStart)}
             </span>
             <button
               onClick={() => shiftWeek(1)}
               disabled={!canGoNext}
-              className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 disabled:opacity-30 disabled:cursor-not-allowed transition"
+              className="px-2 py-1 text-xs text-secondary hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition"
             >
               &rarr;
             </button>
@@ -219,7 +219,7 @@ export default function TunerPage() {
           {weekStart !== thisWeek && (
             <button
               onClick={() => setWeekStart(thisWeek)}
-              className="text-xs text-zinc-500 hover:text-zinc-300 underline transition"
+              className="text-xs text-muted hover:text-secondary underline transition"
             >
               This week
             </button>
@@ -228,7 +228,7 @@ export default function TunerPage() {
         <button
           onClick={handleRefresh}
           disabled={isRefreshing}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 rounded-lg hover:border-zinc-600 disabled:opacity-50 transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-secondary hover:text-primary border border-DEFAULT rounded-lg hover:border-surface-tertiary disabled:opacity-50 transition"
         >
           <svg
             className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`}
@@ -242,7 +242,7 @@ export default function TunerPage() {
 
       {!connected ? (
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-center text-zinc-500">
+          <div className="text-center text-muted">
             <p className="text-sm">Calendar not connected.</p>
             <p className="text-xs mt-1">Connect Google Calendar from your profile to use the tuner.</p>
           </div>
@@ -250,11 +250,11 @@ export default function TunerPage() {
       ) : (
         <div className="flex-1 flex overflow-hidden">
           {/* Chat panel — left side */}
-          <div className="w-80 flex-shrink-0 border-r border-zinc-800 flex flex-col">
+          <div className="w-80 flex-shrink-0 border-r border-secondary flex flex-col">
             {/* Chat messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {chatMessages.length === 0 && (
-                <div className="text-center text-zinc-600 text-xs py-8">
+                <div className="text-center text-muted text-xs py-8">
                   Ask Envoy about your availability. Click any time slot to ask about it.
                 </div>
               )}
@@ -267,7 +267,7 @@ export default function TunerPage() {
                     className={`max-w-[90%] rounded-2xl px-3 py-2.5 text-sm leading-relaxed ${
                       msg.role === "user"
                         ? "bg-indigo-600 text-white rounded-br-sm"
-                        : "bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-bl-sm"
+                        : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm"
                     }`}
                   >
                     {msg.role === "envoy" && (
@@ -281,14 +281,14 @@ export default function TunerPage() {
               ))}
               {isSending && chatMessages[chatMessages.length - 1]?.role === "user" && (
                 <div className="flex justify-start">
-                  <div className="bg-zinc-800 border border-zinc-700 rounded-2xl rounded-bl-sm px-3 py-2.5">
+                  <div className="bg-surface-secondary border border-DEFAULT rounded-2xl rounded-bl-sm px-3 py-2.5">
                     <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
                       Envoy
                     </div>
                     <div className="flex gap-1">
-                      <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce" />
-                      <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.1s]" />
-                      <div className="w-2 h-2 rounded-full bg-zinc-500 animate-bounce [animation-delay:0.2s]" />
+                      <div className="w-2 h-2 rounded-full bg-muted animate-bounce" />
+                      <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.1s]" />
+                      <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.2s]" />
                     </div>
                   </div>
                 </div>
@@ -297,7 +297,7 @@ export default function TunerPage() {
             </div>
 
             {/* Chat input */}
-            <div className="p-3 border-t border-zinc-800 shrink-0">
+            <div className="p-3 border-t border-secondary shrink-0">
               <div className="flex gap-2">
                 <textarea
                   ref={textareaRef}
@@ -311,12 +311,12 @@ export default function TunerPage() {
                   }}
                   placeholder="Ask about your availability..."
                   rows={1}
-                  className="flex-1 resize-none bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition"
+                  className="flex-1 resize-none bg-surface-secondary border border-DEFAULT rounded-xl px-3 py-2.5 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition"
                 />
                 <button
                   onClick={handleChatSend}
                   disabled={isSending || !chatInput.trim()}
-                  className="px-3 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600 text-white rounded-xl text-sm font-medium transition"
+                  className="px-3 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:hover:bg-accent text-white rounded-xl text-sm font-medium transition"
                 >
                   Send
                 </button>

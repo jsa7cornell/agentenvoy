@@ -42,21 +42,21 @@ const TOTAL_ROWS = (HOUR_END - HOUR_START) * 2;
 const ROW_HEIGHT = 28; // px per 30-min row
 
 function getScoreColor(score: number): string {
-  if (score <= 0) return "bg-emerald-600/60";
-  if (score === 1) return "bg-emerald-700/50";
-  if (score === 2) return "bg-amber-600/50";
-  if (score === 3) return "bg-orange-600/50";
-  if (score === 4) return "bg-red-600/45";
-  return "bg-red-700/60";
+  if (score <= 0) return "bg-emerald-100 dark:bg-emerald-600/60";
+  if (score === 1) return "bg-emerald-200 dark:bg-emerald-700/50";
+  if (score === 2) return "bg-amber-100 dark:bg-amber-600/50";
+  if (score === 3) return "bg-orange-100 dark:bg-orange-600/50";
+  if (score === 4) return "bg-red-100 dark:bg-red-600/45";
+  return "bg-red-200 dark:bg-red-700/60";
 }
 
 function getScoreBorder(score: number): string {
-  if (score <= 0) return "border-emerald-400";
-  if (score === 1) return "border-emerald-500";
-  if (score === 2) return "border-amber-400";
-  if (score === 3) return "border-orange-400";
-  if (score === 4) return "border-red-500";
-  return "border-red-600";
+  if (score <= 0) return "border-emerald-500 dark:border-emerald-400";
+  if (score === 1) return "border-emerald-600 dark:border-emerald-500";
+  if (score === 2) return "border-amber-500 dark:border-amber-400";
+  if (score === 3) return "border-orange-500 dark:border-orange-400";
+  if (score === 4) return "border-red-600 dark:border-red-500";
+  return "border-red-700 dark:border-red-600";
 }
 
 function getEventAccent(responseStatus?: string, isTransparent?: boolean): string {
@@ -67,9 +67,9 @@ function getEventAccent(responseStatus?: string, isTransparent?: boolean): strin
 }
 
 function getEventBg(responseStatus?: string, isTransparent?: boolean): string {
-  if (isTransparent || responseStatus === "declined") return "bg-zinc-700/70";
-  if (responseStatus === "tentative") return "bg-amber-900/70";
-  return "bg-indigo-900/80";
+  if (isTransparent || responseStatus === "declined") return "bg-zinc-200 dark:bg-zinc-700/70";
+  if (responseStatus === "tentative") return "bg-amber-50 dark:bg-amber-900/70";
+  return "bg-indigo-50 dark:bg-indigo-900/80";
 }
 
 function formatHour(hour: number): string {
@@ -216,29 +216,29 @@ export function WeeklyCalendar({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Score legend */}
-      <div className="flex items-center gap-4 px-4 py-2 border-b border-zinc-800 text-[11px] text-zinc-500 shrink-0">
-        <span className="text-zinc-400 font-medium">Scores:</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-600/60 border border-emerald-400" /> Open</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-600/50 border border-amber-400" /> Soft hold</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-orange-600/50 border border-orange-400" /> Friction</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-600/45 border border-red-500" /> Protected</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-700/60 border border-red-600" /> Immovable</span>
+      <div className="flex items-center gap-4 px-4 py-2 border-b border-secondary text-[11px] text-muted shrink-0">
+        <span className="text-secondary font-medium">Scores:</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-100 dark:bg-emerald-600/60 border border-emerald-500 dark:border-emerald-400" /> Open</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-100 dark:bg-amber-600/50 border border-amber-500 dark:border-amber-400" /> Soft hold</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-orange-100 dark:bg-orange-600/50 border border-orange-500 dark:border-orange-400" /> Friction</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-100 dark:bg-red-600/45 border border-red-600 dark:border-red-500" /> Protected</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-200 dark:bg-red-700/60 border border-red-700 dark:border-red-600" /> Immovable</span>
       </div>
 
       {/* Scrollable calendar area */}
       <div className="flex-1 overflow-auto">
         <div className="min-w-[700px]">
           {/* Header row: day labels + locations */}
-          <div className="grid sticky top-0 z-20 bg-[#0a0a0f] border-b border-zinc-800"
+          <div className="grid sticky top-0 z-20 bg-surface border-b border-secondary"
             style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
             <div className="p-2" /> {/* gutter */}
             {days.map((day) => {
               const loc = locationByDay[day];
               return (
-                <div key={day} className="px-1 py-2 text-center border-l border-zinc-800">
-                  <div className="text-xs font-medium text-zinc-300">{formatDayHeader(day)}</div>
+                <div key={day} className="px-1 py-2 text-center border-l border-secondary">
+                  <div className="text-xs font-medium text-primary">{formatDayHeader(day)}</div>
                   {loc && (
-                    <div className="mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700">
+                    <div className="mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] bg-surface-secondary text-secondary border border-DEFAULT">
                       {loc}
                     </div>
                   )}
@@ -255,7 +255,7 @@ export function WeeklyCalendar({
               {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (
                 <div
                   key={i}
-                  className="absolute right-2 text-[10px] text-zinc-500 leading-none"
+                  className="absolute right-2 text-[10px] text-muted leading-none"
                   style={{ top: i * 2 * ROW_HEIGHT - 6 }}
                 >
                   {formatHour(HOUR_START + i)}
@@ -267,21 +267,21 @@ export function WeeklyCalendar({
             {days.map((day) => (
               <div
                 key={day}
-                className="relative border-l border-zinc-800"
+                className="relative border-l border-secondary"
                 style={{ height: TOTAL_ROWS * ROW_HEIGHT }}
               >
                 {/* Slot backgrounds */}
                 {Array.from({ length: TOTAL_ROWS }, (_, row) => {
                   const mins = gridStartMin + row * 30;
                   const slot = slotIndex[`${day}-${mins}`];
-                  const scoreColor = slot ? getScoreColor(slot.score) : "bg-zinc-800/30";
+                  const scoreColor = slot ? getScoreColor(slot.score) : "bg-surface-secondary/30";
                   const scoreBorder = slot ? getScoreBorder(slot.score) : "";
                   const isHourBoundary = row % 2 === 0;
 
                   return (
                     <div
                       key={row}
-                      className={`absolute inset-x-0 ${scoreColor} ${isHourBoundary ? "border-t border-zinc-700/60" : ""} cursor-pointer hover:brightness-125 transition-all group`}
+                      className={`absolute inset-x-0 ${scoreColor} ${isHourBoundary ? "border-t border-DEFAULT/60" : ""} cursor-pointer hover:brightness-125 transition-all group`}
                       style={{ top: row * ROW_HEIGHT, height: ROW_HEIGHT }}
                       title={slot ? `Score ${slot.score}: ${slot.reason}${slot.eventSummary ? ` — ${slot.eventSummary}` : ""}` : "No data"}
                       onClick={() => {
@@ -298,9 +298,9 @@ export function WeeklyCalendar({
                       )}
                       {/* Tooltip on hover */}
                       {slot && (
-                        <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-[10px] text-zinc-300 whitespace-nowrap shadow-lg pointer-events-none">
+                        <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-surface-secondary border border-DEFAULT text-[10px] text-primary whitespace-nowrap shadow-lg pointer-events-none">
                           Score {slot.score}: {slot.reason}
-                          {slot.eventSummary && <span className="text-zinc-500"> — {slot.eventSummary}</span>}
+                          {slot.eventSummary && <span className="text-muted"> — {slot.eventSummary}</span>}
                         </div>
                       )}
                     </div>
@@ -325,11 +325,11 @@ export function WeeklyCalendar({
                       style={{ top, height, width, left }}
                     >
                       <div className="px-1.5 py-0.5">
-                        <div className="text-[10px] font-medium text-zinc-100 truncate leading-tight">
+                        <div className="text-[10px] font-medium text-primary truncate leading-tight">
                           {ev.summary}
                         </div>
                         {height > ROW_HEIGHT * 1.5 && ev.location && (
-                          <div className="text-[9px] text-zinc-400 truncate">{ev.location}</div>
+                          <div className="text-[9px] text-secondary truncate">{ev.location}</div>
                         )}
                       </div>
                     </div>
