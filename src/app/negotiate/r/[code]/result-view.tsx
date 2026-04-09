@@ -5,6 +5,8 @@ import { PhaseResearch } from "@/components/negotiator/phase-research";
 import { TranscriptExport } from "@/components/negotiator/transcript-export";
 import { SimpleMarkdown } from "@/components/negotiator/simple-markdown";
 import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
+import { generateTitle } from "@/lib/negotiator/generate-title";
+import { estimateMultiModelCost } from "@/lib/negotiator/types";
 import type {
   ResearchResult,
   Synthesis,
@@ -26,6 +28,7 @@ interface NegotiatorResultViewProps {
 
 export function NegotiatorResultView({
   question,
+  agents,
   research: rawResearch,
   syntheses: rawSyntheses,
   finalResponses: rawFinalResponses,
@@ -40,6 +43,20 @@ export function NegotiatorResultView({
 
   const latestSynthesis = syntheses[syntheses.length - 1];
   const agentLabels = latestSynthesis?.agentLabels ?? {};
+  const title = generateTitle(question);
+
+  // Cost estimate from models used
+  const models = (agents as Array<{ model?: string }>)
+    .map((a) => a.model)
+    .filter((m): m is string => !!m);
+  const cost = totalTokens > 0 && models.length > 0
+    ? estimateMultiModelCost(totalTokens, models)
+    : 0;
+  const costLabel = cost > 0
+    ? cost < 0.01
+      ? `$${cost.toFixed(4)}`
+      : `$${cost.toFixed(2)}`
+    : null;
 
   return (
     <div className="space-y-6">
@@ -56,8 +73,11 @@ export function NegotiatorResultView({
         </a>
       </div>
 
-      {/* Header */}
+      {/* Header — title + question + date */}
       <div>
+        <h2 className="text-sm font-semibold text-[var(--neg-text)] mb-1">
+          {title}
+        </h2>
         <h1 className="text-xl font-semibold text-[var(--neg-text)] mb-1">
           {question}
         </h1>
@@ -71,12 +91,20 @@ export function NegotiatorResultView({
         </p>
       </div>
 
-      {/* Final outcome — with transcript buttons inside */}
+      {/* Final outcome — cost at top, transcript at bottom */}
       {adminSummary && (
         <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
-          <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
-            Final Outcome
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
+              Final Outcome
+            </h2>
+            <div className="flex items-center gap-3 text-xs text-[var(--neg-text-muted)]">
+              {costLabel && (
+                <span title="Estimated total cost">{costLabel} est.</span>
+              )}
+              <span>{totalTokens.toLocaleString()} tokens</span>
+            </div>
+          </div>
           <SimpleMarkdown content={adminSummary} />
           <div className="pt-2 border-t border-purple-500/20">
             <TranscriptExport

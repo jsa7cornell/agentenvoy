@@ -7,8 +7,10 @@ import { DecisionInput } from "./decision-input";
 import { TranscriptExport } from "./transcript-export";
 import { SimpleMarkdown } from "./simple-markdown";
 import { NegotiatorLogo } from "./negotiator-logo";
-import { isOverBudget, budgetPercent } from "@/lib/negotiator/token-budget";
+import { isOverBudget } from "@/lib/negotiator/token-budget";
 import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
+import { estimateMultiModelCost } from "@/lib/negotiator/types";
+import { generateTitle } from "@/lib/negotiator/generate-title";
 import type {
   NegotiationConfig,
   ResearchResult,
@@ -25,6 +27,19 @@ type RunPhase =
   | "complete"
   | "error"
   | "budget-exceeded";
+
+// ─── Progress bar config ─────────────────────────────────
+const PHASE_CONFIG: Record<string, { label: string; step: number; estimate?: string }> = {
+  idle:               { label: "Starting...",                        step: 0 },
+  researching:        { label: "Agents writing proposals",           step: 1, estimate: "~30s" },
+  synthesizing:       { label: "Administrator comparing proposals",  step: 2, estimate: "~15s" },
+  "awaiting-decision":{ label: "Waiting for your decision",          step: 3 },
+  finalizing:         { label: "Agents responding to decision",      step: 4, estimate: "~20s" },
+  complete:           { label: "Complete",                            step: 5 },
+  error:              { label: "Error",                               step: 0 },
+  "budget-exceeded":  { label: "Budget exceeded",                     step: 0 },
+};
+const TOTAL_STEPS = 5;
 
 interface NegotiationRunnerProps {
   config: NegotiationConfig;
@@ -46,6 +61,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- used in error display section
   const [agentErrors, setAgentErrors] = useState<Record<string, string>>({});
   const [hostClarifications, setHostClarifications] = useState<string[]>([]);
+  const [phaseStartTime, setPhaseStartTime] = useState<number>(Date.now());
 
   // Streaming state
   const [streamingIds, setStreamingIds] = useState<Set<string>>(new Set());
@@ -55,12 +71,37 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
   const abortRef = useRef<AbortController | null>(null);
 
+  // Generated title from the question
+  const title = generateTitle(config.question);
+
   // Build the full shareable URL
   const shareUrl = shareCode
     ? typeof window !== "undefined"
       ? `${window.location.origin}/negotiate/r/${shareCode}`
       : `/negotiate/r/${shareCode}`
     : null;
+
+  // Cost estimate
+  const models = config.agents.map((a) => a.model);
+  const estimatedCost = estimateMultiModelCost(totalTokens, models);
+  const costLabel = estimatedCost > 0
+    ? `~$${estimatedCost < 0.01 ? estimatedCost.toFixed(4) : estimatedCost.toFixed(3)}`
+    : null;
+
+  // Track phase start for elapsed timer
+  useEffect(() => {
+    setPhaseStartTime(Date.now());
+  }, [phase]);
+
+  // Elapsed time display
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (phase === "awaiting-decision" || phase === "complete" || phase === "error") return;
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - phaseStartTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [phase, phaseStartTime]);
 
   // ─── Research phase: call all agents in parallel ────────
   const runResearch = useCallback(async (
@@ -87,7 +128,6 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
 
     const newAgentErrors: Record<string, string> = {};
 
-    // Build question with any additional context from host
     const fullQuestion = additionalContext
       ? `${config.question}\n\n## Host Feedback (Round ${currentRound})\n${additionalContext}`
       : config.question;
@@ -346,7 +386,13 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
       }),
     })
       .then((r) => r.json())
-      .then((data) => setShareCode(data.shareCode))
+      .then((data) => {
+        setShareCode(data.shareCode);
+        // Update the browser URL to the result page
+        if (data.shareCode && typeof window !== "undefined") {
+          window.history.pushState(null, "", `/negotiate/r/${data.shareCode}`);
+        }
+      })
       .catch(() => {/* non-blocking */})
       .finally(() => setSharing(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -356,7 +402,7 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   useEffect(() => {
     if (!shareUrl) return;
     setTranscript((prev) => {
-      if (prev.includes(shareUrl)) return prev; // already appended
+      if (prev.includes(shareUrl)) return prev;
       return prev + `---\n\n**Shareable link:** ${shareUrl}\n`;
     });
   }, [shareUrl]);
@@ -389,74 +435,108 @@ export function NegotiationRunner({ config, onReset }: NegotiationRunnerProps) {
   }
 
   // ─── Render ─────────────────────────────────────────────
-  const pct = budgetPercent(totalTokens, config.tokenBudget);
   const agentLabels = synthesis?.agentLabels ?? {};
+  const phaseInfo = PHASE_CONFIG[phase] || PHASE_CONFIG.idle;
+  const progressPct = Math.min(100, (phaseInfo.step / TOTAL_STEPS) * 100);
+  const completedAgents = config.agents.length - streamingIds.size;
 
   return (
     <div className="space-y-6">
-      {/* Status bar with animated logo */}
-      <div className="flex items-center gap-3">
-        <NegotiatorLogo
-          mode={
-            phase === "researching" || phase === "finalizing" ? "debating"
-            : phase === "synthesizing" ? "synthesizing"
-            : phase === "complete" ? "complete"
-            : "idle"
-          }
-          size={32}
-          className="shrink-0 text-[var(--neg-text-muted)]"
-        />
-        <div className="flex-1 h-2 rounded-full bg-[var(--neg-surface-2)] overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${
-              pct > 90
-                ? "bg-[var(--neg-red)]"
-                : pct > 60
-                  ? "bg-[var(--neg-yellow)]"
-                  : "bg-[var(--neg-accent)]"
-            }`}
-            style={{ width: `${pct}%` }}
-          />
+      {/* Progress header */}
+      <div className="space-y-2">
+        {/* Title + New button */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-[var(--neg-text)] truncate">
+            {title}
+          </h2>
+          <button
+            onClick={onReset}
+            className="text-xs text-[var(--neg-text-muted)] hover:text-[var(--neg-text)] transition whitespace-nowrap shrink-0 ml-3"
+          >
+            New ↺
+          </button>
         </div>
-        <span className="text-xs text-[var(--neg-text-muted)] whitespace-nowrap">
-          {round > 1 ? `R${round} · ` : ""}{totalTokens.toLocaleString()} / {(config.tokenBudget / 1000).toFixed(0)}k tokens
-        </span>
-        <button
-          onClick={onReset}
-          className="text-xs text-[var(--neg-text-muted)] hover:text-[var(--neg-text)] transition whitespace-nowrap"
-        >
-          New ↺
-        </button>
+
+        {/* Progress bar */}
+        <div className="flex items-center gap-3">
+          <NegotiatorLogo
+            mode={
+              phase === "researching" || phase === "finalizing" ? "debating"
+              : phase === "synthesizing" ? "synthesizing"
+              : phase === "complete" ? "complete"
+              : "idle"
+            }
+            size={24}
+            className="shrink-0 text-[var(--neg-text-muted)]"
+          />
+          <div className="flex-1 h-1.5 rounded-full bg-[var(--neg-surface-2)] overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${
+                phase === "complete"
+                  ? "bg-[var(--neg-green)]"
+                  : phase === "error"
+                    ? "bg-[var(--neg-red)]"
+                    : "bg-[var(--neg-accent)]"
+              }`}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Status text */}
+        <div className="flex items-center justify-between text-xs text-[var(--neg-text-muted)]">
+          <span>
+            {phaseInfo.label}
+            {phase === "researching" && completedAgents < config.agents.length
+              ? ` (${completedAgents}/${config.agents.length})`
+              : ""}
+          </span>
+          <span>
+            {phase !== "complete" && phase !== "awaiting-decision" && phase !== "error" && elapsed > 0
+              ? `${elapsed}s`
+              : ""}
+            {phase !== "complete" && phaseInfo.estimate && elapsed === 0
+              ? phaseInfo.estimate
+              : ""}
+            {round > 1 ? ` · Round ${round}` : ""}
+          </span>
+        </div>
       </div>
 
-      {/* Final outcome — includes share link and transcript buttons */}
+      {/* Final outcome — cost at top, share + download at bottom */}
       {adminSummary && (
         <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-[var(--neg-purple)] uppercase tracking-wider">
               Final Outcome
             </h2>
+            <div className="flex items-center gap-3 text-xs text-[var(--neg-text-muted)]">
+              {costLabel && (
+                <span title="Estimated total cost">{costLabel} est.</span>
+              )}
+              <span>{totalTokens.toLocaleString()} tokens</span>
+            </div>
+          </div>
+          <SimpleMarkdown content={adminSummary} />
+          {/* Share + transcript export at bottom */}
+          <div className="pt-2 border-t border-purple-500/20 flex flex-wrap items-center gap-2">
+            <TranscriptExport
+              transcript={transcript}
+              tokensUsed={totalTokens}
+              tokenBudget={config.tokenBudget}
+              models={models}
+              inline
+            />
             {shareUrl && (
               <a
                 href={shareUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs text-[var(--neg-accent)] hover:underline font-medium"
+                className="px-3 py-1.5 rounded border border-[var(--neg-border)] text-xs hover:bg-[var(--neg-surface-2)] transition"
               >
-                Share &rarr;
+                Share
               </a>
             )}
-          </div>
-          <SimpleMarkdown content={adminSummary} />
-          {/* Transcript export inside final outcome box */}
-          <div className="pt-2 border-t border-purple-500/20">
-            <TranscriptExport
-              transcript={transcript}
-              tokensUsed={totalTokens}
-              tokenBudget={config.tokenBudget}
-              models={config.agents.map((a) => a.model)}
-              inline
-            />
           </div>
         </div>
       )}
