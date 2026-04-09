@@ -26,23 +26,23 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <Providers>
-          <div className="bg-amber-900/30 border-b border-amber-700/40 px-4 py-1.5 text-center flex-shrink-0">
-            <span className="text-xs text-amber-300">
+          <div className="bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-700/40 px-4 py-1.5 text-center flex-shrink-0">
+            <span className="text-xs text-amber-700 dark:text-amber-300">
               Prototype — email and other features still in development
             </span>
           </div>
           {children}
-          <footer className="relative z-10 py-4 text-center text-xs text-zinc-600 space-x-4">
-            <a href="/privacy" className="hover:text-zinc-400 transition">Privacy</a>
+          <footer className="relative z-10 py-4 text-center text-xs text-muted space-x-4">
+            <a href="/privacy" className="hover:text-secondary transition">Privacy</a>
             <span>&middot;</span>
-            <a href="/terms" className="hover:text-zinc-400 transition">Terms</a>
+            <a href="/terms" className="hover:text-secondary transition">Terms</a>
             <span>&middot;</span>
-            <a href="/faq" className="hover:text-zinc-400 transition">How It Works</a>
+            <a href="/faq" className="hover:text-secondary transition">How It Works</a>
           </footer>
         </Providers>
       </body>

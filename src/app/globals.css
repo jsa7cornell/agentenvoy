@@ -3,8 +3,52 @@
 @tailwind utilities;
 
 :root {
+  /* Legacy (used by body) */
+  --background: #ffffff;
+  --foreground: #18181b;
+
+  /* Surfaces */
+  --surface: #ffffff;
+  --surface-secondary: #f4f4f5;
+  --surface-tertiary: #e4e4e7;
+  --surface-inset: #fafafa;
+
+  /* Text */
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
+  --text-inverted: #fafafa;
+
+  /* Borders */
+  --border: #e4e4e7;
+  --border-secondary: #d4d4d8;
+
+  /* Accent */
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-surface: #eef2ff;
+}
+
+.dark {
   --background: #0a0a0f;
   --foreground: #e8e8f0;
+
+  --surface: #0a0a0f;
+  --surface-secondary: #27272a;
+  --surface-tertiary: #3f3f46;
+  --surface-inset: #18181b;
+
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --text-inverted: #18181b;
+
+  --border: #3f3f46;
+  --border-secondary: #27272a;
+
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-surface: rgba(99, 102, 241, 0.15);
 }
 
 body {
