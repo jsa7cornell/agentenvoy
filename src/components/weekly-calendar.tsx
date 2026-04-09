@@ -42,21 +42,21 @@ const TOTAL_ROWS = (HOUR_END - HOUR_START) * 2;
 const ROW_HEIGHT = 28; // px per 30-min row
 
 function getScoreColor(score: number): string {
-  if (score <= 0) return "bg-emerald-900/40";
-  if (score === 1) return "bg-emerald-900/25";
-  if (score === 2) return "bg-amber-900/30";
-  if (score === 3) return "bg-orange-900/30";
-  if (score === 4) return "bg-red-900/25";
-  return "bg-red-950/40";
+  if (score <= 0) return "bg-emerald-700/50";
+  if (score === 1) return "bg-emerald-800/40";
+  if (score === 2) return "bg-amber-700/40";
+  if (score === 3) return "bg-orange-700/40";
+  if (score === 4) return "bg-red-700/35";
+  return "bg-red-800/50";
 }
 
 function getScoreBorder(score: number): string {
-  if (score <= 0) return "border-emerald-600";
-  if (score === 1) return "border-emerald-700";
-  if (score === 2) return "border-amber-600";
-  if (score === 3) return "border-orange-600";
-  if (score === 4) return "border-red-700";
-  return "border-red-900";
+  if (score <= 0) return "border-emerald-500";
+  if (score === 1) return "border-emerald-600";
+  if (score === 2) return "border-amber-500";
+  if (score === 3) return "border-orange-500";
+  if (score === 4) return "border-red-600";
+  return "border-red-700";
 }
 
 function getEventAccent(responseStatus?: string, isTransparent?: boolean): string {
@@ -218,11 +218,11 @@ export function WeeklyCalendar({
       {/* Score legend */}
       <div className="flex items-center gap-4 px-4 py-2 border-b border-zinc-800 text-[11px] text-zinc-500 shrink-0">
         <span className="text-zinc-400 font-medium">Scores:</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-900/60 border border-emerald-700" /> Open</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-900/50 border border-amber-600" /> Soft hold</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-orange-900/50 border border-orange-600" /> Friction</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-900/40 border border-red-700" /> Protected</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-950/60 border border-red-900" /> Immovable</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-700/50 border border-emerald-500" /> Open</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-700/40 border border-amber-500" /> Soft hold</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-orange-700/40 border border-orange-500" /> Friction</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-700/35 border border-red-600" /> Protected</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-800/50 border border-red-700" /> Immovable</span>
       </div>
 
       {/* Scrollable calendar area */}

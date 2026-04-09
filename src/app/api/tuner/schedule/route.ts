@@ -26,12 +26,11 @@ export async function GET(req: NextRequest) {
   if (weekStartParam) {
     weekStart = new Date(weekStartParam + "T00:00:00");
   } else {
-    // Default to current Monday
+    // Default to current Sunday
     const now = new Date();
-    const day = now.getDay();
-    const diff = day === 0 ? -6 : 1 - day; // Monday = 1
+    const day = now.getDay(); // 0=Sun
     weekStart = new Date(now);
-    weekStart.setDate(now.getDate() + diff);
+    weekStart.setDate(now.getDate() - day);
     weekStart.setHours(0, 0, 0, 0);
   }
   const weekEnd = new Date(weekStart);
