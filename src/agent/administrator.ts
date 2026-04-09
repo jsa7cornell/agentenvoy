@@ -96,7 +96,7 @@ export async function parsePreferences(
     system: `You parse natural language scheduling preferences into structured JSON. Extract:
 - preferredDays: array of day names or "any"
 - preferredTimes: array of time ranges like "morning", "afternoon", "9am-12pm"
-- format: "phone" | "video" | "in-person" | "any"
+- format: "phone" | "video" | "in-person" | "any" (aliases: "vc", "video conference", "videoconference", "zoom", "meet" → "video"; "call" alone without video/vc qualifier → "phone"; "coffee", "lunch", "drinks" → "in-person")
 - duration: number in minutes (default 30)
 - location: string or null
 - constraints: array of strings (things to avoid)
