@@ -608,6 +608,17 @@ export function computeSchedule(
   const buffers: CompiledBuffer[] = compiled?.buffers ?? [];
   const priorityBuckets: CompiledPriorityBucket[] = compiled?.priorityBuckets ?? [];
 
+  // Diagnostic logging for buffer/priority debugging
+  if (compiled) {
+    const eventsWithLocation = events.filter((e) => !!e.location).length;
+    console.log(`[computeSchedule] compiled: ${compiled.blockedWindows.length} blocked, ${buffers.length} buffers, ${priorityBuckets.length} priorities | ${events.length} events (${eventsWithLocation} with location)`);
+    if (buffers.length > 0) {
+      console.log(`[computeSchedule] buffers:`, JSON.stringify(buffers));
+    }
+  } else {
+    console.log(`[computeSchedule] No compiled rules found on preferences`);
+  }
+
   if (compiled) {
     blockedWindows.push(...(compiled.blockedWindows ?? []));
     if (compiled.businessHoursStart !== undefined) bizStart = compiled.businessHoursStart;
