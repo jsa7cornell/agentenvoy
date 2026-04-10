@@ -714,7 +714,7 @@ import { computeSchedule, computeInputHash, type ScoredSlot, type UserPreference
  * Get the computed schedule for a user, recomputing only if inputs changed.
  * This is the main entry point for both the slots endpoint and LLM prompts.
  */
-export async function getOrComputeSchedule(userId: string): Promise<{
+export async function getOrComputeSchedule(userId: string, options?: { forceRefresh?: boolean }): Promise<{
   slots: ScoredSlot[];
   events: CalendarEvent[];
   timezone: string;
@@ -762,6 +762,13 @@ export async function getOrComputeSchedule(userId: string): Promise<{
       // Update local prefs so recomputation uses the cleaned state
       if (prefs.explicit) delete (prefs.explicit as Record<string, unknown>).currentLocation;
     }
+  }
+
+  // Force-clear calendar cache if requested (e.g., host said "check again")
+  if (options?.forceRefresh) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (prisma as any).calendarCache.deleteMany({ where: { userId } });
+    await invalidateSchedule(userId);
   }
 
   // Get cached calendar events (syncs if stale)

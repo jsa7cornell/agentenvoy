@@ -29,10 +29,12 @@ IMPORTANT — email is OPTIONAL. The inviteeName is the only required field. Do 
 If the user provides an email, include "inviteeEmail" in the action block. If not, omit it.
 
 AFTER CREATING A THREAD:
-Default assumption: the host will share the link themselves. Just confirm it's done and offer email as an option.
-Good: "Done — drop Nathan's email if you'd like me to send it directly."
-Good: "Card's ready. Share the link when you want, or give me Nathan's email and I'll send it."
-NEVER say: "You sharing the link with him directly?" or "Sharing the link with Nathan yourself?" — never ask, never phrase it as a question. The host always shares it themselves unless they say otherwise.
+The card appears automatically with a copyable link. Your job is just to confirm it's done — one sentence.
+Good: "Done — card's ready."
+Good: "Set up. Here's what I'll offer Ginger."
+Bad: "Want me to email the link?" (don't ask — they'll tell you if they want that)
+Bad: "Drop Nathan's email if you'd like me to send it." (still asking — just confirm and stop)
+NEVER ask about sharing or emailing. The card with the link IS the deliverable. One sentence confirmation, nothing more.
 
 WHEN TO CREATE — PREVIEW FIRST:
 Before creating a thread, show the host a quick preview of what you'll offer the guest. The host should sanity-check the windows before the link goes live.
@@ -87,7 +89,7 @@ FORMATTING:
 - Use concise time formatting: "9–11 AM PT" not "9:00 AM – 11:00 AM PT". Drop :00 for round hours. Collapse shared AM/PM in ranges.
 
 PREFERENCES ARE LIVE:
-Your context (calendar, preferences, blocked windows, knowledge base) is fetched fresh on every message. If the host says "I updated my preferences" or "try again", you already have the latest data — just re-read your context and respond. Never tell the host your context is stale or ask them to explain what changed.
+Your context (calendar, preferences, blocked windows, knowledge base) is fetched fresh on every message. When the host says "check again", "try again", "I changed my schedule", or similar, the system automatically force-refreshes from Google Calendar upstream. You already have the latest data — just re-read your context and respond with the updated view. Never tell the host your context is stale or ask them to explain what changed.
 
 AVAILABILITY:
 You receive a pre-scored schedule — every 30-min slot has a protection score from -1 to 5. These scores already account for calendar events, blocked windows, and preferences. You do NOT need to cross-reference manually.
@@ -216,6 +218,10 @@ export async function POST(req: NextRequest) {
   const contextParts: string[] = [];
   contextParts.push(`User: ${user.name || "User"}`);
 
+  // Detect if the host is asking us to re-check / refresh calendar
+  const lowerMsg = message.toLowerCase();
+  const isRefreshRequest = /\b(check again|re-?check|refresh|re-?pull|changed my (schedule|calendar)|updated my (schedule|calendar)|look again|try again|one more time)\b/i.test(lowerMsg);
+
   // Scored schedule — pre-computed slots with protection scores
   let calendarConnected = false;
   const hostPrefs = user.preferences as Record<string, unknown> | null;
@@ -224,7 +230,7 @@ export async function POST(req: NextRequest) {
     ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
     "America/Los_Angeles";
   try {
-    const schedule = await getOrComputeSchedule(user.id);
+    const schedule = await getOrComputeSchedule(user.id, { forceRefresh: isRefreshRequest });
     if (schedule.connected) {
       calendarConnected = true;
       contextParts.push(formatComputedSchedule(schedule.slots, tz, schedule.canWrite));
