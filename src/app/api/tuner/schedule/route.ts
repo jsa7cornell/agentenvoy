@@ -92,6 +92,7 @@ export async function GET(req: NextRequest) {
     locationByDay,
     timezone: schedule.timezone,
     connected: schedule.connected,
+    calendars: schedule.calendars,
   });
 }
 

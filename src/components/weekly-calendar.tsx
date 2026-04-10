@@ -32,6 +32,7 @@ interface WeeklyCalendarProps {
   locationByDay: Record<string, string | null>;
   timezone: string;
   weekStart: string;
+  primaryCalendar?: string;
   onSlotClick?: (label: string) => void;
 }
 
@@ -162,6 +163,7 @@ export function WeeklyCalendar({
   locationByDay,
   timezone,
   weekStart,
+  primaryCalendar,
   onSlotClick,
 }: WeeklyCalendarProps) {
   // Build array of 7 day strings
@@ -328,6 +330,9 @@ export function WeeklyCalendar({
                         <div className="text-[10px] font-medium text-primary truncate leading-tight">
                           {ev.summary}
                         </div>
+                        {primaryCalendar && ev.calendar && ev.calendar !== primaryCalendar && (
+                          <div className="text-[9px] text-muted truncate italic">{ev.calendar}</div>
+                        )}
                         {height > ROW_HEIGHT * 1.5 && ev.location && (
                           <div className="text-[9px] text-secondary truncate">{ev.location}</div>
                         )}

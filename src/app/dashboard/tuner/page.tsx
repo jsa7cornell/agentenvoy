@@ -33,6 +33,7 @@ export default function TunerPage() {
   const [locationByDay, setLocationByDay] = useState<Record<string, string | null>>({});
   const [timezone, setTimezone] = useState("America/Los_Angeles");
   const [connected, setConnected] = useState(false);
+  const [calendars, setCalendars] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -50,6 +51,7 @@ export default function TunerPage() {
       setLocationByDay(data.locationByDay || {});
       setTimezone(data.timezone || "America/Los_Angeles");
       setConnected(data.connected ?? false);
+      setCalendars(data.calendars || []);
     } catch (e) {
       console.error("Failed to fetch tuner schedule:", e);
     } finally {
@@ -63,11 +65,11 @@ export default function TunerPage() {
     fetchSchedule();
   }, [status, fetchSchedule]);
 
-  // Week navigation — up to 4 weeks out
+  // Week navigation — up to 8 weeks out (matches scoring horizon)
   const thisWeek = getSunday(new Date());
   const maxWeekStart = (() => {
     const d = new Date(thisWeek + "T12:00:00");
-    d.setDate(d.getDate() + 21);
+    d.setDate(d.getDate() + 49);
     return d.toISOString().slice(0, 10);
   })();
   const canGoPrev = weekStart > thisWeek;
@@ -175,6 +177,7 @@ export default function TunerPage() {
               locationByDay={locationByDay}
               timezone={timezone}
               weekStart={weekStart}
+              primaryCalendar={calendars[0]}
             />
           </div>
         </div>
