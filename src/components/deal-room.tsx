@@ -728,15 +728,44 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             </div>
           </div>
         ) : (
-          messages.map((msg) => {
+          messages.map((msg, idx) => {
+            // Date separator — show on first message of each new day
+            let dateSeparator: React.ReactNode = null;
+            if (msg.createdAt) {
+              const msgDate = new Date(msg.createdAt).toLocaleDateString("en-US", {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+              });
+              const prevDate = idx > 0 && messages[idx - 1]?.createdAt
+                ? new Date(messages[idx - 1].createdAt!).toLocaleDateString("en-US", {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                  })
+                : null;
+              if (idx === 0 || msgDate !== prevDate) {
+                dateSeparator = (
+                  <div className="flex items-center gap-3 py-2">
+                    <div className="flex-1 border-t border-secondary" />
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted">{msgDate}</span>
+                    <div className="flex-1 border-t border-secondary" />
+                  </div>
+                );
+              }
+            }
+
             // Host notes — only visible to host
             if (msg.role === "host_note") {
               if (!isHost) return null;
               return (
-                <div key={msg.id} className="flex justify-end">
-                  <div className="max-w-[70%] rounded-lg px-3 py-1.5 text-xs bg-amber-900/30 border border-amber-700/40 text-amber-300">
-                    <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-500 mr-1.5">Note</span>
-                    {msg.content}
+                <div key={msg.id}>
+                  {dateSeparator}
+                  <div className="flex justify-end">
+                    <div className="max-w-[70%] rounded-lg px-3 py-1.5 text-xs bg-amber-900/30 border border-amber-700/40 text-amber-300">
+                      <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-500 mr-1.5">Note</span>
+                      {msg.content}
+                    </div>
                   </div>
                 </div>
               );
@@ -779,6 +808,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
             return (
               <div key={msg.id}>
+                {dateSeparator}
                 <div className={`flex ${isOwnMessage ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${messageStyle}`}>
                     {senderLabel && (
