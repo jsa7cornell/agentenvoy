@@ -16,6 +16,7 @@ function loadPlaybook(filename: string): string {
 }
 
 const playbooks: Record<string, string> = {
+  groundTruth: loadPlaybook("ground-truth.md"),
   globalTaste: loadPlaybook("global-taste.md"),
   persona: loadPlaybook("persona.md"),
   negotiation: loadPlaybook("negotiation.md"),
@@ -66,7 +67,12 @@ export interface ComposeOptions {
 export function composeSystemPrompt(options: ComposeOptions): string {
   const sections: string[] = [];
 
-  // Layer 0: Global Taste (platform defaults)
+  // Layer 0: Ground Truth Protocol (loaded FIRST — deterministic data rules)
+  if (playbooks.groundTruth) {
+    sections.push(playbooks.groundTruth);
+  }
+
+  // Layer 0b: Global Taste (platform defaults)
   if (playbooks.globalTaste) {
     sections.push(playbooks.globalTaste);
   }
@@ -222,11 +228,11 @@ function formatRules(rules: Record<string, unknown>): string {
   const lines: string[] = ["Special rules for this negotiation:"];
 
   if (rules.format) {
-    lines.push(`- Format (decided by host): ${rules.format}. State as fact — do NOT ask the guest about format.`);
+    lines.push(`- [GROUND TRUTH] Format (decided by host): ${rules.format}. State as fact — do NOT ask the guest about format.`);
   }
 
   if (rules.duration) {
-    lines.push(`- Duration (decided by host): ${rules.duration} minutes. State as fact — do NOT ask the guest about duration.`);
+    lines.push(`- [GROUND TRUTH] Duration (decided by host): ${rules.duration} minutes. State as fact — do NOT ask the guest about duration.`);
   }
 
   const conditional = rules.conditionalRules as Array<{ condition: string; rule: string }> | undefined;
@@ -269,13 +275,15 @@ function buildSessionContext(options: ComposeOptions): string {
     weekday: "short",
     month: "short",
     day: "numeric",
+    year: "numeric",
     hour: "numeric",
     minute: "2-digit",
     timeZoneName: "short",
     timeZone: tz,
   });
-  parts.push(`Current time: ${currentTimeStr}`);
-  parts.push(`Quick reference: PDT = UTC-7, EDT = UTC-4, CDT = UTC-5, MDT = UTC-6, BST = UTC+1, JST = UTC+9`);
+  parts.push(`[GROUND TRUTH] Current time: ${currentTimeStr}`);
+  parts.push(`[GROUND TRUTH] Current year: ${now.toLocaleString("en-US", { year: "numeric", timeZone: tz })}`);
+  parts.push(`[GROUND TRUTH] Quick reference: PDT = UTC-7, EDT = UTC-4, CDT = UTC-5, MDT = UTC-6, BST = UTC+1, JST = UTC+9`);
 
   if (options.isGroupEvent) {
     const participants = options.eventParticipants || [];
@@ -292,7 +300,7 @@ function buildSessionContext(options: ComposeOptions): string {
 
   if (options.guestName) parts.push(`Guest: ${options.guestName}`);
   if (options.guestEmail) parts.push(`Guest email: ${options.guestEmail}`);
-  if (options.guestTimezone) parts.push(`Guest timezone (from browser): ${options.guestTimezone} — confirm with guest if different from host timezone`);
+  if (options.guestTimezone) parts.push(`[GROUND TRUTH] Guest timezone (from browser): ${options.guestTimezone} — confirm with guest if different from host timezone`);
   if (options.topic) parts.push(`Topic: ${options.topic}`);
 
   if (options.rules && Object.keys(options.rules).length > 0) {
@@ -321,12 +329,12 @@ function buildSessionContext(options: ComposeOptions): string {
     });
 
     parts.push(
-      `Available calendar slots for the host (${tzLabel}). IMPORTANT — use these day names and times exactly as written; do not recalculate days of the week:\n${options.availableSlots
+      `[GROUND TRUTH] Available calendar slots for the host (${tzLabel}). Copy these day names, dates, and year exactly — do not recompute:\n${options.availableSlots
         .slice(0, 20)
         .map((s) => {
           const start = new Date(s.start);
           const end = new Date(s.end);
-          const day = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: tz }).format(start);
+          const day = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: tz }).format(start);
           const startTime = timeFmt.format(start);
           const endTime = timeFmt.format(end);
           return `  ${day} ${startTime}–${endTime}`;
@@ -363,6 +371,7 @@ export function formatCalendarContext(ctx: CalendarContext): string {
     weekday: "short",
     month: "short",
     day: "numeric",
+    year: "numeric",
     timeZone: tz,
   });
 
@@ -378,7 +387,7 @@ export function formatCalendarContext(ctx: CalendarContext): string {
   const dateKeys = Array.from(dayMap.keys());
   const dateMappingLines: string[] = [];
   if (dateKeys.length > 0) {
-    // Also generate labels for dates between/around events (14-day window)
+    // Also generate labels for dates between/around events (21-day window)
     const allDates = new Set<string>();
     const start = new Date(ctx.events[0]?.start ?? new Date());
     for (let i = 0; i < 21; i++) {
@@ -392,12 +401,12 @@ export function formatCalendarContext(ctx: CalendarContext): string {
 
   // Build daily view — also include days with no events in the range
   const lines: string[] = [
-    `Host's calendar (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz}), calendars checked: ${ctx.calendars.join(", ")}.`,
+    `[GROUND TRUTH] Host's calendar (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz}), calendars checked: ${ctx.calendars.join(", ")}.`,
     ``,
-    `DATE REFERENCE (system-computed, ALWAYS correct):`,
+    `[GROUND TRUTH] DATE REFERENCE (system-computed, ALWAYS correct — includes year):`,
     ...(dateMappingLines.length > 0 ? dateMappingLines.map(d => `  ${d}`) : [`  (no events in range)`]),
     ``,
-    `CRITICAL: When referring to ANY date, copy the day-of-week from the DATE REFERENCE above. NEVER compute day-of-week yourself — LLMs get this wrong for future dates. If you write "Tuesday, Apr 15" but the reference says "Wed, Apr 15", you are WRONG. Always check.`,
+    `CRITICAL: When referring to ANY date, copy the day-of-week AND year from the DATE REFERENCE above. NEVER compute day-of-week or year yourself — LLMs get this wrong. If you write "Tuesday, Apr 15" but the reference says "Wed, Apr 15, 2026", you are WRONG. Always check the reference before writing any date.`,
     ``,
     `You decide what's available based on these events + the host knowledge base. No pre-computed slots — reason holistically.`,
     `When building a CONFIRMATION_PROPOSAL, use UTC offset "${utcOffset}" and timezone "${tz}" — e.g., "2026-04-03T16:00:00${utcOffset}".`,
@@ -466,11 +475,12 @@ export function formatComputedSchedule(
   // Apply event-level overrides if provided
   const finalSlots = linkRules ? applyEventOverrides(slots, linkRules, tz) : slots;
 
-  // Group by day
+  // Group by day (include year in format)
   const dayFmt = new Intl.DateTimeFormat("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",
+    year: "numeric",
     timeZone: tz,
   });
 
@@ -510,14 +520,14 @@ export function formatComputedSchedule(
   }
 
   const lines: string[] = [
-    `Schedule (${tzLabel}, ${utcOffset}):`,
+    `[GROUND TRUTH] Schedule (${tzLabel}, ${utcOffset}):`,
     ``,
-    `DATE REFERENCE (system-computed, ALWAYS correct):`,
+    `[GROUND TRUTH] DATE REFERENCE (system-computed, ALWAYS correct — includes year):`,
     ...(dateMappingLines.length > 0 ? dateMappingLines.map(d => `  ${d}`) : [`  (no slots)`]),
     ``,
-    `CRITICAL: When referring to ANY date, copy the day-of-week from the DATE REFERENCE above. NEVER compute day-of-week yourself — LLMs get this wrong for future dates. Always check the reference.`,
+    `CRITICAL: When referring to ANY date, copy the day-of-week AND year from the DATE REFERENCE above. NEVER compute day-of-week or year yourself — LLMs get this wrong. Always check the reference before writing any date.`,
     ``,
-    `Use UTC offset "${utcOffset}" and timezone "${tz}" in CONFIRMATION_PROPOSAL — e.g., "2026-04-03T16:00:00${utcOffset}".`,
+    `[GROUND TRUTH] Use UTC offset "${utcOffset}" and timezone "${tz}" in CONFIRMATION_PROPOSAL — e.g., "2026-04-03T16:00:00${utcOffset}".`,
     `Protection scores: -2=exclusive (ONLY these), -1=preferred (offer first), 0=explicitly free, 1=open, 2=soft hold [low confidence], 3=moderate friction [low confidence], 4=protected (host only), 5=immovable.`,
     `Low-confidence scores (2,3): adjust based on context. Phone format = -1 friction. VIP guest = -1 friction.`,
   ];
