@@ -1,7 +1,7 @@
 /**
  * Availability Scoring Engine
  *
- * Computes protection scores for 30-min slots across a 2-week window.
+ * Computes protection scores for 30-min slots across an 8-week window.
  * Scores range from -2 (exclusive) to 5 (immovable).
  *
  * Base scores are deterministic given calendar events + preferences.
@@ -589,7 +589,7 @@ export function extractTemporalOverrides(
 // --- Schedule Computation ---
 
 /**
- * Compute the full 2-week schedule of scored 30-min slots.
+ * Compute the full 8-week schedule of scored 30-min slots.
  * Returns slots for business hours only (weekends and off-hours get score 4 but are excluded from output).
  */
 export function computeSchedule(
@@ -639,7 +639,7 @@ export function computeSchedule(
   }
 
   const now = new Date();
-  const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const horizon = new Date(now.getTime() + 56 * 24 * 60 * 60 * 1000); // 8 weeks
   const slots: ScoredSlot[] = [];
 
   // Snap to next :00 or :30 boundary
@@ -653,7 +653,7 @@ export function computeSchedule(
     current.setSeconds(0, 0);
   }
 
-  while (current < twoWeeks) {
+  while (current < horizon) {
     const { hour, isWeekend } = getLocalParts(current, tz);
 
     // Skip weekends and outside business hours entirely — don't include in output

@@ -474,7 +474,7 @@ export async function syncCalendar(userId: string, activeCalendarIds?: string[])
 }
 
 /**
- * Full sync: fetch all events in 2-week window, get initial syncToken.
+ * Full sync: fetch all events in 8-week window, get initial syncToken.
  */
 async function fullSync(
   client: ReturnType<typeof google.calendar>,
@@ -482,7 +482,7 @@ async function fullSync(
   hostEmail: string
 ): Promise<{ events: StoredCalendarEvent[]; syncToken?: string }> {
   const now = new Date();
-  const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const horizon = new Date(now.getTime() + 56 * 24 * 60 * 60 * 1000); // 8 weeks
   const events: StoredCalendarEvent[] = [];
   let pageToken: string | undefined;
   let syncToken: string | undefined;
@@ -491,7 +491,7 @@ async function fullSync(
     const { data } = await client.events.list({
       calendarId: cal.id,
       timeMin: now.toISOString(),
-      timeMax: twoWeeks.toISOString(),
+      timeMax: horizon.toISOString(),
       singleEvents: true,
       orderBy: "startTime",
       maxResults: 250,
@@ -701,8 +701,8 @@ export async function getCachedCalendarContext(
     console.log("[getCachedCalendarContext] Falling back to live fetch:", e);
     // Fallback to live fetch if sync fails
     const now = new Date();
-    const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-    return getCalendarContext(userId, now, twoWeeks, timezone);
+    const horizon = new Date(now.getTime() + 56 * 24 * 60 * 60 * 1000); // 8 weeks
+    return getCalendarContext(userId, now, horizon, timezone);
   }
 }
 
