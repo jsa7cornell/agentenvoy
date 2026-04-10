@@ -28,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased h-screen flex flex-col overflow-hidden`}
       >
         <Providers>
           <div className="bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-700/40 px-4 py-1.5 text-center flex-shrink-0">
@@ -36,8 +36,10 @@ export default function RootLayout({
               Prototype — email and other features still in development
             </span>
           </div>
-          {children}
-          <footer className="relative z-10 py-4 text-center text-xs text-muted space-x-4">
+          <div className="flex-1 min-h-0 flex flex-col overflow-auto">
+            {children}
+          </div>
+          <footer className="relative z-10 py-4 text-center text-xs text-muted space-x-4 flex-shrink-0">
             <a href="/privacy" className="hover:text-secondary transition">Privacy</a>
             <span>&middot;</span>
             <a href="/terms" className="hover:text-secondary transition">Terms</a>

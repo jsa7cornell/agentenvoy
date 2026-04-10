@@ -103,7 +103,7 @@ export default function TunerPage() {
   }
 
   return (
-    <div className="h-screen bg-surface flex flex-col overflow-hidden">
+    <div className="flex-1 min-h-0 bg-surface flex flex-col overflow-hidden">
       <DashboardHeader />
 
       {/* Week navigation bar */}
