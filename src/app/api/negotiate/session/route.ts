@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
 
   // Find the link — contextual (with code) or generic
   let link;
+  let reuseSessionId: string | null = null;
   if (code) {
     link = await prisma.negotiationLink.findFirst({
       where: { slug, code },
@@ -183,6 +184,19 @@ export async function POST(req: NextRequest) {
             hostName: user.name,
           });
         }
+
+        // Existing session with 0 messages — reuse it instead of creating a duplicate.
+        // Clean up any other empty sessions for this link first.
+        await prisma.negotiationSession.deleteMany({
+          where: {
+            linkId: link.id,
+            id: { not: existingSession.id },
+            messages: { none: {} },
+          },
+        });
+        // Fall through to generate greeting on this existing session
+        // Override the session creation below by using existingSession
+        reuseSessionId = existingSession.id;
       }
     }
   } else {
@@ -204,19 +218,41 @@ export async function POST(req: NextRequest) {
   const isGroupEvent = link.mode === "group";
   const isHost = authSession?.user?.id === user.id;
 
-  // Create the session
-  const session = await prisma.negotiationSession.create({
-    data: {
-      linkId: link.id,
-      hostId: user.id,
-      type: "calendar",
-      status: "active",
-      title: link.topic
-        ? `${link.topic}${link.inviteeName ? ` — ${link.inviteeName}` : ''}`
-        : `Meeting${link.inviteeName ? ` with ${link.inviteeName}` : ''}`,
-      statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
-    },
-  });
+  // Create the session (or reuse an existing empty one)
+  let session;
+  if (reuseSessionId) {
+    session = await prisma.negotiationSession.findUnique({
+      where: { id: reuseSessionId },
+    });
+    if (!session) {
+      // Shouldn't happen, but fall through to create
+      session = await prisma.negotiationSession.create({
+        data: {
+          linkId: link.id,
+          hostId: user.id,
+          type: "calendar",
+          status: "active",
+          title: link.topic
+            ? `${link.topic}${link.inviteeName ? ` — ${link.inviteeName}` : ''}`
+            : `Meeting${link.inviteeName ? ` with ${link.inviteeName}` : ''}`,
+          statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
+        },
+      });
+    }
+  } else {
+    session = await prisma.negotiationSession.create({
+      data: {
+        linkId: link.id,
+        hostId: user.id,
+        type: "calendar",
+        status: "active",
+        title: link.topic
+          ? `${link.topic}${link.inviteeName ? ` — ${link.inviteeName}` : ''}`
+          : `Meeting${link.inviteeName ? ` with ${link.inviteeName}` : ''}`,
+        statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
+      },
+    });
+  }
 
   // For group links, create a SessionParticipant row
   if (isGroupEvent) {

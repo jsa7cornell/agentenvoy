@@ -374,9 +374,34 @@ export function formatCalendarContext(ctx: CalendarContext): string {
     dayMap.get(dayKey)!.push(ev);
   }
 
+  // Build explicit date-to-day mapping so the LLM never computes its own
+  const dateKeys = Array.from(dayMap.keys());
+  const dateMappingLines: string[] = [];
+  if (dateKeys.length > 0) {
+    // Also generate labels for dates between/around events (14-day window)
+    const allDates = new Set<string>();
+    const start = new Date(ctx.events[0]?.start ?? new Date());
+    for (let i = 0; i < 21; i++) {
+      const d = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
+      allDates.add(dayFmt.format(d));
+    }
+    Array.from(allDates).forEach((dk) => {
+      dateMappingLines.push(dk);
+    });
+  }
+
   // Build daily view — also include days with no events in the range
   const lines: string[] = [
-    `Host's calendar (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz}), calendars checked: ${ctx.calendars.join(", ")}.\nIMPORTANT — use these day names and times exactly as written; do not recalculate days of the week. You decide what's available based on these events + the host knowledge base. No pre-computed slots — reason holistically.\nWhen building a CONFIRMATION_PROPOSAL, use UTC offset "${utcOffset}" and timezone "${tz}" — e.g., "2026-04-03T16:00:00${utcOffset}".\n`,
+    `Host's calendar (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz}), calendars checked: ${ctx.calendars.join(", ")}.`,
+    ``,
+    `DATE REFERENCE (system-computed, ALWAYS correct):`,
+    ...(dateMappingLines.length > 0 ? dateMappingLines.map(d => `  ${d}`) : [`  (no events in range)`]),
+    ``,
+    `CRITICAL: When referring to ANY date, copy the day-of-week from the DATE REFERENCE above. NEVER compute day-of-week yourself — LLMs get this wrong for future dates. If you write "Tuesday, Apr 15" but the reference says "Wed, Apr 15", you are WRONG. Always check.`,
+    ``,
+    `You decide what's available based on these events + the host knowledge base. No pre-computed slots — reason holistically.`,
+    `When building a CONFIRMATION_PROPOSAL, use UTC offset "${utcOffset}" and timezone "${tz}" — e.g., "2026-04-03T16:00:00${utcOffset}".`,
+    ``,
   ];
 
   for (const [day, events] of Array.from(dayMap)) {
@@ -468,8 +493,30 @@ export function formatComputedSchedule(
     dayMap.get(dayKey)!.push(slot);
   }
 
+  // Build explicit date-to-day mapping for the LLM
+  const dateKeys = Array.from(dayMap.keys());
+  const dateMappingLines: string[] = [];
+  if (dateKeys.length > 0) {
+    // Generate labels for 21-day window from first slot
+    const firstSlotDate = new Date(finalSlots[0]?.start ?? new Date());
+    const allDates = new Set<string>();
+    for (let i = 0; i < 21; i++) {
+      const d = new Date(firstSlotDate.getTime() + i * 24 * 60 * 60 * 1000);
+      allDates.add(dayFmt.format(d));
+    }
+    Array.from(allDates).forEach((dk) => {
+      dateMappingLines.push(dk);
+    });
+  }
+
   const lines: string[] = [
     `Schedule (${tzLabel}, ${utcOffset}):`,
+    ``,
+    `DATE REFERENCE (system-computed, ALWAYS correct):`,
+    ...(dateMappingLines.length > 0 ? dateMappingLines.map(d => `  ${d}`) : [`  (no slots)`]),
+    ``,
+    `CRITICAL: When referring to ANY date, copy the day-of-week from the DATE REFERENCE above. NEVER compute day-of-week yourself — LLMs get this wrong for future dates. Always check the reference.`,
+    ``,
     `Use UTC offset "${utcOffset}" and timezone "${tz}" in CONFIRMATION_PROPOSAL — e.g., "2026-04-03T16:00:00${utcOffset}".`,
     `Protection scores: -2=exclusive (ONLY these), -1=preferred (offer first), 0=explicitly free, 1=open, 2=soft hold [low confidence], 3=moderate friction [low confidence], 4=protected (host only), 5=immovable.`,
     `Low-confidence scores (2,3): adjust based on context. Phone format = -1 friction. VIP guest = -1 friction.`,

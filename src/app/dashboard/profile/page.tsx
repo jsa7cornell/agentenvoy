@@ -182,12 +182,8 @@ export default function ProfilePage() {
 
           const sorted = [...data.sessions]
             .sort((a: ActiveSession, b: ActiveSession) => {
-              const aConfirmed = a.status === "agreed" ? 0 : 1;
-              const bConfirmed = b.status === "agreed" ? 0 : 1;
-              if (aConfirmed !== bConfirmed) return aConfirmed - bConfirmed;
-              const dateA = a.agreedTime || a.createdAt;
-              const dateB = b.agreedTime || b.createdAt;
-              return new Date(dateA).getTime() - new Date(dateB).getTime();
+              // Most recently created first
+              return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
             })
             .filter((s: ActiveSession) => {
               const isPast = s.agreedTime && new Date(s.agreedTime) < now;
