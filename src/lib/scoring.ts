@@ -47,8 +47,21 @@ export interface UserPreferences {
   learned?: Record<string, unknown>;
 }
 
+export interface CompiledBuffer {
+  beforeMinutes: number;
+  afterMinutes: number;
+  eventFilter: string; // "in-person", "all", or keyword match
+}
+
+export interface CompiledPriorityBucket {
+  level: "high" | "low";
+  keywords: string[];
+}
+
 export interface CompiledRules {
   blockedWindows: BlockedWindow[];
+  buffers: CompiledBuffer[];
+  priorityBuckets: CompiledPriorityBucket[];
   businessHoursStart?: number;
   businessHoursEnd?: number;
   blackoutDays?: string[]; // ISO dates "YYYY-MM-DD"
@@ -81,7 +94,7 @@ export async function compilePreferenceRules(
   if (upcomingSchedulePreferences?.trim()) texts.push(`Schedule context:\n${upcomingSchedulePreferences}`);
 
   if (texts.length === 0) {
-    return { blockedWindows: [], ambiguities: [], compiledAt: new Date().toISOString() };
+    return { blockedWindows: [], buffers: [], priorityBuckets: [], ambiguities: [], compiledAt: new Date().toISOString() };
   }
 
   const { text } = await generateText({
@@ -97,7 +110,20 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
       "end": "HH:MM",         // 24-hour, e.g. "10:00"
       "days": ["Mon","Tue"],   // optional — short day names, omit for all days
       "label": "surfing",      // brief reason
-      "expires": "YYYY-MM-DD"  // optional — omit if permanent
+      "expires": "YYYY-MM-DD"  // REQUIRED for one-off items. Omit ONLY for explicitly permanent rules ("every", "always", "weekly").
+    }
+  ],
+  "buffers": [
+    {
+      "beforeMinutes": 45,     // buffer before matching events
+      "afterMinutes": 45,      // buffer after matching events
+      "eventFilter": "in-person" // "in-person" = events with a location, "all" = all events, or keyword to match in title
+    }
+  ],
+  "priorityBuckets": [
+    {
+      "level": "high",         // "high" = immovable, "low" = flexible/reschedulable
+      "keywords": ["investor", "board prep", "Sarah Chen"]  // matched against event title and attendees
     }
   ],
   "businessHoursStart": 7,     // optional — hour (24h) when availability begins
@@ -112,8 +138,11 @@ Rules:
 - "never before 7am" = businessHoursStart: 7
 - "no calls after 9pm" = businessHoursEnd: 21
 - "out of office Apr 10-12" = blackoutDays for each date
+- "buffer X min before/after [type] meetings" = buffers entry. "f2f", "face to face", "in-person" all map to eventFilter "in-person".
+- "high priority: X, Y, Z" = priorityBuckets with level "high". "low priority: X, Y" = level "low".
 - Date-bounded rules (trips, events) MUST have "expires" set to the last date.
 - Day-bounded rules (daily activities) should use "days" array.
+- ONE-OFF ITEMS: if the preference mentions a specific date/day without "every", "always", or "weekly", it is ONE-OFF. Set "expires" to the end of that day or week. Example: "yoga Wed 7-9 AM" (without "every") → expires end of this week. "I always surf 8-10" → no expires.
 - If a preference is ambiguous (unclear timezone, vague duration, contradictory), add to "ambiguities" and DO NOT generate a rule for it — err on the side of caution.
 - Only extract what is clearly stated. Do not infer unstated preferences.`,
     prompt: texts.join("\n\n"),
@@ -131,6 +160,15 @@ Rules:
         ...(w.label ? { label: String(w.label) } : {}),
         ...(w.expires ? { expires: String(w.expires) } : {}),
       })),
+      buffers: (parsed.buffers ?? []).map((b: Record<string, unknown>) => ({
+        beforeMinutes: Number(b.beforeMinutes ?? 0),
+        afterMinutes: Number(b.afterMinutes ?? 0),
+        eventFilter: String(b.eventFilter ?? "all"),
+      })),
+      priorityBuckets: (parsed.priorityBuckets ?? []).map((p: Record<string, unknown>) => ({
+        level: p.level === "low" ? "low" as const : "high" as const,
+        keywords: Array.isArray(p.keywords) ? p.keywords.map(String) : [],
+      })),
       businessHoursStart: typeof parsed.businessHoursStart === "number" ? parsed.businessHoursStart : undefined,
       businessHoursEnd: typeof parsed.businessHoursEnd === "number" ? parsed.businessHoursEnd : undefined,
       blackoutDays: Array.isArray(parsed.blackoutDays) ? parsed.blackoutDays.map(String) : undefined,
@@ -143,6 +181,8 @@ Rules:
     const fallback = extractTemporalOverrides(persistentKnowledge, upcomingSchedulePreferences);
     return {
       blockedWindows: fallback.extraBlockedWindows,
+      buffers: [],
+      priorityBuckets: [],
       businessHoursStart: fallback.adjustedBizHours?.start,
       businessHoursEnd: fallback.adjustedBizHours?.end,
       ambiguities: ["Preference compiler returned invalid response — using regex fallback"],
@@ -269,7 +309,9 @@ function scoreSlot(
   events: CalendarEvent[],
   blockedWindows: BlockedWindow[],
   prefs: UserPreferences,
-  tz: string
+  tz: string,
+  buffers: CompiledBuffer[] = [],
+  priorityBuckets: CompiledPriorityBucket[] = [],
 ): ScoredSlot {
   const { hour, minute, dayName, isWeekend } = getLocalParts(slotStart, tz);
   const todayStr = getLocalDateStr(new Date(), tz);
@@ -318,7 +360,43 @@ function scoreSlot(
   const overlapping = events.filter((ev) => !ev.isAllDay && slotStart < ev.end && slotEnd > ev.start);
 
   if (overlapping.length === 0) {
-    // No events — clean open slot, score 1
+    // No direct overlap — check buffer zones around nearby events
+    if (buffers.length > 0) {
+      for (const buf of buffers) {
+        const beforeMs = buf.beforeMinutes * 60 * 1000;
+        const afterMs = buf.afterMinutes * 60 * 1000;
+
+        // Find events whose buffer zones overlap this slot
+        const bufferedEvent = events.find((ev) => {
+          if (ev.isAllDay || ev.responseStatus === "declined" || ev.isTransparent) return false;
+
+          // Check event filter
+          if (buf.eventFilter === "in-person") {
+            if (!ev.location) return false;
+          } else if (buf.eventFilter !== "all") {
+            // Keyword match on event title
+            if (!ev.summary.toLowerCase().includes(buf.eventFilter.toLowerCase())) return false;
+          }
+
+          // Check if slot falls in the buffer zone: [event.start - before, event.end + after]
+          const bufferStart = new Date(ev.start.getTime() - beforeMs);
+          const bufferEnd = new Date(ev.end.getTime() + afterMs);
+          return slotStart < bufferEnd && slotEnd > bufferStart &&
+                 !(slotStart < ev.end && slotEnd > ev.start); // Exclude direct overlap (handled below)
+        });
+
+        if (bufferedEvent) {
+          return {
+            ...base,
+            score: 3,
+            confidence: "high",
+            reason: `buffer: ${buf.beforeMinutes}m before / ${buf.afterMinutes}m after`,
+            eventSummary: bufferedEvent.summary,
+          };
+        }
+      }
+    }
+    // No events, no buffers — clean open slot, score 1
     return base;
   }
 
@@ -399,6 +477,26 @@ function scoreSlot(
       evScore = 4;
       evReason = "confirmed meeting";
       evConfidence = "high";
+    }
+
+    // Priority bucket overrides — check if event matches high/low priority keywords
+    for (const bucket of priorityBuckets) {
+      const matches = bucket.keywords.some((kw) =>
+        ev.summary.toLowerCase().includes(kw.toLowerCase())
+      );
+      if (matches) {
+        if (bucket.level === "high") {
+          evScore = 5;
+          evReason = "high priority";
+          evConfidence = "high";
+        } else if (bucket.level === "low" && evScore >= 3) {
+          // Only downgrade if currently protected — don't downgrade already-low scores
+          evScore = 2;
+          evReason = "low priority (flexible)";
+          evConfidence = "low";
+        }
+        break; // First matching bucket wins
+      }
     }
 
     if (evScore > bestScore) {
@@ -507,6 +605,9 @@ export function computeSchedule(
 
   // Use compiled rules from LLM preference compiler (stored on user.preferences.compiled)
   const compiled = (preferences as Record<string, unknown>).compiled as CompiledRules | undefined;
+  const buffers: CompiledBuffer[] = compiled?.buffers ?? [];
+  const priorityBuckets: CompiledPriorityBucket[] = compiled?.priorityBuckets ?? [];
+
   if (compiled) {
     blockedWindows.push(...(compiled.blockedWindows ?? []));
     if (compiled.businessHoursStart !== undefined) bizStart = compiled.businessHoursStart;
@@ -551,7 +652,7 @@ export function computeSchedule(
     }
 
     const slotEnd = new Date(current.getTime() + 30 * 60 * 1000);
-    const scored = scoreSlot(current, slotEnd, events, blockedWindows, preferences, tz);
+    const scored = scoreSlot(current, slotEnd, events, blockedWindows, preferences, tz, buffers, priorityBuckets);
     slots.push(scored);
 
     current.setMinutes(current.getMinutes() + 30);
@@ -578,6 +679,7 @@ export function computeInputHash(
       start: e.start,
       end: e.end,
       summary: e.summary,
+      location: e.location,
       responseStatus: e.responseStatus,
       isTransparent: e.isTransparent,
       isRecurring: e.isRecurring,

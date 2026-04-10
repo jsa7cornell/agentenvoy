@@ -10,6 +10,28 @@ interface BlockedWindow {
   expires?: string;
 }
 
+interface Buffer {
+  beforeMinutes: number;
+  afterMinutes: number;
+  eventFilter: string; // "in-person", "all", keyword match
+}
+
+interface PriorityBucket {
+  level: "high" | "low";
+  keywords: string[];
+}
+
+interface CompiledRules {
+  blockedWindows: BlockedWindow[];
+  buffers: Buffer[];
+  priorityBuckets: PriorityBucket[];
+  businessHoursStart?: number;
+  businessHoursEnd?: number;
+  blackoutDays?: string[];
+  ambiguities: string[];
+  compiledAt: string;
+}
+
 interface PreferenceData {
   timezone: string;
   businessHoursStart: number;
@@ -19,9 +41,8 @@ interface PreferenceData {
   blackoutDays: string[];
   persistentKnowledge: string;
   upcomingSchedulePreferences: string;
+  compiledRules: CompiledRules | null;
 }
-
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const TIMEZONES = [
   "America/New_York",
@@ -52,15 +73,7 @@ export function PreferencePanel({ onSaved }: { onSaved: () => void }) {
   const [isSaving, setIsSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
-
-  // New blocked window form
-  const [newBw, setNewBw] = useState<BlockedWindow>({
-    start: "09:00",
-    end: "10:00",
-    days: [],
-    label: "",
-    expires: "",
-  });
+  const [showControlPanel, setShowControlPanel] = useState(false);
 
   const fetchPrefs = useCallback(async () => {
     try {
@@ -96,6 +109,11 @@ export function PreferencePanel({ onSaved }: { onSaved: () => void }) {
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error("Save failed");
+      const result = await res.json();
+      // Update compiled rules from server response
+      if (result.compiledRules) {
+        setData((prev) => prev ? { ...prev, compiledRules: result.compiledRules } : prev);
+      }
       setDirty(false);
       setSaveStatus("saved");
       onSaved();
@@ -107,31 +125,51 @@ export function PreferencePanel({ onSaved }: { onSaved: () => void }) {
     }
   }
 
-  function addBlockedWindow() {
-    if (!data || !newBw.start || !newBw.end) return;
-    const bw: BlockedWindow = {
-      start: newBw.start,
-      end: newBw.end,
-    };
-    if (newBw.days && newBw.days.length > 0) bw.days = newBw.days;
-    if (newBw.label?.trim()) bw.label = newBw.label.trim();
-    if (newBw.expires?.trim()) bw.expires = newBw.expires.trim();
-
-    update("blockedWindows", [...data.blockedWindows, bw]);
-    setNewBw({ start: "09:00", end: "10:00", days: [], label: "", expires: "" });
-  }
-
+  // --- Control panel: remove a compiled rule and sync back to free text ---
   function removeBlockedWindow(index: number) {
     if (!data) return;
-    update("blockedWindows", data.blockedWindows.filter((_, i) => i !== index));
+    const bw = data.blockedWindows[index];
+    // Remove from explicit blocked windows
+    const newWindows = data.blockedWindows.filter((_, i) => i !== index);
+    // Also try to remove the matching line from preferences text
+    const label = bw.label || "";
+    let newPersistent = data.persistentKnowledge;
+    let newSituational = data.upcomingSchedulePreferences;
+    if (label) {
+      // Remove any line containing the label (case-insensitive)
+      const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const lineRegex = new RegExp(`^.*${escapedLabel}.*$`, "gmi");
+      newPersistent = newPersistent.replace(lineRegex, "").replace(/\n{3,}/g, "\n\n").trim();
+      newSituational = newSituational.replace(lineRegex, "").replace(/\n{3,}/g, "\n\n").trim();
+    }
+    setData({
+      ...data,
+      blockedWindows: newWindows,
+      persistentKnowledge: newPersistent,
+      upcomingSchedulePreferences: newSituational,
+    });
+    setDirty(true);
+    setSaveStatus("idle");
   }
 
-  function toggleNewBwDay(day: string) {
-    const days = newBw.days || [];
-    setNewBw({
-      ...newBw,
-      days: days.includes(day) ? days.filter((d) => d !== day) : [...days, day],
+  function removeBlackoutDay(index: number) {
+    if (!data) return;
+    const day = data.blackoutDays[index];
+    const newDays = data.blackoutDays.filter((_, i) => i !== index);
+    // Remove matching line from text
+    let newPersistent = data.persistentKnowledge;
+    let newSituational = data.upcomingSchedulePreferences;
+    const lineRegex = new RegExp(`^.*${day}.*$`, "gmi");
+    newPersistent = newPersistent.replace(lineRegex, "").replace(/\n{3,}/g, "\n\n").trim();
+    newSituational = newSituational.replace(lineRegex, "").replace(/\n{3,}/g, "\n\n").trim();
+    setData({
+      ...data,
+      blackoutDays: newDays,
+      persistentKnowledge: newPersistent,
+      upcomingSchedulePreferences: newSituational,
     });
+    setDirty(true);
+    setSaveStatus("idle");
   }
 
   if (isLoading || !data) {
@@ -141,6 +179,15 @@ export function PreferencePanel({ onSaved }: { onSaved: () => void }) {
       </div>
     );
   }
+
+  const compiled = data.compiledRules;
+  const hasCompiledRules = compiled && (
+    compiled.blockedWindows.length > 0 ||
+    (compiled.buffers?.length ?? 0) > 0 ||
+    (compiled.priorityBuckets?.length ?? 0) > 0 ||
+    (compiled.blackoutDays?.length ?? 0) > 0 ||
+    (compiled.ambiguities?.length ?? 0) > 0
+  );
 
   return (
     <div className="h-full flex flex-col">
@@ -234,170 +281,223 @@ export function PreferencePanel({ onSaved }: { onSaved: () => void }) {
           <p className="text-[10px] text-muted mt-1">Leave &ldquo;until&rdquo; blank for indefinite</p>
         </section>
 
-        {/* Blocked windows */}
-        <section>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-1.5">
-            Blocked Windows
-          </label>
-          {data.blockedWindows.length > 0 && (
-            <div className="space-y-1.5 mb-3">
-              {data.blockedWindows.map((bw, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-2 bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 group"
-                >
-                  <div className="flex-1 text-sm text-primary">
-                    <span className="font-medium">{bw.label || "Block"}</span>
-                    <span className="text-secondary ml-1.5">
-                      {bw.start}&ndash;{bw.end}
-                    </span>
-                    {bw.days && bw.days.length > 0 && (
-                      <span className="text-muted ml-1.5">{bw.days.join(", ")}</span>
-                    )}
-                    {bw.expires && (
-                      <span className="text-muted ml-1.5">exp {bw.expires}</span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => removeBlockedWindow(i)}
-                    className="text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition text-xs"
-                    title="Remove"
-                  >
-                    &times;
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+        <hr className="border-secondary" />
 
-          {/* Add new blocked window */}
-          <div className="space-y-2 p-3 bg-surface-secondary/50 border border-DEFAULT rounded-lg">
-            <input
-              type="text"
-              value={newBw.label || ""}
-              onChange={(e) => setNewBw({ ...newBw, label: e.target.value })}
-              placeholder="Label (e.g. Surfing, Lunch)"
-              className="w-full bg-surface border border-DEFAULT rounded-lg px-3 py-1.5 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition"
-            />
-            <div className="flex gap-2">
-              <input
-                type="time"
-                value={newBw.start}
-                onChange={(e) => setNewBw({ ...newBw, start: e.target.value })}
-                className="flex-1 bg-surface border border-DEFAULT rounded-lg px-3 py-1.5 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
-              />
-              <span className="text-muted text-xs self-center">to</span>
-              <input
-                type="time"
-                value={newBw.end}
-                onChange={(e) => setNewBw({ ...newBw, end: e.target.value })}
-                className="flex-1 bg-surface border border-DEFAULT rounded-lg px-3 py-1.5 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
-              />
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {DAYS.map((day) => (
-                <button
-                  key={day}
-                  onClick={() => toggleNewBwDay(day)}
-                  className={`px-2 py-1 text-[10px] font-medium rounded-md border transition ${
-                    (newBw.days || []).includes(day)
-                      ? "bg-indigo-600 border-indigo-500 text-white"
-                      : "bg-surface border-DEFAULT text-muted hover:text-primary hover:border-secondary"
-                  }`}
-                >
-                  {day}
-                </button>
-              ))}
-              <span className="text-[10px] text-muted self-center ml-1">
-                {(newBw.days || []).length === 0 ? "All days" : ""}
-              </span>
-            </div>
-            <input
-              type="date"
-              value={newBw.expires || ""}
-              onChange={(e) => setNewBw({ ...newBw, expires: e.target.value })}
-              placeholder="Expires (optional)"
-              className="w-full bg-surface border border-DEFAULT rounded-lg px-3 py-1.5 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
-            />
-            <button
-              onClick={addBlockedWindow}
-              className="w-full px-3 py-1.5 text-xs font-medium bg-surface border border-DEFAULT rounded-lg text-secondary hover:text-primary hover:border-secondary transition"
-            >
-              + Add Block
-            </button>
-          </div>
-        </section>
-
-        {/* Blackout days */}
-        <section>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-1.5">
-            Blackout Days
-          </label>
-          <div className="space-y-1.5 mb-2">
-            {data.blackoutDays.map((day, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2 bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 group"
-              >
-                <span className="flex-1 text-sm text-primary">{day}</span>
-                <button
-                  onClick={() => update("blackoutDays", data.blackoutDays.filter((_, j) => j !== i))}
-                  className="text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition text-xs"
-                >
-                  &times;
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="date"
-              id="newBlackoutDay"
-              className="flex-1 bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-1.5 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
-            />
-            <button
-              onClick={() => {
-                const input = document.getElementById("newBlackoutDay") as HTMLInputElement;
-                if (input?.value && !data.blackoutDays.includes(input.value)) {
-                  update("blackoutDays", [...data.blackoutDays, input.value].sort());
-                  input.value = "";
-                }
-              }}
-              className="px-3 py-1.5 text-xs font-medium bg-surface-secondary border border-DEFAULT rounded-lg text-secondary hover:text-primary hover:border-secondary transition"
-            >
-              Add
-            </button>
-          </div>
-        </section>
-
-        {/* Persistent knowledge */}
+        {/* General Preferences — primary free text */}
         <section>
           <label className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-1.5">
             General Preferences
           </label>
+          <p className="text-[10px] text-muted mb-2">
+            Durable rules about how you schedule. One per line.
+          </p>
           <textarea
             value={data.persistentKnowledge}
             onChange={(e) => update("persistentKnowledge", e.target.value)}
-            rows={4}
-            placeholder="Durable patterns about how you work — e.g. 'Prefers mornings for deep work, afternoons for meetings'"
-            className="w-full bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition resize-none"
+            rows={6}
+            placeholder={`Block Friday afternoons 12-6 PM\nBuffer 45 min before/after in-person meetings\nHigh priority: investor meetings, board prep\nLow priority: coffee chats, networking intros\nNo calls before 10 AM`}
+            className="w-full bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition resize-y font-mono leading-relaxed"
           />
         </section>
 
-        {/* Situational context */}
+        {/* Calendar Preferences — situational free text */}
         <section>
           <label className="text-[10px] font-bold uppercase tracking-wider text-muted block mb-1.5">
-            Situational Context
+            Calendar Preferences
           </label>
+          <p className="text-[10px] text-muted mb-2">
+            Near-term schedule context. Temporary items that expire.
+          </p>
           <textarea
             value={data.upcomingSchedulePreferences}
             onChange={(e) => update("upcomingSchedulePreferences", e.target.value)}
-            rows={3}
-            placeholder="Near-term schedule notes — e.g. 'Traveling next week, only available mornings PT'"
-            className="w-full bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition resize-none"
+            rows={4}
+            placeholder={`Traveling to NYC Apr 14-18\nYoga Wed morning 7-9 AM this week\nBlackout Apr 20 — family event`}
+            className="w-full bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition resize-y font-mono leading-relaxed"
           />
         </section>
+
+        {/* Control panel toggle */}
+        {(hasCompiledRules || data.blockedWindows.length > 0 || data.blackoutDays.length > 0) && (
+          <section>
+            <button
+              onClick={() => setShowControlPanel(!showControlPanel)}
+              className="text-xs text-muted hover:text-secondary transition flex items-center gap-1.5"
+            >
+              <svg
+                className={`w-3 h-3 transition-transform ${showControlPanel ? "rotate-90" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+              View compiled rules
+              {compiled?.compiledAt && (
+                <span className="text-muted">
+                  &middot; last compiled {new Date(compiled.compiledAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                </span>
+              )}
+            </button>
+          </section>
+        )}
       </div>
+
+      {/* Control panel modal */}
+      {showControlPanel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowControlPanel(false)}>
+          <div
+            className="bg-surface-inset border border-DEFAULT rounded-2xl w-full max-w-lg mx-4 shadow-2xl max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-secondary flex items-center justify-between shrink-0">
+              <h3 className="text-sm font-semibold text-primary">Compiled Rules</h3>
+              <button
+                onClick={() => setShowControlPanel(false)}
+                className="text-muted hover:text-primary transition text-xs"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+              {/* Ambiguities */}
+              {compiled?.ambiguities && compiled.ambiguities.length > 0 && (
+                <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-500/20">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1.5">
+                    Could not compile
+                  </div>
+                  {compiled.ambiguities.map((a, i) => (
+                    <p key={i} className="text-xs text-amber-300/80">{a}</p>
+                  ))}
+                </div>
+              )}
+
+              {/* Blocked windows */}
+              {data.blockedWindows.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Blocked Windows ({data.blockedWindows.length})
+                  </div>
+                  <div className="space-y-1">
+                    {data.blockedWindows.map((bw, i) => (
+                      <div key={i} className="flex items-center gap-2 bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 group">
+                        <div className="flex-1 text-sm text-primary">
+                          <span className="font-medium">{bw.label || "Block"}</span>
+                          <span className="text-secondary ml-1.5">{bw.start}&ndash;{bw.end}</span>
+                          {bw.days && bw.days.length > 0 && (
+                            <span className="text-muted ml-1.5">{bw.days.join(", ")}</span>
+                          )}
+                          {bw.expires && (
+                            <span className="text-muted ml-1.5">until {bw.expires}</span>
+                          )}
+                          {!bw.expires && (
+                            <span className="text-emerald-500/60 ml-1.5">permanent</span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => removeBlockedWindow(i)}
+                          className="text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition text-xs"
+                          title="Remove"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Compiled blocked windows (from free text) */}
+              {compiled && compiled.blockedWindows.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Compiled from Preferences ({compiled.blockedWindows.length})
+                  </div>
+                  <div className="space-y-1">
+                    {compiled.blockedWindows.map((bw, i) => (
+                      <div key={i} className="flex items-center gap-2 bg-surface-secondary/50 border border-DEFAULT rounded-lg px-3 py-2">
+                        <div className="flex-1 text-sm text-secondary">
+                          <span className="font-medium">{bw.label || "Block"}</span>
+                          <span className="ml-1.5">{bw.start}&ndash;{bw.end}</span>
+                          {bw.days && bw.days.length > 0 && (
+                            <span className="text-muted ml-1.5">{bw.days.join(", ")}</span>
+                          )}
+                          {bw.expires && (
+                            <span className="text-muted ml-1.5">until {bw.expires}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Buffers */}
+              {compiled?.buffers && compiled.buffers.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Buffers
+                  </div>
+                  <div className="space-y-1">
+                    {compiled.buffers.map((b, i) => (
+                      <div key={i} className="bg-surface-secondary/50 border border-DEFAULT rounded-lg px-3 py-2 text-sm text-secondary">
+                        {b.beforeMinutes} min before / {b.afterMinutes} min after
+                        <span className="text-muted ml-1.5">{b.eventFilter} meetings</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Priority buckets */}
+              {compiled?.priorityBuckets && compiled.priorityBuckets.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Priority Lists
+                  </div>
+                  <div className="space-y-1">
+                    {compiled.priorityBuckets.map((b, i) => (
+                      <div key={i} className="bg-surface-secondary/50 border border-DEFAULT rounded-lg px-3 py-2 text-sm text-secondary">
+                        <span className={`font-medium ${b.level === "high" ? "text-red-400" : "text-emerald-400"}`}>
+                          {b.level === "high" ? "High" : "Low"} priority:
+                        </span>
+                        <span className="ml-1.5">{b.keywords.join(", ")}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Blackout days */}
+              {data.blackoutDays.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Blackout Days ({data.blackoutDays.length})
+                  </div>
+                  <div className="space-y-1">
+                    {data.blackoutDays.map((day, i) => (
+                      <div key={i} className="flex items-center gap-2 bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 group">
+                        <span className="flex-1 text-sm text-primary">{day}</span>
+                        <button
+                          onClick={() => removeBlackoutDay(i)}
+                          className="text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition text-xs"
+                        >
+                          &times;
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {!hasCompiledRules && data.blockedWindows.length === 0 && data.blackoutDays.length === 0 && (
+                <p className="text-sm text-muted text-center py-4">
+                  No compiled rules yet. Add preferences above and save to compile.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sticky save bar */}
       <div className="p-3 border-t border-secondary shrink-0">
@@ -412,7 +512,11 @@ export function PreferencePanel({ onSaved }: { onSaved: () => void }) {
                 : "bg-surface-secondary text-muted border border-DEFAULT cursor-not-allowed"
           } disabled:opacity-60`}
         >
-          {isSaving ? "Saving..." : saveStatus === "saved" ? "Saved — Calendar Updated" : "Save & Update Calendar"}
+          {isSaving
+            ? "Compiling & saving..."
+            : saveStatus === "saved"
+              ? "Saved — Calendar Updated"
+              : "Save & Update Calendar"}
         </button>
         {saveStatus === "error" && (
           <p className="text-xs text-red-400 text-center mt-1">Failed to save. Try again.</p>
