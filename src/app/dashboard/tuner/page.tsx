@@ -2,19 +2,14 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calendar";
-
-interface ChatMsg {
-  id: string;
-  role: "user" | "envoy";
-  content: string;
-}
+import { PreferencePanel } from "@/components/preference-panel";
 
 function getSunday(d: Date): string {
   const date = new Date(d);
-  const day = date.getDay(); // 0=Sun, 1=Mon, ...
+  const day = date.getDay();
   date.setDate(date.getDate() - day);
   return date.toISOString().slice(0, 10);
 }
@@ -41,18 +36,10 @@ export default function TunerPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Chat state
-  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   useEffect(() => {
     if (status === "unauthenticated") router.push("/");
   }, [status, router]);
 
-  // Fetch schedule data
   const fetchSchedule = useCallback(async () => {
     try {
       const res = await fetch(`/api/tuner/schedule?weekStart=${weekStart}`);
@@ -76,16 +63,11 @@ export default function TunerPage() {
     fetchSchedule();
   }, [status, fetchSchedule]);
 
-  // Scroll chat on new messages
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
-
   // Week navigation — up to 4 weeks out
   const thisWeek = getSunday(new Date());
   const maxWeekStart = (() => {
     const d = new Date(thisWeek + "T12:00:00");
-    d.setDate(d.getDate() + 21); // 3 weeks ahead (4 total including current)
+    d.setDate(d.getDate() + 21);
     return d.toISOString().slice(0, 10);
   })();
   const canGoPrev = weekStart > thisWeek;
@@ -100,7 +82,6 @@ export default function TunerPage() {
     setWeekStart(next);
   }
 
-  // Force refresh
   async function handleRefresh() {
     setIsRefreshing(true);
     try {
@@ -111,74 +92,6 @@ export default function TunerPage() {
     } finally {
       setIsRefreshing(false);
     }
-  }
-
-  // Chat send
-  async function handleChatSend() {
-    const text = chatInput.trim();
-    if (!text || isSending) return;
-
-    const userMsg: ChatMsg = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      content: text,
-    };
-    setChatMessages((prev) => [...prev, userMsg]);
-    setChatInput("");
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-    setIsSending(true);
-
-    try {
-      const res = await fetch("/api/tuner/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, weekStart }),
-      });
-
-      if (!res.ok) {
-        let errorMsg = "Failed to send. Try again.";
-        try {
-          const errBody = await res.json();
-          if (errBody.error) errorMsg = errBody.error;
-        } catch {}
-        throw new Error(errorMsg);
-      }
-
-      const data = await res.json();
-      const envoyMsg: ChatMsg = {
-        id: `e-${Date.now()}`,
-        role: "envoy",
-        content: data.message || "Done.",
-      };
-      setChatMessages((prev) => [...prev, envoyMsg]);
-
-      // If Envoy executed an action (update_knowledge), refresh the calendar
-      if (data.actionExecuted) {
-        await fetchSchedule();
-      }
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : "Something went wrong.";
-      setChatMessages((prev) => [
-        ...prev,
-        { id: `err-${Date.now()}`, role: "envoy", content: errMsg },
-      ]);
-    } finally {
-      setIsSending(false);
-    }
-  }
-
-  // Click-to-ask from calendar
-  function handleSlotClick(label: string) {
-    setChatInput(label);
-    textareaRef.current?.focus();
-  }
-
-  // Auto-resize textarea
-  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setChatInput(e.target.value);
-    const el = e.target;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 120) + "px";
   }
 
   if (status === "loading" || isLoading) {
@@ -249,82 +162,12 @@ export default function TunerPage() {
         </div>
       ) : (
         <div className="flex-1 flex overflow-hidden">
-          {/* Chat panel — left side */}
-          <div className="w-80 flex-shrink-0 border-r border-secondary flex flex-col">
-            {/* Chat messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {chatMessages.length === 0 && (
-                <div className="text-center text-muted text-xs py-8">
-                  Ask Envoy about your availability. Click any time slot to ask about it.
-                </div>
-              )}
-              {chatMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`max-w-[90%] rounded-2xl px-3 py-2.5 text-sm leading-relaxed ${
-                      msg.role === "user"
-                        ? "bg-indigo-600 text-white rounded-br-sm"
-                        : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm"
-                    }`}
-                  >
-                    {msg.role === "envoy" && (
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                        Envoy
-                      </div>
-                    )}
-                    <div className="whitespace-pre-wrap">{msg.content}</div>
-                  </div>
-                </div>
-              ))}
-              {isSending && chatMessages[chatMessages.length - 1]?.role === "user" && (
-                <div className="flex justify-start">
-                  <div className="bg-surface-secondary border border-DEFAULT rounded-2xl rounded-bl-sm px-3 py-2.5">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
-                      Envoy
-                    </div>
-                    <div className="flex gap-1">
-                      <div className="w-2 h-2 rounded-full bg-muted animate-bounce" />
-                      <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.1s]" />
-                      <div className="w-2 h-2 rounded-full bg-muted animate-bounce [animation-delay:0.2s]" />
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
-
-            {/* Chat input */}
-            <div className="p-3 border-t border-secondary shrink-0">
-              <div className="flex gap-2">
-                <textarea
-                  ref={textareaRef}
-                  value={chatInput}
-                  onChange={handleInputChange}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleChatSend();
-                    }
-                  }}
-                  placeholder="Ask about your availability..."
-                  rows={1}
-                  className="flex-1 resize-none bg-surface-secondary border border-DEFAULT rounded-xl px-3 py-2.5 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition"
-                />
-                <button
-                  onClick={handleChatSend}
-                  disabled={isSending || !chatInput.trim()}
-                  className="px-3 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:hover:bg-accent text-white rounded-xl text-sm font-medium transition"
-                >
-                  Send
-                </button>
-              </div>
-            </div>
+          {/* Preference panel — left side */}
+          <div className="w-80 flex-shrink-0 border-r border-secondary flex flex-col min-h-0">
+            <PreferencePanel onSaved={fetchSchedule} />
           </div>
 
-          {/* Weekly calendar — right side, takes remaining space */}
+          {/* Weekly calendar — right side */}
           <div className="flex-1 min-w-0 overflow-hidden">
             <WeeklyCalendar
               events={events}
@@ -332,7 +175,6 @@ export default function TunerPage() {
               locationByDay={locationByDay}
               timezone={timezone}
               weekStart={weekStart}
-              onSlotClick={handleSlotClick}
             />
           </div>
         </div>
