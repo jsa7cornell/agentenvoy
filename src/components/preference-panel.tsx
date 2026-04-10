@@ -345,7 +345,7 @@ export function PreferencePanel({ onSaved }: { onSaved: () => void }) {
       {showControlPanel && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowControlPanel(false)}>
           <div
-            className="bg-surface-inset border border-DEFAULT rounded-2xl w-full max-w-lg mx-4 shadow-2xl max-h-[80vh] flex flex-col"
+            className="bg-surface-inset border border-DEFAULT rounded-2xl w-full max-w-2xl mx-4 shadow-2xl max-h-[85vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-4 border-b border-secondary flex items-center justify-between shrink-0">
@@ -360,13 +360,16 @@ export function PreferencePanel({ onSaved }: { onSaved: () => void }) {
             <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
               {/* Ambiguities */}
               {compiled?.ambiguities && compiled.ambiguities.length > 0 && (
-                <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-500/20">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1.5">
-                    Could not compile
+                <div className="p-3 rounded-lg bg-surface-secondary border border-DEFAULT">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1.5">
+                    Needs Clarification ({compiled.ambiguities.length})
                   </div>
                   {compiled.ambiguities.map((a, i) => (
-                    <p key={i} className="text-xs text-amber-300/80">{a}</p>
+                    <p key={i} className="text-xs text-secondary leading-relaxed">{a}</p>
                   ))}
+                  <p className="text-[10px] text-muted mt-2">
+                    Update your preferences to clarify these items, then save again.
+                  </p>
                 </div>
               )}
 

@@ -162,8 +162,8 @@ export default function TunerPage() {
         </div>
       ) : (
         <div className="flex-1 flex overflow-hidden">
-          {/* Preference panel — left side */}
-          <div className="w-80 flex-shrink-0 border-r border-secondary flex flex-col min-h-0">
+          {/* Preference panel — left side (wider, ~1.75x ratio) */}
+          <div className="flex-[1.75] min-w-[320px] max-w-[560px] border-r border-secondary flex flex-col min-h-0">
             <PreferencePanel onSaved={fetchSchedule} />
           </div>
 

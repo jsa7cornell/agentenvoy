@@ -138,12 +138,12 @@ Rules:
 - "never before 7am" = businessHoursStart: 7
 - "no calls after 9pm" = businessHoursEnd: 21
 - "out of office Apr 10-12" = blackoutDays for each date
-- "buffer X min before/after [type] meetings" = buffers entry. "f2f", "face to face", "in-person" all map to eventFilter "in-person".
+- BUFFERS ARE CRITICAL: "buffer X min before/after [type] meetings" = buffers entry. "f2f", "face to face", "in-person" all map to eventFilter "in-person". Buffers are RUNTIME rules — they are applied dynamically when events exist on the calendar. ALWAYS emit a buffers entry for buffer preferences. NEVER put buffer rules in ambiguities — they work at scheduling time, not compile time.
 - "high priority: X, Y, Z" = priorityBuckets with level "high". "low priority: X, Y" = level "low".
 - Date-bounded rules (trips, events) MUST have "expires" set to the last date.
 - Day-bounded rules (daily activities) should use "days" array.
 - ONE-OFF ITEMS: if the preference mentions a specific date/day without "every", "always", or "weekly", it is ONE-OFF. Set "expires" to the end of that day or week. Example: "yoga Wed 7-9 AM" (without "every") → expires end of this week. "I always surf 8-10" → no expires.
-- If a preference is ambiguous (unclear timezone, vague duration, contradictory), add to "ambiguities" and DO NOT generate a rule for it — err on the side of caution.
+- If a preference is TRULY ambiguous (unclear timezone, vague duration, contradictory), add to "ambiguities" and DO NOT generate a rule for it. But do NOT mark dynamic/runtime rules (buffers, priority buckets) as ambiguous just because you can't see the calendar — those rules are applied later.
 - Only extract what is clearly stated. Do not infer unstated preferences.`,
     prompt: texts.join("\n\n"),
   });
