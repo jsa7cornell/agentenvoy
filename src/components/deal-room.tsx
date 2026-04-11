@@ -33,6 +33,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [confirmed, setConfirmed] = useState(false);
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [emailWarning, setEmailWarning] = useState<string | null>(null);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [sessionStatus, setSessionStatus] = useState<string>("active");
@@ -112,6 +114,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   }) {
     if (!sessionId || isConfirming) return;
     setIsConfirming(true);
+    setConfirmError(null);
+    setEmailWarning(null);
     try {
       const res = await fetch("/api/negotiate/confirm", {
         method: "POST",
@@ -125,14 +129,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           timezone: proposal.timezone,
         }),
       });
-      if (!res.ok) throw new Error("Failed to confirm");
       const data = await res.json();
+      if (!res.ok) {
+        if (data.error === "Session already confirmed") {
+          setConfirmed(true);
+          setSessionStatus("agreed");
+          setSessionStatusLabel("Confirmed");
+        } else {
+          setConfirmError(data.error || "Failed to confirm meeting");
+        }
+        return;
+      }
       setConfirmData(data);
       setConfirmed(true);
       setSessionStatus("agreed");
       setSessionStatusLabel("Confirmed");
+      if (data.emailSent === false) {
+        setEmailWarning("Meeting confirmed, but the confirmation email failed to send.");
+      }
     } catch (error) {
       console.error("Confirm error:", error);
+      setConfirmError("Failed to confirm meeting. Please try again.");
     } finally {
       setIsConfirming(false);
     }
@@ -837,6 +854,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       >
                         {isConfirming ? "Confirming..." : "Confirm this time"}
                       </button>
+                      {confirmError && (
+                        <p className="mt-2 text-xs text-red-400">{confirmError}</p>
+                      )}
+                      {emailWarning && (
+                        <p className="mt-2 text-xs text-amber-400">{emailWarning}</p>
+                      )}
                     </div>
                   </div>
                 )}

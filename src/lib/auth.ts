@@ -2,6 +2,8 @@ import { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
+import { Prisma } from "@prisma/client";
+import { google } from "googleapis";
 import { prisma } from "./prisma";
 
 // Dev-only credentials provider — NEVER available in production
@@ -69,8 +71,43 @@ export const authOptions: NextAuthOptions = {
       }
       return session;
     },
-    async signIn() {
-      // Account tokens are saved automatically by PrismaAdapter
+    async signIn({ user, account }) {
+      // Backfill timezone for existing users who signed up before timezone detection
+      if (account?.provider === "google" && user?.id) {
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { preferences: true },
+          });
+          const prefs = (dbUser?.preferences as Record<string, unknown>) || {};
+          const explicit = (prefs.explicit as Record<string, unknown>) || {};
+          if (!explicit.timezone && account.access_token) {
+            const oauth2Client = new google.auth.OAuth2(
+              process.env.GOOGLE_CLIENT_ID,
+              process.env.GOOGLE_CLIENT_SECRET
+            );
+            oauth2Client.setCredentials({
+              access_token: account.access_token,
+              refresh_token: account.refresh_token,
+            });
+            const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+            const res = await calendar.settings.get({ setting: "timezone" });
+            if (res.data.value) {
+              await prisma.user.update({
+                where: { id: user.id },
+                data: {
+                  preferences: {
+                    ...prefs,
+                    explicit: { ...explicit, timezone: res.data.value },
+                  } as Prisma.InputJsonValue,
+                },
+              });
+            }
+          }
+        } catch (e) {
+          console.error("Failed to backfill timezone on sign-in:", e);
+        }
+      }
       return true;
     },
     // JWT callback needed for credentials provider
@@ -103,10 +140,41 @@ export const authOptions: NextAuthOptions = {
         slug = `${base}${counter}`;
         counter++;
       }
+      // Fetch timezone from Google Calendar settings
+      let timezone: string | undefined;
+      try {
+        const account = await prisma.account.findFirst({
+          where: { userId: user.id, provider: "google" },
+        });
+        if (account?.access_token) {
+          const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET
+          );
+          oauth2Client.setCredentials({
+            access_token: account.access_token,
+            refresh_token: account.refresh_token,
+          });
+          const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+          const res = await calendar.settings.get({ setting: "timezone" });
+          if (res.data.value) {
+            timezone = res.data.value;
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch timezone from Google Calendar:", e);
+      }
+
+      const preferences: Record<string, unknown> = {};
+      if (timezone) {
+        preferences.explicit = { timezone };
+      }
+
       await prisma.user.update({
         where: { id: user.id },
         data: {
           meetSlug: slug,
+          preferences: preferences as Prisma.InputJsonValue,
           persistentKnowledge: [
             "- This host has not been calibrated yet. Run the onboarding calibration exercise to learn their scheduling preferences.",
             "- Default posture: balanced — offer open slots, flag flexible blocks, ask before moving anything.",

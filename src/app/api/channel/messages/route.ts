@@ -111,5 +111,16 @@ export async function GET() {
     return msg;
   });
 
-  return NextResponse.json({ messages: enrichedMessages });
+  // Check calendar connection for onboarding UI
+  const googleAccount = await prisma.account.findFirst({
+    where: { userId: user.id, provider: "google" },
+    select: { scope: true },
+  });
+  const calendarConnected = googleAccount?.scope?.includes("calendar") ?? false;
+
+  return NextResponse.json({
+    messages: enrichedMessages,
+    lastCalibratedAt: user.lastCalibratedAt,
+    calendarConnected,
+  });
 }
