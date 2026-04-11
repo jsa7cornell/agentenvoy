@@ -360,14 +360,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
       const contentType = res.headers.get("content-type") || "";
 
-      // Host messages return JSON (no agent response)
+      // Error responses come as JSON
       if (contentType.includes("application/json")) {
-        // No agent response for host messages — message already displayed optimistically
+        const body = await res.json();
+        if (body.error) throw new Error(body.error);
         setIsSending(false);
         return;
       }
 
-      // Guest messages get a streaming agent response
+      // Both host and guest messages get a streaming agent response
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No reader");
 

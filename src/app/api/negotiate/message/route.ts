@@ -73,20 +73,19 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // If host sends a regular message, don't trigger agent response — it's direct to guest
-  if (isHost) {
-    return new Response(
-      JSON.stringify({ ok: true, role: "host" }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  // Host messages in the deal room are instructions TO Envoy (e.g., "book it for friday at 9").
+  // Envoy should always respond — the host is directing the negotiation.
 
   // Build and sanitize conversation history
+  // Prefix host messages so Envoy knows who is speaking (host vs guest)
   const rawHistory = session.messages.map((m) => ({
     role: m.role,
-    content: m.content,
+    content: m.role === "host" ? `[HOST]: ${m.content}` : m.content,
   }));
-  rawHistory.push({ role: "guest", content });
+  rawHistory.push({
+    role: messageRole,
+    content: isHost ? `[HOST]: ${content}` : content,
+  });
   const { messages: history, warnings } = sanitizeHistory(rawHistory, [
     "administrator",
     "assistant",
