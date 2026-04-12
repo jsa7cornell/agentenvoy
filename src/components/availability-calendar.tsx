@@ -20,24 +20,26 @@ function getSlotColor(slots: Slot[], isPast: boolean) {
   if (isPast) return "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700";
   if (slots.length === 0) return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600";
   const best = Math.min(...slots.map((s) => s.score ?? 1));
-  if (best <= -2) return "bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300"; // exclusive
-  if (best === -1) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300"; // preferred
-  if (best === 0) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300"; // explicitly free
-  if (best === 1) return "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300"; // open
-  if (best === 2) return "bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-300"; // soft hold
-  if (best === 3) return "bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-300"; // moderate friction (host view)
-  return "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300"; // 4-5: protected/immovable (host view)
+  if (best <= 0) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300"; // free time
+  if (best <= 2) return "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-600 dark:text-yellow-300"; // potentially doable
+  return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600"; // 3+: not shown as available
 }
 
 function getSlotPillColor(score: number | undefined) {
   const s = score ?? 1;
-  if (s <= -2) return "border-indigo-300 dark:border-indigo-600 text-indigo-600 dark:text-indigo-300 hover:border-indigo-400";
-  if (s === -1) return "border-green-300 dark:border-green-600 text-green-600 dark:text-green-300 hover:border-green-400";
-  if (s === 0) return "border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 hover:border-green-500";
-  if (s === 1) return "border-emerald-400 dark:border-emerald-700 text-emerald-600 dark:text-emerald-300 hover:border-emerald-500";
-  if (s === 2) return "border-amber-400 dark:border-amber-700 text-amber-600 dark:text-amber-300 hover:border-amber-500";
-  if (s === 3) return "border-orange-400 dark:border-orange-700 text-orange-600 dark:text-orange-300 hover:border-orange-500";
-  return "border-red-400 dark:border-red-700 text-red-600 dark:text-red-300 hover:border-red-500";
+  if (s <= 0) return "border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 hover:border-green-500";
+  if (s <= 2) return "border-yellow-400 dark:border-yellow-700 text-yellow-600 dark:text-yellow-300"; // non-clickable
+  return ""; // 3+: not rendered
+}
+
+function isSlotVisible(score: number | undefined): boolean {
+  const s = score ?? 1;
+  return s <= 2; // 3+ not shown
+}
+
+function isSlotClickable(score: number | undefined): boolean {
+  const s = score ?? 1;
+  return s <= 0; // only free time (0 and below) is clickable
 }
 
 const DAY_HEADERS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -178,23 +180,28 @@ export function AvailabilityCalendar({
             <p className="text-xs text-muted">No available slots</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
-              {selectedSlots.map((slot, i) => (
-                <button
-                  key={i}
-                  onClick={() =>
-                    onSelectSlot?.(formatSlotMessage(slot, selectedDay))
-                  }
-                  className={`px-2 py-1 bg-surface-secondary border rounded-md text-xs transition
-                    ${getSlotPillColor(slot.score)}
-                    ${onSelectSlot ? "hover:bg-surface-tertiary cursor-pointer" : "cursor-default"}`}
-                >
-                  {new Date(slot.start).toLocaleTimeString("en-US", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                    timeZone: timezone,
-                  })}
-                </button>
-              ))}
+              {selectedSlots.filter((slot) => isSlotVisible(slot.score)).map((slot, i) => {
+                const clickable = isSlotClickable(slot.score);
+                return (
+                  <button
+                    key={i}
+                    onClick={() =>
+                      clickable && onSelectSlot?.(formatSlotMessage(slot, selectedDay))
+                    }
+                    disabled={!clickable}
+                    title={!clickable ? "Potentially doable" : undefined}
+                    className={`px-2 py-1 bg-surface-secondary border rounded-md text-xs transition
+                      ${getSlotPillColor(slot.score)}
+                      ${clickable && onSelectSlot ? "hover:bg-surface-tertiary cursor-pointer" : "cursor-default opacity-70"}`}
+                  >
+                    {new Date(slot.start).toLocaleTimeString("en-US", {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      timeZone: timezone,
+                    })}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

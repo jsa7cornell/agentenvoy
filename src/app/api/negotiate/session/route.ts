@@ -6,6 +6,62 @@ import { generateAgentResponse, AgentContext } from "@/agent/administrator";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";
+import type { ScoredSlot } from "@/lib/scoring";
+
+/**
+ * Format the best available slots into 2-3 readable time windows for the greeting.
+ * Groups consecutive good slots (score ≤ 1) by day and time-of-day.
+ */
+function formatAvailabilityWindows(slots: ScoredSlot[], timezone: string): string | null {
+  const now = new Date();
+  // Filter to good slots in the future, next 14 days
+  const goodSlots = slots.filter((s) => {
+    const start = new Date(s.start);
+    return start > now && s.score <= 1;
+  });
+
+  if (goodSlots.length === 0) return null;
+
+  // Group by date
+  const byDate = new Map<string, ScoredSlot[]>();
+  for (const slot of goodSlots) {
+    const dateKey = new Date(slot.start).toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+      timeZone: timezone,
+    });
+    if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+    byDate.get(dateKey)!.push(slot);
+  }
+
+  // Pick up to 3 days with the most good slots
+  const dayEntries = Array.from(byDate.entries());
+  const sortedDays = dayEntries
+    .sort((a, b) => b[1].length - a[1].length)
+    .slice(0, 3)
+    // Re-sort chronologically
+    .sort((a, b) => new Date(a[1][0].start).getTime() - new Date(b[1][0].start).getTime());
+
+  const lines: string[] = [];
+  for (const [dayLabel, daySlots] of sortedDays) {
+    // Find earliest and latest time
+    const times: Date[] = daySlots.map((s: ScoredSlot) => new Date(s.start));
+    const earliest = new Date(Math.min(...times.map((t: Date) => t.getTime())));
+    const latest = new Date(Math.max(...times.map((t: Date) => t.getTime())));
+
+    const fmtTime = (d: Date) =>
+      d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone });
+
+    if (earliest.getTime() === latest.getTime()) {
+      lines.push(`${dayLabel} around ${fmtTime(earliest)}`);
+    } else {
+      lines.push(`${dayLabel}, ${fmtTime(earliest)}–${fmtTime(latest)}`);
+    }
+  }
+
+  return lines.map((l) => `  • ${l}`).join("\n");
+}
 
 // POST /api/negotiate/session
 // Start a new negotiation session from a link click
@@ -271,6 +327,8 @@ export async function POST(req: NextRequest) {
 
   // Get calendar context for the next 2 weeks
   let calendarContext: CalendarContext | undefined;
+  let scheduleSlots: ScoredSlot[] = [];
+  let hostTimezone = "America/Los_Angeles";
   try {
     const schedule = await getOrComputeSchedule(user.id);
     if (schedule.connected) {
@@ -281,6 +339,8 @@ export async function POST(req: NextRequest) {
         timezone: schedule.timezone,
         canWrite: schedule.canWrite,
       };
+      scheduleSlots = schedule.slots;
+      hostTimezone = schedule.timezone;
     }
   } catch (e) {
     // Calendar might not be connected — that's ok
@@ -318,7 +378,6 @@ export async function POST(req: NextRequest) {
     conversationHistory: [],
   };
 
-  // Generate greeting
   // Build guest timezone description for the greeting
   const guestTzLabel = guestTimezone
     ? new Intl.DateTimeFormat("en-US", { timeZone: guestTimezone, timeZoneName: "long" })
@@ -326,29 +385,73 @@ export async function POST(req: NextRequest) {
         .find((p) => p.type === "timeZoneName")?.value || guestTimezone
     : null;
 
-  const greetingPrompt = isGroupEvent
-    ? `A new participant just opened the deal room for a group event. Generate your initial greeting following your GREETING STRATEGY and GROUP EVENT COORDINATION instructions. Mention the group context — how many others are involved, who has responded, any emerging time overlaps. Use all context you have — name, topic, format, timing, available slots. Be efficient.`
-    : `A new visitor just opened the deal room. Generate your greeting following these rules:
+  let greeting: string;
 
-STRUCTURE (use this exact flow):
-1. Introduce yourself and the purpose: "Hi! I'm Envoy, coordinating a meeting with [host name]."
-2. If you have the guest's name (from the link), use it. If not, ask for it.
-3. Timezone: ${guestTzLabel ? `Their browser detected ${guestTzLabel}. Confirm: "Your browser shows ${guestTzLabel} — is that right?"` : "No timezone detected. Ask: \"What timezone are you in?\""}
-4. Collect what you need: name (if missing), email (for the calendar invite), and what they'd like to discuss.
-5. State the default format: "By default this is a 30-minute video call, but we can do a phone call or in-person meeting too — and adjust the length if needed. Just let me know."
-6. Briefly mention Envoy's capabilities: "I can see ${context.hostName}'s calendar and navigate around conflicts, busy weeks, and timezone differences — just tell me what works for you and I'll find the best option."
-7. Close with 2-3 broad time windows from the scored schedule for the next week or two.
+  if (isGroupEvent) {
+    // Group events still use AI-generated greeting for dynamic participant context
+    const greetingPrompt = `A new participant just opened the deal room for a group event. Generate your initial greeting following your GREETING STRATEGY and GROUP EVENT COORDINATION instructions. Mention the group context — how many others are involved, who has responded, any emerging time overlaps. Use all context you have — name, topic, format, timing, available slots. Be efficient.`;
+    greeting = await generateAgentResponse({
+      ...context,
+      conversationHistory: [{ role: "user", content: greetingPrompt }],
+    });
+  } else {
+    // Fixed greeting template — consistent for all 1:1 sessions
+    const hostName = user.name || "the organizer";
+    const availabilityWindows = formatAvailabilityWindows(scheduleSlots, guestTimezone || hostTimezone);
+    const linkRules = (link.rules as Record<string, unknown>) || {};
+    const linkFormat = linkRules.format as string | undefined;
+    const linkDuration = linkRules.duration as string | undefined;
 
-RULES:
-- If the link has a topic, format, or duration specified by the host, present those as decided facts — don't re-ask.
-- Keep it warm but concise. No markdown formatting. 6-10 sentences total.
-- Don't say "I'm an AI" — say "I'm Envoy."
-- Follow your GREETING STRATEGY, TIMEZONE CONFIRMATION, and CONTEXT SHARING rules from the playbook.`;
+    // Build numbered items, adapting for contextual links
+    const items: string[] = [];
 
-  const greeting = await generateAgentResponse({
-    ...context,
-    conversationHistory: [{ role: "user", content: greetingPrompt }],
-  });
+    // 1. Timezone
+    if (guestTzLabel) {
+      items.push(`Timezone — I have you as ${guestTzLabel}. Is this right?`);
+    } else {
+      items.push(`Timezone — what timezone are you in?`);
+    }
+
+    // 2. Format — skip if pre-set by host
+    if (linkFormat || linkDuration) {
+      const parts = [];
+      if (linkDuration) parts.push(linkDuration);
+      if (linkFormat) parts.push(linkFormat);
+      items.push(`Format — ${parts.join(" ")} as requested.`);
+    } else {
+      items.push(`Format — I default to 30m video call. We can do phone/in-person, longer/shorter — just let me know.`);
+    }
+
+    // 3. Topic — skip if pre-set
+    if (link.topic) {
+      items.push(`Topic — "${link.topic}" as noted.`);
+    } else {
+      items.push(`Topic — let me know what to title the event.`);
+    }
+
+    // 4. Schedule
+    if (availabilityWindows) {
+      items.push(`Schedule — I can help work out a mutually great time, but here are some suggestions to start:\n${availabilityWindows}`);
+    } else {
+      items.push(`Schedule — I can help work out a mutually great time. Tell me what generally works for you and I'll find the best option.`);
+    }
+
+    // 5. Name/email — skip parts that are already known
+    if (link.inviteeName && link.inviteeEmail) {
+      // Both known — skip entirely
+    } else if (link.inviteeName) {
+      items.push(`Email — so I can send the invite once we lock it in.`);
+    } else if (link.inviteeEmail) {
+      items.push(`Name — so I know who I'm scheduling for.`);
+    } else {
+      items.push(`Name/email — so I can send the invite once we lock it in.`);
+    }
+
+    const nameGreeting = link.inviteeName ? ` ${link.inviteeName},` : "";
+    const numberedItems = items.map((item, i) => `${i + 1}. ${item}`).join("\n");
+
+    greeting = `Hi${nameGreeting}! I'm Envoy, a scheduling agent for ${hostName}. My goal is to help you navigate dynamic calendars.\n\nA few quick things to start:\n${numberedItems}`;
+  }
 
   // Save the greeting message
   await prisma.message.create({

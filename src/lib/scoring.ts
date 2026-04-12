@@ -368,7 +368,7 @@ function scoreSlot(
   if (allDayBlocking.length > 0) {
     const ooo = allDayBlocking.find((ev) => ev.eventType === "outOfOffice");
     if (ooo) {
-      return { ...base, score: 5, reason: "out of office", eventSummary: ooo.summary };
+      return { ...base, score: 4, reason: "out of office", eventSummary: ooo.summary };
     }
     // Non-OOO all-day accepted events (vacations, conferences, etc.)
     const accepted = allDayBlocking.find((ev) => ev.responseStatus === "accepted");
