@@ -379,10 +379,17 @@ export async function POST(req: NextRequest) {
   };
 
   // Build guest timezone description for the greeting
+  // Use IANA ID + short abbreviation for deterministic, readable output
+  // (timeZoneName: "long" produces unreliable names on Vercel, e.g. "Mexican Pacific Standard Time")
   const guestTzLabel = guestTimezone
-    ? new Intl.DateTimeFormat("en-US", { timeZone: guestTimezone, timeZoneName: "long" })
-        .formatToParts(new Date())
-        .find((p) => p.type === "timeZoneName")?.value || guestTimezone
+    ? (() => {
+        const abbr = new Intl.DateTimeFormat("en-US", { timeZone: guestTimezone, timeZoneName: "short" })
+          .formatToParts(new Date())
+          .find((p) => p.type === "timeZoneName")?.value || "";
+        // Format "America/Los_Angeles" → "Los Angeles" and append abbreviation
+        const city = guestTimezone.split("/").pop()?.replace(/_/g, " ") || guestTimezone;
+        return `${city} (${abbr})`;
+      })()
     : null;
 
   let greeting: string;

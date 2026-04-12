@@ -18,27 +18,28 @@ interface AvailabilityCalendarProps {
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
   if (isPast) return "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700";
-  if (slots.length === 0) return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600";
-  const best = Math.min(...slots.map((s) => s.score ?? 1));
+  // Only consider visible slots (score ≤ 2) for day color
+  const visible = slots.filter((s) => (s.score ?? 0) <= 2);
+  if (visible.length === 0) return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600";
+  const best = Math.min(...visible.map((s) => s.score ?? 0));
   if (best <= 0) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300"; // free time
-  if (best <= 2) return "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-600 dark:text-yellow-300"; // potentially doable
-  return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600"; // 3+: not shown as available
+  return "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-600 dark:text-yellow-300"; // 1-2: potentially doable
 }
 
 function getSlotPillColor(score: number | undefined) {
-  const s = score ?? 1;
+  const s = score ?? 0;
   if (s <= 0) return "border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 hover:border-green-500";
   if (s <= 2) return "border-yellow-400 dark:border-yellow-700 text-yellow-600 dark:text-yellow-300"; // non-clickable
   return ""; // 3+: not rendered
 }
 
 function isSlotVisible(score: number | undefined): boolean {
-  const s = score ?? 1;
+  const s = score ?? 0;
   return s <= 2; // 3+ not shown
 }
 
 function isSlotClickable(score: number | undefined): boolean {
-  const s = score ?? 1;
+  const s = score ?? 0;
   return s <= 0; // only free time (0 and below) is clickable
 }
 
@@ -142,6 +143,7 @@ export function AvailabilityCalendar({
         {cells.map((cell, i) => {
           if (!cell) return <div key={`empty-${i}`} />;
           const daySlots = slotsByDay[cell.dateStr] || [];
+          const visibleSlots = daySlots.filter((s) => (s.score ?? 0) <= 2);
           const isPast = cell.dateStr < todayStr;
           const isToday = cell.dateStr === todayStr;
           const isSelected = cell.dateStr === selectedDay;
@@ -150,14 +152,14 @@ export function AvailabilityCalendar({
           return (
             <button
               key={cell.dateStr}
-              onClick={() => !isPast && setSelectedDay(isSelected ? null : cell.dateStr)}
-              disabled={isPast}
+              onClick={() => !isPast && visibleSlots.length > 0 && setSelectedDay(isSelected ? null : cell.dateStr)}
+              disabled={isPast || visibleSlots.length === 0}
               className={`
                 aspect-square rounded-md text-xs font-medium flex items-center justify-center transition-all
                 ${colorClass}
                 ${isToday ? "ring-1 ring-indigo-500" : ""}
                 ${isSelected ? "ring-2 ring-foreground" : ""}
-                ${!isPast && daySlots.length > 0 ? "hover:ring-1 hover:ring-secondary cursor-pointer" : "cursor-default"}
+                ${!isPast && visibleSlots.length > 0 ? "hover:ring-1 hover:ring-secondary cursor-pointer" : "cursor-default"}
               `}
             >
               {cell.day}

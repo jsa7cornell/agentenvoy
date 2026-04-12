@@ -995,11 +995,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           {eventCard}
           {/* Mobile availability toggle — hidden on desktop where sidebar shows */}
           {slotsByDay && Object.keys(slotsByDay).length > 0 && (
-            <details className="md:hidden border-b border-secondary">
+            <details className="md:hidden border-b border-secondary flex-shrink-0">
               <summary className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-muted cursor-pointer hover:text-secondary select-none">
                 View availability
               </summary>
-              <div className="px-4 pb-3">
+              <div className="px-4 pb-3 max-h-[40vh] overflow-y-auto">
                 <AvailabilityCalendar
                   slotsByDay={slotsByDay || {}}
                   timezone={slotTimezone}
@@ -1028,9 +1028,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             className="text-[10px] text-purple-400 hover:text-purple-300 transition mb-2 text-left"
             title="Click to change timezone"
           >
-            {new Intl.DateTimeFormat("en-US", { timeZone: slotTimezone, timeZoneName: "long" })
-              .formatToParts(new Date())
-              .find((p) => p.type === "timeZoneName")?.value || slotTimezone}
+            {(() => {
+              const abbr = new Intl.DateTimeFormat("en-US", { timeZone: slotTimezone, timeZoneName: "short" })
+                .formatToParts(new Date())
+                .find((p) => p.type === "timeZoneName")?.value || "";
+              const city = slotTimezone.split("/").pop()?.replace(/_/g, " ") || slotTimezone;
+              return `${city} (${abbr})`;
+            })()}
           </button>
           <AvailabilityCalendar
             slotsByDay={slotsByDay || {}}

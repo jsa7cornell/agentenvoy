@@ -18,7 +18,7 @@ import type { CalendarEvent } from "./calendar";
 export interface ScoredSlot {
   start: string; // ISO datetime
   end: string; // ISO datetime
-  score: number; // -2 to 5 (-2=exclusive, -1=preferred, 0=free, 1=open, 2=soft, 3=friction, 4=protected, 5=immovable)
+  score: number; // -2 to 5 (-2=exclusive, -1=preferred, 0=available, 1=open+context, 2=soft, 3=friction, 4=protected, 5=immovable)
   confidence: "high" | "low";
   reason: string; // e.g. "declined invite", "Focus Time", "blocked: surfing"
   eventSummary?: string; // what's in this slot (if score > 1)
@@ -321,7 +321,7 @@ function scoreSlot(
   const base: ScoredSlot = {
     start: slotStart.toISOString(),
     end: slotEnd.toISOString(),
-    score: 1,
+    score: 0,
     confidence: "high",
     reason: "open",
   };
@@ -417,7 +417,7 @@ function scoreSlot(
         }
       }
     }
-    // No events, no buffers — clean open slot, score 1
+    // No events, no buffers — clean open slot, score 0
     return base;
   }
 
