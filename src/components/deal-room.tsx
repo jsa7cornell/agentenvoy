@@ -1009,6 +1009,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                     setInput(msg);
                     document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
                   } : undefined}
+                  onTimezoneClick={() => {
+                    setInput("I\u2019m actually in a different timezone \u2014 ");
+                    document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                  }}
                 />
               </div>
             </details>
@@ -1017,26 +1021,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         </div>
 
         {/* Availability sidebar — desktop only */}
-        <div className="hidden md:flex w-64 flex-shrink-0 border-l border-secondary p-4 overflow-y-auto flex-col">
-          <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">
+        <div className="hidden md:flex w-80 flex-shrink-0 border-l border-secondary p-5 overflow-y-auto flex-col">
+          <h4 className="text-[11px] font-bold uppercase tracking-widest text-muted mb-3">
             Availability
           </h4>
-          <button
-            onClick={() => {
-              setInput("I\u2019m actually in a different timezone \u2014 ");
-              document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-            }}
-            className="text-[10px] text-purple-400 hover:text-purple-300 transition mb-2 text-left"
-            title="Click to change timezone"
-          >
-            {(() => {
-              const abbr = new Intl.DateTimeFormat("en-US", { timeZone: slotTimezone, timeZoneName: "short" })
-                .formatToParts(new Date())
-                .find((p) => p.type === "timeZoneName")?.value || "";
-              const city = slotTimezone.split("/").pop()?.replace(/_/g, " ") || slotTimezone;
-              return `${city} (${abbr})`;
-            })()}
-          </button>
           <AvailabilityCalendar
             slotsByDay={slotsByDay || {}}
             timezone={slotTimezone}
@@ -1045,6 +1033,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               setInput(msg);
               document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
             } : undefined}
+            onTimezoneClick={() => {
+              setInput("I\u2019m actually in a different timezone \u2014 ");
+              document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+            }}
           />
         </div>
       </div>

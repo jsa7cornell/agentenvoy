@@ -15,6 +15,7 @@ interface AvailabilityCalendarProps {
   currentLocation?: { label: string; until?: string } | null;
   onClearLocation?: () => void; // Optional: show a dismiss button on the location notice
   view?: "month" | "week"; // week = compact single-row strip (ideal for mobile)
+  onTimezoneClick?: () => void; // Callback when guest clicks the timezone label
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
@@ -149,6 +150,27 @@ function LocationNotice({
   );
 }
 
+function TimezoneLabel({ timezone, onClick }: { timezone: string; onClick?: () => void }) {
+  const city = timezone.split("/").pop()?.replace(/_/g, " ") || timezone;
+  const abbr = new Intl.DateTimeFormat("en-US", { timeZone: timezone, timeZoneName: "short" })
+    .formatToParts(new Date())
+    .find((p) => p.type === "timeZoneName")?.value || "";
+  const label = `${city} (${abbr})`;
+
+  if (onClick) {
+    return (
+      <button
+        onClick={onClick}
+        className="text-[10px] text-purple-400 hover:text-purple-300 transition text-left"
+        title="Click to change timezone"
+      >
+        {label}
+      </button>
+    );
+  }
+  return <span className="text-[10px] text-muted">{label}</span>;
+}
+
 // ─── Week View ────────────────────────────────────────────────────────
 
 function WeekView({
@@ -157,6 +179,7 @@ function WeekView({
   onSelectSlot,
   currentLocation,
   onClearLocation,
+  onTimezoneClick,
 }: Omit<AvailabilityCalendarProps, "view">) {
   const now = new Date();
   const todayStr = toDateStr(now);
@@ -296,10 +319,13 @@ function WeekView({
         <LocationNotice currentLocation={currentLocation} onClearLocation={onClearLocation} />
       )}
 
-      {/* Disclaimer */}
-      <p className="mt-2 text-[10px] text-muted leading-tight">
-        Times are approximate. Envoy may have additional preferences.
-      </p>
+      {/* Timezone + Disclaimer */}
+      <div className="mt-2 space-y-1">
+        <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />
+        <p className="text-[10px] text-muted leading-tight">
+          Times are approximate. Envoy may have additional preferences.
+        </p>
+      </div>
     </div>
   );
 }
@@ -312,6 +338,7 @@ function MonthView({
   onSelectSlot,
   currentLocation,
   onClearLocation,
+  onTimezoneClick,
 }: Omit<AvailabilityCalendarProps, "view">) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
@@ -369,16 +396,16 @@ function MonthView({
       </div>
 
       {/* Day headers */}
-      <div className="grid grid-cols-7 gap-1 mb-1">
+      <div className="grid grid-cols-7 gap-1.5 mb-1">
         {DAY_HEADERS.map((d) => (
-          <div key={d} className="text-[10px] text-muted text-center font-medium">
+          <div key={d} className="text-[11px] text-muted text-center font-medium">
             {d}
           </div>
         ))}
       </div>
 
       {/* Day grid */}
-      <div className="grid grid-cols-7 gap-1">
+      <div className="grid grid-cols-7 gap-1.5">
         {cells.map((cell, i) => {
           if (!cell) return <div key={`empty-${i}`} />;
           const daySlots = slotsByDay[cell.dateStr] || [];
@@ -394,7 +421,7 @@ function MonthView({
               onClick={() => !isPast && visibleSlots.length > 0 && setSelectedDay(isSelected ? null : cell.dateStr)}
               disabled={isPast || visibleSlots.length === 0}
               className={`
-                aspect-square rounded-md text-xs font-medium flex items-center justify-center transition-all
+                aspect-square rounded-lg text-sm font-medium flex items-center justify-center transition-all
                 ${colorClass}
                 ${isToday ? "ring-1 ring-indigo-500" : ""}
                 ${isSelected ? "ring-2 ring-foreground" : ""}
@@ -431,10 +458,13 @@ function MonthView({
         <LocationNotice currentLocation={currentLocation} onClearLocation={onClearLocation} />
       )}
 
-      {/* Disclaimer */}
-      <p className="mt-3 text-[10px] text-muted leading-tight">
-        Times are approximate. Envoy may have additional preferences.
-      </p>
+      {/* Timezone + Disclaimer */}
+      <div className="mt-3 space-y-1">
+        <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />
+        <p className="text-[10px] text-muted leading-tight">
+          Times are approximate. Envoy may have additional preferences.
+        </p>
+      </div>
     </div>
   );
 }
