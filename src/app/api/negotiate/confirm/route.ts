@@ -90,16 +90,30 @@ export async function POST(req: NextRequest) {
     ? [hostEmail, ...allParticipantEmails.filter((e) => e !== hostEmail)]
     : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
 
+  // Build the deal room URL for this session
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://agentenvoy.ai";
+  const dealRoomUrl = session.link.code
+    ? `${baseUrl}/meet/${session.link.slug}/${session.link.code}`
+    : `${baseUrl}/meet/${session.link.slug}`;
+
   // Create calendar event for the host
   let meetLink: string | undefined;
   let eventLink: string | undefined;
 
   try {
+    const descriptionLines = [
+      `Scheduled via AgentEnvoy`,
+      `Format: ${meetingFormat}`,
+      ...(location ? [`Location: ${location}`] : []),
+      ...(isGroupEvent ? [`Participants: ${attendeeEmails.length}`] : []),
+      "",
+      `Need to change or cancel? ${dealRoomUrl}`,
+    ];
     const result = await createCalendarEvent(session.hostId, {
       summary: session.link.topic
         ? `${session.link.topic} — ${session.link.inviteeName || "Meeting"}`
         : `Meeting with ${session.link.inviteeName || guestEmail || "guest"}`,
-      description: `Scheduled via Envoy\nFormat: ${meetingFormat}${location ? `\nLocation: ${location}` : ""}${isGroupEvent ? `\nParticipants: ${attendeeEmails.length}` : ""}`,
+      description: descriptionLines.join("\n"),
       startTime,
       endTime,
       attendeeEmails,
@@ -239,6 +253,7 @@ export async function POST(req: NextRequest) {
     location,
     meetLink,
     timezone: hostTimezone,
+    dealRoomUrl,
   });
 
   const emailRecipients = isGroupEvent
@@ -333,6 +348,7 @@ function buildConfirmationEmail(params: {
   location?: string;
   meetLink?: string;
   timezone?: string;
+  dealRoomUrl?: string;
 }) {
   const tz = params.timezone || "America/Los_Angeles";
   const tzAbbr = new Intl.DateTimeFormat("en-US", {
@@ -356,6 +372,11 @@ function buildConfirmationEmail(params: {
         ${params.location ? `<p style="margin: 0 0 8px 0; color: #666;">📍 ${params.location}</p>` : ""}
         ${params.meetLink ? `<p style="margin: 0;"><a href="${params.meetLink}" style="color: #6c5ce7; font-weight: 600;">Join Google Meet</a></p>` : ""}
       </div>
+      ${params.dealRoomUrl ? `
+      <div style="text-align: center; margin-bottom: 20px;">
+        <a href="${params.dealRoomUrl}" style="display: inline-block; padding: 10px 24px; background: #f8f8fc; border: 1px solid #e0e0e8; border-radius: 8px; color: #6c5ce7; font-size: 13px; font-weight: 600; text-decoration: none;">Need to change or cancel?</a>
+      </div>
+      ` : ""}
       <p style="text-align: center; font-size: 13px; color: #999;">
         Scheduled by <a href="https://agentenvoy.ai" style="color: #6c5ce7;">AgentEnvoy</a> — your AI negotiates so you don't have to.
       </p>

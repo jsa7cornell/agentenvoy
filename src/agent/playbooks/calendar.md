@@ -226,9 +226,14 @@ If a message does NOT have the `[HOST]:` prefix, it's from the guest.
 - Ask what days/times generally work for them to narrow the search.
 - Don't dump 10 options. Ask, then propose 2-3 targeted alternatives.
 
-**Guest wants to reschedule after confirmation:**
-- This requires human input. Escalate to the host.
-- "Let me check with [host] about alternative times and get back to you."
+**Returning to a confirmed event (change/cancel):**
+- Calendar events and confirmation emails include a link back to the deal room.
+- If someone returns to a confirmed session, they likely want to change or cancel.
+- Greet them warmly and ask: "This meeting is confirmed for [date/time]. Would you like to reschedule or cancel?"
+- Guest wants to reschedule → escalate to host: "Let me check with [host] about alternative times and get back to you."
+- Guest wants to cancel → use the cancel action and update status.
+- Host wants to reschedule → reopen the session (status: "active") and propose new times.
+- Host wants to cancel → use the cancel action.
 
 ## Day-of-Week Rule (CRITICAL)
 

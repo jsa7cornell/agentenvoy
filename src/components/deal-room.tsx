@@ -517,6 +517,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     const dt = new Date(confirmData.dateTime as string);
     const end = new Date(dt.getTime() + (Number(confirmData.duration) || 30) * 60000);
     const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const dealRoomUrl = `${window.location.origin}/meet/${slug}${code ? `/${code}` : ""}`;
+    const descParts = [
+      `Scheduled via AgentEnvoy`,
+      ...(confirmData.meetLink ? [`Join: ${confirmData.meetLink}`] : []),
+      "",
+      `Need to change or cancel? ${dealRoomUrl}`,
+    ];
+    // ICS DESCRIPTION uses escaped newlines
+    const icsDesc = descParts.join("\\n");
     const ics = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
@@ -524,7 +533,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       `DTSTART:${fmt(dt)}`,
       `DTEND:${fmt(end)}`,
       `SUMMARY:${getEventTitle()}`,
-      confirmData.meetLink ? `URL:${confirmData.meetLink}` : "",
+      `DESCRIPTION:${icsDesc}`,
+      `URL:${dealRoomUrl}`,
       confirmData.location ? `LOCATION:${confirmData.location}` : "",
       "END:VEVENT",
       "END:VCALENDAR",
@@ -590,12 +600,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     const dur = Number(eventDuration) || 30;
     const end = new Date(dt.getTime() + dur * 60000);
     const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const drUrl = `${window.location.origin}/meet/${slug}${code ? `/${code}` : ""}`;
+    const detailParts = [
+      ...(eventMeetLink ? [`Join: ${eventMeetLink}`] : []),
+      "",
+      `Need to change or cancel? ${drUrl}`,
+    ];
     const params = new URLSearchParams({
       action: "TEMPLATE",
       text: getEventTitle(),
       dates: `${fmt(dt)}/${fmt(end)}`,
+      details: detailParts.join("\n"),
       ...(eventLocation ? { location: eventLocation } : {}),
-      ...(eventMeetLink ? { details: `Join: ${eventMeetLink}` } : {}),
     });
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
   })();
