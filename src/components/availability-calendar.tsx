@@ -160,23 +160,23 @@ function WeekView({
 }: Omit<AvailabilityCalendarProps, "view">) {
   const now = new Date();
   const todayStr = toDateStr(now);
-  const thisWeekStart = getWeekStart(now);
+  const thisWeekStartTime = getWeekStart(now).getTime();
 
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   // Compute the start of the displayed week
-  const weekStart = useMemo(() => {
-    const d = new Date(thisWeekStart);
+  const weekStartTime = useMemo(() => {
+    const d = new Date(thisWeekStartTime);
     d.setDate(d.getDate() + weekOffset * 7);
-    return d;
-  }, [thisWeekStart.getTime(), weekOffset]);
+    return d.getTime();
+  }, [thisWeekStartTime, weekOffset]);
 
   // Build 7 day cells for the week
   const weekDays = useMemo(() => {
     const days: Array<{ dateStr: string; day: number; dayLabel: string; monthLabel: string }> = [];
     for (let i = 0; i < 7; i++) {
-      const d = new Date(weekStart);
+      const d = new Date(weekStartTime);
       d.setDate(d.getDate() + i);
       days.push({
         dateStr: toDateStr(d),
@@ -186,7 +186,7 @@ function WeekView({
       });
     }
     return days;
-  }, [weekStart.getTime()]);
+  }, [weekStartTime]);
 
   // Find the bounds of available data for prev/next limits
   const sortedDates = useMemo(() => Object.keys(slotsByDay).sort(), [slotsByDay]);
