@@ -9,8 +9,18 @@ import { formatComputedSchedule } from "@/agent/composer";
 import { generateCode } from "@/lib/utils";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { sanitizeHistory, roleSummary } from "@/lib/conversation";
+import { readFileSync } from "fs";
+import { join } from "path";
 
-const CHANNEL_SYSTEM = `You are Envoy, the user's scheduling assistant. You look at their calendar and other context to smartly infer and offer up time slots when people want to schedule with them. You operate in their feed — a chat interface where scheduling threads appear as inline cards.
+// Load persona once at module scope (same pattern as composer.ts)
+let personaPlaybook = "";
+try {
+  personaPlaybook = readFileSync(join(process.cwd(), "src", "agent", "playbooks", "persona.md"), "utf-8");
+} catch (e) {
+  console.error("Failed to load persona.md for channel chat:", e);
+}
+
+const CHANNEL_SYSTEM = `${personaPlaybook ? personaPlaybook + "\n\n---\n\n" : ""}You operate in the user's feed — a chat interface where scheduling threads appear as inline cards.
 
 CORE BEHAVIOR:
 1. Create scheduling threads when the user describes a meeting they want to set up

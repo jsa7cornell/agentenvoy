@@ -5,6 +5,7 @@ import type { CalendarContext } from "@/lib/calendar";
 import { generateAgentResponse, AgentContext } from "@/agent/administrator";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { generateCode } from "@/lib/utils";
 
 // POST /api/negotiate/session
 // Start a new negotiation session from a link click
@@ -200,19 +201,16 @@ export async function POST(req: NextRequest) {
       }
     }
   } else {
-    // Find or create the generic link for this user
-    link = await prisma.negotiationLink.findFirst({
-      where: { userId: user.id, type: "generic" },
+    // Generic link: auto-create a contextual link so the session persists
+    const autoCode = generateCode();
+    link = await prisma.negotiationLink.create({
+      data: {
+        userId: user.id,
+        type: "contextual",
+        slug: user.meetSlug!,
+        code: autoCode,
+      },
     });
-    if (!link) {
-      link = await prisma.negotiationLink.create({
-        data: {
-          userId: user.id,
-          type: "generic",
-          slug: user.meetSlug!,
-        },
-      });
-    }
   }
 
   const isGroupEvent = link.mode === "group";
@@ -349,6 +347,7 @@ export async function POST(req: NextRequest) {
     status: session.status,
     statusLabel: session.statusLabel,
     greeting,
+    code: link.code || undefined,
     host: {
       name: user.name,
     },

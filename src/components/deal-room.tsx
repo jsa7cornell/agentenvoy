@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { LogoFull } from "./logo";
 import { AvailabilityCalendar } from "./availability-calendar";
 import Link from "next/link";
@@ -18,6 +19,7 @@ interface DealRoomProps {
 }
 
 export function DealRoom({ slug, code }: DealRoomProps) {
+  const router = useRouter();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -84,6 +86,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   function parseConfirmationProposal(content: string): {
     text: string;
     proposal: { dateTime: string; duration: number; format: string; location: string | null; timezone?: string } | null;
+    proposalWarning?: string;
   } {
     // Strip STATUS_UPDATE and ACTION blocks (should already be stripped server-side, but belt-and-suspenders)
     const cleaned = content
@@ -99,7 +102,29 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         /\[CONFIRMATION_PROPOSAL\][^\[]*\[\/CONFIRMATION_PROPOSAL\]/,
         ""
       ).trim();
-      return { text, proposal };
+
+      // Validate proposal fields
+      const warnings: string[] = [];
+      const dt = new Date(proposal.dateTime);
+      if (isNaN(dt.getTime())) {
+        return { text, proposal: null, proposalWarning: "Invalid date in proposal" };
+      }
+      if (dt.getTime() < Date.now()) {
+        warnings.push("This time is in the past");
+      }
+      if (!proposal.duration || proposal.duration <= 0) {
+        proposal.duration = 30; // safe default
+      }
+      const validFormats = ["phone", "video", "in-person"];
+      if (!validFormats.includes(proposal.format)) {
+        warnings.push(`Unknown format: ${proposal.format}`);
+      }
+      const hasOffset = /[+-]\d{2}:\d{2}$/.test(proposal.dateTime) || proposal.dateTime.endsWith("Z");
+      if (!hasOffset) {
+        warnings.push("Timezone offset missing \u2014 time may be inaccurate");
+      }
+
+      return { text, proposal, proposalWarning: warnings.length > 0 ? warnings.join(". ") : undefined };
     } catch {
       return { text: cleaned.trim(), proposal: null };
     }
@@ -245,6 +270,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (data.isGroupEvent) setIsGroupEvent(true);
         if (data.participants) setParticipants(data.participants);
 
+        // Generic link → redirect to persistent contextual URL
+        if (!code && data.code) {
+          router.replace(`/meet/${slug}/${data.code}`);
+        }
+
         // Already confirmed — load messages AND set confirmed state
         if (data.confirmed) {
           setConfirmData({
@@ -295,6 +325,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     }
 
     initSession();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- router is stable, slug/code are the real triggers
   }, [slug, code]);
 
   async function handleSend(e: React.FormEvent) {
@@ -789,10 +820,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               );
             }
 
-            const { text, proposal } =
+            const { text, proposal, proposalWarning } =
               msg.role === "administrator"
                 ? parseConfirmationProposal(msg.content)
-                : { text: msg.content, proposal: null };
+                : { text: msg.content, proposal: null, proposalWarning: undefined };
 
             // Determine alignment and styling
             const isOwnMessage =
@@ -848,12 +879,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                         <p>&#128241; {proposal.format.charAt(0).toUpperCase() + proposal.format.slice(1)}</p>
                         {proposal.location && <p>&#128205; {proposal.location}</p>}
                       </div>
+                      {proposalWarning && (
+                        <p className="text-xs text-amber-400 mt-1">{proposalWarning}</p>
+                      )}
                       <button
                         onClick={() => handleConfirm(proposal)}
-                        disabled={isConfirming}
+                        disabled={isConfirming || (proposalWarning?.includes("in the past") ?? false)}
                         className="w-full mt-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
                       >
                         {isConfirming ? "Confirming..." : "Confirm this time"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setInput("That\u2019s close, but could we ");
+                          document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                        }}
+                        className="w-full text-center text-xs text-muted hover:text-secondary transition mt-1"
+                      >
+                        Suggest a change
                       </button>
                       {confirmError && (
                         <p className="mt-2 text-xs text-red-400">{confirmError}</p>
