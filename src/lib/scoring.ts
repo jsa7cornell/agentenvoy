@@ -356,7 +356,28 @@ function scoreSlot(
     }
   }
 
-  // Find overlapping calendar events
+  // Check all-day blocking events (OOO, etc.) — these should block the entire day
+  const allDayBlocking = events.filter((ev) =>
+    ev.isAllDay &&
+    !ev.isTransparent &&
+    ev.responseStatus !== "declined" &&
+    slotStart < ev.end &&
+    slotEnd > ev.start &&
+    (ev.eventType === "outOfOffice" || (!ev.eventType && !ev.isTransparent))
+  );
+  if (allDayBlocking.length > 0) {
+    const ooo = allDayBlocking.find((ev) => ev.eventType === "outOfOffice");
+    if (ooo) {
+      return { ...base, score: 5, reason: "out of office", eventSummary: ooo.summary };
+    }
+    // Non-OOO all-day accepted events (vacations, conferences, etc.)
+    const accepted = allDayBlocking.find((ev) => ev.responseStatus === "accepted");
+    if (accepted) {
+      return { ...base, score: 4, reason: `all-day event: ${accepted.summary}`, eventSummary: accepted.summary };
+    }
+  }
+
+  // Find overlapping calendar events (timed, not all-day)
   const overlapping = events.filter((ev) => !ev.isAllDay && slotStart < ev.end && slotEnd > ev.start);
 
   if (overlapping.length === 0) {
@@ -695,6 +716,8 @@ export function computeInputHash(
       isTransparent: e.isTransparent,
       isRecurring: e.isRecurring,
       attendeeCount: e.attendeeCount,
+      eventType: e.eventType,
+      isAllDay: e.isAllDay,
     })),
     blockedWindows: preferences.explicit?.blockedWindows,
     businessHoursStart: preferences.explicit?.businessHoursStart,

@@ -869,6 +869,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   </div>
                 </div>
 
+                {proposal && confirmed && (
+                  <div className="flex justify-start mt-2">
+                    <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-3">
+                      <p className="text-sm text-emerald-400 font-medium">Meeting confirmed!</p>
+                      <p className="text-xs text-muted mt-1">You can view and manage details at the top of this page.</p>
+                    </div>
+                  </div>
+                )}
+
                 {proposal && !confirmed && (
                   <div className="flex justify-start mt-2">
                     <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3">
@@ -1011,6 +1020,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">
             Availability
           </h4>
+          <button
+            onClick={() => {
+              setInput("I\u2019m actually in a different timezone \u2014 ");
+              document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+            }}
+            className="text-[10px] text-purple-400 hover:text-purple-300 transition mb-2 text-left"
+            title="Click to change timezone"
+          >
+            {new Intl.DateTimeFormat("en-US", { timeZone: slotTimezone, timeZoneName: "long" })
+              .formatToParts(new Date())
+              .find((p) => p.type === "timeZoneName")?.value || slotTimezone}
+          </button>
           <AvailabilityCalendar
             slotsByDay={slotsByDay || {}}
             timezone={slotTimezone}

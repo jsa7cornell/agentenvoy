@@ -319,9 +319,31 @@ export async function POST(req: NextRequest) {
   };
 
   // Generate greeting
+  // Build guest timezone description for the greeting
+  const guestTzLabel = guestTimezone
+    ? new Intl.DateTimeFormat("en-US", { timeZone: guestTimezone, timeZoneName: "long" })
+        .formatToParts(new Date())
+        .find((p) => p.type === "timeZoneName")?.value || guestTimezone
+    : null;
+
   const greetingPrompt = isGroupEvent
     ? `A new participant just opened the deal room for a group event. Generate your initial greeting following your GREETING STRATEGY and GROUP EVENT COORDINATION instructions. Mention the group context — how many others are involved, who has responded, any emerging time overlaps. Use all context you have — name, topic, format, timing, available slots. Be efficient.`
-    : `A new visitor just opened the deal room. You are delivering the host's scheduling request. Format, duration, and timing preferences are already decided by the host — present them as facts, not questions. Propose 2-3 broad time windows from the scored schedule. Follow your GREETING STRATEGY and CONTEXT SHARING rules. Be concise — 3-5 sentences.`;
+    : `A new visitor just opened the deal room. Generate your greeting following these rules:
+
+STRUCTURE (use this exact flow):
+1. Introduce yourself and the purpose: "Hi! I'm Envoy, coordinating a meeting with [host name]."
+2. If you have the guest's name (from the link), use it. If not, ask for it.
+3. Timezone: ${guestTzLabel ? `Their browser detected ${guestTzLabel}. Confirm: "Your browser shows ${guestTzLabel} — is that right?"` : "No timezone detected. Ask: \"What timezone are you in?\""}
+4. Collect what you need: name (if missing), email (for the calendar invite), and what they'd like to discuss.
+5. State the default format: "By default this is a 30-minute video call, but we can do a phone call or in-person meeting too — and adjust the length if needed. Just let me know."
+6. Briefly mention Envoy's capabilities: "I can see ${context.hostName}'s calendar and navigate around conflicts, busy weeks, and timezone differences — just tell me what works for you and I'll find the best option."
+7. Close with 2-3 broad time windows from the scored schedule for the next week or two.
+
+RULES:
+- If the link has a topic, format, or duration specified by the host, present those as decided facts — don't re-ask.
+- Keep it warm but concise. No markdown formatting. 6-10 sentences total.
+- Don't say "I'm an AI" — say "I'm Envoy."
+- Follow your GREETING STRATEGY, TIMEZONE CONFIRMATION, and CONTEXT SHARING rules from the playbook.`;
 
   const greeting = await generateAgentResponse({
     ...context,
