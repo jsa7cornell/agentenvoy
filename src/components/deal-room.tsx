@@ -1001,6 +1001,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               </summary>
               <div className="px-4 pb-3 max-h-[40vh] overflow-y-auto">
                 <AvailabilityCalendar
+                  view="week"
                   slotsByDay={slotsByDay || {}}
                   timezone={slotTimezone}
                   currentLocation={slotLocation}
