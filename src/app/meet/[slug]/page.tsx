@@ -23,10 +23,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const user = await getHostData(slug);
 
   const hostName = user?.name ?? "Someone";
+  const hostFirst = hostName.split(" ")[0];
   const baseUrl = process.env.NEXTAUTH_URL ?? "https://agentenvoy.ai";
 
-  const title = `Meet with ${hostName} — AgentEnvoy`;
-  const description = `${hostName} uses AgentEnvoy to coordinate meetings. Find a time that works for both of you.`;
+  const title = `Meet with ${hostFirst}`;
+  const description = `Find a time to meet with ${hostName}. Powered by Envoy, an AI scheduling agent that navigates busy calendars.`;
 
   return {
     title,
