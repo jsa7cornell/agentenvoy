@@ -46,7 +46,9 @@ export async function GET() {
     preview,
     ambiguities: compiled?.ambiguities ?? [],
     activeCalendarIds: prefs.explicit?.activeCalendarIds ?? [],
-    phone: (prefs.phone as string) || "",
+    phone: prefs.phone || "",
+    videoProvider: prefs.videoProvider || "google-meet",
+    zoomLink: prefs.zoomLink || "",
   });
 }
 
@@ -59,19 +61,24 @@ export async function PUT(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { persistentKnowledge, upcomingSchedulePreferences, phone } = body;
+  const { persistentKnowledge, upcomingSchedulePreferences, phone, videoProvider, zoomLink } = body;
 
-  // If phone number is being updated, save it to preferences.phone first
-  if (phone !== undefined) {
+  // If meeting settings are being updated, save them to preferences first
+  const hasMeetingSettings = phone !== undefined || videoProvider !== undefined || zoomLink !== undefined;
+  if (hasMeetingSettings) {
     const currentUser = await prisma.user.findUnique({
       where: { id: session.user.id },
       select: { preferences: true },
     });
     const currentPrefs = (currentUser?.preferences as Record<string, unknown>) || {};
+    const updates: Record<string, unknown> = {};
+    if (phone !== undefined) updates.phone = phone || null;
+    if (videoProvider !== undefined) updates.videoProvider = videoProvider || "google-meet";
+    if (zoomLink !== undefined) updates.zoomLink = zoomLink || null;
     await prisma.user.update({
       where: { id: session.user.id },
       data: {
-        preferences: { ...currentPrefs, phone: phone || null } as unknown as Prisma.InputJsonValue,
+        preferences: { ...currentPrefs, ...updates } as unknown as Prisma.InputJsonValue,
       },
     });
   }

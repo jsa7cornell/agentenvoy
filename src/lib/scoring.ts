@@ -34,7 +34,9 @@ export interface BlockedWindow {
 
 export interface UserPreferences {
   timezone?: string;
-  phone?: string; // host phone number — used as default location for phone call meetings
+  phone?: string; // host phone number (with country code) — default location for phone calls
+  videoProvider?: "google-meet" | "zoom"; // preferred video conferencing platform
+  zoomLink?: string; // personal Zoom meeting link (e.g. https://zoom.us/j/1234567890)
   explicit?: {
     timezone?: string;
     businessHoursStart?: number; // hour, default 9

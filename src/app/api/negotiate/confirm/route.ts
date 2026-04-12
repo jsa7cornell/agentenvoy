@@ -96,10 +96,10 @@ export async function POST(req: NextRequest) {
     ? `${baseUrl}/meet/${session.link.slug}/${session.link.code}`
     : `${baseUrl}/meet/${session.link.slug}`;
 
-  // Resolve host phone number from preferences (for phone call location default)
-  const hostPhone = (hostPrefs?.phone as string) ||
-    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.phone as string) ||
-    null;
+  // Resolve meeting settings from preferences
+  const hostPhone = (hostPrefs?.phone as string) || null;
+  const videoProvider = (hostPrefs?.videoProvider as string) || "google-meet";
+  const zoomLink = (hostPrefs?.zoomLink as string) || null;
 
   // Build event summary — format-aware
   const guestLabel = session.link.inviteeName || guestEmail || "guest";
@@ -114,10 +114,14 @@ export async function POST(req: NextRequest) {
     return `Meeting with ${guestLabel}`;
   })();
 
-  // Default location for phone calls
-  const effectiveLocation = location || (meetingFormat === "phone" && hostPhone
-    ? `${guestLabel} calls ${session.host.name || "host"} @ ${hostPhone}`
-    : null);
+  // Default location — phone calls get host's number, Zoom gets the link
+  const effectiveLocation = location
+    || (meetingFormat === "phone" && hostPhone
+      ? `${guestLabel} calls ${session.host.name || "host"} @ ${hostPhone}`
+      : null)
+    || (meetingFormat === "video" && videoProvider === "zoom" && zoomLink
+      ? zoomLink
+      : null);
 
   // Create calendar event for the host
   let meetLink: string | undefined;
@@ -132,16 +136,24 @@ export async function POST(req: NextRequest) {
       "",
       `Need to change or cancel? ${dealRoomUrl}`,
     ];
+    // For Zoom: skip Google Meet auto-creation, use the host's Zoom link
+    const useGoogleMeet = meetingFormat === "video" && videoProvider !== "zoom";
+    const useZoom = meetingFormat === "video" && videoProvider === "zoom" && !!zoomLink;
+
     const result = await createCalendarEvent(session.hostId, {
       summary: eventSummary,
       description: descriptionLines.join("\n"),
       startTime,
       endTime,
       attendeeEmails,
-      addMeetLink: meetingFormat === "video",
+      addMeetLink: useGoogleMeet,
     });
 
-    meetLink = result.meetLink || undefined;
+    if (useZoom) {
+      meetLink = zoomLink!;
+    } else {
+      meetLink = result.meetLink || undefined;
+    }
     eventLink = result.htmlLink || undefined;
   } catch (e) {
     console.error("Failed to create calendar event:", e);

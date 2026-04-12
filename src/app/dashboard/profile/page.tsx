@@ -115,6 +115,10 @@ export default function ProfilePage() {
   const [savedSituational, setSavedSituational] = useState("");
   const [phone, setPhone] = useState("");
   const [savedPhone, setSavedPhone] = useState("");
+  const [videoProvider, setVideoProvider] = useState<"google-meet" | "zoom">("google-meet");
+  const [savedVideoProvider, setSavedVideoProvider] = useState<"google-meet" | "zoom">("google-meet");
+  const [zoomLink, setZoomLink] = useState("");
+  const [savedZoomLink, setSavedZoomLink] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
@@ -170,6 +174,8 @@ export default function ProfilePage() {
           setSavedPersistent(data.persistentKnowledge);
           setSavedSituational(data.upcomingSchedulePreferences);
           if (data.phone) { setPhone(data.phone); setSavedPhone(data.phone); }
+          if (data.videoProvider) { setVideoProvider(data.videoProvider); setSavedVideoProvider(data.videoProvider); }
+          if (data.zoomLink) { setZoomLink(data.zoomLink); setSavedZoomLink(data.zoomLink); }
           if (data.ambiguities?.length) setAmbiguities(data.ambiguities);
           if (data.activeCalendarIds) setActiveCalendarIds(data.activeCalendarIds);
         }
@@ -230,6 +236,8 @@ export default function ProfilePage() {
           persistentKnowledge: persistent,
           upcomingSchedulePreferences: situational,
           ...(phone !== savedPhone ? { phone } : {}),
+          ...(videoProvider !== savedVideoProvider ? { videoProvider } : {}),
+          ...(zoomLink !== savedZoomLink ? { zoomLink } : {}),
         }),
       });
       if (res.ok) {
@@ -238,6 +246,8 @@ export default function ProfilePage() {
         setSavedPersistent(persistent);
         setSavedSituational(situational);
         setSavedPhone(phone);
+        setSavedVideoProvider(videoProvider);
+        setSavedZoomLink(zoomLink);
         setEditingSchedule(false);
         setEditingGeneral(false);
         setAmbiguities(data.ambiguities ?? []);
@@ -490,19 +500,71 @@ export default function ProfilePage() {
                 Preferences
               </h2>
               <div className="bg-surface-inset/50 border border-secondary rounded-xl divide-y divide-secondary/60">
-                {/* Phone number */}
-                <div className="p-4">
-                  <div className="flex items-baseline mb-2">
-                    <span className="text-xs font-semibold text-secondary">Phone</span>
-                    <InfoBubble text="Your phone number is used as the default location for phone call meetings — e.g. 'Guest calls John @ (555) 123-4567'." />
+                {/* Meeting Settings */}
+                <div className="p-4 space-y-4">
+                  <div className="flex items-baseline mb-1">
+                    <span className="text-xs font-semibold text-secondary">Meeting Settings</span>
+                    <InfoBubble text="Configure how Envoy handles phone calls and video meetings. Phone number is used as default location for calls. Video provider determines which link goes on confirmed events." />
                   </div>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="(555) 123-4567"
-                    className="w-full max-w-xs bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted outline-none focus:border-purple-500/50 transition"
-                  />
+
+                  {/* Phone number with country code */}
+                  <div>
+                    <label className="text-[11px] text-muted font-medium block mb-1">Phone number</label>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+1 (555) 123-4567"
+                      className="w-full max-w-xs bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted outline-none focus:border-purple-500/50 transition"
+                    />
+                    <p className="text-[10px] text-muted mt-1">Include country code. Used as default location for phone call meetings.</p>
+                  </div>
+
+                  {/* Video conferencing provider */}
+                  <div>
+                    <label className="text-[11px] text-muted font-medium block mb-1.5">Video conferencing</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setVideoProvider("google-meet")}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition ${
+                          videoProvider === "google-meet"
+                            ? "border-purple-500 bg-purple-500/10 text-primary"
+                            : "border-surface-tertiary/50 bg-surface-secondary/40 text-muted hover:border-secondary"
+                        }`}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 8l5-3.5v15L15 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><rect x="3" y="6" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>
+                        Google Meet
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVideoProvider("zoom")}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition ${
+                          videoProvider === "zoom"
+                            ? "border-purple-500 bg-purple-500/10 text-primary"
+                            : "border-surface-tertiary/50 bg-surface-secondary/40 text-muted hover:border-secondary"
+                        }`}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M16 10l4-2.5v9L16 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        Zoom
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Zoom link — only shown when Zoom is selected */}
+                  {videoProvider === "zoom" && (
+                    <div>
+                      <label className="text-[11px] text-muted font-medium block mb-1">Zoom meeting link</label>
+                      <input
+                        type="url"
+                        value={zoomLink}
+                        onChange={(e) => setZoomLink(e.target.value)}
+                        placeholder="https://zoom.us/j/1234567890"
+                        className="w-full max-w-md bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted outline-none focus:border-purple-500/50 transition"
+                      />
+                      <p className="text-[10px] text-muted mt-1">Your personal meeting room link. Added to calendar events instead of Google Meet.</p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Schedule sub-area */}
@@ -556,7 +618,7 @@ export default function ProfilePage() {
 
               {/* Save button — only shown when changes are pending */}
               {(() => {
-                const isDirty = persistent !== savedPersistent || situational !== savedSituational || phone !== savedPhone;
+                const isDirty = persistent !== savedPersistent || situational !== savedSituational || phone !== savedPhone || videoProvider !== savedVideoProvider || zoomLink !== savedZoomLink;
                 return (
                   <div className={`flex items-center justify-end gap-2 mt-3 transition-opacity duration-200 ${isDirty ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
                     {saveMessage && (

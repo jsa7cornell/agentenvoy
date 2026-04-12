@@ -198,6 +198,20 @@ function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: str
     }
   }
 
+  // Meeting settings (phone, video provider)
+  const meetingItems: string[] = [];
+  if (prefs.phone) meetingItems.push(`Host phone: ${prefs.phone} (default location for phone calls — "guest calls host @ number")`);
+  if (prefs.videoProvider === "zoom" && prefs.zoomLink) {
+    meetingItems.push(`Video provider: Zoom (link: ${prefs.zoomLink}). Use "Zoom" not "Google Meet" when discussing video meetings.`);
+  } else if (prefs.videoProvider === "zoom") {
+    meetingItems.push(`Video provider: Zoom (no link set — mention Zoom, not Google Meet)`);
+  } else {
+    meetingItems.push(`Video provider: Google Meet (auto-generated on confirmation)`);
+  }
+  if (meetingItems.length > 0) {
+    parts.push("**Meeting settings:**\n" + meetingItems.map(i => `- ${i}`).join("\n"));
+  }
+
   if (learned && (learned as Record<string, unknown>).confidence) {
     const items: string[] = [];
     if (learned.formatDistribution) items.push(`Format usage: ${JSON.stringify(learned.formatDistribution)}`);
