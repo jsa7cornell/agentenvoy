@@ -46,6 +46,7 @@ export async function GET() {
     preview,
     ambiguities: compiled?.ambiguities ?? [],
     activeCalendarIds: prefs.explicit?.activeCalendarIds ?? [],
+    phone: (prefs.phone as string) || "",
   });
 }
 
@@ -58,9 +59,24 @@ export async function PUT(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { persistentKnowledge, upcomingSchedulePreferences } = body;
+  const { persistentKnowledge, upcomingSchedulePreferences, phone } = body;
 
-  // Save text fields first
+  // If phone number is being updated, save it to preferences.phone first
+  if (phone !== undefined) {
+    const currentUser = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { preferences: true },
+    });
+    const currentPrefs = (currentUser?.preferences as Record<string, unknown>) || {};
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: {
+        preferences: { ...currentPrefs, phone: phone || null } as unknown as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  // Save text fields
   const user = await prisma.user.update({
     where: { id: session.user.id },
     data: {

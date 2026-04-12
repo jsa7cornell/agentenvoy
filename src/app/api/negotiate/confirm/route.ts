@@ -96,6 +96,29 @@ export async function POST(req: NextRequest) {
     ? `${baseUrl}/meet/${session.link.slug}/${session.link.code}`
     : `${baseUrl}/meet/${session.link.slug}`;
 
+  // Resolve host phone number from preferences (for phone call location default)
+  const hostPhone = (hostPrefs?.phone as string) ||
+    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.phone as string) ||
+    null;
+
+  // Build event summary — format-aware
+  const guestLabel = session.link.inviteeName || guestEmail || "guest";
+  const hostLabel = session.host.name || "Host";
+  const eventSummary = (() => {
+    if (session.link.topic) {
+      return `${session.link.topic} — ${guestLabel}`;
+    }
+    if (meetingFormat === "phone") {
+      return `Phone call: ${guestLabel} & ${hostLabel}`;
+    }
+    return `Meeting with ${guestLabel}`;
+  })();
+
+  // Default location for phone calls
+  const effectiveLocation = location || (meetingFormat === "phone" && hostPhone
+    ? `${guestLabel} calls ${session.host.name || "host"} @ ${hostPhone}`
+    : null);
+
   // Create calendar event for the host
   let meetLink: string | undefined;
   let eventLink: string | undefined;
@@ -104,15 +127,13 @@ export async function POST(req: NextRequest) {
     const descriptionLines = [
       `Scheduled via AgentEnvoy`,
       `Format: ${meetingFormat}`,
-      ...(location ? [`Location: ${location}`] : []),
+      ...(effectiveLocation ? [`Location: ${effectiveLocation}`] : []),
       ...(isGroupEvent ? [`Participants: ${attendeeEmails.length}`] : []),
       "",
       `Need to change or cancel? ${dealRoomUrl}`,
     ];
     const result = await createCalendarEvent(session.hostId, {
-      summary: session.link.topic
-        ? `${session.link.topic} — ${session.link.inviteeName || "Meeting"}`
-        : `Meeting with ${session.link.inviteeName || guestEmail || "guest"}`,
+      summary: eventSummary,
       description: descriptionLines.join("\n"),
       startTime,
       endTime,

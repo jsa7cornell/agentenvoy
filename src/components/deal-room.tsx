@@ -433,7 +433,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           }
         }
       }
-      // Re-fetch session status after AI response
+      // Re-fetch session status + link info after AI response
       if (sessionId) {
         try {
           const sessionRes = await fetch(`/api/negotiate/session?id=${sessionId}`);
@@ -441,6 +441,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             const { session: sess } = await sessionRes.json();
             setSessionStatus(sess.status);
             setSessionStatusLabel(sess.statusLabel || "");
+            // Update link info (guest name, topic) if changed by save_guest_info action
+            if (sess.link?.inviteeName && !inviteeName) setInviteeName(sess.link.inviteeName);
+            if (sess.link?.topic && !topic) setTopic(sess.link.topic);
           }
         } catch {}
       }
@@ -460,11 +463,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   function getEventTitle() {
     const hostFirst = hostName ? hostName.split(" ")[0] : "";
     const guestFirst = inviteeName ? inviteeName.split(" ")[0] : "";
+    const effectiveFormat = confirmed && confirmData ? (confirmData.format as string) : linkFormat;
 
-    if (topic && guestFirst && hostFirst) return `${topic} — ${guestFirst} & ${hostFirst}`;
+    if (topic && guestFirst) return `${topic} — ${guestFirst}`;
     if (topic && hostFirst) return `${topic} with ${hostFirst}`;
-    if ((linkFormat === "phone" || linkFormat === "video") && guestFirst && hostFirst) return `Call — ${guestFirst} & ${hostFirst}`;
-    if ((linkFormat === "phone" || linkFormat === "video") && hostName) return `Call with ${hostName}`;
+    if (effectiveFormat === "phone" && guestFirst && hostFirst) return `Phone call: ${guestFirst} & ${hostFirst}`;
+    if (effectiveFormat === "phone" && hostName) return `Phone call with ${hostName}`;
+    if ((effectiveFormat === "video") && guestFirst && hostFirst) return `Call — ${guestFirst} & ${hostFirst}`;
+    if ((effectiveFormat === "video") && hostName) return `Call with ${hostName}`;
     if (guestFirst && hostFirst) return `${guestFirst} & ${hostFirst}`;
     if (hostName) return `Meet with ${hostName}`;
     return "Meeting";

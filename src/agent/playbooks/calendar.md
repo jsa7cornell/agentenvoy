@@ -308,6 +308,11 @@ Available actions:
 - update_format: Change format → {"action":"update_format","params":{"sessionId":"...","format":"video"}}
 - update_time: Propose new time → {"action":"update_time","params":{"sessionId":"...","dateTime":"2026-04-10T14:00:00-07:00","timezone":"America/Los_Angeles"}}
 - update_location: Change location → {"action":"update_location","params":{"sessionId":"...","location":"123 Main St"}}
+- save_guest_info: Save guest name/email/topic → {"action":"save_guest_info","params":{"guestName":"Sarah Chen","guestEmail":"sarah@example.com","topic":"Q2 Roadmap Review"}}
+  - **CRITICAL: Use this action IMMEDIATELY when a guest provides their name, email, or topic.** This updates the event card, calendar invite title, and confirmation email. Without it, events show generic titles like "Meet with [host]" instead of the actual topic and guest name.
+  - Include ALL fields you have — you can include just name, just email, just topic, or any combination.
+  - If the guest says "I'm Sarah, sarah@co.com, want to discuss the product launch" — save all three in one action.
+  - If the topic was already set on the link, don't overwrite it unless the guest explicitly changes it.
 
 Rules:
 - Always include the action block when the user's intent is clear

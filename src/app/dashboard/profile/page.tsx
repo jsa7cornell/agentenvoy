@@ -113,6 +113,8 @@ export default function ProfilePage() {
   const [situational, setSituational] = useState("");
   const [savedPersistent, setSavedPersistent] = useState("");
   const [savedSituational, setSavedSituational] = useState("");
+  const [phone, setPhone] = useState("");
+  const [savedPhone, setSavedPhone] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
@@ -167,6 +169,7 @@ export default function ProfilePage() {
           setSituational(data.upcomingSchedulePreferences);
           setSavedPersistent(data.persistentKnowledge);
           setSavedSituational(data.upcomingSchedulePreferences);
+          if (data.phone) { setPhone(data.phone); setSavedPhone(data.phone); }
           if (data.ambiguities?.length) setAmbiguities(data.ambiguities);
           if (data.activeCalendarIds) setActiveCalendarIds(data.activeCalendarIds);
         }
@@ -226,6 +229,7 @@ export default function ProfilePage() {
         body: JSON.stringify({
           persistentKnowledge: persistent,
           upcomingSchedulePreferences: situational,
+          ...(phone !== savedPhone ? { phone } : {}),
         }),
       });
       if (res.ok) {
@@ -233,6 +237,7 @@ export default function ProfilePage() {
         setSaveMessage("Saved");
         setSavedPersistent(persistent);
         setSavedSituational(situational);
+        setSavedPhone(phone);
         setEditingSchedule(false);
         setEditingGeneral(false);
         setAmbiguities(data.ambiguities ?? []);
@@ -485,6 +490,21 @@ export default function ProfilePage() {
                 Preferences
               </h2>
               <div className="bg-surface-inset/50 border border-secondary rounded-xl divide-y divide-secondary/60">
+                {/* Phone number */}
+                <div className="p-4">
+                  <div className="flex items-baseline mb-2">
+                    <span className="text-xs font-semibold text-secondary">Phone</span>
+                    <InfoBubble text="Your phone number is used as the default location for phone call meetings — e.g. 'Guest calls John @ (555) 123-4567'." />
+                  </div>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="(555) 123-4567"
+                    className="w-full max-w-xs bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted outline-none focus:border-purple-500/50 transition"
+                  />
+                </div>
+
                 {/* Schedule sub-area */}
                 <div className="p-4">
                   <div className="flex items-baseline mb-2">
@@ -536,7 +556,7 @@ export default function ProfilePage() {
 
               {/* Save button — only shown when changes are pending */}
               {(() => {
-                const isDirty = persistent !== savedPersistent || situational !== savedSituational;
+                const isDirty = persistent !== savedPersistent || situational !== savedSituational || phone !== savedPhone;
                 return (
                   <div className={`flex items-center justify-end gap-2 mt-3 transition-opacity duration-200 ${isDirty ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
                     {saveMessage && (

@@ -115,6 +115,8 @@ async function executeAction(
       return handleCreateLink(action.params, userId, context?.meetSlug);
     case "update_knowledge":
       return handleUpdateKnowledge(action.params, userId);
+    case "save_guest_info":
+      return handleSaveGuestInfo(action.params, userId, context?.sessionId);
     default:
       return { success: false, message: `Unknown action: ${action.action}` };
   }
@@ -535,5 +537,61 @@ async function handleUpdateKnowledge(
   return {
     success: true,
     message: `Updated ${parts.join(" and ")}`,
+  };
+}
+
+async function handleSaveGuestInfo(
+  params: Record<string, unknown>,
+  userId: string,
+  sessionId?: string
+): Promise<ActionResult> {
+  const guestName = params.guestName as string | undefined;
+  const guestEmail = params.guestEmail as string | undefined;
+  const topic = params.topic as string | undefined;
+
+  if (!guestName && !guestEmail && !topic) {
+    return { success: false, message: "No guest info to save" };
+  }
+
+  if (!sessionId) {
+    return { success: false, message: "No session context" };
+  }
+
+  const session = await prisma.negotiationSession.findUnique({
+    where: { id: sessionId },
+    select: { linkId: true, hostId: true, guestEmail: true },
+  });
+
+  if (!session || session.hostId !== userId) {
+    return { success: false, message: "Session not found or unauthorized" };
+  }
+
+  // Update the link with guest info (so it persists to event card, calendar events, etc.)
+  const linkUpdate: Record<string, unknown> = {};
+  if (guestName) linkUpdate.inviteeName = guestName;
+  if (guestEmail) linkUpdate.inviteeEmail = guestEmail;
+  if (topic) linkUpdate.topic = topic;
+
+  await prisma.negotiationLink.update({
+    where: { id: session.linkId },
+    data: linkUpdate as Parameters<typeof prisma.negotiationLink.update>[0]["data"],
+  });
+
+  // Also save guestEmail on the session if not already set
+  if (guestEmail && !session.guestEmail) {
+    await prisma.negotiationSession.update({
+      where: { id: sessionId },
+      data: { guestEmail },
+    });
+  }
+
+  const parts: string[] = [];
+  if (guestName) parts.push(`name: ${guestName}`);
+  if (guestEmail) parts.push(`email: ${guestEmail}`);
+  if (topic) parts.push(`topic: ${topic}`);
+
+  return {
+    success: true,
+    message: `Saved guest info — ${parts.join(", ")}`,
   };
 }

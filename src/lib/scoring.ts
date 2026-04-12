@@ -34,6 +34,7 @@ export interface BlockedWindow {
 
 export interface UserPreferences {
   timezone?: string;
+  phone?: string; // host phone number — used as default location for phone call meetings
   explicit?: {
     timezone?: string;
     businessHoursStart?: number; // hour, default 9
