@@ -24,3 +24,4 @@ RESEND_API_KEY=op://Secrets/AGENTENVOY_RESEND_API_KEY/credential
 
 # ─── Dev Auth (non-secret, dev-only) ──────────────────────
 DEV_AUTH_SECRET=dev-test-secret-local-only
+NEXT_PUBLIC_DEV_AUTH_SECRET=dev-test-secret-local-only

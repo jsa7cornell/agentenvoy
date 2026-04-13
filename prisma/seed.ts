@@ -25,10 +25,12 @@ async function main() {
       name: "Test Host",
       email: "testhost@agentenvoy.dev",
       meetSlug: "testhost",
+      lastCalibratedAt: new Date(),
       preferences: {
         preferredTimes: ["morning"],
         format: "phone",
         duration: 30,
+        explicit: { timezone: "America/Los_Angeles" },
       },
       hostDirectives: [
         "Always confirm timezone",
@@ -40,10 +42,12 @@ async function main() {
       name: "Test Host",
       email: "testhost@agentenvoy.dev",
       meetSlug: "testhost",
+      lastCalibratedAt: new Date(),
       preferences: {
         preferredTimes: ["morning"],
         format: "phone",
         duration: 30,
+        explicit: { timezone: "America/Los_Angeles" },
       },
       hostDirectives: [
         "Always confirm timezone",

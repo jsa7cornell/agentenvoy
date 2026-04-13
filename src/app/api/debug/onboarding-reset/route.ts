@@ -22,7 +22,16 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { mode } = body as { mode: "reset" | "create" };
+  const { mode } = body as { mode: "reset" | "create" | "calibrate" };
+
+  // Mark user as calibrated (skip onboarding) — used by dev-login
+  if (mode === "calibrate") {
+    await prisma.user.update({
+      where: { email: session.user.email },
+      data: { lastCalibratedAt: new Date() },
+    });
+    return NextResponse.json({ success: true, message: "User marked as calibrated." });
+  }
 
   if (mode === "reset") {
     const user = await prisma.user.findUnique({
