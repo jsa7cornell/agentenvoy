@@ -63,10 +63,11 @@ export const authOptions: NextAuthOptions = {
           session.user.id = userId;
           const dbUser = await prisma.user.findUnique({
             where: { id: userId },
-            select: { meetSlug: true, preferences: true },
+            select: { meetSlug: true, preferences: true, lastCalibratedAt: true },
           });
           session.user.meetSlug = dbUser?.meetSlug ?? null;
           session.user.preferences = (dbUser?.preferences as Record<string, unknown>) ?? null;
+          session.user.onboardingComplete = !!dbUser?.lastCalibratedAt;
         }
       }
       return session;

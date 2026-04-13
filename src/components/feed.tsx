@@ -295,15 +295,21 @@ export default function Feed() {
     <div className="flex flex-col h-full">
       {/* Messages */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-1.5">
-        {/* Welcome banner for uncalibrated users */}
+        {/* Fallback banner for uncalibrated users who somehow bypassed onboarding */}
         {!isCalibrated && !welcomeDismissed && messages.length === 0 && (
           <div className="mx-auto max-w-md bg-purple-500/10 border border-purple-500/20 rounded-xl p-4 mb-4">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-sm font-medium text-primary">Welcome to AgentEnvoy</p>
+                <p className="text-sm font-medium text-primary">Finish setting up your Envoy</p>
                 <p className="text-xs text-secondary mt-1">
-                  Envoy will ask a few quick questions to learn your scheduling style, then you can start creating meeting links.
+                  Complete the quick setup to configure your availability and start scheduling.
                 </p>
+                <a
+                  href="/onboarding"
+                  className="inline-block mt-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded-lg transition"
+                >
+                  Continue setup
+                </a>
               </div>
               <button
                 onClick={() => setWelcomeDismissed(true)}
@@ -448,7 +454,7 @@ export default function Feed() {
               <p className="text-xs text-muted">Envoy needs access to your schedule to find available times.</p>
             </div>
             <a
-              href="/dashboard/profile"
+              href="/dashboard/account"
               className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium rounded-lg transition flex-shrink-0"
             >
               Connect

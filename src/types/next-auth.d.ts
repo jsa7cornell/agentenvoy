@@ -9,6 +9,7 @@ declare module "next-auth" {
       image?: string | null;
       meetSlug?: string | null;
       preferences?: Record<string, unknown> | null;
+      onboardingComplete?: boolean;
     };
   }
 }

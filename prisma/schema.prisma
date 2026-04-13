@@ -57,6 +57,7 @@ model User {
   persistentKnowledge  String?   @db.Text   // Long-lived: who they are, how they work, what matters
   upcomingSchedulePreferences String?   @db.Text @map("situationalKnowledge") // Near-term non-time context: mood, goals, temp rules
   lastCalibratedAt DateTime?              // null = never calibrated, triggers onboarding flow
+  onboardingPhase  String?                // null = not started, tracks progress through onboarding chat
   createdAt        DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

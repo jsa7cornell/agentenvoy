@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "@/components/providers";
+import { ConditionalFooter } from "@/components/conditional-footer";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -17,7 +18,7 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: "AgentEnvoy — Your AI Negotiates So You Don't Have To",
   description:
-    "AI agent negotiation platform. Meetings, RFPs, dinner plans — your AI handles the back-and-forth.",
+    "AI agent that negotiates meetings, proposals, and schedules on your behalf. Connect your Google Calendar and let Envoy handle the back-and-forth.",
 };
 
 export default function RootLayout({
@@ -39,13 +40,7 @@ export default function RootLayout({
           <div className="flex-1 min-h-0 flex flex-col overflow-auto">
             {children}
           </div>
-          <footer className="relative z-10 py-4 text-center text-xs text-muted space-x-4 flex-shrink-0">
-            <a href="/privacy" className="hover:text-secondary transition">Privacy</a>
-            <span>&middot;</span>
-            <a href="/terms" className="hover:text-secondary transition">Terms</a>
-            <span>&middot;</span>
-            <a href="/faq" className="hover:text-secondary transition">How It Works</a>
-          </footer>
+          <ConditionalFooter />
         </Providers>
       </body>
     </html>

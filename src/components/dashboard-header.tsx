@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { LogoFull } from "./logo";
 
 interface ConnectionStatus {
@@ -15,6 +16,7 @@ interface ConnectionStatus {
 
 export function DashboardHeader() {
   const { data: session } = useSession();
+  const pathname = usePathname();
   const [copied, setCopied] = useState(false);
   const [connStatus, setConnStatus] = useState<ConnectionStatus | null>(null);
 
@@ -40,33 +42,35 @@ export function DashboardHeader() {
     }
   }
 
-  // Determine actions needed
   const calendarConnected = connStatus?.google?.calendar ?? false;
   const hasPreferences =
     session?.user?.preferences &&
     Object.keys(session.user.preferences as Record<string, unknown>).length > 0;
 
-  const actions: Array<{ label: string; href: string }> = [];
-  if (connStatus && !calendarConnected) {
-    actions.push({ label: "Connect your calendar", href: "/dashboard/profile" });
-  }
-  if (!hasPreferences) {
-    actions.push({ label: "Set meeting preferences", href: "/dashboard/profile" });
-  }
+  const showAction = (connStatus && !calendarConnected) || !hasPreferences;
+  const actionLabel = connStatus && !calendarConnected ? "Connect calendar" : "Set preferences";
+
+  const isAvailability = pathname.startsWith("/dashboard/availability");
+  const isAccount = pathname.startsWith("/dashboard/account");
+  const isDashboard = pathname === "/dashboard" || pathname === "/dashboard/";
 
   return (
     <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0">
-      <div className="px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-        {/* Left: Logo */}
-        <Link href="/" className="flex-shrink-0">
-          <LogoFull height={24} className="text-primary" />
+      <div className="px-4 sm:px-6 py-2.5 flex items-center gap-3">
+        {/* Logo → Dashboard */}
+        <Link
+          href="/dashboard"
+          className={`flex-shrink-0 transition ${isDashboard ? "opacity-100" : "opacity-60 hover:opacity-100"}`}
+          title="Dashboard"
+        >
+          <LogoFull height={22} className="text-primary" />
         </Link>
 
-        {/* Center: Meet link pill */}
+        {/* Meet link pill — desktop */}
         {meetUrl && (
           <button
             onClick={copyLink}
-            className="hidden sm:flex items-center gap-2 bg-surface-secondary/60 border border-surface-tertiary/50 rounded-full px-3.5 py-1.5 hover:border-purple-500/40 transition group max-w-[280px]"
+            className="hidden sm:flex items-center gap-2 bg-surface-secondary/60 border border-surface-tertiary/50 rounded-full px-3 py-1 hover:border-purple-500/40 transition group max-w-[240px]"
           >
             <code className="text-purple-400 font-mono text-xs truncate">
               /meet/{meetSlug}
@@ -81,77 +85,84 @@ export function DashboardHeader() {
           </button>
         )}
 
-        {/* Mobile: just a copy icon */}
+        {/* Mobile: copy icon */}
         {meetUrl && (
           <button
             onClick={copyLink}
-            className="flex sm:hidden items-center justify-center w-8 h-8 rounded-lg bg-surface-secondary/60 border border-surface-tertiary/50 hover:border-purple-500/40 transition"
+            className="flex sm:hidden items-center justify-center w-7 h-7 rounded-lg bg-surface-secondary/60 border border-surface-tertiary/50 hover:border-purple-500/40 transition"
             title="Copy invite link"
           >
             {copied ? (
-              <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             ) : (
-              <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-3.5 h-3.5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.776a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.25 8.016" />
               </svg>
             )}
           </button>
         )}
 
-        {/* Right: Actions + Profile */}
-        <div className="flex items-center gap-3">
-          {/* Actions badge */}
-          {actions.length > 0 && (
-            <Link
-              href={actions[0].href}
-              className="hidden sm:flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 rounded-full px-3 py-1 hover:border-amber-500/40 transition"
-            >
-              <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-[11px] font-medium text-amber-600 dark:text-amber-300">
-                {actions[0].label}
-              </span>
-            </Link>
-          )}
-          {/* Mobile: just a dot */}
-          {actions.length > 0 && (
-            <Link
-              href={actions[0].href}
-              className="flex sm:hidden items-center justify-center w-8 h-8 rounded-lg relative"
-              title={actions[0].label}
-            >
-              <svg className="w-5 h-5 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-              </svg>
-              <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400" />
-            </Link>
-          )}
+        {/* Spacer */}
+        <div className="flex-1" />
 
-          {/* Profile link */}
+        {/* Action badge — compact */}
+        {showAction && (
           <Link
-            href="/dashboard/profile"
-            className="flex items-center gap-2 hover:opacity-80 transition"
+            href="/dashboard/account"
+            className="hidden sm:flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 rounded-full px-2.5 py-1 hover:border-amber-500/40 transition"
           >
-            <span className="text-xs text-muted hidden sm:inline">
-              {session?.user?.name}
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+            <span className="text-[10px] font-medium text-amber-600 dark:text-amber-300">
+              {actionLabel}
             </span>
-            {session?.user?.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={session.user.image}
-                alt=""
-                className="w-7 h-7 rounded-full"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
-                <span className="text-[10px] font-bold text-white">
-                  {session?.user?.name?.charAt(0)?.toUpperCase() || "?"}
-                </span>
-              </div>
-            )}
           </Link>
-        </div>
+        )}
+
+        {/* Availability nav icon */}
+        <Link
+          href="/dashboard/availability"
+          className={`flex items-center justify-center w-8 h-8 rounded-lg transition ${
+            isAvailability
+              ? "bg-accent/15 text-accent"
+              : "text-muted hover:text-secondary hover:bg-surface-secondary/60"
+          }`}
+          title="My Availability"
+        >
+          <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+          </svg>
+        </Link>
+
+        {/* Profile → Account */}
+        <Link
+          href="/dashboard/account"
+          className={`flex items-center gap-2 rounded-lg px-2 py-1 transition ${
+            isAccount
+              ? "bg-accent/10"
+              : "hover:bg-surface-secondary/60"
+          }`}
+          title="My Account"
+        >
+          {session?.user?.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={session.user.image}
+              alt=""
+              className={`w-7 h-7 rounded-full ${isAccount ? "ring-2 ring-accent" : ""}`}
+            />
+          ) : (
+            <div className={`w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center ${isAccount ? "ring-2 ring-accent" : ""}`}>
+              <span className="text-[10px] font-bold text-white">
+                {session?.user?.name?.charAt(0)?.toUpperCase() || "?"}
+              </span>
+            </div>
+          )}
+          <span className="text-xs text-muted hidden sm:inline">
+            {session?.user?.name?.split(" ")[0]}
+          </span>
+        </Link>
       </div>
     </header>
   );

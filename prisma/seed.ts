@@ -110,12 +110,38 @@ async function main() {
     console.log(`✓ Cleaned ${deleted.count} stale test session(s)`);
   }
 
+  // 5. Upsert onboarding test user (uncalibrated, for testing onboarding flow)
+  const ONBOARDING_USER_ID = "test-user-onboarding";
+  const onboardingUser = await prisma.user.upsert({
+    where: { id: ONBOARDING_USER_ID },
+    update: {
+      name: "Onboarding Test",
+      email: "onboarding@agentenvoy.dev",
+      meetSlug: "onboardingtest",
+      lastCalibratedAt: null,
+      onboardingPhase: null,
+      preferences: { explicit: { timezone: "America/Los_Angeles" } },
+      persistentKnowledge: "- This host has not been calibrated yet.",
+    },
+    create: {
+      id: ONBOARDING_USER_ID,
+      name: "Onboarding Test",
+      email: "onboarding@agentenvoy.dev",
+      meetSlug: "onboardingtest",
+      lastCalibratedAt: null,
+      preferences: { explicit: { timezone: "America/Los_Angeles" } },
+      persistentKnowledge: "- This host has not been calibrated yet.",
+    },
+  });
+  console.log(`✓ Onboarding test user upserted: ${onboardingUser.id} (${onboardingUser.email})`);
+
   console.log("\n🌱 Seed complete.\n");
   console.log("Test credentials:");
   console.log("  API key (plaintext): ae_test_key_e2e");
   console.log("  Host slug:           testhost");
   console.log("  Contextual code:     test-ctx-001");
   console.log("  Dev auth email:      testhost@agentenvoy.dev");
+  console.log("  Onboarding email:    onboarding@agentenvoy.dev");
 }
 
 main()

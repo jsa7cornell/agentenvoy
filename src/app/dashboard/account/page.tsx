@@ -1,0 +1,681 @@
+"use client";
+
+import { useSession, signIn, signOut } from "next-auth/react";
+import { useEffect, useState, useCallback } from "react";
+import { ThemeToggle } from "@/components/theme-toggle";
+
+interface ConnectionStatus {
+  google: {
+    connected: boolean;
+    calendar: boolean;
+    scopes: string[];
+  };
+}
+
+const TIMEZONES = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Phoenix",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Asia/Tokyo",
+  "Asia/Shanghai",
+  "Australia/Sydney",
+];
+
+export default function AccountPage() {
+  const { data: session, status } = useSession();
+
+  const [connStatus, setConnStatus] = useState<ConnectionStatus | null>(null);
+  const [phone, setPhone] = useState("");
+  const [savedPhone, setSavedPhone] = useState("");
+  const [videoProvider, setVideoProvider] = useState<"google-meet" | "zoom">("google-meet");
+  const [savedVideoProvider, setSavedVideoProvider] = useState<"google-meet" | "zoom">("google-meet");
+  const [zoomLink, setZoomLink] = useState("");
+  const [savedZoomLink, setSavedZoomLink] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+
+  // Timezone + location (edits go to /api/tuner/preferences)
+  const [timezone, setTimezone] = useState("America/Los_Angeles");
+  const [savedTimezone, setSavedTimezone] = useState("America/Los_Angeles");
+  const [currentLocation, setCurrentLocation] = useState<{ label: string; until?: string } | null>(null);
+  const [savedLocation, setSavedLocation] = useState<{ label: string; until?: string } | null>(null);
+
+  // Calendar modals
+  const [calendarModal, setCalendarModal] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [calendarFilterModal, setCalendarFilterModal] = useState(false);
+  const [googleCalendars, setGoogleCalendars] = useState<Array<{ id: string; name: string; primary: boolean; backgroundColor: string | null }>>([]);
+  const [activeCalendarIds, setActiveCalendarIds] = useState<string[]>([]);
+  const [modalSelectedIds, setModalSelectedIds] = useState<string[]>([]);
+  const [savingCalendarFilter, setSavingCalendarFilter] = useState(false);
+
+  const calendarConnected = connStatus?.google?.calendar ?? false;
+
+  const fetchData = useCallback(() => {
+    fetch("/api/connections/status")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data) setConnStatus(data); })
+      .catch(() => {});
+
+    fetch("/api/agent/knowledge")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) {
+          if (data.phone) { setPhone(data.phone); setSavedPhone(data.phone); }
+          if (data.videoProvider) { setVideoProvider(data.videoProvider); setSavedVideoProvider(data.videoProvider); }
+          if (data.zoomLink) { setZoomLink(data.zoomLink); setSavedZoomLink(data.zoomLink); }
+          if (data.activeCalendarIds) setActiveCalendarIds(data.activeCalendarIds);
+        }
+      })
+      .catch(() => {});
+
+    fetch("/api/tuner/preferences")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) {
+          setTimezone(data.timezone); setSavedTimezone(data.timezone);
+          setCurrentLocation(data.currentLocation); setSavedLocation(data.currentLocation);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    fetchData();
+  }, [status, fetchData]);
+
+  const isDirty = phone !== savedPhone ||
+    videoProvider !== savedVideoProvider ||
+    zoomLink !== savedZoomLink ||
+    timezone !== savedTimezone ||
+    JSON.stringify(currentLocation) !== JSON.stringify(savedLocation);
+
+  async function handleSave() {
+    if (saving) return;
+    setSaving(true);
+    setSaveMessage("");
+    try {
+      // Save meeting prefs
+      const meetingRes = await fetch("/api/agent/knowledge", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(phone !== savedPhone ? { phone } : {}),
+          ...(videoProvider !== savedVideoProvider ? { videoProvider } : {}),
+          ...(zoomLink !== savedZoomLink ? { zoomLink } : {}),
+        }),
+      });
+
+      // Save timezone + location if changed
+      if (timezone !== savedTimezone || JSON.stringify(currentLocation) !== JSON.stringify(savedLocation)) {
+        await fetch("/api/tuner/preferences", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ timezone, currentLocation }),
+        });
+        setSavedTimezone(timezone);
+        setSavedLocation(currentLocation);
+      }
+
+      if (meetingRes.ok) {
+        setSaveMessage("Saved");
+        setSavedPhone(phone);
+        setSavedVideoProvider(videoProvider);
+        setSavedZoomLink(zoomLink);
+        setTimeout(() => setSaveMessage(""), 2000);
+      } else {
+        setSaveMessage("Failed to save");
+      }
+    } catch {
+      setSaveMessage("Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDisconnectCalendar() {
+    setDisconnecting(true);
+    try {
+      const res = await fetch("/api/connections/disconnect-calendar", { method: "POST" });
+      if (res.ok) {
+        setConnStatus((prev) =>
+          prev ? { ...prev, google: { ...prev.google, calendar: false, scopes: [] } } : prev
+        );
+        setCalendarModal(false);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
+  if (status === "loading" || !session) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-muted text-sm">Loading...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-8 space-y-8">
+        {/* Profile Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {session.user?.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={session.user.image} alt="" className="w-12 h-12 rounded-full" />
+            ) : (
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
+                <span className="text-lg font-bold text-white">
+                  {session.user?.name?.charAt(0)?.toUpperCase() || "?"}
+                </span>
+              </div>
+            )}
+            <div>
+              <h1 className="text-lg font-semibold">{session.user?.name}</h1>
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-muted">{session.user?.email}</p>
+                <span className="text-muted">&middot;</span>
+                <button
+                  onClick={() => signOut({ callbackUrl: "/" })}
+                  className="text-xs text-muted hover:text-secondary transition"
+                >
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Google Calendar */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
+            Google Calendar
+          </h2>
+          <div className={`rounded-xl border transition ${
+            calendarConnected
+              ? "bg-emerald-900/10 border-emerald-700/30"
+              : "bg-surface-inset/50 border-secondary"
+          }`}>
+            <button
+              onClick={() => {
+                if (calendarConnected) {
+                  setCalendarModal(true);
+                } else {
+                  signIn("google", { callbackUrl: "/dashboard/account" });
+                }
+              }}
+              className="flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-black/5 dark:hover:bg-white/5 transition rounded-xl"
+            >
+              <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center flex-shrink-0">
+                <svg viewBox="0 0 24 24" className="w-5 h-5">
+                  <path d="M18.316 5.684H24v12.632h-5.684V5.684z" fill="#1967D2" />
+                  <path d="M5.684 18.316V5.684L0 5.684v12.632l5.684 0z" fill="#188038" />
+                  <path d="M18.316 24V18.316H5.684V24h12.632z" fill="#1967D2" />
+                  <path d="M18.316 5.684V0H5.684v5.684h12.632z" fill="#EA4335" />
+                  <path d="M18.316 18.316H5.684V5.684h12.632v12.632z" fill="#fff" />
+                  <path d="M9.2 15.7V9.1h1.5v2.4h2.6V9.1h1.5v6.6h-1.5v-2.8h-2.6v2.8H9.2z" fill="#1967D2" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-primary">
+                  {calendarConnected ? "Connected" : "Connect Google Calendar"}
+                </div>
+                <div className={`text-xs ${calendarConnected ? "text-emerald-400" : "text-muted"}`}>
+                  {calendarConnected ? session.user?.email : "Read events and create meetings on your behalf"}
+                </div>
+              </div>
+              {calendarConnected && (
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 flex-shrink-0" />
+              )}
+            </button>
+            {calendarConnected && (
+              <button
+                onClick={() => {
+                  if (googleCalendars.length === 0) {
+                    fetch("/api/connections/google-calendars")
+                      .then((r) => r.json())
+                      .then((d) => {
+                        if (d.calendars) {
+                          setGoogleCalendars(d.calendars);
+                          const ids = d.calendars.map((c: { id: string }) => c.id);
+                          setModalSelectedIds(activeCalendarIds.length > 0 ? activeCalendarIds : ids);
+                        }
+                      })
+                      .catch(() => {});
+                  } else {
+                    setModalSelectedIds(activeCalendarIds.length > 0 ? activeCalendarIds : googleCalendars.map((c) => c.id));
+                  }
+                  setCalendarFilterModal(true);
+                }}
+                className="w-full px-4 py-2 text-xs text-muted hover:text-secondary border-t border-emerald-800/30 text-left transition hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                Manage calendars
+              </button>
+            )}
+          </div>
+        </section>
+
+        {/* Timezone */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">
+            Timezone
+          </h2>
+          <select
+            value={timezone}
+            onChange={(e) => setTimezone(e.target.value)}
+            className="w-full max-w-sm bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
+          >
+            {TIMEZONES.map((tz) => (
+              <option key={tz} value={tz}>
+                {tz.replace(/_/g, " ")}
+              </option>
+            ))}
+            {!TIMEZONES.includes(timezone) && (
+              <option value={timezone}>{timezone.replace(/_/g, " ")}</option>
+            )}
+          </select>
+        </section>
+
+        {/* Current Location */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-2">
+            Current Location
+          </h2>
+          <div className="flex gap-2 max-w-sm">
+            <input
+              type="text"
+              value={currentLocation?.label ?? ""}
+              onChange={(e) => {
+                if (!e.target.value.trim()) {
+                  setCurrentLocation(null);
+                } else {
+                  setCurrentLocation({
+                    label: e.target.value,
+                    until: currentLocation?.until,
+                  });
+                }
+              }}
+              placeholder="e.g. Baja, NYC"
+              className="flex-1 bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition"
+            />
+            <input
+              type="date"
+              value={currentLocation?.until ?? ""}
+              onChange={(e) => {
+                if (currentLocation) {
+                  setCurrentLocation({
+                    ...currentLocation,
+                    until: e.target.value || undefined,
+                  });
+                }
+              }}
+              className="w-36 bg-surface-secondary border border-DEFAULT rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
+            />
+          </div>
+          <p className="text-[10px] text-muted mt-1">Leave &ldquo;until&rdquo; blank for indefinite</p>
+        </section>
+
+        {/* Meeting Preferences */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
+            Meeting Preferences
+          </h2>
+          <div className="bg-surface-inset/50 border border-secondary rounded-xl p-4 space-y-4">
+            {/* Phone */}
+            <div>
+              <label className="text-[11px] text-muted font-medium block mb-1">Phone number</label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+1 (555) 123-4567"
+                className="w-full max-w-xs bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted outline-none focus:border-purple-500/50 transition"
+              />
+              <p className="text-[10px] text-muted mt-1">Include country code. Used as default for phone call meetings.</p>
+            </div>
+
+            {/* Video provider */}
+            <div>
+              <label className="text-[11px] text-muted font-medium block mb-1.5">Video conferencing</label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setVideoProvider("google-meet")}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition ${
+                    videoProvider === "google-meet"
+                      ? "border-purple-500 bg-purple-500/10 text-primary"
+                      : "border-surface-tertiary/50 bg-surface-secondary/40 text-muted hover:border-secondary"
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 8l5-3.5v15L15 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><rect x="3" y="6" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>
+                  Google Meet
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVideoProvider("zoom")}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition ${
+                    videoProvider === "zoom"
+                      ? "border-purple-500 bg-purple-500/10 text-primary"
+                      : "border-surface-tertiary/50 bg-surface-secondary/40 text-muted hover:border-secondary"
+                  }`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M16 10l4-2.5v9L16 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Zoom
+                </button>
+              </div>
+            </div>
+
+            {/* Zoom link */}
+            {videoProvider === "zoom" && (
+              <div>
+                <label className="text-[11px] text-muted font-medium block mb-1">Zoom meeting link</label>
+                <input
+                  type="url"
+                  value={zoomLink}
+                  onChange={(e) => setZoomLink(e.target.value)}
+                  placeholder="https://zoom.us/j/1234567890"
+                  className="w-full max-w-md bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted outline-none focus:border-purple-500/50 transition"
+                />
+                <p className="text-[10px] text-muted mt-1">Your personal meeting room link. Added to calendar events instead of Google Meet.</p>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Appearance */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
+            Appearance
+          </h2>
+          <div className="bg-surface-inset/50 border border-secondary rounded-xl px-4 py-3">
+            <ThemeToggle />
+          </div>
+        </section>
+
+        {/* Other Agents */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
+            Other Agents
+          </h2>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-inset/50 border border-secondary opacity-50 flex-shrink-0 w-36">
+                <div className="w-7 h-7 rounded-lg bg-surface-tertiary flex items-center justify-center flex-shrink-0">
+                  <svg className="w-3.5 h-3.5 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082" />
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-secondary">Agent {n}</div>
+                  <div className="text-[10px] text-muted">Coming soon</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Dev Tools — only in development */}
+        {process.env.NODE_ENV !== "production" && <DevTools />}
+
+        {/* Save button */}
+        <div className={`flex items-center justify-end gap-2 transition-opacity duration-200 ${isDirty ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+          {saveMessage && (
+            <span className={`text-xs ${saveMessage === "Saved" ? "text-emerald-400" : "text-red-400"}`}>
+              {saveMessage}
+            </span>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-30 text-white text-sm rounded-lg font-medium transition"
+          >
+            {saving ? "Saving..." : "Save changes"}
+          </button>
+        </div>
+      </div>
+
+      {/* Google Calendar Modal */}
+      {calendarModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setCalendarModal(false)}>
+          <div
+            className="bg-surface-inset border border-DEFAULT rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center">
+                <svg viewBox="0 0 24 24" className="w-6 h-6">
+                  <path d="M18.316 5.684H24v12.632h-5.684V5.684z" fill="#1967D2" />
+                  <path d="M5.684 18.316V5.684L0 5.684v12.632l5.684 0z" fill="#188038" />
+                  <path d="M18.316 24V18.316H5.684V24h12.632z" fill="#1967D2" />
+                  <path d="M18.316 5.684V0H5.684v5.684h12.632z" fill="#EA4335" />
+                  <path d="M18.316 18.316H5.684V5.684h12.632v12.632z" fill="#fff" />
+                  <path d="M9.2 15.7V9.1h1.5v2.4h2.6V9.1h1.5v6.6h-1.5v-2.8h-2.6v2.8H9.2z" fill="#1967D2" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-primary">Google Calendar</h3>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="text-xs text-emerald-400">Connected</span>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-2 mb-5">
+              <div className="bg-surface-secondary/60 rounded-lg px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1">Access</div>
+                <p className="text-xs text-primary">Read calendar events and create meetings on your behalf</p>
+              </div>
+              <div className="bg-surface-secondary/60 rounded-lg px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-1">Account</div>
+                <p className="text-xs text-primary">{session.user?.email}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCalendarModal(false)}
+                className="flex-1 px-3 py-2 text-xs font-medium text-secondary border border-DEFAULT rounded-lg hover:border-surface-tertiary transition"
+              >
+                Close
+              </button>
+              <button
+                onClick={handleDisconnectCalendar}
+                disabled={disconnecting}
+                className="flex-1 px-3 py-2 text-xs font-medium text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition disabled:opacity-50"
+              >
+                {disconnecting ? "Disconnecting..." : "Disconnect Calendar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Calendar Filter Modal */}
+      {calendarFilterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setCalendarFilterModal(false)}>
+          <div
+            className="bg-surface-inset border border-DEFAULT rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-primary mb-1">Which calendars affect your availability?</h3>
+            <p className="text-xs text-muted mb-4">Only checked calendars will be used when scheduling.</p>
+            {googleCalendars.length === 0 ? (
+              <div className="text-xs text-muted py-4 text-center">Loading calendars...</div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Calendars</span>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setModalSelectedIds(googleCalendars.map((c) => c.id))}
+                      className="text-[10px] text-muted hover:text-primary transition"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      onClick={() => setModalSelectedIds([])}
+                      className="text-[10px] text-muted hover:text-primary transition"
+                    >
+                      Select none
+                    </button>
+                  </div>
+                </div>
+                <ul className="space-y-2 mb-5 max-h-64 overflow-y-auto">
+                  {googleCalendars.map((cal) => (
+                    <li key={cal.id}>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={modalSelectedIds.includes(cal.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setModalSelectedIds((prev) => [...prev, cal.id]);
+                            } else {
+                              setModalSelectedIds((prev) => prev.filter((id) => id !== cal.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded accent-purple-500"
+                        />
+                        <span
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: cal.backgroundColor || "#6366f1" }}
+                        />
+                        <span className="text-sm text-primary truncate">
+                          {cal.name}
+                          {cal.primary && <span className="ml-1.5 text-[10px] text-muted">(primary)</span>}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCalendarFilterModal(false)}
+                className="flex-1 px-3 py-2 text-xs font-medium text-secondary border border-DEFAULT rounded-lg hover:border-surface-tertiary transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setSavingCalendarFilter(true);
+                  try {
+                    const toSave = modalSelectedIds.length === googleCalendars.length ? [] : modalSelectedIds;
+                    await fetch("/api/connections/calendar-filter", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ activeCalendarIds: toSave }),
+                    });
+                    setActiveCalendarIds(toSave);
+                    setCalendarFilterModal(false);
+                  } catch {
+                    // ignore
+                  } finally {
+                    setSavingCalendarFilter(false);
+                  }
+                }}
+                disabled={savingCalendarFilter || googleCalendars.length === 0}
+                className="flex-1 px-3 py-2 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-lg transition disabled:opacity-40"
+              >
+                {savingCalendarFilter ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Dev-only tools for testing onboarding and other flows */
+function DevTools() {
+  const [resetting, setResetting] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [devMessage, setDevMessage] = useState("");
+
+  async function handleReset() {
+    setResetting(true);
+    setDevMessage("");
+    try {
+      const res = await fetch("/api/debug/onboarding-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "reset" }),
+      });
+      const data = await res.json();
+      setDevMessage(data.message || "Reset complete");
+    } catch {
+      setDevMessage("Reset failed");
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  async function handleCreateTestAccount() {
+    setCreating(true);
+    setDevMessage("");
+    try {
+      const res = await fetch("/api/debug/onboarding-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "create" }),
+      });
+      const data = await res.json();
+      if (data.email) {
+        setDevMessage(`Created: ${data.email}`);
+        navigator.clipboard.writeText(data.email);
+      } else {
+        setDevMessage(data.message || "Failed");
+      }
+    } catch {
+      setDevMessage("Create failed");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="text-[10px] font-bold uppercase tracking-widest text-amber-400 mb-3">
+        Dev Tools
+      </h2>
+      <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={handleReset}
+            disabled={resetting}
+            className="px-3 py-2 text-xs font-medium text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 transition disabled:opacity-40"
+          >
+            {resetting ? "Resetting..." : "Reset Onboarding"}
+          </button>
+          <button
+            onClick={handleCreateTestAccount}
+            disabled={creating}
+            className="px-3 py-2 text-xs font-medium text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 transition disabled:opacity-40"
+          >
+            {creating ? "Creating..." : "Create Test Account"}
+          </button>
+        </div>
+        {devMessage && (
+          <p className="text-xs text-amber-300">{devMessage}</p>
+        )}
+        <p className="text-[10px] text-muted">
+          Reset clears your onboarding state (you&apos;ll be redirected to /onboarding on reload).
+          Create makes a throwaway @agentenvoy.dev account — sign in via dev credentials.
+        </p>
+      </div>
+    </section>
+  );
+}
