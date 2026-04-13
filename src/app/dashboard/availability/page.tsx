@@ -36,6 +36,41 @@ export default function AvailabilityPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Calendar filter modal state
+  const [calendarFilterModal, setCalendarFilterModal] = useState(false);
+  const [googleCalendars, setGoogleCalendars] = useState<Array<{ id: string; name: string; primary: boolean; backgroundColor: string | null }>>([]);
+  const [modalSelectedIds, setModalSelectedIds] = useState<string[]>([]);
+  const [activeCalendarIds, setActiveCalendarIds] = useState<string[]>([]);
+  const [savingCalendarFilter, setSavingCalendarFilter] = useState(false);
+
+  function openCalendarFilter() {
+    if (googleCalendars.length === 0) {
+      fetch("/api/connections/google-calendars")
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.calendars) {
+            setGoogleCalendars(d.calendars);
+            const ids = d.calendars.map((c: { id: string }) => c.id);
+            setModalSelectedIds(activeCalendarIds.length > 0 ? activeCalendarIds : ids);
+          }
+        })
+        .catch(() => {});
+    } else {
+      setModalSelectedIds(activeCalendarIds.length > 0 ? activeCalendarIds : googleCalendars.map((c) => c.id));
+    }
+    setCalendarFilterModal(true);
+  }
+
+
+  // Fetch activeCalendarIds once on mount
+  useEffect(() => {
+    fetch("/api/agent/knowledge")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.activeCalendarIds) setActiveCalendarIds(data.activeCalendarIds);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchSchedule = useCallback(async () => {
     try {
@@ -147,20 +182,28 @@ export default function AvailabilityPage() {
           </button>
         )}
       </div>
-      <button
-        onClick={handleRefresh}
-        disabled={isRefreshing}
-        className="flex items-center gap-1 px-2 py-1 text-xs text-secondary hover:text-primary disabled:opacity-50 transition"
-        title={isRefreshing ? "Syncing..." : "Refresh"}
-      >
-        <svg
-          className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={openCalendarFilter}
+          className="text-[11px] text-muted hover:text-secondary underline transition"
         >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-        {isRefreshing && <span>Syncing...</span>}
-      </button>
+          Manage calendars
+        </button>
+        <button
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-secondary hover:text-primary disabled:opacity-50 transition"
+          title={isRefreshing ? "Syncing..." : "Refresh"}
+        >
+          <svg
+            className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          {isRefreshing && <span>Syncing...</span>}
+        </button>
+      </div>
     </div>
   );
 
@@ -207,6 +250,103 @@ export default function AvailabilityPage() {
           </div>
         </div>
       </div>
+
+      {/* Calendar Filter Modal */}
+      {calendarFilterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setCalendarFilterModal(false)}>
+          <div
+            className="bg-surface-inset border border-DEFAULT rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-primary mb-1">Which calendars affect your availability?</h3>
+            <p className="text-xs text-muted mb-4">Only checked calendars will be used when scheduling.</p>
+            {googleCalendars.length === 0 ? (
+              <div className="text-xs text-muted py-4 text-center">Loading calendars...</div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">Calendars</span>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setModalSelectedIds(googleCalendars.map((c) => c.id))}
+                      className="text-[10px] text-muted hover:text-primary transition"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      onClick={() => setModalSelectedIds([])}
+                      className="text-[10px] text-muted hover:text-primary transition"
+                    >
+                      Select none
+                    </button>
+                  </div>
+                </div>
+                <ul className="space-y-2 mb-5 max-h-64 overflow-y-auto">
+                  {googleCalendars.map((cal) => (
+                    <li key={cal.id}>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={modalSelectedIds.includes(cal.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setModalSelectedIds((prev) => [...prev, cal.id]);
+                            } else {
+                              setModalSelectedIds((prev) => prev.filter((id) => id !== cal.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded accent-purple-500"
+                        />
+                        <span
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: cal.backgroundColor || "#6366f1" }}
+                        />
+                        <span className="text-sm text-primary truncate">
+                          {cal.name}
+                          {cal.primary && <span className="ml-1.5 text-[10px] text-muted">(primary)</span>}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCalendarFilterModal(false)}
+                className="flex-1 px-3 py-2 text-xs font-medium text-secondary border border-DEFAULT rounded-lg hover:border-surface-tertiary transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setSavingCalendarFilter(true);
+                  try {
+                    const toSave = modalSelectedIds.length === googleCalendars.length ? [] : modalSelectedIds;
+                    await fetch("/api/connections/calendar-filter", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ activeCalendarIds: toSave }),
+                    });
+                    setActiveCalendarIds(toSave);
+                    setCalendarFilterModal(false);
+                    // Refresh schedule to reflect new calendar selection
+                    await handleRefresh();
+                  } catch {
+                    // ignore
+                  } finally {
+                    setSavingCalendarFilter(false);
+                  }
+                }}
+                disabled={savingCalendarFilter || googleCalendars.length === 0}
+                className="flex-1 px-3 py-2 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-lg transition disabled:opacity-40"
+              >
+                {savingCalendarFilter ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
