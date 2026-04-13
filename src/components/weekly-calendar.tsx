@@ -152,7 +152,7 @@ export function WeeklyCalendar({
         <div className="min-w-[700px]">
           {/* Header row: day labels + locations */}
           <div className="grid sticky top-0 z-20 bg-surface border-b border-secondary"
-            style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
+            style={{ gridTemplateColumns: "56px repeat(7, minmax(0, 1fr))" }}>
             <div className="p-2" /> {/* gutter */}
             {days.map((day) => {
               const loc = locationByDay[day];
@@ -172,7 +172,7 @@ export function WeeklyCalendar({
           {/* All-day events row */}
           {hasAnyAllDay && (
             <div className="grid border-b border-secondary"
-              style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
+              style={{ gridTemplateColumns: "56px repeat(7, minmax(0, 1fr))" }}>
               <div className="px-1 py-1.5 flex items-start justify-end">
                 <span className="text-[10px] text-muted">All day</span>
               </div>
@@ -197,7 +197,7 @@ export function WeeklyCalendar({
 
           {/* Time grid */}
           <div className="grid relative"
-            style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
+            style={{ gridTemplateColumns: "56px repeat(7, minmax(0, 1fr))" }}>
             {/* Hour labels gutter */}
             <div className="relative" style={{ height: TOTAL_ROWS * ROW_HEIGHT }}>
               {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (

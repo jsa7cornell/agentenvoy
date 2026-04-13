@@ -225,6 +225,67 @@ export async function POST(req: NextRequest) {
     data: { channelId: channel.id, role: "user", content: message },
   });
 
+  // --- Channel session lifecycle (3-day rolling window) ---
+  // IMPORTANT: must happen immediately after saving the message so the session's
+  // startedAt is close in time to the message's createdAt.
+  const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+  const now = new Date();
+  let activeSession = await prisma.channelSession.findFirst({
+    where: { channelId: channel.id, closed: false },
+    orderBy: { startedAt: "desc" },
+  });
+
+  let previousSummary: string | null = null;
+
+  if (activeSession && activeSession.expiresAt < now) {
+    // Session expired — close it with a summary and start fresh
+    const recentMsgs = await prisma.channelMessage.findMany({
+      where: {
+        channelId: channel.id,
+        createdAt: { gte: activeSession.startedAt },
+      },
+      orderBy: { createdAt: "asc" },
+      take: 30,
+    });
+    const summaryText = recentMsgs
+      .filter((m) => m.role !== "system")
+      .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
+      .join("\n");
+
+    try {
+      const summaryResult = await generateText({
+        model: envoyModel("claude-sonnet-4-6"),
+        system: "Summarize this scheduling conversation in 2-3 sentences. Focus on what was decided, what's pending, and any preferences learned.",
+        messages: [{ role: "user", content: summaryText }],
+      });
+      previousSummary = summaryResult.text;
+      await prisma.channelSession.update({
+        where: { id: activeSession.id },
+        data: { closed: true, summary: previousSummary },
+      });
+    } catch {
+      await prisma.channelSession.update({
+        where: { id: activeSession.id },
+        data: { closed: true },
+      });
+    }
+    activeSession = null;
+  }
+
+  if (!activeSession) {
+    activeSession = await prisma.channelSession.create({
+      data: {
+        channelId: channel.id,
+        expiresAt: new Date(Date.now() + THREE_DAYS_MS),
+      },
+    });
+  } else {
+    await prisma.channelSession.update({
+      where: { id: activeSession.id },
+      data: { expiresAt: new Date(Date.now() + THREE_DAYS_MS) },
+    });
+  }
+
   // Build context
   const contextParts: string[] = [];
   contextParts.push(`User: ${user.name || "User"}`);
@@ -284,7 +345,6 @@ export async function POST(req: NextRequest) {
   }
 
   // Timezone reference
-  const now = new Date();
   const timeStr = now.toLocaleString("en-US", {
     weekday: "short",
     month: "short",
@@ -308,75 +368,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // --- Channel session lifecycle (3-day rolling window) ---
-  const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
-  let activeSession = await prisma.channelSession.findFirst({
-    where: { channelId: channel.id, closed: false },
-    orderBy: { startedAt: "desc" },
-  });
-
-  let previousSummary: string | null = null;
-
-  if (activeSession && activeSession.expiresAt < now) {
-    // Session expired — close it with a summary and start fresh
-    // Generate summary from recent messages
-    const recentMsgs = await prisma.channelMessage.findMany({
-      where: {
-        channelId: channel.id,
-        createdAt: { gte: activeSession.startedAt },
-      },
-      orderBy: { createdAt: "asc" },
-      take: 30,
-    });
-    const summaryText = recentMsgs
-      .filter((m) => m.role !== "system")
-      .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
-      .join("\n");
-
-    // Quick LLM summary
-    try {
-      const summaryResult = await generateText({
-        model: envoyModel("claude-sonnet-4-6"),
-        system: "Summarize this scheduling conversation in 2-3 sentences. Focus on what was decided, what's pending, and any preferences learned.",
-        messages: [{ role: "user", content: summaryText }],
-      });
-      previousSummary = summaryResult.text;
-      await prisma.channelSession.update({
-        where: { id: activeSession.id },
-        data: { closed: true, summary: previousSummary },
-      });
-    } catch {
-      await prisma.channelSession.update({
-        where: { id: activeSession.id },
-        data: { closed: true },
-      });
-    }
-    activeSession = null;
-  }
-
-  if (!activeSession) {
-    // Start new session
-    activeSession = await prisma.channelSession.create({
-      data: {
-        channelId: channel.id,
-        expiresAt: new Date(Date.now() + THREE_DAYS_MS),
-      },
-    });
-  } else {
-    // Extend rolling window
-    await prisma.channelSession.update({
-      where: { id: activeSession.id },
-      data: { expiresAt: new Date(Date.now() + THREE_DAYS_MS) },
-    });
-  }
-
   // Add previous session summary to context if starting fresh
   if (previousSummary) {
     contextParts.push(`Previous session summary: ${previousSummary}`);
   }
 
-  // Get conversation history — hard cap at 3 days to keep thread context lean
-  // Use 5s buffer before session start to capture the user message saved before session creation
+  // Get conversation history — hard cap at 3 days
   const threeDaysAgo = new Date(Date.now() - THREE_DAYS_MS);
   const sessionStart = new Date(activeSession.startedAt.getTime() - 5000);
   const historyStart = sessionStart > threeDaysAgo ? sessionStart : threeDaysAgo;
