@@ -14,6 +14,7 @@ export interface CalendarProvider {
 
 export interface CalendarEvent {
   id: string;
+  iCalUID?: string; // consistent across calendars — used for cross-calendar dedup
   summary: string;
   start: Date;
   end: Date;
@@ -103,6 +104,7 @@ class GoogleCalendarProvider implements CalendarProvider {
 
             return {
               id: ev.id || crypto.randomUUID(),
+              iCalUID: ev.iCalUID || undefined,
               summary: ev.summary || "(no title)",
               start: evStart,
               end: evEnd,
@@ -233,11 +235,14 @@ export async function getCalendarContext(
     }
   }
 
-  // Deduplicate by id, sort by start time
+  // Deduplicate by iCalUID (cross-calendar) then by id (same calendar), sort by start time
   const seen = new Set<string>();
   const dedupedEvents = allEvents.filter((ev) => {
-    if (seen.has(ev.id)) return false;
-    seen.add(ev.id);
+    const dedupKey = ev.iCalUID || ev.id;
+    if (seen.has(dedupKey)) return false;
+    seen.add(dedupKey);
+    // Also track by id to prevent same-calendar dupes
+    if (ev.iCalUID) seen.add(ev.id);
     return true;
   });
   dedupedEvents.sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -334,6 +339,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  */
 interface StoredCalendarEvent {
   id: string;
+  iCalUID?: string;
   summary: string;
   start: string; // ISO string
   end: string;
@@ -519,6 +525,7 @@ async function fullSync(
 
       events.push({
         id: ev.id || crypto.randomUUID(),
+        iCalUID: ev.iCalUID || undefined,
         summary: ev.summary || "(no title)",
         start: isAllDay
           ? new Date(ev.start?.date + "T00:00:00").toISOString()
@@ -591,6 +598,7 @@ async function incrementalSync(
 
         newEvents.push({
           id: ev.id || crypto.randomUUID(),
+          iCalUID: ev.iCalUID || undefined,
           summary: ev.summary || "(no title)",
           start: isAllDay
             ? new Date(ev.start?.date + "T00:00:00").toISOString()
@@ -656,11 +664,13 @@ export async function getCachedCalendarContext(
       }
     }
 
-    // Deduplicate and cap (same logic as getCalendarContext)
+    // Deduplicate by iCalUID (cross-calendar) then by id (same calendar)
     const seen = new Set<string>();
     const deduped = events.filter((ev) => {
-      if (seen.has(ev.id)) return false;
-      seen.add(ev.id);
+      const dedupKey = ev.iCalUID || ev.id;
+      if (seen.has(dedupKey)) return false;
+      seen.add(dedupKey);
+      if (ev.iCalUID) seen.add(ev.id);
       return true;
     });
     deduped.sort((a, b) => a.start.getTime() - b.start.getTime());
