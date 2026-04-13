@@ -365,19 +365,6 @@ export default function AccountPage() {
             Meeting Preferences
           </h2>
           <div className="bg-surface-inset/50 border border-secondary rounded-xl p-4 space-y-4">
-            {/* Phone */}
-            <div>
-              <label className="text-[11px] text-muted font-medium block mb-1">Phone number</label>
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+1 (555) 123-4567"
-                className="w-full max-w-xs bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted outline-none focus:border-purple-500/50 transition"
-              />
-              <p className="text-[10px] text-muted mt-1">Include country code. Used as default for phone call meetings.</p>
-            </div>
-
             {/* Default meeting length */}
             <div>
               <label className="text-[11px] text-muted font-medium block mb-1.5">Default meeting length</label>
@@ -401,6 +388,19 @@ export default function AccountPage() {
                 })}
               </div>
               <p className="text-[10px] text-muted mt-1">Used when creating new meeting threads unless overridden.</p>
+            </div>
+
+            {/* Phone */}
+            <div>
+              <label className="text-[11px] text-muted font-medium block mb-1">Phone number</label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+1 (555) 123-4567"
+                className="w-full max-w-xs bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted outline-none focus:border-purple-500/50 transition"
+              />
+              <p className="text-[10px] text-muted mt-1">Include country code. Used as default for phone call meetings.</p>
             </div>
 
             {/* Video provider */}

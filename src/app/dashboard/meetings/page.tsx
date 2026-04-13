@@ -38,6 +38,25 @@ export default function MeetingsPage() {
   const { status } = useSession();
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [archiving, setArchiving] = useState<string | null>(null);
+
+  async function handleArchive(sessionId: string) {
+    setArchiving(sessionId);
+    try {
+      const res = await fetch("/api/negotiate/archive", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, archived: true }),
+      });
+      if (res.ok) {
+        setActiveSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setArchiving(null);
+    }
+  }
 
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -115,20 +134,28 @@ export default function MeetingsPage() {
                 const guestLabel = s.link.inviteeName || s.guestEmail || s.link.inviteeEmail || "Guest";
                 const title = s.title || s.link.topic || `Meeting with ${guestLabel}`;
                 return (
-                  <Link
-                    key={s.id}
-                    href={getDealRoomUrl(s)}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-surface-secondary/40 transition"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-primary truncate">{title}</div>
-                      <div className="text-xs text-muted truncate">{s.statusLabel || guestLabel}</div>
-                    </div>
-                    <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${sd.bg} ${sd.text}`}>
-                      {sd.label}
-                    </span>
-                    <span className="flex-shrink-0 text-[10px] text-muted">{displayDate}</span>
-                  </Link>
+                  <div key={s.id} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-secondary/40 transition group">
+                    <Link href={getDealRoomUrl(s)} className="flex-1 min-w-0 flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-primary truncate">{title}</div>
+                        <div className="text-xs text-muted truncate">{s.statusLabel || guestLabel}</div>
+                      </div>
+                      <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${sd.bg} ${sd.text}`}>
+                        {sd.label}
+                      </span>
+                      <span className="flex-shrink-0 text-[10px] text-muted">{displayDate}</span>
+                    </Link>
+                    <button
+                      onClick={() => handleArchive(s.id)}
+                      disabled={archiving === s.id}
+                      title="Archive"
+                      className="flex-shrink-0 p-1.5 rounded-md text-muted opacity-0 group-hover:opacity-100 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                      </svg>
+                    </button>
+                  </div>
                 );
               })}
             </div>
