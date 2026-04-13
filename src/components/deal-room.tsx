@@ -56,6 +56,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Detect [TIMEZONE_SWITCH] in messages and update widget timezone
+  useEffect(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== "administrator") continue;
+      const match = msg.content.match(/\[TIMEZONE_SWITCH\]\s*(\{[^}]+\})\s*\[\/TIMEZONE_SWITCH\]/);
+      if (match) {
+        try {
+          const { timezone } = JSON.parse(match[1]);
+          if (timezone && typeof timezone === "string") {
+            setSlotTimezone(timezone);
+          }
+        } catch { /* ignore parse errors */ }
+        break; // only apply the most recent switch
+      }
+    }
+  }, [messages]);
+
   // Fetch slots for availability calendar
   useEffect(() => {
     if (!sessionId) return;
@@ -88,10 +106,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     proposal: { dateTime: string; duration: number; format: string; location: string | null; timezone?: string } | null;
     proposalWarning?: string;
   } {
-    // Strip STATUS_UPDATE and ACTION blocks (should already be stripped server-side, but belt-and-suspenders)
+    // Strip STATUS_UPDATE, ACTION, and TIMEZONE_SWITCH blocks
     const cleaned = content
       .replace(/\s*\[STATUS_UPDATE\].*?\[\/STATUS_UPDATE\]\s*/g, "")
-      .replace(/\s*\[ACTION\].*?\[\/ACTION\]\s*/g, "");
+      .replace(/\s*\[ACTION\].*?\[\/ACTION\]\s*/g, "")
+      .replace(/\s*\[TIMEZONE_SWITCH\].*?\[\/TIMEZONE_SWITCH\]\s*/g, "");
     const match = cleaned.match(
       /\[CONFIRMATION_PROPOSAL\]([^\[]*)\[\/CONFIRMATION_PROPOSAL\]/
     );

@@ -209,6 +209,9 @@ export async function POST(req: NextRequest) {
   // Strip all structured blocks from the display text
   let displayText = stripActionBlocks(responseText);
 
+  // Note: TIMEZONE_SWITCH blocks are NOT stripped server-side — they're stored in the DB
+  // and parsed client-side by deal-room.tsx to update the widget timezone.
+
   // Parse and apply status update if present
   const statusUpdate = parseStatusUpdate(displayText);
   displayText = stripStatusUpdate(displayText);

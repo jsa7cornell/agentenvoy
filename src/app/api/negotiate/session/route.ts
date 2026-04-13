@@ -497,9 +497,10 @@ export async function POST(req: NextRequest) {
       : "";
 
     // 5. Timezone sentence (standalone, before times)
+    const guestTzDiffers = guestTzAbbr && guestTzAbbr !== hostTzAbbr;
     let tzSentence: string;
-    if (guestTzAbbr && guestTzAbbr !== hostTzAbbr) {
-      tzSentence = `I have you in ${guestTzAbbr} — let me know if that's wrong. Times below are in ${hostTzAbbr}.`;
+    if (guestTzDiffers) {
+      tzSentence = `Times below are in ${hostTzAbbr}.`;
     } else if (guestTzAbbr) {
       tzSentence = `Times below are in ${hostTzAbbr}.`;
     } else {
@@ -527,8 +528,13 @@ export async function POST(req: NextRequest) {
       ? `\n\nJust need ${needItems.join(" and ")} to send the invite once we lock in a time.`
       : "\n\nJust need your email to send the invite once we lock in a time.";
 
-    // Assemble: intro + format + topic + urgency → tz sentence → times → fallback → need
-    greeting = `${intro}${formatLine}${topicLine}${urgencyLine}\n\n${tzSentence}\n\n${scheduleLine}${needLine}`;
+    // 8. Timezone switch offer (only when guest is in a different tz)
+    const tzOffer = guestTzDiffers
+      ? `\n\nI notice you might be in ${guestTzAbbr}. Want me to show times in your timezone instead?`
+      : "";
+
+    // Assemble: intro + format + topic + urgency → tz sentence → times → fallback → tz offer → need
+    greeting = `${intro}${formatLine}${topicLine}${urgencyLine}\n\n${tzSentence}\n\n${scheduleLine}${tzOffer}${needLine}`;
   }
 
   // Save the greeting message
