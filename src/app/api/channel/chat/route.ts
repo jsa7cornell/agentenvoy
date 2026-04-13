@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
-import { formatComputedSchedule } from "@/agent/composer";
+import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
 import { generateCode } from "@/lib/utils";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { sanitizeHistory, roleSummary } from "@/lib/conversation";
@@ -29,11 +29,12 @@ CORE BEHAVIOR:
 4. Be contextual — reference the user's calendar, active threads, and preferences
 
 CREATING THREADS:
-When the user wants to schedule something, extract what you can: who (name), what (topic), when (preferences), format (phone/video/in-person), duration.
+When the user wants to schedule something, extract what you can: who (name), what (topic), when (preferences), format (phone/video/in-person), duration, urgency.
 Then emit an action block:
 \`\`\`agentenvoy-action
-{"action":"create_thread","inviteeName":"Sarah Chen","topic":"Q2 Roadmap","format":"phone","duration":30,"rules":{"preferredDays":["Tuesday"],"lastResort":["Friday"]}}
+{"action":"create_thread","inviteeName":"Sarah Chen","topic":"Q2 Roadmap","format":"phone","duration":30,"urgency":"asap","rules":{"preferredDays":["Tuesday"],"lastResort":["Friday"]}}
 \`\`\`
+- "urgency" is optional. Use "asap" if the user says soon/asap/urgent/high-pri. Use "this-week" or "next-week" if they give a timeframe. Omit if no urgency specified.
 
 IMPORTANT — email is OPTIONAL. The inviteeName is the only required field. Do NOT ask for email unless the user wants Envoy to send the invite directly. If the user just says "set up a meeting with Bryan", create the thread with just the name — they can share the link themselves.
 If the user provides an email, include "inviteeEmail" in the action block. If not, omit it.
@@ -122,6 +123,12 @@ When the host asks you to find time for a specific meeting, be an active collabo
 - If the host is already active during a normally protected time, note that — "since you're up now, 8–9 could work too if morning is flexible."
 - Propose times directly — don't ask if they want you to "set it up." Example: "10–11 is your cleanest window" not "want me to set it up for 10?"
 - When creating a thread, you can mark specific slots as preferred (score -1) using slotOverrides in the link rules. This makes the widget highlight those slots for the guest.
+
+OFFERABLE SLOTS RULE (CRITICAL):
+Your context includes an OFFERABLE SLOTS section — a pre-formatted list of times guests will see. When creating threads or describing availability to the host:
+- ONLY reference times from the OFFERABLE SLOTS list. Do NOT invent times or compute availability yourself.
+- Copy day-of-week and dates exactly from the DATE REFERENCE. Never calculate what day a date falls on.
+- When telling the host what you're offering a guest, match the OFFERABLE SLOTS — those are the actual windows guests see.
 
 UPDATING KNOWLEDGE:
 When the host tells you something about their schedule, preferences, or context, save it using the update_knowledge action:
@@ -237,6 +244,9 @@ export async function POST(req: NextRequest) {
     if (schedule.connected) {
       calendarConnected = true;
       contextParts.push(formatComputedSchedule(schedule.slots, tz, schedule.canWrite));
+      // Add pre-formatted offerable slots — this is the ONLY list the LLM should
+      // reference when creating threads or telling the host what guests will see.
+      contextParts.push(formatOfferableSlots(schedule.slots, tz, schedule.canWrite));
     }
   } catch (e) {
     console.log("Schedule context error:", e);
@@ -436,7 +446,14 @@ export async function POST(req: NextRequest) {
           ? `${action.topic} — ${action.inviteeName || "Invitee"}`
           : `Catch up — ${action.inviteeName || "Invitee"}`;
 
-        // Create contextual link
+        // Create contextual link — merge format/duration/urgency into rules
+        // so they're available when generating the deal room greeting
+        const linkRules = {
+          ...(action.rules || {}),
+          ...(action.format ? { format: action.format } : {}),
+          ...(action.duration ? { duration: action.duration } : {}),
+          ...(action.urgency ? { urgency: action.urgency } : {}),
+        };
         const link = await prisma.negotiationLink.create({
           data: {
             userId: user.id,
@@ -446,7 +463,7 @@ export async function POST(req: NextRequest) {
             inviteeEmail: action.inviteeEmail || null,
             inviteeName: action.inviteeName || null,
             topic: action.topic || null,
-            rules: action.rules || {},
+            rules: linkRules,
           },
         });
 

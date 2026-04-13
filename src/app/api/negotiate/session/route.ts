@@ -9,56 +9,83 @@ import { generateCode } from "@/lib/utils";
 import type { ScoredSlot } from "@/lib/scoring";
 
 /**
- * Format the best available slots into 2-3 readable time windows for the greeting.
- * Groups consecutive good slots (score ≤ 1) by day and time-of-day.
+ * Format the best available slots into readable time windows for the greeting.
+ * Groups consecutive 30-min slots into contiguous blocks, then picks the best ones.
+ * When urgentSoonest=true, prioritizes the nearest blocks over the biggest.
  */
-function formatAvailabilityWindows(slots: ScoredSlot[], timezone: string): string | null {
+function formatAvailabilityWindows(
+  slots: ScoredSlot[],
+  timezone: string,
+  urgentSoonest = false
+): string | null {
   const now = new Date();
-  // Filter to good slots in the future, next 14 days
-  const goodSlots = slots.filter((s) => {
-    const start = new Date(s.start);
-    return start > now && s.score <= 1;
-  });
+  // Filter to offerable slots in the future (score <= 1: preferred, free, or open)
+  const goodSlots = slots
+    .filter((s) => {
+      const start = new Date(s.start);
+      return start > now && s.score <= 1;
+    })
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
   if (goodSlots.length === 0) return null;
 
-  // Group by date
-  const byDate = new Map<string, ScoredSlot[]>();
-  for (const slot of goodSlots) {
-    const dateKey = new Date(slot.start).toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "short",
-      day: "numeric",
-      timeZone: timezone,
-    });
-    if (!byDate.has(dateKey)) byDate.set(dateKey, []);
-    byDate.get(dateKey)!.push(slot);
+  const fmtTime = (d: Date) =>
+    d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone });
+
+  const fmtDay = (d: Date) =>
+    d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: timezone });
+
+  // Build contiguous blocks of consecutive 30-min slots on the same day.
+  // Track whether a block contains any preferred slots (score <= 0).
+  interface Block {
+    start: Date; end: Date; dayLabel: string; count: number;
+    hasPreferred: boolean;
   }
+  const blocks: Block[] = [];
+  let current: Block | null = null;
 
-  // Pick up to 3 days with the most good slots
-  const dayEntries = Array.from(byDate.entries());
-  const sortedDays = dayEntries
-    .sort((a, b) => b[1].length - a[1].length)
-    .slice(0, 3)
-    // Re-sort chronologically
-    .sort((a, b) => new Date(a[1][0].start).getTime() - new Date(b[1][0].start).getTime());
+  for (const slot of goodSlots) {
+    const start = new Date(slot.start);
+    const end = new Date(slot.end);
+    const dayLabel = fmtDay(start);
+    const isPreferred = slot.score <= 0;
 
-  const lines: string[] = [];
-  for (const [dayLabel, daySlots] of sortedDays) {
-    // Find earliest and latest time
-    const times: Date[] = daySlots.map((s: ScoredSlot) => new Date(s.start));
-    const earliest = new Date(Math.min(...times.map((t: Date) => t.getTime())));
-    const latest = new Date(Math.max(...times.map((t: Date) => t.getTime())));
-
-    const fmtTime = (d: Date) =>
-      d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone });
-
-    if (earliest.getTime() === latest.getTime()) {
-      lines.push(`${dayLabel} around ${fmtTime(earliest)}`);
+    if (current && current.dayLabel === dayLabel && start.getTime() === current.end.getTime()) {
+      current.end = end;
+      current.count++;
+      if (isPreferred) current.hasPreferred = true;
     } else {
-      lines.push(`${dayLabel}, ${fmtTime(earliest)}–${fmtTime(latest)}`);
+      if (current) blocks.push(current);
+      current = { start, end, dayLabel, count: 1, hasPreferred: isPreferred };
     }
   }
+  if (current) blocks.push(current);
+
+  if (blocks.length === 0) return null;
+
+  // Prioritize: preferred blocks first, then by soonest (urgent) or biggest (normal)
+  let picked: Block[];
+  const preferred = blocks.filter((b) => b.hasPreferred);
+  const regular = blocks.filter((b) => !b.hasPreferred);
+
+  if (urgentSoonest) {
+    // Soonest preferred first, then soonest regular, cap at 3
+    picked = [...preferred, ...regular].slice(0, 3);
+  } else {
+    // Preferred first (biggest), then regular (biggest), cap at 3, re-sort chronologically
+    const sortedPref = preferred.sort((a, b) => b.count - a.count);
+    const sortedReg = regular.sort((a, b) => b.count - a.count);
+    picked = [...sortedPref, ...sortedReg]
+      .slice(0, 3)
+      .sort((a, b) => a.start.getTime() - b.start.getTime());
+  }
+
+  const lines = picked.map((b) => {
+    const timeStr = b.count === 1
+      ? `${b.dayLabel}, ${fmtTime(b.start)}`
+      : `${b.dayLabel}, ${fmtTime(b.start)}–${fmtTime(b.end)}`;
+    return b.hasPreferred ? `${timeStr} ★` : timeStr;
+  });
 
   return lines.map((l) => `  • ${l}`).join("\n");
 }
@@ -392,72 +419,84 @@ export async function POST(req: NextRequest) {
       })()
     : null;
 
+  // Read format/duration/urgency from link rules (primary) or session (legacy fallback)
+  const linkRules = (link.rules as Record<string, unknown>) || {};
+  const effectiveFormat = (linkRules.format as string) || session.format || undefined;
+  const effectiveDuration = (linkRules.duration as number) || session.duration || undefined;
+  const effectiveUrgency = (linkRules.urgency as string) || undefined;
+
+  const availabilityWindows = formatAvailabilityWindows(
+    scheduleSlots,
+    guestTimezone || hostTimezone,
+    effectiveUrgency === "asap"
+  );
+
   let greeting: string;
 
   if (isGroupEvent) {
-    // Group events still use AI-generated greeting for dynamic participant context
+    // Group events use AI-generated greeting for dynamic participant context
     const greetingPrompt = `A new participant just opened the deal room for a group event. Generate your initial greeting following your GREETING STRATEGY and GROUP EVENT COORDINATION instructions. Mention the group context — how many others are involved, who has responded, any emerging time overlaps. Use all context you have — name, topic, format, timing, available slots. Be efficient.`;
     greeting = await generateAgentResponse({
       ...context,
       conversationHistory: [{ role: "user", content: greetingPrompt }],
     });
   } else {
-    // Fixed greeting template — consistent for all 1:1 sessions
+    // Deterministic template greeting — no LLM, no hallucination risk
     const hostName = user.name || "the organizer";
-    const availabilityWindows = formatAvailabilityWindows(scheduleSlots, guestTimezone || hostTimezone);
-    const linkRules = (link.rules as Record<string, unknown>) || {};
-    const linkFormat = linkRules.format as string | undefined;
-    const linkDuration = linkRules.duration as string | undefined;
+    const guestName = link.inviteeName || null;
 
-    // Build numbered items, adapting for contextual links
-    const items: string[] = [];
+    // Intro line
+    const intro = guestName
+      ? `Hi ${guestName}! I'm coordinating a time for you and ${hostName}.`
+      : `Hi! I'm coordinating a meeting with ${hostName}.`;
 
-    // 1. Timezone
-    if (guestTzLabel) {
-      items.push(`Timezone — I have you as ${guestTzLabel}. Is this right?`);
+    // Format/duration line — state as fact if known, ask if not
+    let formatLine: string;
+    if (effectiveFormat && effectiveDuration) {
+      formatLine = `This is a ${effectiveDuration}-minute ${effectiveFormat === "phone" ? "phone call" : effectiveFormat === "video" ? "video call" : effectiveFormat === "in-person" ? "in-person meeting" : effectiveFormat}.`;
+    } else if (effectiveFormat) {
+      formatLine = `This is a ${effectiveFormat === "phone" ? "phone call" : effectiveFormat === "video" ? "video call" : effectiveFormat === "in-person" ? "in-person meeting" : effectiveFormat}.`;
+    } else if (effectiveDuration) {
+      formatLine = `This is a ${effectiveDuration}-minute meeting.`;
     } else {
-      items.push(`Timezone — what timezone are you in?`);
+      formatLine = "We can do phone, video, or in-person — let me know your preference.";
     }
 
-    // 2. Format — skip if pre-set by host
-    if (linkFormat || linkDuration) {
-      const parts = [];
-      if (linkDuration) parts.push(linkDuration);
-      if (linkFormat) parts.push(linkFormat);
-      items.push(`Format — ${parts.join(" ")} as requested.`);
-    } else {
-      items.push(`Format — I default to 30m video call. We can do phone/in-person, longer/shorter — just let me know.`);
-    }
+    // Topic line — only if set
+    const topicLine = link.topic ? ` Re: ${link.topic}.` : "";
 
-    // 3. Topic — skip if pre-set
-    if (link.topic) {
-      items.push(`Topic — "${link.topic}" as noted.`);
-    } else {
-      items.push(`Topic — let me know what to title the event.`);
-    }
+    // Urgency line
+    const urgencyLine = effectiveUrgency === "asap"
+      ? " Looking to get this scheduled as soon as possible."
+      : "";
 
-    // 4. Schedule
+    // Schedule line — availability suggestions with fallback offer
+    let scheduleLine: string;
+    const hasPreferredSlots = availabilityWindows?.includes("★") ?? false;
     if (availabilityWindows) {
-      items.push(`Schedule — I can help work out a mutually great time, but here are some suggestions to start:\n${availabilityWindows}`);
+      scheduleLine = `Here are some times that work:\n${availabilityWindows}`;
+      if (hasPreferredSlots) {
+        scheduleLine += `\n  (★ = best for ${hostName})`;
+      }
+      scheduleLine += `\n\nIf none of these work, just tell me what does and I'll find a match.`;
     } else {
-      items.push(`Schedule — I can help work out a mutually great time. Tell me what generally works for you and I'll find the best option.`);
+      scheduleLine = "Let me know what times generally work for you and I'll find the best fit.";
     }
 
-    // 5. Name/email — skip parts that are already known
-    if (link.inviteeName && link.inviteeEmail) {
-      // Both known — skip entirely
-    } else if (link.inviteeName) {
-      items.push(`Email — so I can send the invite once we lock it in.`);
-    } else if (link.inviteeEmail) {
-      items.push(`Name — so I know who I'm scheduling for.`);
-    } else {
-      items.push(`Name/email — so I can send the invite once we lock it in.`);
-    }
+    // What we still need
+    const needItems: string[] = [];
+    if (!guestName) needItems.push("your name");
+    if (!link.inviteeEmail) needItems.push("your email");
+    const needLine = needItems.length > 0
+      ? `\n\nJust need ${needItems.join(" and ")} to send the invite once we lock in a time.`
+      : "\n\nJust need your email to send the invite once we lock in a time.";
 
-    const nameGreeting = link.inviteeName ? ` ${link.inviteeName},` : "";
-    const numberedItems = items.map((item, i) => `${i + 1}. ${item}`).join("\n");
+    // Timezone note
+    const tzLine = guestTzLabel
+      ? ` (I have you in ${guestTzLabel} — let me know if that's wrong.)`
+      : " What timezone are you in?";
 
-    greeting = `Hi${nameGreeting}! I'm Envoy, a scheduling agent for ${hostName}. My goal is to help you navigate dynamic calendars.\n\nA few quick things to start:\n${numberedItems}`;
+    greeting = `${intro} ${formatLine}${topicLine}${urgencyLine}\n\n${scheduleLine}${tzLine}${needLine}`;
   }
 
   // Save the greeting message

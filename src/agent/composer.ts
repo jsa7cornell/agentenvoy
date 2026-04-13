@@ -52,6 +52,9 @@ export interface ComposeOptions {
   /** @deprecated Use calendarContext instead */
   availableSlots?: Array<{ start: string; end: string }>;
   calendarContext?: CalendarContext;
+  /** Pre-scored slots from the availability engine. When provided, the prompt
+   *  shows only offerable time blocks instead of raw calendar events. */
+  scoredSlots?: ScoredSlot[];
   hostPersistentKnowledge?: string | null;
   hostUpcomingSchedulePreferences?: string | null;
   hostDirectives?: string[];
@@ -321,8 +324,18 @@ function buildSessionContext(options: ComposeOptions): string {
     parts.push(formatRules(options.rules));
   }
 
-  // New: CalendarContext — raw events as daily calendar view
-  if (options.calendarContext?.connected && options.calendarContext.events.length > 0) {
+  // Scored slots → pre-formatted offerable blocks (preferred: prevents hallucination)
+  if (options.scoredSlots && options.scoredSlots.length > 0 && options.calendarContext) {
+    const linkRules = options.rules as LinkRules | undefined;
+    parts.push(formatOfferableSlots(
+      options.scoredSlots,
+      options.calendarContext.timezone,
+      options.calendarContext.canWrite,
+      linkRules
+    ));
+  }
+  // Fallback: raw events as daily calendar view (only if no scored slots)
+  else if (options.calendarContext?.connected && options.calendarContext.events.length > 0) {
     parts.push(formatCalendarContext(options.calendarContext));
   }
   // Legacy fallback: old availableSlots format
@@ -592,6 +605,139 @@ export function formatComputedSchedule(
     lines.push(
       "\nCalendar is read-only. Confirmation sends .ics email instead of creating event directly."
     );
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format pre-computed offerable time blocks for the LLM prompt.
+ * The LLM can ONLY suggest times from this list — no raw events, no score interpretation.
+ * Groups consecutive 30-min slots into contiguous blocks labeled by tier.
+ */
+export function formatOfferableSlots(
+  slots: ScoredSlot[],
+  tz: string,
+  canWrite: boolean,
+  linkRules?: LinkRules
+): string {
+  const tzLabel = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
+    .formatToParts(new Date())
+    .find((p) => p.type === "timeZoneName")?.value ?? tz;
+
+  const utcOffset = getUtcOffsetString(tz);
+
+  // Apply event-level overrides if provided
+  const finalSlots = linkRules ? applyEventOverrides(slots, linkRules, tz) : slots;
+
+  const now = new Date();
+
+  // Check for exclusive mode
+  const hasExclusive = finalSlots.some((s) => s.score === -2);
+  const maxScore = hasExclusive ? 0 : 3;
+
+  // Filter to offerable slots in the future
+  const offerableSlots = finalSlots
+    .filter((s) => new Date(s.start) > now && s.score <= maxScore)
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+  if (offerableSlots.length === 0) {
+    return [
+      `[GROUND TRUTH] OFFERABLE SLOTS (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz})`,
+      `No offerable times in the current window. Ask the guest what times work for them and escalate to the host.`,
+    ].join("\n");
+  }
+
+  // Formatters
+  const dayFmt = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: tz,
+  });
+
+  const timeFmt = (date: Date): string =>
+    new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: tz,
+    }).format(date);
+
+  // Group by day
+  const dayMap = new Map<string, ScoredSlot[]>();
+  for (const slot of offerableSlots) {
+    const dayKey = dayFmt.format(new Date(slot.start));
+    if (!dayMap.has(dayKey)) dayMap.set(dayKey, []);
+    dayMap.get(dayKey)!.push(slot);
+  }
+
+  // Date reference (21-day window)
+  const dateMappingLines: string[] = [];
+  const firstSlotDate = new Date(offerableSlots[0].start);
+  for (let i = 0; i < 21; i++) {
+    const d = new Date(firstSlotDate.getTime() + i * 24 * 60 * 60 * 1000);
+    dateMappingLines.push(`  ${dayFmt.format(d)}`);
+  }
+
+  function tierLabel(score: number): string {
+    if (score <= 0) return "preferred";
+    if (score <= 1) return "open";
+    return "flexible";
+  }
+
+  const lines: string[] = [
+    `[GROUND TRUTH] OFFERABLE SLOTS (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz})`,
+    `These are the ONLY times you may suggest to the guest. Do NOT invent or calculate other times.`,
+    `If the guest requests a time not on this list, say it's not available and suggest the nearest options from this list.`,
+    ``,
+    `[GROUND TRUTH] DATE REFERENCE (system-computed, ALWAYS correct):`,
+    ...dateMappingLines,
+    ``,
+    `CRITICAL: Copy day-of-week and year from DATE REFERENCE. NEVER compute them yourself.`,
+    `Use UTC offset "${utcOffset}" and timezone "${tz}" in CONFIRMATION_PROPOSAL.`,
+    ``,
+  ];
+
+  if (hasExclusive) {
+    lines.push(`EXCLUSIVE MODE: Only the slots listed below are available for this guest.`);
+    lines.push(``);
+  }
+
+  // Build blocks per day — merge contiguous same-tier slots
+  for (const [day, daySlots] of Array.from(dayMap)) {
+    interface OfferBlock { start: Date; end: Date; tier: string; hasPreferred: boolean }
+    const blocks: OfferBlock[] = [];
+    let current: OfferBlock | null = null;
+
+    for (const slot of daySlots) {
+      const start = new Date(slot.start);
+      const end = new Date(slot.end);
+      const tier = tierLabel(slot.score);
+      const isPreferred = slot.score <= 0;
+
+      if (current && current.tier === tier && start.getTime() === current.end.getTime()) {
+        current.end = end;
+        if (isPreferred) current.hasPreferred = true;
+      } else {
+        if (current) blocks.push(current);
+        current = { start, end, tier, hasPreferred: isPreferred };
+      }
+    }
+    if (current) blocks.push(current);
+
+    lines.push(`${day}:`);
+    for (const b of blocks) {
+      const star = b.hasPreferred ? "★ " : "";
+      lines.push(`  ${star}${timeFmt(b.start)}–${timeFmt(b.end)} — ${b.tier}`);
+    }
+  }
+
+  lines.push(``);
+  lines.push(`Legend: preferred = host's best times (★), open = no conflicts, flexible = soft hold (may need host OK for high-friction slots).`);
+
+  if (!canWrite) {
+    lines.push(`Calendar is read-only. Confirmation sends .ics email instead of creating event directly.`);
   }
 
   return lines.join("\n");

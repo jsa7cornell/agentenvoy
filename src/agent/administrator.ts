@@ -3,6 +3,7 @@ import { envoyModel } from "@/lib/model";
 import { composeSystemPrompt, getModelForDomain } from "./composer";
 import type { DomainType } from "./composer";
 import type { CalendarContext } from "@/lib/calendar";
+import type { ScoredSlot } from "@/lib/scoring";
 
 export type AgentRole = "coordinator" | "administrator";
 
@@ -19,6 +20,8 @@ export interface AgentContext {
   /** @deprecated Use calendarContext instead */
   availableSlots?: Array<{ start: string; end: string }>;
   calendarContext?: CalendarContext;
+  /** Pre-scored slots — when provided, prompt shows offerable blocks instead of raw events */
+  scoredSlots?: ScoredSlot[];
   hostPersistentKnowledge?: string | null;
   hostUpcomingSchedulePreferences?: string | null;
   hostDirectives?: string[];
@@ -49,6 +52,7 @@ function buildComposeOptions(context: AgentContext) {
     rules: context.rules,
     availableSlots: context.availableSlots,
     calendarContext: context.calendarContext,
+    scoredSlots: context.scoredSlots,
     hostPersistentKnowledge: context.hostPersistentKnowledge,
     hostUpcomingSchedulePreferences: context.hostUpcomingSchedulePreferences,
     hostDirectives: context.hostDirectives,

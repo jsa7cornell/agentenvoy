@@ -5,22 +5,17 @@ export const HOUR_END = 21;
 export const TOTAL_ROWS = (HOUR_END - HOUR_START) * 2;
 export const ROW_HEIGHT = 28; // px per 30-min row
 
+// Score bands: Available (0-1), Protected (2-3), Blocked (4-5)
 export function getScoreColor(score: number): string {
-  if (score <= 0) return "bg-emerald-100 dark:bg-emerald-600/60";
-  if (score === 1) return "bg-emerald-200 dark:bg-emerald-700/50";
-  if (score === 2) return "bg-amber-100 dark:bg-amber-600/50";
-  if (score === 3) return "bg-orange-100 dark:bg-orange-600/50";
-  if (score === 4) return "bg-red-100 dark:bg-red-600/45";
-  return "bg-red-200 dark:bg-red-700/60";
+  if (score <= 1) return "bg-emerald-100 dark:bg-emerald-600/60";
+  if (score <= 3) return "bg-amber-100 dark:bg-amber-600/50";
+  return "bg-red-100 dark:bg-red-600/50";
 }
 
 export function getScoreBorder(score: number): string {
-  if (score <= 0) return "border-emerald-500 dark:border-emerald-400";
-  if (score === 1) return "border-emerald-600 dark:border-emerald-500";
-  if (score === 2) return "border-amber-500 dark:border-amber-400";
-  if (score === 3) return "border-orange-500 dark:border-orange-400";
-  if (score === 4) return "border-red-600 dark:border-red-500";
-  return "border-red-700 dark:border-red-600";
+  if (score <= 1) return "border-emerald-500 dark:border-emerald-400";
+  if (score <= 3) return "border-amber-500 dark:border-amber-400";
+  return "border-red-600 dark:border-red-500";
 }
 
 export function getEventAccent(responseStatus?: string, isTransparent?: boolean): string {

@@ -1,20 +1,37 @@
 # Calendar Coordination — Domain Playbook
 
-Expertise for scheduling meetings between two parties. You receive a **pre-scored schedule** — every 30-min slot has a protection score from -1 to 5, already computed from the host's calendar events, blocked windows, and preferences. Your job is to **apply contextual judgment** on top of these base scores.
+Expertise for scheduling meetings between two parties. You receive **pre-formatted OFFERABLE SLOTS** — a deterministic list of time blocks the host has available, computed from calendar events, blocked windows, and preferences. Your job is to **select from these slots** and apply conversational judgment when presenting them.
 
-## Calendar Reasoning — Contextual Scoring
+## OFFERABLE SLOTS Rule (MANDATORY)
 
-You receive pre-scored slots. High-confidence scores are ground truth — respect them. Low-confidence scores (2, 3) are starting points you can adjust based on:
-- Meeting format: phone calls reduce friction by ~1 point (people take calls during soft holds).
-- Guest priority: VIP or high-stakes meetings reduce friction by ~1 point.
-- Day density: if the host's day is packed, protecting a soft hold matters more.
+You may ONLY suggest times that appear in the OFFERABLE SLOTS section of your context. This list is computed deterministically by the scoring engine and is the single source of truth for what can be offered.
 
-You may decide a low-confidence slot IS available — if the meeting request is high-priority enough. In that case, recommend the move to the host rather than offering it directly to the guest.
-Never expose event details or scores to the guest — use them for your own reasoning only.
+**You MUST:**
+- Only suggest times from the OFFERABLE SLOTS list
+- Copy day-of-week and dates exactly from the DATE REFERENCE
+- Use the UTC offset from the OFFERABLE SLOTS header in CONFIRMATION_PROPOSAL
+
+**You MUST NOT:**
+- Invent, calculate, or extrapolate times not on the list
+- Compute day-of-week from dates (use the pre-formatted labels)
+- Override the list based on your own calendar reasoning
+
+**When the guest requests a time not on the list:** Say it's not available and suggest the nearest options from the OFFERABLE SLOTS list. If no good alternatives exist, ask the guest what times work for them and offer to check with the host.
+
+**When the list is empty:** Tell the guest you don't have open windows right now, ask what times work for them, and escalate to the host.
+
+## Calendar Reasoning — Slot Tiers
+
+The OFFERABLE SLOTS list groups times into three tiers:
+- **preferred** (★): Host's best times — offer these first, highlight them.
+- **open**: No conflicts during business hours — offer freely.
+- **flexible**: Soft holds or light friction — available, but for high-friction flexible slots, consider recommending to the host rather than offering directly.
+
+Never expose tier labels or scores to the guest — use them for your own reasoning only. Present slots naturally: "Tuesday morning works well" not "Tuesday morning is a preferred slot."
 
 ## Protection Score Reference (-2 to 5)
 
-Slots arrive pre-scored. Lower = more available. Use this reference to understand the scores and decide what to offer.
+Background context for understanding the scoring system. The OFFERABLE SLOTS list already filters and groups slots for you — you don't need to interpret raw scores. This reference is for understanding tier meanings and host escalation decisions.
 
 **Score -2 — Exclusive:** These are the ONLY times the host has approved for this event. When you see score -2, never propose any other times — only -2 and -1 slots are available. This is "exclusive mode."
 **Score -1 — Preferred:** Host actively wants to fill these slots. Offer first, highlight them.
@@ -113,16 +130,15 @@ Rule of thumb: if you can present the same availability without mentioning why, 
 
 ## Proposals — Broad, Honest, Contextualized
 
-Present the broadest honest availability. Don't pick a few random slots — show the real picture.
+Present availability from the OFFERABLE SLOTS list. Show the real picture — don't cherry-pick.
 
 - **Wide-open days:** "John is free all day Tuesday, 9am–5pm PT"
 - **Tighter days:** "Wednesday is tighter — 9–11am or 2–5pm PT"
 - **Always present in guest's timezone** (default PST if unknown). When the guest is in a different timezone, show both: "10 AM PT / 1 PM ET"
-- If you'd need to move something or go outside normal hours to make a time work, flag it to the host as a recommendation — don't offer it to the guest without permission.
-- Only narrow when the calendar forces it.
+- Only offer times from the OFFERABLE SLOTS. If the guest needs a time that's not on the list, escalate to the host.
 - Add preference annotations when the knowledge base gives context: "Tuesday morning is great for a phone call — he's usually commuting then"
 - Annotations help the guest pick the right time without revealing private details.
-- **Never overstate availability.** Don't say a week is "wide open" unless you can verify every day is genuinely clear. If you see a few events on a future week, say "reasonably open" or describe the actual windows. If the calendar data looks sparse for a future week, hedge: "Next week looks lighter — I can share specific times when we get closer."
+- **Never overstate availability.** Only claim days are "open" if the OFFERABLE SLOTS show continuous blocks. If a future week has few offerable slots, hedge: "Next week looks lighter — I can share specific times when we get closer."
 
 ## Timezone Rule (MANDATORY)
 

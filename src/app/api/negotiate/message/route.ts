@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { AgentContext, extractAvailabilitySummary } from "@/agent/administrator";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import type { CalendarContext } from "@/lib/calendar";
+import type { ScoredSlot } from "@/lib/scoring";
 import { computeThreadStatus } from "@/lib/thread-status";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -98,10 +99,10 @@ export async function POST(req: NextRequest) {
 
   // Fetch scored schedule (uses cached calendar + computed scores)
   let calendarContext: CalendarContext | undefined;
+  let scoredSlots: ScoredSlot[] = [];
   try {
     const schedule = await getOrComputeSchedule(session.hostId);
     if (schedule.connected) {
-      // Build a CalendarContext-compatible object for the composer
       calendarContext = {
         connected: true,
         events: schedule.events,
@@ -109,6 +110,7 @@ export async function POST(req: NextRequest) {
         timezone: schedule.timezone,
         canWrite: schedule.canWrite,
       };
+      scoredSlots = schedule.slots;
     }
   } catch (e) {
     console.log("Schedule context error in negotiate/message:", e);
@@ -171,6 +173,7 @@ export async function POST(req: NextRequest) {
     topic: session.link.topic || undefined,
     rules: (session.link.rules as Record<string, unknown>) || {},
     calendarContext,
+    scoredSlots,
     hostPersistentKnowledge: (session.host as { persistentKnowledge?: string }).persistentKnowledge,
     hostUpcomingSchedulePreferences: (session.host as { upcomingSchedulePreferences?: string }).upcomingSchedulePreferences,
     isGroupEvent: isGroupEvent || undefined,

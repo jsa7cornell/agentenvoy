@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { streamText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
-import { formatComputedSchedule } from "@/agent/composer";
+import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
 
 const DASHBOARD_SYSTEM = `You are Envoy, the user's scheduling agent. You help them:
 1. Create meeting links from natural language
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     try {
       const schedule = await getOrComputeSchedule(session.user.id);
       if (schedule.connected) {
-        availabilityContext = `\n${formatComputedSchedule(schedule.slots, tz, schedule.canWrite)}`;
+        availabilityContext = `\n${formatComputedSchedule(schedule.slots, tz, schedule.canWrite)}\n${formatOfferableSlots(schedule.slots, tz, schedule.canWrite)}`;
       } else {
         availabilityContext = "\nGoogle Calendar: CONNECTED but no events returned.";
       }

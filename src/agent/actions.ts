@@ -394,7 +394,16 @@ async function handleCreateLink(
   const inviteeEmail = (params.inviteeEmail as string) || null;
   const topic = (params.topic as string) || null;
   const format = (params.format as string) || null;
+  const urgency = (params.urgency as string) || null;
   const rules = (params.rules as Record<string, unknown>) || {};
+
+  // Merge format/duration/urgency into rules so they're available at greeting time
+  const linkRules = {
+    ...rules,
+    ...(format ? { format } : {}),
+    ...(params.duration ? { duration: params.duration } : {}),
+    ...(urgency ? { urgency } : {}),
+  };
 
   const link = await prisma.negotiationLink.create({
     data: {
@@ -405,7 +414,7 @@ async function handleCreateLink(
       inviteeName,
       inviteeEmail,
       topic,
-      rules: rules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
+      rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
     },
   });
 
