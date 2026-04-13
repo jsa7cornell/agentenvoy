@@ -110,6 +110,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
   const [isSaving, setIsSaving] = useState(false);
   const [inputText, setInputText] = useState("");
   const [isParsing, setIsParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
   const [pendingRule, setPendingRule] = useState<ParsedRule | null>(null);
   const [selectedInterpretation, setSelectedInterpretation] = useState<number>(0);
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
@@ -180,10 +181,21 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
       });
       if (!res.ok) throw new Error("Parse failed");
       const parsed: ParsedRule = await res.json();
+
+      // Detect nonsensical input — LLM flags it as ambiguous with no real rule
+      if (parsed.ambiguous && parsed.interpretations?.some(
+        i => /not a scheduling|unrelated|no.*rule.*extracted|noise|test input/i.test(i)
+      )) {
+        setParseError("That doesn't look like a scheduling rule. Try something like:");
+        return;
+      }
+
+      setParseError(null);
       setPendingRule(parsed);
       setSelectedInterpretation(0);
     } catch (e) {
       console.error("Parse failed:", e);
+      setParseError("Something went wrong. Please try again.");
     } finally {
       setIsParsing(false);
     }
@@ -326,7 +338,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
               <input
                 type="text"
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
+                onChange={(e) => { setInputText(e.target.value); setParseError(null); }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && inputText.trim()) {
                     e.preventDefault();
@@ -349,9 +361,21 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
                 )}
               </button>
             </div>
-            <p className="text-[10px] text-muted mt-1.5">
-              Set business hours &middot; Block or protect time &middot; Set buffers &middot; Allow exceptions
-            </p>
+            {parseError ? (
+              <div className="mt-2 text-xs space-y-1">
+                <p className="text-amber-400">{parseError}</p>
+                <ul className="text-muted space-y-0.5 pl-3">
+                  <li>&ldquo;Available 9am to 5pm&rdquo;</li>
+                  <li>&ldquo;Block Friday afternoons&rdquo;</li>
+                  <li>&ldquo;Buffer 30min after in-person meetings&rdquo;</li>
+                  <li>&ldquo;Allow calls Saturday before noon&rdquo;</li>
+                </ul>
+              </div>
+            ) : (
+              <p className="text-[10px] text-muted mt-1.5">
+                Set business hours &middot; Block or protect time &middot; Set buffers &middot; Allow exceptions
+              </p>
+            )}
             </>
           )}
 
