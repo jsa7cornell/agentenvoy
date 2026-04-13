@@ -6,7 +6,7 @@ import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calen
 import { DayView } from "@/components/day-view";
 import { AvailabilityRules } from "@/components/availability-rules";
 import Link from "next/link";
-// Link still used for "calendar not connected" state
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 function getSunday(d: Date): string {
   const date = new Date(d);
@@ -36,6 +36,7 @@ export default function AvailabilityPage() {
   const [calendars, setCalendars] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [mobileShowCalendar, setMobileShowCalendar] = useState(false);
 
   const fetchSchedule = useCallback(async () => {
     try {
@@ -117,6 +118,53 @@ export default function AvailabilityPage() {
     );
   }
 
+  // Week navigation bar (shared between layouts)
+  const weekNav = (
+    <div className="flex items-center justify-between px-3 py-1.5 border-b border-secondary shrink-0">
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={() => shiftWeek(-1)}
+          disabled={!canGoPrev}
+          className="px-1.5 py-0.5 text-xs text-secondary hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition"
+        >
+          &larr;
+        </button>
+        <span className="text-xs text-primary text-center font-medium">
+          {formatWeekRange(weekStart)}
+        </span>
+        <button
+          onClick={() => shiftWeek(1)}
+          disabled={!canGoNext}
+          className="px-1.5 py-0.5 text-xs text-secondary hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition"
+        >
+          &rarr;
+        </button>
+        {weekStart !== thisWeek && (
+          <button
+            onClick={() => setWeekStart(thisWeek)}
+            className="text-[10px] text-muted hover:text-secondary underline transition"
+          >
+            Today
+          </button>
+        )}
+      </div>
+      <button
+        onClick={handleRefresh}
+        disabled={isRefreshing}
+        className="flex items-center gap-1 px-2 py-1 text-xs text-secondary hover:text-primary disabled:opacity-50 transition"
+        title={isRefreshing ? "Syncing..." : "Refresh"}
+      >
+        <svg
+          className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        {isRefreshing && <span>Syncing...</span>}
+      </button>
+    </div>
+  );
+
   return (
     <>
       {/* ── Desktop: side-by-side layout ── */}
@@ -128,51 +176,7 @@ export default function AvailabilityPage() {
 
         {/* Calendar panel — right */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Week navigation */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-secondary shrink-0">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => shiftWeek(-1)}
-                disabled={!canGoPrev}
-                className="px-2 py-1 text-xs text-secondary hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition"
-              >
-                &larr;
-              </button>
-              <span className="text-sm text-primary min-w-[160px] text-center font-medium">
-                {formatWeekRange(weekStart)}
-              </span>
-              <button
-                onClick={() => shiftWeek(1)}
-                disabled={!canGoNext}
-                className="px-2 py-1 text-xs text-secondary hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition"
-              >
-                &rarr;
-              </button>
-              {weekStart !== thisWeek && (
-                <button
-                  onClick={() => setWeekStart(thisWeek)}
-                  className="text-xs text-muted hover:text-secondary underline transition"
-                >
-                  This week
-                </button>
-              )}
-            </div>
-            <button
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-secondary hover:text-primary border border-DEFAULT rounded-lg hover:border-surface-tertiary disabled:opacity-50 transition"
-            >
-              <svg
-                className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`}
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              {isRefreshing ? "Syncing..." : "Refresh"}
-            </button>
-          </div>
-
-          {/* Weekly calendar */}
+          {weekNav}
           <div className="flex-1 min-h-0 overflow-hidden">
             <WeeklyCalendar
               events={events}
@@ -186,58 +190,47 @@ export default function AvailabilityPage() {
         </div>
       </div>
 
-      {/* ── Mobile: scrollable vertical stack ── */}
+      {/* ── Mobile: rules primary, calendar toggleable ── */}
       <div className="flex md:hidden flex-1 flex-col overflow-y-auto">
-        {/* Week nav bar + refresh */}
-        <div className="flex items-center justify-between px-3 py-1.5 border-b border-secondary shrink-0 sticky top-0 z-10 bg-surface">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => shiftWeek(-1)}
-              disabled={!canGoPrev}
-              className="px-1.5 py-0.5 text-xs text-secondary hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition"
-            >
-              &larr;
-            </button>
-            <span className="text-xs text-primary text-center font-medium">
-              {formatWeekRange(weekStart)}
-            </span>
-            <button
-              onClick={() => shiftWeek(1)}
-              disabled={!canGoNext}
-              className="px-1.5 py-0.5 text-xs text-secondary hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition"
-            >
-              &rarr;
-            </button>
-          </div>
+        {/* Rules panel — primary view */}
+        <AvailabilityRules onSaved={fetchSchedule} />
+
+        {/* Calendar toggle */}
+        <div className="border-t border-secondary">
           <button
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="p-1.5 text-xs text-secondary hover:text-primary disabled:opacity-50 transition"
-            title={isRefreshing ? "Syncing..." : "Refresh"}
+            onClick={() => setMobileShowCalendar(!mobileShowCalendar)}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs text-secondary hover:text-primary transition"
           >
-            <svg
-              className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`}
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
+            {mobileShowCalendar ? (
+              <>
+                <ChevronUp className="w-3.5 h-3.5" />
+                Hide Calendar Preview
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-3.5 h-3.5" />
+                Show Calendar Preview
+              </>
+            )}
           </button>
         </div>
 
-        {/* Day view — fixed height so it's always visible */}
-        <div className="h-[480px] shrink-0 border-b border-secondary">
-          <DayView
-            events={events}
-            slots={slots}
-            locationByDay={locationByDay}
-            timezone={timezone}
-            weekStart={weekStart}
-            primaryCalendar={calendars[0]}
-          />
-        </div>
-
-        {/* Rules panel — scrolls naturally below */}
-        <AvailabilityRules onSaved={fetchSchedule} />
+        {/* Collapsible calendar */}
+        {mobileShowCalendar && (
+          <>
+            {weekNav}
+            <div className="h-[480px] shrink-0">
+              <DayView
+                events={events}
+                slots={slots}
+                locationByDay={locationByDay}
+                timezone={timezone}
+                weekStart={weekStart}
+                primaryCalendar={calendars[0]}
+              />
+            </div>
+          </>
+        )}
       </div>
     </>
   );

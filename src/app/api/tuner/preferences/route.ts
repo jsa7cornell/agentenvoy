@@ -4,6 +4,9 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { invalidateSchedule } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
+import { compileStructuredRules, expireRules } from "@/lib/availability-rules";
+import type { AvailabilityRule } from "@/lib/availability-rules";
+import type { Prisma } from "@prisma/client";
 
 // GET /api/tuner/preferences — fetch current user preferences for the tuner panel
 export async function GET() {
@@ -28,6 +31,19 @@ export async function GET() {
   const prefs = (user.preferences as Record<string, unknown>) || {};
   const explicit = (prefs.explicit as Record<string, unknown>) || {};
   const compiled = (prefs as Record<string, unknown>).compiled as Record<string, unknown> | undefined;
+  const structuredRules = (explicit.structuredRules as AvailabilityRule[]) ?? [];
+
+  // Auto-expire rules on read
+  const { rules: cleanedRules, changed } = expireRules(structuredRules);
+  if (changed) {
+    // Persist the expired status updates
+    const newExplicit = { ...explicit, structuredRules: cleanedRules };
+    const newPrefs = { ...prefs, explicit: newExplicit };
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { preferences: newPrefs as unknown as Prisma.InputJsonValue },
+    });
+  }
 
   return NextResponse.json({
     timezone: (explicit.timezone as string) ?? (prefs.timezone as string) ?? "America/Los_Angeles",
@@ -39,6 +55,7 @@ export async function GET() {
     persistentKnowledge: user.persistentKnowledge ?? "",
     upcomingSchedulePreferences: user.upcomingSchedulePreferences ?? "",
     compiledRules: compiled ?? null,
+    structuredRules: cleanedRules,
   });
 }
 
@@ -67,6 +84,7 @@ export async function PUT(req: NextRequest) {
     blackoutDays,
     persistentKnowledge,
     upcomingSchedulePreferences,
+    structuredRules,
   } = body;
 
   const prefs = (user.preferences as Record<string, unknown>) || {};
@@ -79,6 +97,7 @@ export async function PUT(req: NextRequest) {
   if (businessHoursEnd !== undefined) newExplicit.businessHoursEnd = businessHoursEnd;
   if (blockedWindows !== undefined) newExplicit.blockedWindows = blockedWindows;
   if (blackoutDays !== undefined) newExplicit.blackoutDays = blackoutDays;
+  if (structuredRules !== undefined) newExplicit.structuredRules = structuredRules;
 
   if (currentLocation !== undefined) {
     if (currentLocation === null) {
@@ -88,18 +107,31 @@ export async function PUT(req: NextRequest) {
     }
   }
 
-  // Compile free-text preferences into deterministic rules
+  // Compile rules — use structured rules if available, fall back to free text
   const tz = (timezone as string) ?? (newExplicit.timezone as string) ?? "America/Los_Angeles";
   let compiledRules = null;
-  try {
-    compiledRules = await compilePreferenceRules(
-      persistentKnowledge ?? null,
-      upcomingSchedulePreferences ?? null,
-      tz
+
+  const rules = (structuredRules as AvailabilityRule[] | undefined) ?? (newExplicit.structuredRules as AvailabilityRule[] | undefined);
+  const activeRules = rules?.filter((r: AvailabilityRule) => r.status === "active");
+
+  if (activeRules && activeRules.length > 0) {
+    // Deterministic compilation from structured rules — no LLM needed
+    compiledRules = compileStructuredRules(
+      activeRules,
+      (businessHoursStart as number) ?? (newExplicit.businessHoursStart as number) ?? 9,
+      (businessHoursEnd as number) ?? (newExplicit.businessHoursEnd as number) ?? 18,
     );
-  } catch (e) {
-    console.error("[tuner/preferences] Compile failed:", e);
-    // Non-fatal — save prefs anyway, just skip compilation
+  } else {
+    // Fall back to LLM compilation from free text (legacy path)
+    try {
+      compiledRules = await compilePreferenceRules(
+        persistentKnowledge ?? null,
+        upcomingSchedulePreferences ?? null,
+        tz
+      );
+    } catch (e) {
+      console.error("[tuner/preferences] Compile failed:", e);
+    }
   }
 
   const newPrefs: Record<string, unknown> = {
@@ -111,7 +143,7 @@ export async function PUT(req: NextRequest) {
   }
 
   const updateData: Record<string, unknown> = {
-    preferences: newPrefs as Parameters<typeof prisma.user.update>[0]["data"]["preferences"],
+    preferences: newPrefs as unknown as Prisma.InputJsonValue,
     lastCalibratedAt: new Date(),
   };
 
@@ -120,7 +152,7 @@ export async function PUT(req: NextRequest) {
 
   await prisma.user.update({
     where: { id: user.id },
-    data: updateData as Parameters<typeof prisma.user.update>[0]["data"],
+    data: updateData as unknown as Parameters<typeof prisma.user.update>[0]["data"],
   });
 
   // Invalidate computed schedule so calendar refreshes with new preferences
