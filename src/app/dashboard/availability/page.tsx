@@ -6,7 +6,6 @@ import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calen
 import { DayView } from "@/components/day-view";
 import { AvailabilityRules } from "@/components/availability-rules";
 import Link from "next/link";
-import { ChevronDown, ChevronUp } from "lucide-react";
 
 function getSunday(d: Date): string {
   const date = new Date(d);
@@ -36,7 +35,7 @@ export default function AvailabilityPage() {
   const [calendars, setCalendars] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [mobileShowCalendar, setMobileShowCalendar] = useState(false);
+
 
   const fetchSchedule = useCallback(async () => {
     try {
@@ -190,47 +189,23 @@ export default function AvailabilityPage() {
         </div>
       </div>
 
-      {/* ── Mobile: rules primary, calendar toggleable ── */}
+      {/* ── Mobile: rules then calendar ── */}
       <div className="flex md:hidden flex-1 flex-col overflow-y-auto">
-        {/* Rules panel — primary view */}
         <AvailabilityRules onSaved={fetchSchedule} />
 
-        {/* Calendar toggle */}
         <div className="border-t border-secondary">
-          <button
-            onClick={() => setMobileShowCalendar(!mobileShowCalendar)}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs text-secondary hover:text-primary transition"
-          >
-            {mobileShowCalendar ? (
-              <>
-                <ChevronUp className="w-3.5 h-3.5" />
-                Hide Calendar Preview
-              </>
-            ) : (
-              <>
-                <ChevronDown className="w-3.5 h-3.5" />
-                Show Calendar Preview
-              </>
-            )}
-          </button>
+          {weekNav}
+          <div className="h-[480px] shrink-0">
+            <DayView
+              events={events}
+              slots={slots}
+              locationByDay={locationByDay}
+              timezone={timezone}
+              weekStart={weekStart}
+              primaryCalendar={calendars[0]}
+            />
+          </div>
         </div>
-
-        {/* Collapsible calendar */}
-        {mobileShowCalendar && (
-          <>
-            {weekNav}
-            <div className="h-[480px] shrink-0">
-              <DayView
-                events={events}
-                slots={slots}
-                locationByDay={locationByDay}
-                timezone={timezone}
-                weekStart={weekStart}
-                primaryCalendar={calendars[0]}
-              />
-            </div>
-          </>
-        )}
       </div>
     </>
   );

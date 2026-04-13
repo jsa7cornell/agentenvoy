@@ -84,7 +84,7 @@ export function WeeklyCalendar({
     return idx;
   }, [slots, timezone]);
 
-  // Group events by day (exclude workingLocation/outOfOffice event types and all-day)
+  // Group timed events by day (exclude workingLocation/outOfOffice event types and all-day)
   const eventsByDay = useMemo(() => {
     const grouped: Record<string, TunerEvent[]> = {};
     for (const day of days) grouped[day] = [];
@@ -98,6 +98,33 @@ export function WeeklyCalendar({
     }
     return grouped;
   }, [events, days, timezone]);
+
+  // Group all-day events by day (can span multiple days)
+  const allDayByDay = useMemo(() => {
+    const grouped: Record<string, TunerEvent[]> = {};
+    for (const day of days) grouped[day] = [];
+    for (const e of events) {
+      if (!e.isAllDay) continue;
+      if (e.eventType === "workingLocation" || e.eventType === "outOfOffice") continue;
+      // All-day events span from start date to end date (exclusive)
+      const eStart = new Date(e.start);
+      const eEnd = new Date(e.end);
+      for (const day of days) {
+        const dayStart = new Date(day + "T00:00:00");
+        const dayEnd = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+        if (eStart < dayEnd && eEnd > dayStart) {
+          grouped[day].push(e);
+        }
+      }
+    }
+    return grouped;
+  }, [events, days]);
+
+  const hasAnyAllDay = useMemo(
+    () => days.some((day) => (allDayByDay[day] || []).length > 0),
+    [days, allDayByDay]
+  );
 
   // Layout events per day with column positions
   const layoutByDay = useMemo(() => {
@@ -143,6 +170,32 @@ export function WeeklyCalendar({
               );
             })}
           </div>
+
+          {/* All-day events row */}
+          {hasAnyAllDay && (
+            <div className="grid border-b border-secondary"
+              style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
+              <div className="px-1 py-1.5 flex items-start justify-end">
+                <span className="text-[10px] text-muted">All day</span>
+              </div>
+              {days.map((day) => {
+                const allDayEvents = allDayByDay[day] || [];
+                return (
+                  <div key={day} className="border-l border-secondary px-1 py-1 flex flex-col gap-0.5 min-h-[28px]">
+                    {allDayEvents.map((e) => (
+                      <div
+                        key={e.id}
+                        className="text-[10px] leading-tight px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/80 border-l-2 border-l-indigo-500 text-primary truncate"
+                        title={e.summary}
+                      >
+                        {e.summary}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Time grid */}
           <div className="grid relative"

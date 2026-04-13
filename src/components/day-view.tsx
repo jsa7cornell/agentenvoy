@@ -91,7 +91,7 @@ export function DayView({
     return best;
   }, [slots, timezone]);
 
-  // Filter events for selected day
+  // Filter timed events for selected day
   const dayEvents = useMemo(() => {
     return events.filter((e) => {
       if (e.eventType === "workingLocation" || e.eventType === "outOfOffice") return false;
@@ -99,6 +99,20 @@ export function DayView({
       return toDayStr(e.start, timezone) === selectedDay;
     });
   }, [events, selectedDay, timezone]);
+
+  // All-day events for selected day (can span multiple days)
+  const allDayEvents = useMemo(() => {
+    return events.filter((e) => {
+      if (!e.isAllDay) return false;
+      if (e.eventType === "workingLocation" || e.eventType === "outOfOffice") return false;
+      const eStart = new Date(e.start);
+      const eEnd = new Date(e.end);
+      const dayStart = new Date(selectedDay + "T00:00:00");
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      return eStart < dayEnd && eEnd > dayStart;
+    });
+  }, [events, selectedDay]);
 
   const laidOut = useMemo(() => layoutEvents(dayEvents, timezone), [dayEvents, timezone]);
 
@@ -164,6 +178,22 @@ export function DayView({
           </span>
         )}
       </div>
+
+      {/* All-day events */}
+      {allDayEvents.length > 0 && (
+        <div className="px-3 py-1.5 border-b border-secondary shrink-0 flex flex-wrap gap-1 items-center">
+          <span className="text-[10px] text-muted mr-1">All day</span>
+          {allDayEvents.map((e) => (
+            <span
+              key={e.id}
+              className="text-[10px] leading-tight px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/80 border-l-2 border-l-indigo-500 text-primary truncate max-w-[200px]"
+              title={e.summary}
+            >
+              {e.summary}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Day timeline */}
       <div className="flex-1 overflow-auto">
