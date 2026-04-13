@@ -30,7 +30,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full">
+    <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full min-h-0">
       <OnboardingChat />
     </div>
   );

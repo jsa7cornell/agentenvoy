@@ -8,6 +8,17 @@ import { InlineCalendar } from "./inline-calendar";
 import { SimulatedDealRoom } from "./simulated-deal-room";
 import { LogoIcon } from "@/components/logo";
 
+/** Render simple markdown: **bold** and line breaks */
+function renderMarkdown(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
 interface QuickReplyOption {
   number: number;
   label: string;
@@ -67,21 +78,26 @@ export function OnboardingChat() {
   const [eventIds, setEventIds] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const initRef = useRef(false);
 
   // Auto-scroll to bottom
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    }
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+      }
+    });
   }, [messages]);
 
   // Load initial state
   useEffect(() => {
+    if (initRef.current) return;
+    initRef.current = true;
     fetch("/api/onboarding/chat")
       .then((r) => r.json())
       .then((data) => {
         if (data.redirect) {
-          router.push(data.redirect);
+          window.location.href = data.redirect;
           return;
         }
         setCurrentPhase(data.currentPhase || data.phase);
@@ -127,16 +143,18 @@ export function OnboardingChat() {
       if (sending) return;
       setSending(true);
 
-      // Add user message
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `user-${Date.now()}`,
-          role: "user",
-          content: response,
-          visible: true,
-        },
-      ]);
+      // Add user message (suppress internal signals)
+      if (!response.startsWith("events_complete")) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `user-${Date.now()}`,
+            role: "user",
+            content: response,
+            visible: true,
+          },
+        ]);
+      }
 
       try {
         const body: Record<string, unknown> = {
@@ -154,8 +172,8 @@ export function OnboardingChat() {
         const data = await res.json();
 
         if (data.redirect) {
-          // Short delay so completion message shows
-          setTimeout(() => router.push(data.redirect), 1500);
+          // Full reload to pick up fresh session (onboardingComplete)
+          setTimeout(() => { window.location.href = data.redirect; }, 1500);
         }
 
         setCurrentPhase(data.phase);
@@ -262,7 +280,7 @@ export function OnboardingChat() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-black/5 dark:border-white/5">
         <div className="flex items-center gap-2">
@@ -320,7 +338,7 @@ export function OnboardingChat() {
                   Envoy
                 </div>
                 <div className="text-sm text-primary whitespace-pre-wrap leading-relaxed">
-                  {msg.content}
+                  {renderMarkdown(msg.content)}
                 </div>
               </div>
 
