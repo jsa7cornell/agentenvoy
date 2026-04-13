@@ -8,7 +8,9 @@ import {
   OnboardingPhase,
   OnboardingContext,
   getIntroMessages,
+  getTimezonePickerMessages,
   getDefaultsFormatMessages,
+  getPhoneNumberMessages,
   getZoomLinkMessages,
   getDefaultsDurationMessages,
   getDefaultsBufferMessages,
@@ -19,6 +21,7 @@ import {
   PhaseResult,
 } from "@/lib/onboarding-machine";
 import type { AvailabilityRule } from "@/lib/availability-rules";
+import { safeTimezone } from "@/lib/utils";
 
 interface UserPreferences {
   timezone?: string;
@@ -69,7 +72,7 @@ export async function GET() {
   }
 
   const prefs = (user.preferences as UserPreferences) || {};
-  const tz = prefs.explicit?.timezone ?? prefs.timezone ?? "America/Los_Angeles";
+  const tz = safeTimezone(prefs.explicit?.timezone ?? prefs.timezone);
 
   const ctx: OnboardingContext = {
     userName: user.name || undefined,
@@ -112,15 +115,14 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { phase: currentPhase, response, timezoneValue } = body as {
+  const { phase: currentPhase, response } = body as {
     phase: OnboardingPhase;
     response?: string;
-    timezoneValue?: string;
   };
 
   const prefs = (user.preferences as UserPreferences) || {};
   const explicit = prefs.explicit || {};
-  const tz = explicit.timezone ?? prefs.timezone ?? "America/Los_Angeles";
+  const tz = safeTimezone(explicit.timezone ?? prefs.timezone);
 
   let advancing = true;
   let result: PhaseResult;
@@ -138,17 +140,16 @@ export async function POST(req: NextRequest) {
 
   switch (currentPhase) {
     case "intro": {
-      const selectedTz = timezoneValue || response;
-      if (selectedTz && selectedTz !== "custom") {
-        await updatePrefs(user.id, prefs, explicit, { timezone: selectedTz });
-        ctx.detectedTimezone = selectedTz;
-      }
-      if (response === "custom" && !timezoneValue) {
+      if (response === "change_tz") {
+        // User wants to change timezone — show free text input (stay on intro phase)
         advancing = false;
-        result = getIntroMessages(ctx);
-        result.widget = { type: "timezone-picker", data: { current: tz } };
+        result = getTimezonePickerMessages();
         return NextResponse.json(result);
       }
+      // Either confirmed timezone or typed a custom one
+      const selectedTz = safeTimezone(response || tz);
+      await updatePrefs(user.id, prefs, explicit, { timezone: selectedTz });
+      ctx.detectedTimezone = selectedTz;
       break;
     }
 
@@ -222,12 +223,6 @@ export async function POST(req: NextRequest) {
     }
 
     case "calendar_rules": {
-      if (response === "custom") {
-        advancing = false;
-        result = getCalendarRulesMessages();
-        result.widget = { type: "hours-picker", data: { start: 9, end: 17 } };
-        return NextResponse.json(result);
-      }
       const [startH, endH] = (response || "9-17").split("-").map(Number);
       const freshPrefs = await getFreshPrefs(user.id);
       await updatePrefs(user.id, freshPrefs.prefs, freshPrefs.explicit, {
@@ -264,7 +259,10 @@ export async function POST(req: NextRequest) {
   // Advance to next phase
   let next = advancing ? nextPhase(currentPhase) : currentPhase;
 
-  // Skip zoom_link phase if user didn't choose Zoom
+  // Skip conditional phases based on format choice
+  if (next === "phone_number" && skipPhoneNumber) {
+    next = nextPhase("phone_number");
+  }
   if (next === "zoom_link" && skipZoomLink) {
     next = nextPhase("zoom_link");
   }
@@ -281,6 +279,7 @@ function getMessagesForPhase(phase: OnboardingPhase, ctx: OnboardingContext): Ph
   switch (phase) {
     case "intro": return getIntroMessages(ctx);
     case "defaults_format": return getDefaultsFormatMessages();
+    case "phone_number": return getPhoneNumberMessages();
     case "zoom_link": return getZoomLinkMessages();
     case "defaults_duration": return getDefaultsDurationMessages();
     case "defaults_buffer": return getDefaultsBufferMessages();
