@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { getOrComputeSchedule, invalidateSchedule } from "@/lib/calendar";
 import { getStubSchedule } from "@/lib/fixtures/stub-calendar";
 import {
@@ -22,9 +23,11 @@ import {
   getSimulationMessages,
   getSimulationWalkthroughMessages,
   getCompletionMessages,
+  getRulesIntroMessages,
   nextPhase,
   PhaseResult,
 } from "@/lib/onboarding-machine";
+import type { AvailabilityRule } from "@/lib/availability-rules";
 import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
 
@@ -228,17 +231,31 @@ export async function POST(req: NextRequest) {
     }
 
     case "protection": {
-      // Buffer minutes
+      // Buffer minutes — save as structured rule
       const buffer = parseInt(response || "0", 10);
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          preferences: {
-            ...prefs,
-            explicit: { ...explicit, bufferMinutes: buffer },
+      if (buffer > 0) {
+        const bufferRule: AvailabilityRule = {
+          id: `rule_onboard_buffer_${Date.now()}`,
+          originalText: `buffer ${buffer} min after all meetings`,
+          type: "ongoing",
+          action: "buffer",
+          bufferMinutesAfter: buffer,
+          bufferAppliesTo: "all",
+          status: "active",
+          priority: 3,
+          createdAt: new Date().toISOString(),
+        };
+        const existingRules = (explicit.structuredRules as AvailabilityRule[]) ?? [];
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            preferences: {
+              ...prefs,
+              explicit: { ...explicit, structuredRules: [...existingRules, bufferRule] },
+            } as unknown as Prisma.InputJsonValue,
           },
-        },
-      });
+        });
+      }
       break;
     }
 
@@ -264,35 +281,71 @@ export async function POST(req: NextRequest) {
     }
 
     case "protection_blocks": {
-      // Parse freeform text into blocked windows
+      // Parse freeform text into structured availability rules via parse-rule
       const text = (response || "").trim().toLowerCase();
       if (text && text !== "nothing" && text !== "none" && text !== "no" && text !== "skip") {
-        // Use LLM to parse into structured blocked windows
         try {
+          // Use the parse-rule LLM to get a structured rule
+          const freshUser2 = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { preferences: true },
+          });
+          const fp = (freshUser2?.preferences as UserPreferences) || {};
+          const fe = fp.explicit || {};
+
           const parseResult = await generateText({
-            model: envoyModel("claude-sonnet-4-6"),
-            system: `Parse the user's text into structured blocked windows for a scheduling system. Return valid JSON only — an array of objects with: { start: "HH:MM", end: "HH:MM", days?: ["Mon","Tue",...], label: string, recurring: boolean }. Use 24-hour time. If you can't parse it, return [].`,
+            model: envoyModel("claude-haiku-4-5-20251001"),
+            system: `You parse natural language scheduling preferences into structured rules.
+User's timezone is ${tz}. Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: tz })}.
+
+Return ONLY valid JSON — an array of rule objects. Each rule:
+{
+  "originalText": "user's input for this specific rule",
+  "type": "ongoing|recurring|temporary|one-time",
+  "action": "block|buffer|limit",
+  "timeStart": "HH:MM or null",
+  "timeEnd": "HH:MM or null",
+  "allDay": false,
+  "daysOfWeek": [0-6] or null,
+  "priority": 3,
+  "summary": "Human-readable one-line summary"
+}
+
+Days of week: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat.
+If the input mentions multiple things (e.g. "yoga mornings and no Friday afternoons"), return multiple rules.
+If you can't parse scheduling intent, return [].`,
             messages: [{ role: "user", content: response! }],
           });
-          const windows = JSON.parse(parseResult.text);
-          if (Array.isArray(windows) && windows.length > 0) {
-            const freshUser2 = await prisma.user.findUnique({
-              where: { id: user.id },
-              select: { preferences: true },
+
+          const cleaned = parseResult.text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+          const parsed = JSON.parse(cleaned);
+          const rules: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+
+          if (rules.length > 0) {
+            const existingRules = (fe.structuredRules as AvailabilityRule[]) ?? [];
+            const newRules: AvailabilityRule[] = rules.map((r: unknown, i: number) => {
+              const rule = r as Record<string, unknown>;
+              return {
+                id: `rule_onboard_block_${Date.now()}_${i}`,
+                originalText: (rule.originalText as string) || response!,
+                type: (rule.type as AvailabilityRule["type"]) || "recurring",
+                action: (rule.action as AvailabilityRule["action"]) || "block",
+                timeStart: (rule.timeStart as string) || undefined,
+                timeEnd: (rule.timeEnd as string) || undefined,
+                allDay: (rule.allDay as boolean) || false,
+                daysOfWeek: Array.isArray(rule.daysOfWeek) ? rule.daysOfWeek : undefined,
+                status: "active" as const,
+                priority: (rule.priority as number) || 3,
+                createdAt: new Date().toISOString(),
+              };
             });
-            const fp = (freshUser2?.preferences as UserPreferences) || {};
-            const fe = fp.explicit || {};
-            const existing = fe.blockedWindows || [];
             await prisma.user.update({
               where: { id: user.id },
               data: {
                 preferences: {
                   ...fp,
-                  explicit: {
-                    ...fe,
-                    blockedWindows: [...existing, ...windows],
-                  },
-                },
+                  explicit: { ...fe, structuredRules: [...existingRules, ...newRules] },
+                } as unknown as Prisma.InputJsonValue,
               },
             });
           }
@@ -393,6 +446,11 @@ export async function POST(req: NextRequest) {
       break;
     }
 
+    case "rules_intro": {
+      // User tapped "Got it — show me the simulation"
+      break;
+    }
+
     case "simulation": {
       // User tapped "Show me what it looks like"
       const schedule = await loadSchedule(user.id, tz);
@@ -466,6 +524,7 @@ function getMessagesForPhase(phase: OnboardingPhase, ctx: OnboardingContext): Ph
     case "hours": return getHoursMessages();
     case "hours_posture": return getHoursPostureMessages();
     case "format": return getFormatMessages();
+    case "rules_intro": return getRulesIntroMessages();
     case "simulation": return getSimulationMessages(ctx);
     case "simulation_walkthrough": return getSimulationWalkthroughMessages(ctx);
     case "complete": return getCompletionMessages(ctx);
