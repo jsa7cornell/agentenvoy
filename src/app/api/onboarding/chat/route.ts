@@ -3,33 +3,22 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
-import { getOrComputeSchedule, invalidateSchedule } from "@/lib/calendar";
-import { getStubSchedule } from "@/lib/fixtures/stub-calendar";
+import { invalidateSchedule } from "@/lib/calendar";
 import {
   OnboardingPhase,
   OnboardingContext,
   getIntroMessages,
-  getTimezoneMessages,
-  getCalendarRevealMessages,
-  pickEventQuestions,
-  getEventQuestion,
-  getEveningQuestion,
-  getProtectionMessages,
-  getProtectionDurationMessages,
-  getProtectionBlocksMessages,
-  getHoursMessages,
-  getHoursPostureMessages,
-  getFormatMessages,
-  getSimulationMessages,
-  getSimulationWalkthroughMessages,
-  getCompletionMessages,
-  getRulesIntroMessages,
+  getDefaultsFormatMessages,
+  getZoomLinkMessages,
+  getDefaultsDurationMessages,
+  getDefaultsBufferMessages,
+  getCalendarRulesMessages,
+  getCalendarEveningsMessages,
+  getCompleteMessages,
   nextPhase,
   PhaseResult,
 } from "@/lib/onboarding-machine";
 import type { AvailabilityRule } from "@/lib/availability-rules";
-import { generateText } from "ai";
-import { envoyModel } from "@/lib/model";
 
 interface UserPreferences {
   timezone?: string;
@@ -40,14 +29,10 @@ interface UserPreferences {
     bufferMinutes?: number;
     defaultDuration?: number;
     defaultFormat?: string;
+    videoProvider?: string;
+    zoomLink?: string;
     schedulingPosture?: string;
-    blockedWindows?: Array<{
-      start: string;
-      end: string;
-      days?: string[];
-      label?: string;
-      expires?: string;
-    }>;
+    structuredRules?: AvailabilityRule[];
     [key: string]: unknown;
   };
   [key: string]: unknown;
@@ -95,14 +80,6 @@ export async function GET() {
   // Resume at saved phase or start fresh
   const phase = (user.onboardingPhase as OnboardingPhase) || "intro";
 
-  // For calendar phases, load schedule data
-  let scheduleData: Awaited<ReturnType<typeof getOrComputeSchedule>> | null = null;
-  if (["calendar_reveal", "events"].includes(phase)) {
-    scheduleData = await loadSchedule(user.id, tz);
-    ctx.slots = scheduleData.slots;
-    ctx.events = scheduleData.events;
-  }
-
   const result = getMessagesForPhase(phase, ctx);
   return NextResponse.json({ ...result, currentPhase: phase });
 }
@@ -125,7 +102,6 @@ export async function POST(req: NextRequest) {
       meetSlug: true,
       preferences: true,
       persistentKnowledge: true,
-      upcomingSchedulePreferences: true,
       lastCalibratedAt: true,
       onboardingPhase: true,
     },
@@ -136,11 +112,10 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { phase: currentPhase, response, timezoneValue, eventAnswers } = body as {
+  const { phase: currentPhase, response, timezoneValue } = body as {
     phase: OnboardingPhase;
     response?: string;
-    timezoneValue?: string; // for timezone picker
-    eventAnswers?: Array<{ eventId: string; answer: string }>; // for batch event answers
+    timezoneValue?: string;
   };
 
   const prefs = (user.preferences as UserPreferences) || {};
@@ -149,6 +124,9 @@ export async function POST(req: NextRequest) {
 
   let advancing = true;
   let result: PhaseResult;
+  // Track which conditional phases to skip
+  let skipPhoneNumber = false;
+  let skipZoomLink = false;
 
   const ctx: OnboardingContext = {
     userName: user.name || undefined,
@@ -156,84 +134,74 @@ export async function POST(req: NextRequest) {
     meetSlug: user.meetSlug || undefined,
   };
 
-  // ── Handle response for current phase and determine next ──
+  // ── Handle response for current phase ─────────────────────────────────
 
   switch (currentPhase) {
     case "intro": {
-      // User tapped "Let's go"
-      break;
-    }
-
-    case "timezone": {
       const selectedTz = timezoneValue || response;
       if (selectedTz && selectedTz !== "custom") {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            preferences: {
-              ...prefs,
-              explicit: { ...explicit, timezone: selectedTz },
-            },
-          },
-        });
+        await updatePrefs(user.id, prefs, explicit, { timezone: selectedTz });
         ctx.detectedTimezone = selectedTz;
       }
-      // If "custom", the client will show a timezone picker and re-submit with timezoneValue
       if (response === "custom" && !timezoneValue) {
         advancing = false;
-        result = getTimezoneMessages(ctx);
+        result = getIntroMessages(ctx);
         result.widget = { type: "timezone-picker", data: { current: tz } };
         return NextResponse.json(result);
       }
       break;
     }
 
-    case "calendar_reveal": {
-      // User saw the calendar and tapped "Got it"
-      // Load schedule for event questions
-      const schedule = await loadSchedule(user.id, tz);
-      ctx.slots = schedule.slots;
-      ctx.events = schedule.events;
-      break;
-    }
-
-    case "events": {
-      // Event answers come as batch from client
-      if (eventAnswers && eventAnswers.length > 0) {
-        const knowledge: string[] = [];
-        for (const ea of eventAnswers) {
-          if (ea.answer === "protect") {
-            knowledge.push(`- Event "${ea.eventId}" should always be protected (score 4+)`);
-          } else if (ea.answer === "soft") {
-            knowledge.push(`- Event "${ea.eventId}" is a soft hold — offer if the meeting is important`);
-          } else if (ea.answer === "flexible" || ea.answer === "movable") {
-            knowledge.push(`- Event "${ea.eventId}" is flexible and can be offered or rescheduled`);
-          } else if (ea.answer === "blocked") {
-            knowledge.push(`- Evenings should be kept off-limits for scheduling`);
-          } else if (ea.answer === "phone_only") {
-            knowledge.push(`- Evenings are only available for phone calls, not video`);
-          } else if (ea.answer === "open") {
-            knowledge.push(`- Evenings are open for scheduling`);
-          }
-        }
-        if (knowledge.length > 0) {
-          const existing = user.persistentKnowledge || "";
-          const updated = existing
-            ? `${existing}\n${knowledge.join("\n")}`
-            : knowledge.join("\n");
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { persistentKnowledge: updated },
-          });
-        }
+    case "defaults_format": {
+      if (response === "phone") {
+        await updatePrefs(user.id, prefs, explicit, { defaultFormat: "phone" });
+        skipZoomLink = true;
+      } else if (response === "zoom") {
+        await updatePrefs(user.id, prefs, explicit, { defaultFormat: "video", videoProvider: "zoom" });
+        skipPhoneNumber = true;
+      } else if (response === "google_meet") {
+        await updatePrefs(user.id, prefs, explicit, { defaultFormat: "video", videoProvider: "google_meet" });
+        skipPhoneNumber = true;
+        skipZoomLink = true;
+      } else {
+        const format = response === "none" ? undefined : response;
+        await updatePrefs(user.id, prefs, explicit, { defaultFormat: format });
+        skipPhoneNumber = true;
+        skipZoomLink = true;
       }
       break;
     }
 
-    case "protection": {
-      // Buffer minutes — save as structured rule
+    case "phone_number": {
+      const phoneNum = (response || "").trim();
+      if (phoneNum) {
+        await updatePrefs(user.id, prefs, explicit, { phone: phoneNum });
+      }
+      // Always skip zoom_link after phone_number (user chose phone, not zoom)
+      skipZoomLink = true;
+      break;
+    }
+
+    case "zoom_link": {
+      const link = (response || "").trim();
+      if (link) {
+        const freshPrefs = await getFreshPrefs(user.id);
+        await updatePrefs(user.id, freshPrefs.prefs, freshPrefs.explicit, { zoomLink: link });
+      }
+      break;
+    }
+
+    case "defaults_duration": {
+      const duration = parseInt(response || "30", 10);
+      const freshPrefs = await getFreshPrefs(user.id);
+      await updatePrefs(user.id, freshPrefs.prefs, freshPrefs.explicit, { defaultDuration: duration });
+      break;
+    }
+
+    case "defaults_buffer": {
       const buffer = parseInt(response || "0", 10);
       if (buffer > 0) {
+        const freshPrefs = await getFreshPrefs(user.id);
         const bufferRule: AvailabilityRule = {
           id: `rule_onboard_buffer_${Date.now()}`,
           originalText: `buffer ${buffer} min after all meetings`,
@@ -245,275 +213,65 @@ export async function POST(req: NextRequest) {
           priority: 3,
           createdAt: new Date().toISOString(),
         };
-        const existingRules = (explicit.structuredRules as AvailabilityRule[]) ?? [];
-        await prisma.user.update({
-          where: { id: user.id },
-          data: {
-            preferences: {
-              ...prefs,
-              explicit: { ...explicit, structuredRules: [...existingRules, bufferRule] },
-            } as unknown as Prisma.InputJsonValue,
-          },
+        const existingRules = (freshPrefs.explicit.structuredRules as AvailabilityRule[]) ?? [];
+        await updatePrefs(user.id, freshPrefs.prefs, freshPrefs.explicit, {
+          structuredRules: [...existingRules, bufferRule],
         });
       }
       break;
     }
 
-    case "protection_duration": {
-      const duration = parseInt(response || "30", 10);
-      // Re-read prefs since buffer was just saved
-      const freshUser = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { preferences: true },
-      });
-      const freshPrefs = (freshUser?.preferences as UserPreferences) || {};
-      const freshExplicit = freshPrefs.explicit || {};
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          preferences: {
-            ...freshPrefs,
-            explicit: { ...freshExplicit, defaultDuration: duration },
-          },
-        },
-      });
-      break;
-    }
-
-    case "protection_blocks": {
-      // Parse freeform text into structured availability rules via parse-rule
-      const text = (response || "").trim().toLowerCase();
-      if (text && text !== "nothing" && text !== "none" && text !== "no" && text !== "skip") {
-        try {
-          // Use the parse-rule LLM to get a structured rule
-          const freshUser2 = await prisma.user.findUnique({
-            where: { id: user.id },
-            select: { preferences: true },
-          });
-          const fp = (freshUser2?.preferences as UserPreferences) || {};
-          const fe = fp.explicit || {};
-
-          const parseResult = await generateText({
-            model: envoyModel("claude-haiku-4-5-20251001"),
-            system: `You parse natural language scheduling preferences into structured rules.
-User's timezone is ${tz}. Today is ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: tz })}.
-
-Return ONLY valid JSON — an array of rule objects. Each rule:
-{
-  "originalText": "user's input for this specific rule",
-  "type": "ongoing|recurring|temporary|one-time",
-  "action": "block|buffer|limit",
-  "timeStart": "HH:MM or null",
-  "timeEnd": "HH:MM or null",
-  "allDay": false,
-  "daysOfWeek": [0-6] or null,
-  "priority": 3,
-  "summary": "Human-readable one-line summary"
-}
-
-Days of week: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat.
-If the input mentions multiple things (e.g. "yoga mornings and no Friday afternoons"), return multiple rules.
-If you can't parse scheduling intent, return [].`,
-            messages: [{ role: "user", content: response! }],
-          });
-
-          const cleaned = parseResult.text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
-          const parsed = JSON.parse(cleaned);
-          const rules: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
-
-          if (rules.length > 0) {
-            const existingRules = (fe.structuredRules as AvailabilityRule[]) ?? [];
-            const newRules: AvailabilityRule[] = rules.map((r: unknown, i: number) => {
-              const rule = r as Record<string, unknown>;
-              return {
-                id: `rule_onboard_block_${Date.now()}_${i}`,
-                originalText: (rule.originalText as string) || response!,
-                type: (rule.type as AvailabilityRule["type"]) || "recurring",
-                action: (rule.action as AvailabilityRule["action"]) || "block",
-                timeStart: (rule.timeStart as string) || undefined,
-                timeEnd: (rule.timeEnd as string) || undefined,
-                allDay: (rule.allDay as boolean) || false,
-                daysOfWeek: Array.isArray(rule.daysOfWeek) ? rule.daysOfWeek : undefined,
-                status: "active" as const,
-                priority: (rule.priority as number) || 3,
-                createdAt: new Date().toISOString(),
-              };
-            });
-            await prisma.user.update({
-              where: { id: user.id },
-              data: {
-                preferences: {
-                  ...fp,
-                  explicit: { ...fe, structuredRules: [...existingRules, ...newRules] },
-                } as unknown as Prisma.InputJsonValue,
-              },
-            });
-          }
-        } catch (e) {
-          console.error("Failed to parse blocked windows:", e);
-          // Save as knowledge instead
-          const existing = user.persistentKnowledge || "";
-          await prisma.user.update({
-            where: { id: user.id },
-            data: {
-              persistentKnowledge: existing
-                ? `${existing}\n- Protected time: ${response}`
-                : `- Protected time: ${response}`,
-            },
-          });
-        }
-      }
-      break;
-    }
-
-    case "hours": {
+    case "calendar_rules": {
       if (response === "custom") {
-        // Client will show hours picker and re-submit with specific values
         advancing = false;
-        result = getHoursMessages();
+        result = getCalendarRulesMessages();
         result.widget = { type: "hours-picker", data: { start: 9, end: 17 } };
         return NextResponse.json(result);
       }
       const [startH, endH] = (response || "9-17").split("-").map(Number);
-      const freshUser3 = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { preferences: true },
-      });
-      const fp3 = (freshUser3?.preferences as UserPreferences) || {};
-      const fe3 = fp3.explicit || {};
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          preferences: {
-            ...fp3,
-            explicit: { ...fe3, businessHoursStart: startH, businessHoursEnd: endH },
-          },
-        },
+      const freshPrefs = await getFreshPrefs(user.id);
+      await updatePrefs(user.id, freshPrefs.prefs, freshPrefs.explicit, {
+        businessHoursStart: startH,
+        businessHoursEnd: endH,
       });
       break;
     }
 
-    case "hours_posture": {
-      const freshUser4 = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { preferences: true, persistentKnowledge: true },
-      });
-      const fp4 = (freshUser4?.preferences as UserPreferences) || {};
-      const fe4 = fp4.explicit || {};
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          preferences: {
-            ...fp4,
-            explicit: { ...fe4, schedulingPosture: response || "balanced" },
-          },
-        },
-      });
-      // Also save to persistent knowledge for the LLM
-      const postureLabel =
-        response === "generous" ? "generous — offer whatever's open" :
-        response === "conservative" ? "conservative — only clearly open slots" :
-        "balanced — offer open slots, check before moving things";
-      const pk = freshUser4?.persistentKnowledge || "";
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          persistentKnowledge: pk
-            ? `${pk}\n- Scheduling posture: ${postureLabel}`
-            : `- Scheduling posture: ${postureLabel}`,
-        },
-      });
-      break;
-    }
-
-    case "format": {
-      const freshUser5 = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { preferences: true },
-      });
-      const fp5 = (freshUser5?.preferences as UserPreferences) || {};
-      const fe5 = fp5.explicit || {};
-      const format = response === "none" ? undefined : response;
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          preferences: {
-            ...fp5,
-            explicit: { ...fe5, defaultFormat: format },
-          },
-        },
-      });
-      break;
-    }
-
-    case "rules_intro": {
-      // User tapped "Got it — show me the simulation"
-      break;
-    }
-
-    case "simulation": {
-      // User tapped "Show me what it looks like"
-      const schedule = await loadSchedule(user.id, tz);
-      ctx.slots = schedule.slots;
-      break;
-    }
-
-    case "simulation_walkthrough": {
-      // User tapped "Got it, take me to the dashboard" — complete onboarding
-      await completeOnboarding(user.id, user.meetSlug || "");
-      result = getCompletionMessages(ctx);
+    case "calendar_evenings": {
+      // Save evening preference to knowledge
+      const pk = user.persistentKnowledge || "";
+      let entry = "";
+      if (response === "blocked") entry = "- Evenings: only offer evening meetings with host's explicit permission";
+      else if (response === "open") entry = "- Evenings are open for scheduling";
+      if (entry) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { persistentKnowledge: pk ? `${pk}\n${entry}` : entry },
+        });
+      }
+      // This is the last phase before complete
+      await completeOnboarding(user.id);
+      result = getCompleteMessages(ctx);
       await savePhase(user.id, "complete");
-      return NextResponse.json({ ...result, redirect: "/dashboard" });
+      return NextResponse.json({ ...result, onboardingComplete: true });
     }
 
     case "complete": {
-      return NextResponse.json({ phase: "complete", messages: [], redirect: "/dashboard" });
+      return NextResponse.json({ phase: "complete", messages: [], onboardingComplete: true });
     }
   }
 
   // Advance to next phase
-  const next = advancing ? nextPhase(currentPhase) : currentPhase;
+  let next = advancing ? nextPhase(currentPhase) : currentPhase;
+
+  // Skip zoom_link phase if user didn't choose Zoom
+  if (next === "zoom_link" && skipZoomLink) {
+    next = nextPhase("zoom_link");
+  }
+
   await savePhase(user.id, next);
 
-  // Load schedule data if needed for next phase
-  if (["calendar_reveal", "events", "simulation", "simulation_walkthrough"].includes(next)) {
-    const schedule = await loadSchedule(user.id, tz);
-    ctx.slots = schedule.slots;
-    ctx.events = schedule.events;
-  }
-
   result = getMessagesForPhase(next, ctx);
-
-  // For events phase, pick interesting events and generate questions
-  if (next === "events" && ctx.events) {
-    const picks = pickEventQuestions(ctx.events);
-    const eventMessages = picks.map((event) => getEventQuestion(event));
-    const questionIds = picks.map((e) => e.summary);
-    // Check if we should ask about evenings (no evening event in picks)
-    const hasEvening = picks.some((e) => {
-      const h = e.start instanceof Date ? e.start.getHours() : new Date(e.start).getHours();
-      return h >= 17;
-    });
-    if (!hasEvening) {
-      eventMessages.push(getEveningQuestion());
-      questionIds.push("evenings");
-    }
-
-    if (eventMessages.length === 0) {
-      // No events to ask about — skip to next phase
-      const skipNext = nextPhase("events");
-      await savePhase(user.id, skipNext);
-      result = getMessagesForPhase(skipNext, ctx);
-    } else {
-      result = {
-        phase: "events",
-        messages: eventMessages,
-      };
-      // Include event IDs so client can send back answers keyed by event
-      (result as PhaseResult & { eventIds?: string[] }).eventIds = questionIds;
-    }
-  }
-
   return NextResponse.json(result);
 }
 
@@ -522,44 +280,14 @@ If you can't parse scheduling intent, return [].`,
 function getMessagesForPhase(phase: OnboardingPhase, ctx: OnboardingContext): PhaseResult {
   switch (phase) {
     case "intro": return getIntroMessages(ctx);
-    case "timezone": return getTimezoneMessages(ctx);
-    case "calendar_reveal": return getCalendarRevealMessages(ctx);
-    case "events": return { phase: "events", messages: [] }; // filled dynamically above
-    case "protection": return getProtectionMessages();
-    case "protection_duration": return getProtectionDurationMessages();
-    case "protection_blocks": return getProtectionBlocksMessages();
-    case "hours": return getHoursMessages();
-    case "hours_posture": return getHoursPostureMessages();
-    case "format": return getFormatMessages();
-    case "rules_intro": return getRulesIntroMessages();
-    case "simulation": return getSimulationMessages(ctx);
-    case "simulation_walkthrough": return getSimulationWalkthroughMessages(ctx);
-    case "complete": return getCompletionMessages(ctx);
+    case "defaults_format": return getDefaultsFormatMessages();
+    case "zoom_link": return getZoomLinkMessages();
+    case "defaults_duration": return getDefaultsDurationMessages();
+    case "defaults_buffer": return getDefaultsBufferMessages();
+    case "calendar_rules": return getCalendarRulesMessages();
+    case "calendar_evenings": return getCalendarEveningsMessages();
+    case "complete": return getCompleteMessages(ctx);
     default: return getIntroMessages(ctx);
-  }
-}
-
-async function loadSchedule(userId: string, timezone: string) {
-  // Check if user has a Google account
-  const account = await prisma.account.findFirst({
-    where: { userId, provider: "google" },
-    select: { id: true },
-  });
-
-  if (!account && process.env.NODE_ENV !== "production") {
-    // Dev user without Google — use stub data
-    return getStubSchedule(timezone);
-  }
-
-  try {
-    return await getOrComputeSchedule(userId);
-  } catch (e) {
-    console.error("Failed to load schedule for onboarding:", e);
-    // Fall back to stub in dev
-    if (process.env.NODE_ENV !== "production") {
-      return getStubSchedule(timezone);
-    }
-    return { slots: [], events: [], timezone, connected: false, canWrite: false, calendars: [] };
   }
 }
 
@@ -570,8 +298,34 @@ async function savePhase(userId: string, phase: OnboardingPhase) {
   });
 }
 
-async function completeOnboarding(userId: string, meetSlug: string) {
-  // Set lastCalibratedAt
+async function getFreshPrefs(userId: string) {
+  const freshUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferences: true },
+  });
+  const prefs = (freshUser?.preferences as UserPreferences) || {};
+  const explicit = prefs.explicit || {};
+  return { prefs, explicit };
+}
+
+async function updatePrefs(
+  userId: string,
+  prefs: UserPreferences,
+  explicit: NonNullable<UserPreferences["explicit"]>,
+  updates: Record<string, unknown>
+) {
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      preferences: {
+        ...prefs,
+        explicit: { ...explicit, ...updates },
+      } as unknown as Prisma.InputJsonValue,
+    },
+  });
+}
+
+async function completeOnboarding(userId: string) {
   await prisma.user.update({
     where: { id: userId },
     data: {
@@ -580,19 +334,5 @@ async function completeOnboarding(userId: string, meetSlug: string) {
     },
   });
 
-  // Invalidate schedule so it recomputes with new preferences
   await invalidateSchedule(userId);
-
-  // Seed a welcome message in the channel
-  let channel = await prisma.channel.findUnique({ where: { userId } });
-  if (!channel) {
-    channel = await prisma.channel.create({ data: { userId } });
-  }
-  await prisma.channelMessage.create({
-    data: {
-      channelId: channel.id,
-      role: "envoy",
-      content: `Welcome back! Your Envoy is calibrated and ready. Tell me who you need to meet with, or share your link: agentenvoy.ai/meet/${meetSlug}`,
-    },
-  });
 }
