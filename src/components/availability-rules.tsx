@@ -721,6 +721,13 @@ function RuleCard({
             )}
           </div>
         </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="flex-shrink-0 text-muted hover:text-red-400 transition"
+          title="Remove"
+        >
+          <X className="w-4 h-4" />
+        </button>
         {!isExpired && (
           <button
             onClick={(e) => { e.stopPropagation(); onToggle(); }}
