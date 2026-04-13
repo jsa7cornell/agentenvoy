@@ -6,7 +6,7 @@ import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
-import { generateCode } from "@/lib/utils";
+import { generateCode, safeTimezone } from "@/lib/utils";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { sanitizeHistory, roleSummary } from "@/lib/conversation";
 import { readFileSync } from "fs";
@@ -46,7 +46,7 @@ Step 2: Create the thread IMMEDIATELY. Do NOT preview first, do NOT wait for app
 Step 3: In the SAME message as the action block, tell the host what you're offering the guest. Be specific — mention the time windows, format, and duration. Then add: "Share his email if you want me to send it, otherwise it's ready to share. Let me know any tweaks."
 
 Example response (Step 2+3 combined):
-"Here's the card for a 30-min VC with Bob. I'm offering Tue and Wed mornings, plus Thu afternoon PT. Share his email if you want me to send it, otherwise it's ready to share. Let me know any tweaks."
+"Set up a 30-min video call with Bob. I'm offering Tue and Wed mornings, plus Thu afternoon PT. Share his email if you want me to send it, or just share the link. Let me know any tweaks."
 
 Step 4: If the host gives feedback ("skip Tuesday", "make it 45 min", "add Friday"), update the thread rules and confirm the change. No re-preview needed — just confirm what changed.
 
@@ -86,6 +86,7 @@ TONE:
 - Warm but professional. Match the user's energy.
 - No emoji unless the user uses them first.
 - No filler phrases ("I'd be happy to help!", "Great question!"). Get to the point.
+- Use plain language. Don't say "card's up" or "here's the card" — say "set up" or "created". The user may not know what "card" means.
 
 FORMATTING:
 - Do NOT use markdown bold (**text**), italics (*text*), or headers (#). The chat UI renders plain text.
@@ -235,10 +236,10 @@ export async function POST(req: NextRequest) {
   // Scored schedule — pre-computed slots with protection scores
   let calendarConnected = false;
   const hostPrefs = user.preferences as Record<string, unknown> | null;
-  const tz =
+  const tz = safeTimezone(
     (hostPrefs?.timezone as string) ??
-    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
-    "America/Los_Angeles";
+    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string)
+  );
   try {
     const schedule = await getOrComputeSchedule(user.id, { forceRefresh: isRefreshRequest });
     if (schedule.connected) {
@@ -375,8 +376,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Get conversation history — hard cap at 3 days to keep thread context lean
+  // Use 5s buffer before session start to capture the user message saved before session creation
   const threeDaysAgo = new Date(Date.now() - THREE_DAYS_MS);
-  const historyStart = activeSession.startedAt > threeDaysAgo ? activeSession.startedAt : threeDaysAgo;
+  const sessionStart = new Date(activeSession.startedAt.getTime() - 5000);
+  const historyStart = sessionStart > threeDaysAgo ? sessionStart : threeDaysAgo;
   const history = await prisma.channelMessage.findMany({
     where: {
       channelId: channel.id,
