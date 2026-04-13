@@ -7,7 +7,7 @@ import { envoyModel } from "@/lib/model";
 export interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer";
+  action: "block" | "allow" | "buffer" | "prefer" | "business_hours";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -17,6 +17,8 @@ export interface ParsedRule {
   bufferMinutesBefore?: number;
   bufferMinutesAfter?: number;
   bufferAppliesTo?: string;
+  businessHoursStart?: number; // hour 0-23, set when action is "business_hours"
+  businessHoursEnd?: number;   // hour 0-23, set when action is "business_hours"
   priority: number;
   ambiguous?: boolean;
   interpretations?: string[];
@@ -54,7 +56,7 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
 {
   "originalText": "the user's input verbatim",
   "type": "ongoing|recurring|temporary|one-time",
-  "action": "block|allow|buffer|prefer",
+  "action": "block|allow|buffer|prefer|business_hours",
   "timeStart": "HH:MM or null",
   "timeEnd": "HH:MM or null",
   "allDay": false,
@@ -64,6 +66,8 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
   "bufferMinutesBefore": number or null,
   "bufferMinutesAfter": number or null,
   "bufferAppliesTo": "string or null",
+  "businessHoursStart": number or null,
+  "businessHoursEnd": number or null,
   "priority": 1-5,
   "ambiguous": false,
   "interpretations": null,
@@ -81,6 +85,11 @@ Action rules:
 - "allow": explicitly permit scheduling ("Saturday calls OK before 2pm")
 - "buffer": add time around events ("buffer 45min after in-person meetings")
 - "prefer": soft preference, not a hard block ("prefer mornings for calls")
+- "business_hours": change when the user is available for meetings. Use this when the input is about setting/changing general availability window, work hours, or business hours. Set businessHoursStart and businessHoursEnd (hour 0-23). Examples:
+  - "business hours 10-4" → action: "business_hours", businessHoursStart: 10, businessHoursEnd: 16
+  - "available 9am to 5pm" → action: "business_hours", businessHoursStart: 9, businessHoursEnd: 17
+  - "standard hours 10 to 4" → action: "business_hours", businessHoursStart: 10, businessHoursEnd: 16
+  - "only take meetings 11-6" → action: "business_hours", businessHoursStart: 11, businessHoursEnd: 18
 
 Date conversion:
 - Convert ALL relative dates to absolute YYYY-MM-DD using today's date.
@@ -114,7 +123,8 @@ Summary should be a clean, unambiguous description like:
 - "Block every Friday 12:00 PM - 6:00 PM"
 - "45-min buffer before & after in-person meetings"
 - "Block Apr 14 (all day)"
-- "Allow Saturday before 2:00 PM for calls"`,
+- "Allow Saturday before 2:00 PM for calls"
+- "Set business hours to 10:00 AM - 4:00 PM"`,
     prompt: text.trim(),
   });
 
@@ -126,7 +136,7 @@ Summary should be a clean, unambiguous description like:
     const rule: ParsedRule = {
       originalText: text.trim(),
       type: (["ongoing", "recurring", "temporary", "one-time"].includes(parsed.type) ? parsed.type : "ongoing") as ParsedRule["type"],
-      action: (["block", "allow", "buffer", "prefer"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
+      action: (["block", "allow", "buffer", "prefer", "business_hours"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
       timeStart: parsed.timeStart || undefined,
       timeEnd: parsed.timeEnd || undefined,
       allDay: parsed.allDay || false,
@@ -136,6 +146,8 @@ Summary should be a clean, unambiguous description like:
       bufferMinutesBefore: typeof parsed.bufferMinutesBefore === "number" ? parsed.bufferMinutesBefore : undefined,
       bufferMinutesAfter: typeof parsed.bufferMinutesAfter === "number" ? parsed.bufferMinutesAfter : undefined,
       bufferAppliesTo: parsed.bufferAppliesTo || undefined,
+      businessHoursStart: typeof parsed.businessHoursStart === "number" ? parsed.businessHoursStart : undefined,
+      businessHoursEnd: typeof parsed.businessHoursEnd === "number" ? parsed.businessHoursEnd : undefined,
       priority: typeof parsed.priority === "number" ? Math.max(1, Math.min(5, parsed.priority)) : 3,
       ambiguous: parsed.ambiguous || false,
       interpretations: Array.isArray(parsed.interpretations) ? parsed.interpretations : undefined,

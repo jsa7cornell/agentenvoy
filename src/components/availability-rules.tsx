@@ -12,7 +12,7 @@ import type { AvailabilityRule } from "@/lib/availability-rules";
 interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer";
+  action: "block" | "allow" | "buffer" | "prefer" | "business_hours";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -22,6 +22,8 @@ interface ParsedRule {
   bufferMinutesBefore?: number;
   bufferMinutesAfter?: number;
   bufferAppliesTo?: string;
+  businessHoursStart?: number;
+  businessHoursEnd?: number;
   priority: number;
   ambiguous?: boolean;
   interpretations?: string[];
@@ -97,6 +99,7 @@ const ACTION_LABELS: Record<string, string> = {
   allow: "Allow",
   buffer: "Buffer",
   prefer: "Prefer",
+  business_hours: "Business Hours",
 };
 
 // --- Component ---
@@ -190,11 +193,20 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
 
   function confirmRule() {
     if (!data || !pendingRule) return;
+
+    // Business hours: update the setting directly instead of creating a rule
+    if (pendingRule.action === "business_hours" && pendingRule.businessHoursStart != null && pendingRule.businessHoursEnd != null) {
+      setPendingRule(null);
+      setInputText("");
+      saveBusinessHours(pendingRule.businessHoursStart, pendingRule.businessHoursEnd);
+      return;
+    }
+
     const rule: AvailabilityRule = {
       id: uuid(),
       originalText: pendingRule.originalText,
       type: pendingRule.type,
-      action: pendingRule.action,
+      action: pendingRule.action as AvailabilityRule["action"],
       timeStart: pendingRule.timeStart,
       timeEnd: pendingRule.timeEnd,
       allDay: pendingRule.allDay,
@@ -350,6 +362,52 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
             />
           )}
 
+          {/* Business Hours — prominent, above rules */}
+          <section className="bg-surface-secondary/50 border border-DEFAULT rounded-xl p-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-muted" />
+                <span className="text-xs font-semibold text-primary">
+                  Available Hours
+                </span>
+              </div>
+              <button
+                onClick={() => setEditingBusinessHours(!editingBusinessHours)}
+                className="text-xs text-accent hover:text-accent-hover transition"
+              >
+                {editingBusinessHours ? "Done" : "Edit"}
+              </button>
+            </div>
+            {editingBusinessHours ? (
+              <div className="flex items-center gap-2 mt-2">
+                <select
+                  value={data.businessHoursStart}
+                  onChange={(e) => saveBusinessHours(Number(e.target.value), data.businessHoursEnd)}
+                  className="flex-1 bg-surface border border-DEFAULT rounded-lg px-2 py-1.5 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i}>{formatHour(i)}</option>
+                  ))}
+                </select>
+                <span className="text-muted text-xs">to</span>
+                <select
+                  value={data.businessHoursEnd}
+                  onChange={(e) => saveBusinessHours(data.businessHoursStart, Number(e.target.value))}
+                  className="flex-1 bg-surface border border-DEFAULT rounded-lg px-2 py-1.5 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i}>{formatHour(i)}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="text-lg font-medium text-primary mt-1">
+                {formatHour(data.businessHoursStart)} &ndash; {formatHour(data.businessHoursEnd)}
+              </div>
+            )}
+            <p className="text-[10px] text-muted mt-1">Meetings can only be scheduled during these hours</p>
+          </section>
+
           {/* THIS WEEK — temporal rules */}
           {temporalRules.length > 0 && (
             <section>
@@ -442,50 +500,6 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
             </section>
           )}
 
-          {/* Business Hours */}
-          <section className="bg-surface-secondary/50 border border-DEFAULT rounded-xl p-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <Clock className="w-3 h-3 text-muted" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted">
-                  Business Hours
-                </span>
-              </div>
-              <button
-                onClick={() => setEditingBusinessHours(!editingBusinessHours)}
-                className="text-[10px] text-muted hover:text-secondary transition"
-              >
-                {editingBusinessHours ? "Done" : "Edit"}
-              </button>
-            </div>
-            {editingBusinessHours ? (
-              <div className="flex items-center gap-2 mt-2">
-                <select
-                  value={data.businessHoursStart}
-                  onChange={(e) => saveBusinessHours(Number(e.target.value), data.businessHoursEnd)}
-                  className="flex-1 bg-surface border border-DEFAULT rounded-lg px-2 py-1.5 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
-                >
-                  {Array.from({ length: 24 }, (_, i) => (
-                    <option key={i} value={i}>{formatHour(i)}</option>
-                  ))}
-                </select>
-                <span className="text-muted text-xs">to</span>
-                <select
-                  value={data.businessHoursEnd}
-                  onChange={(e) => saveBusinessHours(data.businessHoursStart, Number(e.target.value))}
-                  className="flex-1 bg-surface border border-DEFAULT rounded-lg px-2 py-1.5 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
-                >
-                  {Array.from({ length: 24 }, (_, i) => (
-                    <option key={i} value={i}>{formatHour(i)}</option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <div className="text-sm text-primary mt-1">
-                {formatHour(data.businessHoursStart)} &ndash; {formatHour(data.businessHoursEnd)}
-              </div>
-            )}
-          </section>
         </div>
       </div>
     </div>
@@ -560,6 +574,15 @@ function ConfirmationCard({
           </div>
 
           <div className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
+            {/* Business hours */}
+            {rule.action === "business_hours" && rule.businessHoursStart != null && rule.businessHoursEnd != null && (
+              <>
+                <span className="text-muted">Hours</span>
+                <span className="text-primary font-medium">
+                  {formatHour(rule.businessHoursStart)} &ndash; {formatHour(rule.businessHoursEnd)}
+                </span>
+              </>
+            )}
             {/* When */}
             {rule.daysOfWeek && (
               <>
