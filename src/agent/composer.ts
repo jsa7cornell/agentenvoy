@@ -659,12 +659,15 @@ export function formatOfferableSlots(
     timeZone: tz,
   });
 
-  const timeFmt = (date: Date): string =>
-    new Intl.DateTimeFormat("en-US", {
+  // Compact time: "10 AM" not "10:00 AM", "3:30 PM" keeps minutes
+  const timeFmt = (date: Date): string => {
+    const raw = new Intl.DateTimeFormat("en-US", {
       hour: "numeric",
       minute: "2-digit",
       timeZone: tz,
     }).format(date);
+    return raw.replace(/:00/g, "");
+  };
 
   // Group by day
   const dayMap = new Map<string, ScoredSlot[]>();
