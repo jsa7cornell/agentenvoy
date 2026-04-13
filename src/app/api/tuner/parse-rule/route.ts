@@ -7,7 +7,7 @@ import { envoyModel } from "@/lib/model";
 export interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "business_hours";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -56,7 +56,7 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
 {
   "originalText": "the user's input verbatim",
   "type": "ongoing|recurring|temporary|one-time",
-  "action": "block|allow|buffer|prefer|business_hours",
+  "action": "block|allow|buffer|prefer|limit|business_hours",
   "timeStart": "HH:MM or null",
   "timeEnd": "HH:MM or null",
   "allDay": false,
@@ -81,11 +81,16 @@ Type rules:
 - "one-time": single date ("block today after 4pm", "no meetings April 10")
 
 Action rules:
-- "block": prevent scheduling ("block Friday afternoons", "no meetings before 10am")
+- "block": prevent scheduling during specific hours ("block Friday afternoons", "no meetings before 10am")
 - "allow": explicitly permit scheduling ("Saturday calls OK before 2pm")
 - "buffer": add time around events ("buffer 45min after in-person meetings")
 - "prefer": soft preference, not a hard block ("prefer mornings for calls")
-- "business_hours": change when the user is available for meetings. Use this when the input is about setting/changing general availability window, work hours, or business hours. Set businessHoursStart and businessHoursEnd (hour 0-23). Examples:
+- "limit": restrict availability to ONLY the specified hours — blocks everything outside the window. Use when the user wants to narrow their availability for specific days, NOT block specific hours. Examples:
+  - "only available Monday 12-3" → action: "limit", daysOfWeek: [1], timeStart: "12:00", timeEnd: "15:00"
+  - "reduce Monday to just 12-3" → action: "limit", daysOfWeek: [1], timeStart: "12:00", timeEnd: "15:00"
+  - "limit Tuesday availability to 10am-2pm" → action: "limit", daysOfWeek: [2], timeStart: "10:00", timeEnd: "14:00"
+  - "Wednesdays only 9-12" → action: "limit", daysOfWeek: [3], timeStart: "09:00", timeEnd: "12:00"
+- "business_hours": change when the user is available for meetings. Use this when the input is about setting/changing GENERAL availability window (all days), work hours, or business hours. Set businessHoursStart and businessHoursEnd (hour 0-23). Examples:
   - "business hours 10-4" → action: "business_hours", businessHoursStart: 10, businessHoursEnd: 16
   - "available 9am to 5pm" → action: "business_hours", businessHoursStart: 9, businessHoursEnd: 17
   - "standard hours 10 to 4" → action: "business_hours", businessHoursStart: 10, businessHoursEnd: 16
@@ -124,6 +129,7 @@ Summary should be a clean, unambiguous description like:
 - "45-min buffer before & after in-person meetings"
 - "Block Apr 14 (all day)"
 - "Allow Saturday before 2:00 PM for calls"
+- "Limit Monday to 12:00 PM - 3:00 PM only"
 - "Set business hours to 10:00 AM - 4:00 PM"`,
     prompt: text.trim(),
   });
@@ -136,7 +142,7 @@ Summary should be a clean, unambiguous description like:
     const rule: ParsedRule = {
       originalText: text.trim(),
       type: (["ongoing", "recurring", "temporary", "one-time"].includes(parsed.type) ? parsed.type : "ongoing") as ParsedRule["type"],
-      action: (["block", "allow", "buffer", "prefer", "business_hours"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
+      action: (["block", "allow", "buffer", "prefer", "limit", "business_hours"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
       timeStart: parsed.timeStart || undefined,
       timeEnd: parsed.timeEnd || undefined,
       allDay: parsed.allDay || false,

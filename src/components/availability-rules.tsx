@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Clock, Shield, Timer, CalendarOff, ChevronDown, ChevronRight,
+  Clock, ChevronDown, ChevronRight,
   Plus, Check, X, Pencil, Trash2, Loader2, ToggleLeft, ToggleRight,
+  Ban, Lock, Timer, CheckCircle2, Star,
 } from "lucide-react";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 
@@ -12,7 +13,7 @@ import type { AvailabilityRule } from "@/lib/availability-rules";
 interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "business_hours";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -85,21 +86,22 @@ function uuid(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// --- Rule type config ---
-
-const TYPE_CONFIG = {
-  ongoing: { label: "Ongoing", color: "text-violet-400", bgColor: "bg-violet-500/10", icon: Shield },
-  recurring: { label: "Recurring", color: "text-blue-400", bgColor: "bg-blue-500/10", icon: Clock },
-  temporary: { label: "Temporary", color: "text-amber-400", bgColor: "bg-amber-500/10", icon: Timer },
-  "one-time": { label: "One-time", color: "text-orange-400", bgColor: "bg-orange-500/10", icon: CalendarOff },
-};
 
 const ACTION_LABELS: Record<string, string> = {
   block: "Block",
   allow: "Allow",
   buffer: "Buffer",
   prefer: "Prefer",
+  limit: "Limit",
   business_hours: "Business Hours",
+};
+
+const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  block: Ban,
+  allow: CheckCircle2,
+  buffer: Timer,
+  prefer: Star,
+  limit: Lock,
 };
 
 // --- Component ---
@@ -118,6 +120,10 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
   const [showExpired, setShowExpired] = useState(false);
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [editFields, setEditFields] = useState<Partial<ParsedRule>>({});
+  const [bizExpanded, setBizExpanded] = useState(false);
+  const [bizEditing, setBizEditing] = useState(false);
+  const [bizEditStart, setBizEditStart] = useState<number | null>(null);
+  const [bizEditEnd, setBizEditEnd] = useState<number | null>(null);
 
   const fetchPrefs = useCallback(async () => {
     try {
@@ -266,8 +272,12 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
         ...r,
         timeStart: editFields.timeStart ?? r.timeStart,
         timeEnd: editFields.timeEnd ?? r.timeEnd,
+        allDay: editFields.allDay ?? r.allDay,
         daysOfWeek: editFields.daysOfWeek ?? r.daysOfWeek,
+        effectiveDate: editFields.effectiveDate ?? r.effectiveDate,
         expiryDate: editFields.expiryDate ?? r.expiryDate,
+        bufferMinutesBefore: editFields.bufferMinutesBefore ?? r.bufferMinutesBefore,
+        bufferMinutesAfter: editFields.bufferMinutesAfter ?? r.bufferMinutesAfter,
         type: editFields.type ?? r.type,
       } as AvailabilityRule;
     });
@@ -306,10 +316,6 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
   const rules = data.structuredRules || [];
   const activeRules = rules.filter((r) => r.status === "active" || r.status === "paused");
   const expiredRules = rules.filter((r) => r.status === "expired");
-
-  // Categorize active rules
-  const temporalRules = activeRules.filter((r) => r.type === "temporary" || r.type === "one-time");
-  const permanentRules = activeRules.filter((r) => r.type === "ongoing" || r.type === "recurring");
 
   return (
     <div className="flex flex-col h-full">
@@ -373,7 +379,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
               </div>
             ) : (
               <p className="text-[10px] text-muted mt-1.5">
-                Set business hours &middot; Block or protect time &middot; Set buffers &middot; Allow exceptions
+                Set business hours &middot; Block or protect time &middot; Limit days &middot; Set buffers &middot; Allow exceptions
               </p>
             )}
             </>
@@ -387,59 +393,109 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
               onSelectInterpretation={setSelectedInterpretation}
               onConfirm={confirmRule}
               onCancel={() => { setPendingRule(null); setInputText(""); }}
+              onUpdateRule={(updates) => setPendingRule({ ...pendingRule, ...updates })}
             />
           )}
 
-          {/* THIS WEEK — temporal rules */}
-          {temporalRules.length > 0 && (
-            <section>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-2">
-                This Week
+          {/* Business hours card */}
+          {data.businessHoursStart != null && data.businessHoursEnd != null && (
+            <div className="bg-surface-secondary border border-DEFAULT rounded-xl">
+              <div
+                className="flex items-center gap-2 px-3 py-2.5 cursor-pointer"
+                onClick={() => { setBizExpanded(!bizExpanded); setBizEditing(false); }}
+              >
+                <Clock className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-primary">
+                    Business hours: {formatHour(data.businessHoursStart)} &ndash; {formatHour(data.businessHoursEnd)}
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                {temporalRules.map((rule) => (
-                  <RuleCard
-                    key={rule.id}
-                    rule={rule}
-                    expanded={expandedRuleId === rule.id}
-                    editing={editingRule === rule.id}
-                    onToggleExpand={() => setExpandedRuleId(expandedRuleId === rule.id ? null : rule.id)}
-                    onToggle={() => toggleRule(rule.id)}
-                    onRemove={() => removeRule(rule.id)}
-                    onStartEdit={() => { setEditingRule(rule.id); setEditFields({}); }}
-                    onEditField={(f) => setEditFields({ ...editFields, ...f })}
-                    onSaveEdit={() => saveEditedRule(rule.id)}
-                    onCancelEdit={() => { setEditingRule(null); setEditFields({}); }}
-                  />
-                ))}
-              </div>
-            </section>
+              {bizExpanded && (
+                <div className="px-3 pb-3 pt-0 border-t border-DEFAULT space-y-2">
+                  {bizEditing ? (
+                    <div className="space-y-2 pt-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-muted w-12">From</span>
+                        <select
+                          value={bizEditStart ?? data.businessHoursStart}
+                          onChange={(e) => setBizEditStart(Number(e.target.value))}
+                          className="bg-surface border border-DEFAULT rounded px-2 py-1 text-primary text-xs"
+                        >
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <option key={i} value={i}>{formatHour(i)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-muted w-12">To</span>
+                        <select
+                          value={bizEditEnd ?? data.businessHoursEnd}
+                          onChange={(e) => setBizEditEnd(Number(e.target.value))}
+                          className="bg-surface border border-DEFAULT rounded px-2 py-1 text-primary text-xs"
+                        >
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <option key={i} value={i}>{formatHour(i)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          onClick={() => {
+                            const start = bizEditStart ?? data.businessHoursStart;
+                            const end = bizEditEnd ?? data.businessHoursEnd;
+                            saveBusinessHours(start, end);
+                            setBizEditing(false);
+                            setBizEditStart(null);
+                            setBizEditEnd(null);
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-accent hover:bg-accent-hover text-white text-xs font-medium rounded-lg transition"
+                        >
+                          <Check className="w-3 h-3" /> Save
+                        </button>
+                        <button
+                          onClick={() => { setBizEditing(false); setBizEditStart(null); setBizEditEnd(null); }}
+                          className="px-2.5 py-1 text-xs text-muted hover:text-secondary transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 pt-2">
+                      <button
+                        onClick={() => setBizEditing(true)}
+                        className="flex items-center gap-1 text-xs text-muted hover:text-secondary transition"
+                      >
+                        <Pencil className="w-3 h-3" /> Edit
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
-          {/* ALWAYS — permanent rules */}
-          {permanentRules.length > 0 && (
-            <section>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-2">
-                Always
-              </div>
-              <div className="space-y-1.5">
-                {permanentRules.map((rule) => (
-                  <RuleCard
-                    key={rule.id}
-                    rule={rule}
-                    expanded={expandedRuleId === rule.id}
-                    editing={editingRule === rule.id}
-                    onToggleExpand={() => setExpandedRuleId(expandedRuleId === rule.id ? null : rule.id)}
-                    onToggle={() => toggleRule(rule.id)}
-                    onRemove={() => removeRule(rule.id)}
-                    onStartEdit={() => { setEditingRule(rule.id); setEditFields({}); }}
-                    onEditField={(f) => setEditFields({ ...editFields, ...f })}
-                    onSaveEdit={() => saveEditedRule(rule.id)}
-                    onCancelEdit={() => { setEditingRule(null); setEditFields({}); }}
-                  />
-                ))}
-              </div>
-            </section>
+          {/* All active rules */}
+          {activeRules.length > 0 && (
+            <div className="space-y-1.5">
+              {activeRules.map((rule) => (
+                <RuleCard
+                  key={rule.id}
+                  rule={rule}
+                  expanded={expandedRuleId === rule.id}
+                  editing={editingRule === rule.id}
+                  editFields={editingRule === rule.id ? editFields : {}}
+                  onToggleExpand={() => setExpandedRuleId(expandedRuleId === rule.id ? null : rule.id)}
+                  onToggle={() => toggleRule(rule.id)}
+                  onRemove={() => removeRule(rule.id)}
+                  onStartEdit={() => { setEditingRule(rule.id); setEditFields({}); }}
+                  onEditField={(f) => setEditFields({ ...editFields, ...f })}
+                  onSaveEdit={() => saveEditedRule(rule.id)}
+                  onCancelEdit={() => { setEditingRule(null); setEditFields({}); }}
+                />
+              ))}
+            </div>
           )}
 
           {/* Empty state */}
@@ -468,6 +524,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
                       rule={rule}
                       expanded={expandedRuleId === rule.id}
                       editing={false}
+                      editFields={{}}
                       onToggleExpand={() => setExpandedRuleId(expandedRuleId === rule.id ? null : rule.id)}
                       onToggle={() => toggleRule(rule.id)}
                       onRemove={() => removeRule(rule.id)}
@@ -496,15 +553,16 @@ function ConfirmationCard({
   onSelectInterpretation,
   onConfirm,
   onCancel,
+  onUpdateRule,
 }: {
   rule: ParsedRule;
   selectedInterpretation: number;
   onSelectInterpretation: (i: number) => void;
   onConfirm: () => void;
   onCancel: () => void;
+  onUpdateRule: (updates: Partial<ParsedRule>) => void;
 }) {
-  const config = TYPE_CONFIG[rule.type];
-  const Icon = config.icon;
+  const [isEditing, setIsEditing] = useState(false);
 
   return (
     <div className="bg-surface-secondary border border-indigo-500/30 rounded-xl p-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -545,73 +603,217 @@ function ConfirmationCard({
           ))}
         </div>
       ) : (
-        /* Structured preview */
+        /* Structured preview / edit */
         <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-1 text-xs font-medium ${config.color}`}>
-              <Icon className="w-3 h-3" />
-              {config.label}
-            </div>
-            <span className="text-xs text-muted">{ACTION_LABELS[rule.action]}</span>
-          </div>
-
           <div className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
+            {/* Type (action) */}
+            <span className="text-muted">Type</span>
+            <span className="text-primary font-medium">{ACTION_LABELS[rule.action]}</span>
             {/* Business hours */}
             {rule.action === "business_hours" && rule.businessHoursStart != null && rule.businessHoursEnd != null && (
-              <>
-                <span className="text-muted">Hours</span>
-                <span className="text-primary font-medium">
-                  {formatHour(rule.businessHoursStart)} &ndash; {formatHour(rule.businessHoursEnd)}
-                </span>
-              </>
+              isEditing ? (
+                <>
+                  <span className="text-muted">Hours</span>
+                  <div className="flex items-center gap-1">
+                    <select
+                      defaultValue={rule.businessHoursStart}
+                      onChange={(e) => onUpdateRule({ businessHoursStart: Number(e.target.value) })}
+                      className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                    >
+                      {Array.from({ length: 24 }, (_, i) => (
+                        <option key={i} value={i}>{formatHour(i)}</option>
+                      ))}
+                    </select>
+                    <span className="text-muted">to</span>
+                    <select
+                      defaultValue={rule.businessHoursEnd}
+                      onChange={(e) => onUpdateRule({ businessHoursEnd: Number(e.target.value) })}
+                      className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                    >
+                      {Array.from({ length: 24 }, (_, i) => (
+                        <option key={i} value={i}>{formatHour(i)}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-muted">Hours</span>
+                  <span className="text-primary font-medium">
+                    {formatHour(rule.businessHoursStart)} &ndash; {formatHour(rule.businessHoursEnd)}
+                  </span>
+                </>
+              )
             )}
-            {/* When */}
+            {/* When — days of week */}
             {rule.daysOfWeek && (
-              <>
-                <span className="text-muted">When</span>
-                <span className="text-primary">
-                  {rule.type === "recurring" ? "Every " : ""}{daysLabel(rule.daysOfWeek)}
-                </span>
-              </>
+              isEditing ? (
+                <>
+                  <span className="text-muted">When</span>
+                  <div className="flex flex-wrap gap-1">
+                    {DAY_NAMES_SHORT.map((name, i) => {
+                      const active = rule.daysOfWeek!.includes(i);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            const newDays = active
+                              ? rule.daysOfWeek!.filter(d => d !== i)
+                              : [...rule.daysOfWeek!, i].sort();
+                            onUpdateRule({ daysOfWeek: newDays });
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+                            active
+                              ? "bg-accent text-white"
+                              : "bg-surface border border-DEFAULT text-muted hover:text-secondary"
+                          }`}
+                        >
+                          {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-muted">When</span>
+                  <span className="text-primary">
+                    {rule.type === "recurring" ? "Every " : ""}{daysLabel(rule.daysOfWeek)}
+                  </span>
+                </>
+              )
             )}
             {rule.effectiveDate && (
-              <>
-                <span className="text-muted">{rule.expiryDate ? "From" : "Date"}</span>
-                <span className="text-primary">{formatDate(rule.effectiveDate)}</span>
-              </>
+              isEditing ? (
+                <>
+                  <span className="text-muted">{rule.expiryDate ? "From" : "Date"}</span>
+                  <input
+                    type="date"
+                    defaultValue={rule.effectiveDate}
+                    onChange={(e) => onUpdateRule({ effectiveDate: e.target.value })}
+                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-muted">{rule.expiryDate ? "From" : "Date"}</span>
+                  <span className="text-primary">{formatDate(rule.effectiveDate)}</span>
+                </>
+              )
             )}
             {rule.expiryDate && (
-              <>
-                <span className="text-muted">Until</span>
-                <span className="text-primary">{formatDate(rule.expiryDate)}</span>
-              </>
+              isEditing ? (
+                <>
+                  <span className="text-muted">Until</span>
+                  <input
+                    type="date"
+                    defaultValue={rule.expiryDate}
+                    onChange={(e) => onUpdateRule({ expiryDate: e.target.value })}
+                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                  />
+                </>
+              ) : (
+                <>
+                  <span className="text-muted">Until</span>
+                  <span className="text-primary">{formatDate(rule.expiryDate)}</span>
+                </>
+              )
             )}
 
             {/* Time */}
             {rule.allDay ? (
-              <>
-                <span className="text-muted">Time</span>
-                <span className="text-primary">All day</span>
-              </>
+              isEditing ? (
+                <>
+                  <span className="text-muted">Time</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onUpdateRule({ allDay: false, timeStart: "09:00", timeEnd: "17:00" })}
+                      className="text-[10px] text-accent hover:underline"
+                    >
+                      Set specific times
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-muted">Time</span>
+                  <span className="text-primary">All day</span>
+                </>
+              )
             ) : rule.timeStart && rule.timeEnd ? (
-              <>
-                <span className="text-muted">Time</span>
-                <span className="text-primary">
-                  {formatTime24to12(rule.timeStart)} &ndash; {formatTime24to12(rule.timeEnd)}
-                </span>
-              </>
+              isEditing ? (
+                <>
+                  <span className="text-muted">Time</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="time"
+                      defaultValue={rule.timeStart}
+                      onChange={(e) => onUpdateRule({ timeStart: e.target.value })}
+                      className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                    />
+                    <span className="text-muted">to</span>
+                    <input
+                      type="time"
+                      defaultValue={rule.timeEnd}
+                      onChange={(e) => onUpdateRule({ timeEnd: e.target.value })}
+                      className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-muted">Time</span>
+                  <span className="text-primary">
+                    {formatTime24to12(rule.timeStart)} &ndash; {formatTime24to12(rule.timeEnd)}
+                  </span>
+                </>
+              )
             ) : null}
 
             {/* Buffer */}
             {rule.action === "buffer" && (
-              <>
-                <span className="text-muted">Buffer</span>
-                <span className="text-primary">
-                  {rule.bufferMinutesBefore ? `${rule.bufferMinutesBefore}min before` : ""}
-                  {rule.bufferMinutesBefore && rule.bufferMinutesAfter ? " & " : ""}
-                  {rule.bufferMinutesAfter ? `${rule.bufferMinutesAfter}min after` : ""}
-                </span>
-              </>
+              isEditing ? (
+                <>
+                  <span className="text-muted">Buffer</span>
+                  <div className="flex items-center gap-1">
+                    {rule.bufferMinutesBefore != null && (
+                      <>
+                        <input
+                          type="number"
+                          defaultValue={rule.bufferMinutesBefore}
+                          min={0}
+                          onChange={(e) => onUpdateRule({ bufferMinutesBefore: Number(e.target.value) })}
+                          className="w-12 bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                        />
+                        <span className="text-muted">min before</span>
+                      </>
+                    )}
+                    {rule.bufferMinutesAfter != null && (
+                      <>
+                        <input
+                          type="number"
+                          defaultValue={rule.bufferMinutesAfter}
+                          min={0}
+                          onChange={(e) => onUpdateRule({ bufferMinutesAfter: Number(e.target.value) })}
+                          className="w-12 bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                        />
+                        <span className="text-muted">min after</span>
+                      </>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="text-muted">Buffer</span>
+                  <span className="text-primary">
+                    {rule.bufferMinutesBefore ? `${rule.bufferMinutesBefore}min before` : ""}
+                    {rule.bufferMinutesBefore && rule.bufferMinutesAfter ? " & " : ""}
+                    {rule.bufferMinutesAfter ? `${rule.bufferMinutesAfter}min after` : ""}
+                  </span>
+                </>
+              )
             )}
             {rule.bufferAppliesTo && (
               <>
@@ -633,6 +835,12 @@ function ConfirmationCard({
           Looks good
         </button>
         <button
+          onClick={() => setIsEditing(!isEditing)}
+          className="px-3 py-2 text-sm text-muted hover:text-secondary border border-DEFAULT rounded-lg transition"
+        >
+          {isEditing ? "Done editing" : "Edit"}
+        </button>
+        <button
           onClick={onCancel}
           className="px-3 py-2 text-sm text-muted hover:text-secondary border border-DEFAULT rounded-lg transition"
         >
@@ -649,6 +857,7 @@ function RuleCard({
   rule,
   expanded,
   editing,
+  editFields,
   onToggleExpand,
   onToggle,
   onRemove,
@@ -660,6 +869,7 @@ function RuleCard({
   rule: AvailabilityRule;
   expanded: boolean;
   editing: boolean;
+  editFields: Partial<ParsedRule>;
   onToggleExpand: () => void;
   onToggle: () => void;
   onRemove: () => void;
@@ -668,8 +878,6 @@ function RuleCard({
   onSaveEdit: () => void;
   onCancelEdit: () => void;
 }) {
-  const config = TYPE_CONFIG[rule.type];
-  const Icon = config.icon;
   const isExpired = rule.status === "expired";
   const isPaused = rule.status === "paused";
 
@@ -694,45 +902,34 @@ function RuleCard({
     summary = rule.originalText;
   }
 
+  const ActionIcon = ACTION_ICONS[rule.action];
+
   return (
     <div
       className={`border rounded-xl transition ${
         isExpired
-          ? "bg-surface-secondary/30 border-DEFAULT opacity-60"
+          ? "bg-surface-secondary/30 border-DEFAULT opacity-40"
           : isPaused
-            ? "bg-surface-secondary/30 border-DEFAULT"
+            ? "bg-surface-secondary/30 border-DEFAULT opacity-50"
             : "bg-surface-secondary border-DEFAULT"
       }`}
     >
       {/* Collapsed view */}
       <div
-        className="flex items-center gap-2 px-3 py-2.5 cursor-pointer"
+        className="flex items-center gap-2.5 px-3 py-2 cursor-pointer"
         onClick={onToggleExpand}
       >
-        <div className={`flex-shrink-0 ${config.color}`}>
-          <Icon className="w-3.5 h-3.5" />
-        </div>
+        {ActionIcon && (
+          <ActionIcon className={`w-3.5 h-3.5 flex-shrink-0 ${isPaused || isExpired ? "text-muted" : "text-secondary"}`} />
+        )}
         <div className="flex-1 min-w-0">
-          <div className={`text-sm truncate ${isPaused ? "text-muted line-through" : "text-primary"}`}>
+          <div className={`text-sm truncate ${isPaused || isExpired ? "text-muted" : "text-primary"}`}>
             {summary}
           </div>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className={`text-[10px] ${config.color}`}>{config.label}</span>
-            {expiryBadge && (
-              <span className="text-[10px] text-amber-400">{expiryBadge}</span>
-            )}
-            {isExpired && rule.expiryDate && (
-              <span className="text-[10px] text-muted">Expired {formatDate(rule.expiryDate)}</span>
-            )}
-          </div>
         </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); onRemove(); }}
-          className="flex-shrink-0 text-muted hover:text-red-400 transition"
-          title="Remove"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        {expiryBadge && (
+          <span className="text-[10px] text-amber-400 flex-shrink-0 whitespace-nowrap">{expiryBadge}</span>
+        )}
         {!isExpired && (
           <button
             onClick={(e) => { e.stopPropagation(); onToggle(); }}
@@ -754,30 +951,117 @@ function RuleCard({
           {editing ? (
             /* Edit mode */
             <div className="space-y-2 pt-2">
-              {rule.timeStart && (
+              {/* Days of week */}
+              {rule.daysOfWeek && rule.daysOfWeek.length > 0 && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted w-12">When</span>
+                  <div className="flex flex-wrap gap-1">
+                    {DAY_NAMES_SHORT.map((name, i) => {
+                      const currentDays = (editFields.daysOfWeek as number[] | undefined) ?? rule.daysOfWeek!;
+                      const active = currentDays.includes(i);
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            const newDays = active
+                              ? currentDays.filter(d => d !== i)
+                              : [...currentDays, i].sort();
+                            onEditField({ daysOfWeek: newDays });
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
+                            active
+                              ? "bg-accent text-white"
+                              : "bg-surface border border-DEFAULT text-muted hover:text-secondary"
+                          }`}
+                        >
+                          {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {/* Time — show for non-allDay rules, or offer to set times for allDay */}
+              {rule.allDay ? (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted w-12">Time</span>
+                  <span className="text-secondary">All day</span>
+                  <button
+                    type="button"
+                    onClick={() => onEditField({ allDay: false, timeStart: "09:00", timeEnd: "17:00" })}
+                    className="text-[10px] text-accent hover:underline ml-1"
+                  >
+                    Set specific times
+                  </button>
+                </div>
+              ) : (rule.timeStart || editFields.timeStart) ? (
                 <div className="flex items-center gap-2 text-xs">
                   <span className="text-muted w-12">Time</span>
                   <input
                     type="time"
-                    defaultValue={rule.timeStart}
+                    value={(editFields.timeStart as string | undefined) ?? rule.timeStart ?? "09:00"}
                     onChange={(e) => onEditField({ timeStart: e.target.value })}
                     className="bg-surface border border-DEFAULT rounded px-2 py-1 text-primary text-xs"
                   />
                   <span className="text-muted">to</span>
                   <input
                     type="time"
-                    defaultValue={rule.timeEnd}
+                    value={(editFields.timeEnd as string | undefined) ?? rule.timeEnd ?? "17:00"}
                     onChange={(e) => onEditField({ timeEnd: e.target.value })}
                     className="bg-surface border border-DEFAULT rounded px-2 py-1 text-primary text-xs"
                   />
                 </div>
+              ) : null}
+              {/* Buffer amounts */}
+              {rule.action === "buffer" && (
+                <div className="flex items-center gap-2 text-xs flex-wrap">
+                  <span className="text-muted w-12">Buffer</span>
+                  {(rule.bufferMinutesBefore != null || editFields.bufferMinutesBefore != null) && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        value={(editFields.bufferMinutesBefore as number | undefined) ?? rule.bufferMinutesBefore ?? 0}
+                        onChange={(e) => onEditField({ bufferMinutesBefore: Number(e.target.value) })}
+                        className="w-14 bg-surface border border-DEFAULT rounded px-2 py-1 text-primary text-xs"
+                      />
+                      <span className="text-muted">min before</span>
+                    </div>
+                  )}
+                  {(rule.bufferMinutesAfter != null || editFields.bufferMinutesAfter != null) && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        value={(editFields.bufferMinutesAfter as number | undefined) ?? rule.bufferMinutesAfter ?? 0}
+                        onChange={(e) => onEditField({ bufferMinutesAfter: Number(e.target.value) })}
+                        className="w-14 bg-surface border border-DEFAULT rounded px-2 py-1 text-primary text-xs"
+                      />
+                      <span className="text-muted">min after</span>
+                    </div>
+                  )}
+                </div>
               )}
-              {rule.expiryDate && (
+              {/* Effective date */}
+              {rule.effectiveDate && (
                 <div className="flex items-center gap-2 text-xs">
-                  <span className="text-muted w-12">Until</span>
+                  <span className="text-muted w-12">From</span>
                   <input
                     type="date"
-                    defaultValue={rule.expiryDate}
+                    value={(editFields.effectiveDate as string | undefined) ?? rule.effectiveDate}
+                    onChange={(e) => onEditField({ effectiveDate: e.target.value })}
+                    className="bg-surface border border-DEFAULT rounded px-2 py-1 text-primary text-xs"
+                  />
+                </div>
+              )}
+              {/* Expiry date */}
+              {(rule.expiryDate || editFields.expiryDate) && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted w-12">Expires</span>
+                  <input
+                    type="date"
+                    value={(editFields.expiryDate as string | undefined) ?? rule.expiryDate ?? ""}
                     onChange={(e) => onEditField({ expiryDate: e.target.value })}
                     className="bg-surface border border-DEFAULT rounded px-2 py-1 text-primary text-xs"
                   />
@@ -802,12 +1086,17 @@ function RuleCard({
             /* Detail view */
             <div className="space-y-2 pt-2">
               <div className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
+                {/* Type */}
+                <span className="text-muted">Type</span>
+                <span className="text-primary font-medium">{ACTION_LABELS[rule.action]}</span>
+                {/* When — days */}
                 {rule.daysOfWeek && rule.daysOfWeek.length > 0 && (
                   <>
                     <span className="text-muted">When</span>
                     <span className="text-primary">{daysLabel(rule.daysOfWeek)}</span>
                   </>
                 )}
+                {/* Time */}
                 {rule.allDay ? (
                   <>
                     <span className="text-muted">Time</span>
@@ -821,28 +1110,33 @@ function RuleCard({
                     </span>
                   </>
                 ) : null}
-                {rule.action === "buffer" && (
+                {/* Buffer specifics */}
+                {rule.action === "buffer" && (rule.bufferMinutesBefore || rule.bufferMinutesAfter) && (
                   <>
                     <span className="text-muted">Buffer</span>
                     <span className="text-primary">
                       {rule.bufferMinutesBefore ? `${rule.bufferMinutesBefore}min before` : ""}
                       {rule.bufferMinutesBefore && rule.bufferMinutesAfter ? " & " : ""}
                       {rule.bufferMinutesAfter ? `${rule.bufferMinutesAfter}min after` : ""}
+                      {rule.bufferAppliesTo ? ` ${rule.bufferAppliesTo}` : ""}
                     </span>
                   </>
                 )}
+                {/* From */}
                 {rule.effectiveDate && (
                   <>
                     <span className="text-muted">From</span>
                     <span className="text-primary">{formatDate(rule.effectiveDate)}</span>
                   </>
                 )}
+                {/* Until */}
                 {rule.expiryDate && (
                   <>
                     <span className="text-muted">Until</span>
                     <span className="text-primary">{formatDate(rule.expiryDate)}</span>
                   </>
                 )}
+                {/* Added */}
                 <span className="text-muted">Added</span>
                 <span className="text-primary">
                   {new Date(rule.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}

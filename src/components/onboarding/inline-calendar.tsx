@@ -48,10 +48,8 @@ export function InlineCalendar({ slots }: InlineCalendarProps) {
   }
 
   function scoreColor(score: number): string {
-    if (score <= 0) return "bg-emerald-500/30 dark:bg-emerald-500/20";
-    if (score === 1) return "bg-emerald-400/20 dark:bg-emerald-400/15";
-    if (score === 2) return "bg-amber-400/30 dark:bg-amber-400/20";
-    if (score === 3) return "bg-orange-400/30 dark:bg-orange-400/20";
+    if (score <= 1) return "bg-emerald-500/30 dark:bg-emerald-500/20";
+    if (score <= 3) return "bg-amber-400/30 dark:bg-amber-400/20";
     return "bg-red-400/30 dark:bg-red-400/20";
   }
 
@@ -101,15 +99,15 @@ export function InlineCalendar({ slots }: InlineCalendarProps) {
       <div className="flex gap-3 mt-2 pt-2 border-t border-secondary justify-center">
         <div className="flex items-center gap-1">
           <div className="w-2.5 h-2.5 rounded-sm bg-emerald-400/20" />
-          <span className="text-[9px] text-muted">Open</span>
+          <span className="text-[9px] text-muted">Available</span>
         </div>
         <div className="flex items-center gap-1">
           <div className="w-2.5 h-2.5 rounded-sm bg-amber-400/20" />
-          <span className="text-[9px] text-muted">Soft hold</span>
+          <span className="text-[9px] text-muted">Protected</span>
         </div>
         <div className="flex items-center gap-1">
           <div className="w-2.5 h-2.5 rounded-sm bg-red-400/20" />
-          <span className="text-[9px] text-muted">Protected</span>
+          <span className="text-[9px] text-muted">Blocked</span>
         </div>
       </div>
     </div>

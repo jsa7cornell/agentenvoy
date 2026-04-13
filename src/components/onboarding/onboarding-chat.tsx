@@ -65,7 +65,6 @@ export function OnboardingChat() {
   // Event answers for batch submission
   const [eventAnswers, setEventAnswers] = useState<Array<{ eventId: string; answer: string }>>([]);
   const [eventIds, setEventIds] = useState<string[]>([]);
-  const [allEventsAnswered, setAllEventsAnswered] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -167,7 +166,6 @@ export function OnboardingChat() {
         // Reset event tracking for new events phase
         if (data.phase === "events" && data.eventIds) {
           setEventAnswers([]);
-          setAllEventsAnswered(false);
         }
 
         // Show timezone picker if needed
@@ -190,40 +188,32 @@ export function OnboardingChat() {
   // Handle quick reply selection
   const handleQuickReply = useCallback(
     (value: string, label: string) => {
-      // For events phase, collect answers locally before submitting
+      // For events phase, collect answers locally then auto-submit when done
       if (currentPhase === "events") {
         const idx = eventAnswers.length;
-        if (idx < eventIds.length) {
-          const newAnswers = [...eventAnswers, { eventId: eventIds[idx], answer: value }];
-          setEventAnswers(newAnswers);
+        const newAnswers = [...eventAnswers, { eventId: eventIds[idx] || `q${idx}`, answer: value }];
+        setEventAnswers(newAnswers);
 
-          // Add user message for this answer
-          setMessages((prev) => [
-            ...prev,
-            { id: `user-${Date.now()}`, role: "user", content: label, visible: true },
-          ]);
+        // Add user message for this answer
+        setMessages((prev) => [
+          ...prev,
+          { id: `user-${Date.now()}`, role: "user", content: label, visible: true },
+        ]);
 
-          // Check if all event questions answered
-          // Count total options in envoy messages (each message with options is a question)
-          const questionMessages = messages.filter(
-            (m) => m.role === "envoy" && m.options && m.options.length > 0 && m.visible
-          );
-          if (newAnswers.length >= questionMessages.length) {
-            setAllEventsAnswered(true);
-          }
-          return;
+        // Auto-submit when all questions answered
+        if (newAnswers.length >= eventIds.length) {
+          // Small delay so the user sees their last answer before transitioning
+          setTimeout(() => {
+            sendResponse("events_complete", { eventAnswers: newAnswers });
+          }, 400);
         }
+        return;
       }
 
       sendResponse(value);
     },
-    [currentPhase, eventAnswers, eventIds, messages, sendResponse]
+    [currentPhase, eventAnswers, eventIds, sendResponse]
   );
-
-  // Submit collected event answers
-  const submitEventAnswers = useCallback(() => {
-    sendResponse("events_complete", { eventAnswers });
-  }, [eventAnswers, sendResponse]);
 
   // Handle freeform text submit
   const handleFreeformSubmit = useCallback(() => {
@@ -244,6 +234,7 @@ export function OnboardingChat() {
     "events",
     "protection",
     "format",
+    "rules_intro",
     "simulation",
     "complete",
   ];
@@ -359,18 +350,6 @@ export function OnboardingChat() {
           );
         })}
 
-        {/* Event answers submit button */}
-        {currentPhase === "events" && allEventsAnswered && (
-          <div className="self-center mt-2">
-            <button
-              onClick={submitEventAnswers}
-              disabled={sending}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-xl transition disabled:opacity-40"
-            >
-              {sending ? "Saving..." : "Continue"}
-            </button>
-          </div>
-        )}
 
         {/* Typing indicator when sending */}
         {sending && (

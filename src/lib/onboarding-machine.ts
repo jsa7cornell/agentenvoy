@@ -22,6 +22,7 @@ export type OnboardingPhase =
   | "hours"
   | "hours_posture"
   | "format"
+  | "rules_intro"
   | "simulation"
   | "simulation_walkthrough"
   | "complete";
@@ -79,28 +80,8 @@ export function getIntroMessages(ctx: OnboardingContext): PhaseResult {
     phase: "intro",
     messages: [
       {
-        content: `Hey ${name}! I'm Envoy. I negotiate your schedule so you don't have to.`,
+        content: `Hey ${name}! I'm Envoy — I negotiate your schedule so you don't have to.\n\nYou'll have two ways to share your availability:\n• **Custom invites** — one-off links with rules (e.g. "only Tuesday 2-4pm, video, 30 min")\n• **General link** — a permanent URL (agentenvoy.ai/meet/${ctx.meetSlug || "you"}) for your email signature\n\nBoth are powered by a scoring engine that rates every slot on your calendar. Let's set that up now.`,
         delay: 0,
-      },
-      {
-        content: `Here's what makes this different from a regular scheduling link — you have two ways to share your availability:`,
-        delay: 800,
-      },
-      {
-        content: `1. Custom Invites — Create a tailored invite for a specific person. You control which time slots to offer, the meeting format, and how much to protect your schedule. Want to steer someone toward Tuesday morning for a quick call? Or lock down availability to just 3 slots for a VIP? Custom invites let you do that.`,
-        delay: 1600,
-      },
-      {
-        content: `2. Generic Link — Your always-on scheduling link (agentenvoy.ai/meet/${ctx.meetSlug || "you"}). Anyone can use it. It shows your general availability based on your calendar and preferences. Copy, paste, done. Great for "let's find a time" situations.`,
-        delay: 2400,
-      },
-      {
-        content: `Both are powered by your availability engine — I score every 30-minute slot on your calendar from "wide open" to "don't touch." The more context you give me, the smarter I am about what to offer.`,
-        delay: 3200,
-      },
-      {
-        content: `Let's set that up now. This'll take a few minutes, but it's worth it.`,
-        delay: 4000,
         options: [{ number: 1, label: "Let's go", value: "start" }],
       },
     ],
@@ -114,11 +95,11 @@ export function getTimezoneMessages(ctx: OnboardingContext): PhaseResult {
     phase: "timezone",
     messages: [
       {
-        content: `I pulled in your Google Calendar. Let me confirm your timezone:`,
+        content: `First — I detected your timezone as **${tzLabel}**. Correct?`,
         delay: 0,
         options: [
-          { number: 1, label: `${tzLabel} — that's right`, value: tz },
-          { number: 2, label: "I'm somewhere else...", value: "custom" },
+          { number: 1, label: `Yes, ${tzLabel}`, value: tz },
+          { number: 2, label: "No, let me change it", value: "custom" },
         ],
       },
     ],
@@ -130,13 +111,9 @@ export function getCalendarRevealMessages(ctx: OnboardingContext): PhaseResult {
     phase: "calendar_reveal",
     messages: [
       {
-        content: `Great. Here's how your week looks to me right now:`,
+        content: `Here's how your week looks to me right now:\n\n🟢 **Available** — open slots I'll offer first\n🟡 **Protected** — buffers, soft holds, tentative. I can offer these if pressed\n🔴 **Blocked** — confirmed meetings, hard blocks. Off-limits\n\nNext, I'll ask about a few of your events to learn how you like to protect your time.`,
         delay: 0,
-      },
-      {
-        content: `Green = open and available. Amber = soft hold (focus time, tentative). Red = protected — guests never see these.`,
-        delay: 600,
-        options: [{ number: 1, label: "Got it, let's keep going", value: "continue" }],
+        options: [{ number: 1, label: "Sounds good", value: "continue" }],
       },
     ],
     widget: {
@@ -260,17 +237,12 @@ export function getProtectionMessages(): PhaseResult {
     phase: "protection",
     messages: [
       {
-        content: `Now let's set up your general protection rules. These affect every invite — both custom and generic.`,
-        delay: 0,
-      },
-      {
-        content: `Buffers between meetings — how much breathing room do you need?`,
-        delay: 600,
+        content: `Now let's set up your first availability rule — buffer time between meetings. How much breathing room do you want after each meeting?`,
         options: [
           { number: 1, label: "No buffer needed", value: "0" },
-          { number: 2, label: "10 minutes (quick breather)", value: "10" },
-          { number: 3, label: "15 minutes (standard)", value: "15" },
-          { number: 4, label: "30 minutes (comfortable gap)", value: "30" },
+          { number: 2, label: "10 minutes", value: "10" },
+          { number: 3, label: "15 minutes", value: "15" },
+          { number: 4, label: "30 minutes", value: "30" },
         ],
       },
     ],
@@ -282,7 +254,7 @@ export function getProtectionDurationMessages(): PhaseResult {
     phase: "protection_duration",
     messages: [
       {
-        content: `Meeting duration defaults — what length should I suggest when someone doesn't specify?`,
+        content: `What default meeting length should I suggest when someone doesn't specify?`,
         options: [
           { number: 1, label: "15 minutes (quick sync)", value: "15" },
           { number: 2, label: "30 minutes (standard)", value: "30" },
@@ -299,7 +271,10 @@ export function getProtectionBlocksMessages(): PhaseResult {
     phase: "protection_blocks",
     messages: [
       {
-        content: `Protected time blocks — anything recurring that's NOT on your calendar? Workouts, commutes, family time?\n\nJust type it out (e.g., "I surf 7-9am weekdays") or say "nothing" to skip.`,
+        content: `Any recurring time that's always off-limits? (Workouts, commutes, family time — things not on your calendar.)\n\nType it naturally (e.g. "I surf 7-9am weekdays") or pick below.`,
+        options: [
+          { number: 1, label: "Nothing — skip this", value: "none" },
+        ],
       },
     ],
   };
@@ -310,7 +285,7 @@ export function getHoursMessages(): PhaseResult {
     phase: "hours",
     messages: [
       {
-        content: `What working hours should I use as your baseline?`,
+        content: `What are your business hours? I won't offer times outside this window.`,
         options: [
           { number: 1, label: "9am - 5pm", value: "9-17" },
           { number: 2, label: "9am - 6pm", value: "9-18" },
@@ -327,16 +302,12 @@ export function getHoursPostureMessages(): PhaseResult {
     phase: "hours_posture",
     messages: [
       {
-        content: `How aggressive should I be with your availability?`,
+        content: `How should I handle edge cases — requests near your boundaries or protected time?`,
         options: [
           { number: 1, label: "Generous — offer whatever's open", value: "generous" },
-          { number: 2, label: "Balanced — offer open slots, check before moving things", value: "balanced" },
+          { number: 2, label: "Balanced — offer open slots, ask me about edge cases", value: "balanced" },
           { number: 3, label: "Conservative — only clearly open slots", value: "conservative" },
         ],
-      },
-      {
-        content: `Think of it this way: "generous" is great if you're building a network and want to make it easy for people to book. "Conservative" is better if your calendar is packed and every slot matters.`,
-        delay: 400,
       },
     ],
   };
@@ -347,13 +318,25 @@ export function getFormatMessages(): PhaseResult {
     phase: "format",
     messages: [
       {
-        content: `What default meeting format would you prefer?`,
+        content: `What's your default meeting format? (You can override this per-invite later.)`,
         options: [
           { number: 1, label: "Phone call", value: "phone" },
           { number: 2, label: "Video (Google Meet)", value: "video" },
           { number: 3, label: "In-person", value: "in-person" },
-          { number: 4, label: "No preference — let the guest decide", value: "none" },
+          { number: 4, label: "No preference", value: "none" },
         ],
+      },
+    ],
+  };
+}
+
+export function getRulesIntroMessages(): PhaseResult {
+  return {
+    phase: "rules_intro",
+    messages: [
+      {
+        content: `Your business hours and buffer are now saved as **availability rules**. You can add more anytime from your Availability page using natural language:\n\n• "Block Friday afternoons"\n• "Only available Monday 12-3"\n• "No meetings before 10am"\n\nI parse them into structured rules and the scoring engine enforces them instantly — no AI at runtime. Next, let me show you what your guests see.`,
+        options: [{ number: 1, label: "Show me", value: "continue" }],
       },
     ],
   };
@@ -365,29 +348,8 @@ export function getSimulationMessages(ctx: OnboardingContext): PhaseResult {
     phase: "simulation",
     messages: [
       {
-        content: `Before I send you to the dashboard, let's practice creating a custom invite. Nothing will be sent — I just want to show you what's possible.`,
-        delay: 0,
-      },
-      {
-        content: `Imagine you need to meet with someone named Sam about a project review this week.`,
-        delay: 800,
-      },
-      {
-        content: `Time steering — I can offer Sam your full availability, OR you can narrow it:\n- "Only offer Tuesday and Wednesday mornings"\n- "Prefer afternoons but allow mornings as fallback"\n- "Lock it to exactly 3 specific slots"`,
-        delay: 1600,
-      },
-      {
-        content: `Format control — Phone, video, or in-person. You can set conditional rules like "video if same city, phone if they're remote."`,
-        delay: 2400,
-      },
-      {
-        content: `Protection overrides — For this specific meeting, you can make slots MORE or LESS available than your defaults. Mark times as "exclusive" (only these slots offered) or "preferred" (offered first).`,
-        delay: 3200,
-      },
-      {
-        content: `Duration + context — 30 minutes, coffee chat, project review — giving me this context helps me negotiate smarter on your behalf.`,
-        delay: 4000,
-        options: [{ number: 1, label: "Show me what it looks like", value: "show" }],
+        content: `When you create a custom invite, you control everything:\n• **Time steering** — "only Tuesday mornings" or "prefer afternoons"\n• **Format** — phone, video, or in-person\n• **Duration + context** — "30 min project review"\n\nI negotiate with the guest on your behalf. Let me show you what they see:`,
+        options: [{ number: 1, label: "Show me", value: "show" }],
       },
     ],
   };
@@ -398,17 +360,8 @@ export function getSimulationWalkthroughMessages(ctx: OnboardingContext): PhaseR
     phase: "simulation_walkthrough",
     messages: [
       {
-        content: `Here's what it would look like if you created this invite:`,
-        delay: 0,
-      },
-      {
-        content: `When you create a real invite, you get a link like this to share — text it, email it, drop it in Slack. When Sam opens it, Envoy takes over and negotiates a time that works for both of you.`,
-        delay: 600,
-      },
-      {
-        content: `Ready to try it for real? Just tell me in the feed: "Set up a call with Sam about the project review" — and I'll create the actual invite.`,
-        delay: 1200,
-        options: [{ number: 1, label: "Got it, take me to the dashboard", value: "done" }],
+        content: `Here's a sample invite for "Project Review — Sam." Share links like this via text, email, or Slack — when they open it, I negotiate a time on your behalf.\n\nTo create a real one, just tell me in the feed: "Set up a call with Sam about the project review."`,
+        options: [{ number: 1, label: "Take me to my dashboard", value: "done" }],
       },
     ],
     widget: {
@@ -452,6 +405,7 @@ const PHASE_ORDER: OnboardingPhase[] = [
   "hours",
   "hours_posture",
   "format",
+  "rules_intro",
   "simulation",
   "simulation_walkthrough",
   "complete",

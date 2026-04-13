@@ -488,6 +488,7 @@ If you can't parse scheduling intent, return [].`,
   if (next === "events" && ctx.events) {
     const picks = pickEventQuestions(ctx.events);
     const eventMessages = picks.map((event) => getEventQuestion(event));
+    const questionIds = picks.map((e) => e.summary);
     // Check if we should ask about evenings (no evening event in picks)
     const hasEvening = picks.some((e) => {
       const h = e.start instanceof Date ? e.start.getHours() : new Date(e.start).getHours();
@@ -495,16 +496,22 @@ If you can't parse scheduling intent, return [].`,
     });
     if (!hasEvening) {
       eventMessages.push(getEveningQuestion());
+      questionIds.push("evenings");
     }
-    result = {
-      phase: "events",
-      messages: [
-        { content: "Let's walk through some of your actual events so I know how to handle them.", delay: 0 },
-        ...eventMessages.map((m, i) => ({ ...m, delay: (i + 1) * 800 })),
-      ],
-    };
-    // Include event IDs so client can send back answers keyed by event
-    (result as PhaseResult & { eventIds?: string[] }).eventIds = picks.map((e) => e.summary);
+
+    if (eventMessages.length === 0) {
+      // No events to ask about — skip to next phase
+      const skipNext = nextPhase("events");
+      await savePhase(user.id, skipNext);
+      result = getMessagesForPhase(skipNext, ctx);
+    } else {
+      result = {
+        phase: "events",
+        messages: eventMessages,
+      };
+      // Include event IDs so client can send back answers keyed by event
+      (result as PhaseResult & { eventIds?: string[] }).eventIds = questionIds;
+    }
   }
 
   return NextResponse.json(result);

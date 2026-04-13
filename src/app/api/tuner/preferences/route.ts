@@ -35,14 +35,27 @@ export async function GET() {
 
   // Auto-expire rules on read
   const { rules: cleanedRules, changed } = expireRules(structuredRules);
-  if (changed) {
-    // Persist the expired status updates
+
+  // Re-compile structured rules on read to pick up compiler fixes
+  const activeRules = cleanedRules.filter((r: AvailabilityRule) => r.status === "active");
+  let compiledFromStructured = null;
+  if (activeRules.length > 0) {
+    const bizStart = (explicit.businessHoursStart as number) ?? 9;
+    const bizEnd = (explicit.businessHoursEnd as number) ?? 18;
+    compiledFromStructured = compileStructuredRules(activeRules, bizStart, bizEnd);
+  }
+
+  if (changed || compiledFromStructured) {
     const newExplicit = { ...explicit, structuredRules: cleanedRules };
-    const newPrefs = { ...prefs, explicit: newExplicit };
+    const newPrefs: Record<string, unknown> = { ...prefs, explicit: newExplicit };
+    if (compiledFromStructured) newPrefs.compiled = compiledFromStructured;
     await prisma.user.update({
       where: { id: user.id },
       data: { preferences: newPrefs as unknown as Prisma.InputJsonValue },
     });
+    if (compiledFromStructured) {
+      await invalidateSchedule(user.id);
+    }
   }
 
   return NextResponse.json({
@@ -54,7 +67,7 @@ export async function GET() {
     blackoutDays: (explicit.blackoutDays as string[]) ?? [],
     persistentKnowledge: user.persistentKnowledge ?? "",
     upcomingSchedulePreferences: user.upcomingSchedulePreferences ?? "",
-    compiledRules: compiled ?? null,
+    compiledRules: compiledFromStructured ?? compiled ?? null,
     structuredRules: cleanedRules,
   });
 }
