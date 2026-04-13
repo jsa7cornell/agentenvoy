@@ -201,8 +201,10 @@ function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: str
     }
   }
 
-  // Meeting settings (phone, video provider)
+  // Meeting settings (phone, video provider, default duration)
   const meetingItems: string[] = [];
+  const defaultDur = (prefs.defaultDuration as number) || (explicit?.defaultDuration as number) || 30;
+  meetingItems.push(`Default meeting duration: ${defaultDur} minutes. Use this when no duration is specified in the link rules.`);
   if (prefs.phone) meetingItems.push(`Host phone: ${prefs.phone} (default location for phone calls — "guest calls host @ number")`);
   if (prefs.videoProvider === "zoom" && prefs.zoomLink) {
     meetingItems.push(`Video provider: Zoom (link: ${prefs.zoomLink}). Use "Zoom" not "Google Meet" when discussing video meetings.`);

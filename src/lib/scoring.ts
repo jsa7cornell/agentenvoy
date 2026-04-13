@@ -37,6 +37,7 @@ export interface UserPreferences {
   phone?: string; // host phone number (with country code) — default location for phone calls
   videoProvider?: "google-meet" | "zoom"; // preferred video conferencing platform
   zoomLink?: string; // personal Zoom meeting link (e.g. https://zoom.us/j/1234567890)
+  defaultDuration?: number; // default meeting length in minutes (15, 30, 45, 60, 90)
   explicit?: {
     timezone?: string;
     businessHoursStart?: number; // hour, default 9

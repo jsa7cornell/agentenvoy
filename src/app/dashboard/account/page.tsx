@@ -38,6 +38,8 @@ export default function AccountPage() {
   const [savedVideoProvider, setSavedVideoProvider] = useState<"google-meet" | "zoom">("google-meet");
   const [zoomLink, setZoomLink] = useState("");
   const [savedZoomLink, setSavedZoomLink] = useState("");
+  const [defaultDuration, setDefaultDuration] = useState(30);
+  const [savedDefaultDuration, setSavedDefaultDuration] = useState(30);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
 
@@ -71,6 +73,7 @@ export default function AccountPage() {
           if (data.phone) { setPhone(data.phone); setSavedPhone(data.phone); }
           if (data.videoProvider) { setVideoProvider(data.videoProvider); setSavedVideoProvider(data.videoProvider); }
           if (data.zoomLink) { setZoomLink(data.zoomLink); setSavedZoomLink(data.zoomLink); }
+          if (data.defaultDuration) { setDefaultDuration(data.defaultDuration); setSavedDefaultDuration(data.defaultDuration); }
           if (data.activeCalendarIds) setActiveCalendarIds(data.activeCalendarIds);
         }
       })
@@ -95,6 +98,7 @@ export default function AccountPage() {
   const isDirty = phone !== savedPhone ||
     videoProvider !== savedVideoProvider ||
     zoomLink !== savedZoomLink ||
+    defaultDuration !== savedDefaultDuration ||
     timezone !== savedTimezone ||
     JSON.stringify(currentLocation) !== JSON.stringify(savedLocation);
 
@@ -111,6 +115,7 @@ export default function AccountPage() {
           ...(phone !== savedPhone ? { phone } : {}),
           ...(videoProvider !== savedVideoProvider ? { videoProvider } : {}),
           ...(zoomLink !== savedZoomLink ? { zoomLink } : {}),
+          ...(defaultDuration !== savedDefaultDuration ? { defaultDuration } : {}),
         }),
       });
 
@@ -130,6 +135,7 @@ export default function AccountPage() {
         setSavedPhone(phone);
         setSavedVideoProvider(videoProvider);
         setSavedZoomLink(zoomLink);
+        setSavedDefaultDuration(defaultDuration);
         setTimeout(() => setSaveMessage(""), 2000);
       } else {
         setSaveMessage("Failed to save");
@@ -372,6 +378,31 @@ export default function AccountPage() {
               <p className="text-[10px] text-muted mt-1">Include country code. Used as default for phone call meetings.</p>
             </div>
 
+            {/* Default meeting length */}
+            <div>
+              <label className="text-[11px] text-muted font-medium block mb-1.5">Default meeting length</label>
+              <div className="flex gap-2">
+                {([15, 30, 45, 60, 90] as const).map((mins) => {
+                  const label = mins < 60 ? `${mins}m` : mins === 60 ? "1h" : "1.5h";
+                  return (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => setDefaultDuration(mins)}
+                      className={`px-3 py-2 rounded-lg border text-sm transition ${
+                        defaultDuration === mins
+                          ? "border-purple-500 bg-purple-500/10 text-primary"
+                          : "border-surface-tertiary/50 bg-surface-secondary/40 text-muted hover:border-secondary"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-muted mt-1">Used when creating new meeting threads unless overridden.</p>
+            </div>
+
             {/* Video provider */}
             <div>
               <label className="text-[11px] text-muted font-medium block mb-1.5">Video conferencing</label>
@@ -430,8 +461,8 @@ export default function AccountPage() {
           </div>
         </section>
 
-        {/* Dev Tools — only in development */}
-        {process.env.NODE_ENV !== "production" && <DevTools />}
+        {/* Dev Tools */}
+        <DevTools />
 
         {/* Save button */}
         <div className={`flex items-center justify-end gap-2 transition-opacity duration-200 ${isDirty ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
@@ -609,7 +640,7 @@ function DevTools() {
   const [creating, setCreating] = useState(false);
   const [devMessage, setDevMessage] = useState("");
 
-  async function handleReset() {
+  async function handleResetAndGo() {
     setResetting(true);
     setDevMessage("");
     try {
@@ -619,10 +650,14 @@ function DevTools() {
         body: JSON.stringify({ mode: "reset" }),
       });
       const data = await res.json();
-      setDevMessage(data.message || "Reset complete");
+      if (res.ok) {
+        window.location.href = "/onboarding";
+      } else {
+        setDevMessage(data.message || "Reset failed");
+        setResetting(false);
+      }
     } catch {
       setDevMessage("Reset failed");
-    } finally {
       setResetting(false);
     }
   }
@@ -638,7 +673,7 @@ function DevTools() {
       });
       const data = await res.json();
       if (data.email) {
-        setDevMessage(`Created: ${data.email}`);
+        setDevMessage(`Created: ${data.email} (copied to clipboard)`);
         navigator.clipboard.writeText(data.email);
       } else {
         setDevMessage(data.message || "Failed");
@@ -653,31 +688,28 @@ function DevTools() {
   return (
     <section>
       <h2 className="text-[10px] font-bold uppercase tracking-widest text-amber-400 mb-3">
-        Dev Tools
+        🛠 Dev Tools
       </h2>
       <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={handleReset}
-            disabled={resetting}
-            className="px-3 py-2 text-xs font-medium text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 transition disabled:opacity-40"
-          >
-            {resetting ? "Resetting..." : "Reset Onboarding"}
-          </button>
-          <button
-            onClick={handleCreateTestAccount}
-            disabled={creating}
-            className="px-3 py-2 text-xs font-medium text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10 transition disabled:opacity-40"
-          >
-            {creating ? "Creating..." : "Create Test Account"}
-          </button>
-        </div>
+        <button
+          onClick={handleResetAndGo}
+          disabled={resetting}
+          className="w-full px-4 py-3 text-sm font-medium text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg hover:bg-amber-500/20 transition disabled:opacity-40"
+        >
+          {resetting ? "Resetting..." : "Reset & Test Onboarding →"}
+        </button>
+        <button
+          onClick={handleCreateTestAccount}
+          disabled={creating}
+          className="w-full px-3 py-2 text-xs font-medium text-amber-400/70 border border-amber-500/20 rounded-lg hover:bg-amber-500/10 transition disabled:opacity-40"
+        >
+          {creating ? "Creating..." : "Create Throwaway Test Account"}
+        </button>
         {devMessage && (
           <p className="text-xs text-amber-300">{devMessage}</p>
         )}
         <p className="text-[10px] text-muted">
-          Reset clears your onboarding state (you&apos;ll be redirected to /onboarding on reload).
-          Create makes a throwaway @agentenvoy.dev account — sign in via dev credentials.
+          Reset clears your onboarding state and takes you straight to /onboarding.
         </p>
       </div>
     </section>

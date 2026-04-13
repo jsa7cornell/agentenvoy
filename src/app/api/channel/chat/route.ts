@@ -477,7 +477,7 @@ export async function POST(req: NextRequest) {
             title,
             statusLabel: `Waiting for ${action.inviteeName || "invitee"}`,
             format: action.format || null,
-            duration: action.duration || 30,
+            duration: action.duration || (hostPrefs?.defaultDuration as number) || 30,
           },
         });
 
@@ -505,7 +505,7 @@ export async function POST(req: NextRequest) {
             status: "active",
             statusLabel: `Waiting for ${action.inviteeName || "invitee"}`,
             format: action.format || null,
-            duration: action.duration || 30,
+            duration: action.duration || (hostPrefs?.defaultDuration as number) || 30,
             url: threadUrl,
             code,
             link: {

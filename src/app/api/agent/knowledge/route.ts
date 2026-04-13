@@ -49,6 +49,7 @@ export async function GET() {
     phone: prefs.phone || "",
     videoProvider: prefs.videoProvider || "google-meet",
     zoomLink: prefs.zoomLink || "",
+    defaultDuration: prefs.defaultDuration || 30,
   });
 }
 
@@ -61,10 +62,10 @@ export async function PUT(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { persistentKnowledge, upcomingSchedulePreferences, phone, videoProvider, zoomLink } = body;
+  const { persistentKnowledge, upcomingSchedulePreferences, phone, videoProvider, zoomLink, defaultDuration } = body;
 
   // If meeting settings are being updated, save them to preferences first
-  const hasMeetingSettings = phone !== undefined || videoProvider !== undefined || zoomLink !== undefined;
+  const hasMeetingSettings = phone !== undefined || videoProvider !== undefined || zoomLink !== undefined || defaultDuration !== undefined;
   if (hasMeetingSettings) {
     const currentUser = await prisma.user.findUnique({
       where: { id: session.user.id },
@@ -75,6 +76,7 @@ export async function PUT(req: NextRequest) {
     if (phone !== undefined) updates.phone = phone || null;
     if (videoProvider !== undefined) updates.videoProvider = videoProvider || "google-meet";
     if (zoomLink !== undefined) updates.zoomLink = zoomLink || null;
+    if (defaultDuration !== undefined) updates.defaultDuration = defaultDuration || 30;
     await prisma.user.update({
       where: { id: session.user.id },
       data: {
