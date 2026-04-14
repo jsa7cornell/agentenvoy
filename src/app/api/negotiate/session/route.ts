@@ -331,7 +331,6 @@ export async function POST(req: NextRequest) {
 
   // Human-readable timezone label for the greeting ("Pacific time", not "GMT-7").
   const hostTimezoneLabel = humanTimezoneLabel(hostTimezone);
-  const guestTimezoneLabel = guestTimezone ? humanTimezoneLabel(guestTimezone) : null;
   const guestTzDiffers = !!guestTimezone && guestTimezone !== hostTimezone;
 
   // Resolve effective format/duration — link rules override user preferences.

@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getOrComputeSchedule, CalendarEvent } from "@/lib/calendar";
-import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
+import { type AvailabilityRule } from "@/lib/availability-rules";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
