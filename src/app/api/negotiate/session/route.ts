@@ -7,115 +7,12 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";
 import type { ScoredSlot } from "@/lib/scoring";
-
-/**
- * Format the best available slots into readable time windows for the greeting.
- * Groups consecutive 30-min slots into contiguous blocks, then picks the best ones.
- * When urgentSoonest=true, prioritizes the nearest blocks over the biggest.
- */
-/**
- * Compact time formatter: "10 AM" not "10:00 AM", "3:30 PM" keeps minutes.
- */
-function fmtTimeShort(d: Date, timezone: string): string {
-  const raw = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone });
-  // "12:00 PM" → "12 PM", "3:30 PM" stays
-  return raw.replace(/:00/g, "");
-}
-
-/**
- * Compact time range: collapses shared AM/PM.
- * "10 AM–4 PM" stays, "10 AM–11 AM" → "10–11 AM"
- */
-function fmtTimeRange(start: Date, end: Date, timezone: string): string {
-  const s = fmtTimeShort(start, timezone);
-  const e = fmtTimeShort(end, timezone);
-  // If both share AM or PM, collapse: "10 AM" + "11 AM" → "10–11 AM"
-  const sMatch = s.match(/^(.+)\s(AM|PM)$/);
-  const eMatch = e.match(/^(.+)\s(AM|PM)$/);
-  if (sMatch && eMatch && sMatch[2] === eMatch[2]) {
-    return `${sMatch[1]}–${eMatch[1]} ${sMatch[2]}`;
-  }
-  return `${s}–${e}`;
-}
-
-/**
- * Format the best available slots into readable time windows for the greeting.
- * Groups consecutive 30-min slots into contiguous blocks, then picks the best ones.
- * When urgentSoonest=true, prioritizes the nearest blocks over the biggest.
- */
-function formatAvailabilityWindows(
-  slots: ScoredSlot[],
-  timezone: string,
-  urgentSoonest = false
-): string | null {
-  const now = new Date();
-  // Filter to offerable slots in the future (score <= 1: preferred, free, or open)
-  const goodSlots = slots
-    .filter((s) => {
-      const start = new Date(s.start);
-      return start > now && s.score <= 1;
-    })
-    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
-
-  if (goodSlots.length === 0) return null;
-
-  const fmtDay = (d: Date) =>
-    d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: timezone });
-
-  // Build contiguous blocks of consecutive 30-min slots on the same day.
-  // Track whether a block contains any preferred slots (score <= 0).
-  interface Block {
-    start: Date; end: Date; dayLabel: string; count: number;
-    hasPreferred: boolean;
-  }
-  const blocks: Block[] = [];
-  let current: Block | null = null;
-
-  for (const slot of goodSlots) {
-    const start = new Date(slot.start);
-    const end = new Date(slot.end);
-    const dayLabel = fmtDay(start);
-    const isPreferred = slot.score <= 0;
-
-    if (current && current.dayLabel === dayLabel && start.getTime() === current.end.getTime()) {
-      current.end = end;
-      current.count++;
-      if (isPreferred) current.hasPreferred = true;
-    } else {
-      if (current) blocks.push(current);
-      current = { start, end, dayLabel, count: 1, hasPreferred: isPreferred };
-    }
-  }
-  if (current) blocks.push(current);
-
-  if (blocks.length === 0) return null;
-
-  // Prioritize: preferred blocks first, then by soonest (urgent) or biggest (normal)
-  let picked: Block[];
-  const preferred = blocks.filter((b) => b.hasPreferred);
-  const regular = blocks.filter((b) => !b.hasPreferred);
-
-  if (urgentSoonest) {
-    // Soonest preferred first, then soonest regular, cap at 3
-    picked = [...preferred, ...regular].slice(0, 3);
-  } else {
-    // Preferred first (biggest), then regular (biggest), cap at 3, re-sort chronologically
-    const sortedPref = preferred.sort((a, b) => b.count - a.count);
-    const sortedReg = regular.sort((a, b) => b.count - a.count);
-    picked = [...sortedPref, ...sortedReg]
-      .slice(0, 3)
-      .sort((a, b) => a.start.getTime() - b.start.getTime());
-  }
-
-  const lines = picked.map((b) => {
-    const timeStr = b.count === 1
-      ? `${b.dayLabel}, ${fmtTimeShort(b.start, timezone)}`
-      : `${b.dayLabel}, ${fmtTimeRange(b.start, b.end, timezone)}`;
-    return b.hasPreferred ? `${timeStr} ★` : timeStr;
-  });
-
-  return lines.map((l) => `  • ${l}`).join("\n");
-}
+import {
+  formatAvailabilityWindows,
+  humanTimezoneLabel,
+  formatLabel,
+  alternateFormatsLabel,
+} from "@/lib/greeting-template";
 
 // POST /api/negotiate/session
 // Start a new negotiation session from a link click
@@ -432,29 +329,29 @@ export async function POST(req: NextRequest) {
     conversationHistory: [],
   };
 
-  // Timezone labels for greeting
-  const hostTzAbbr = new Intl.DateTimeFormat("en-US", { timeZone: hostTimezone, timeZoneName: "short" })
-    .formatToParts(new Date())
-    .find((p) => p.type === "timeZoneName")?.value || hostTimezone;
+  // Human-readable timezone label for the greeting ("Pacific time", not "GMT-7").
+  const hostTimezoneLabel = humanTimezoneLabel(hostTimezone);
+  const guestTimezoneLabel = guestTimezone ? humanTimezoneLabel(guestTimezone) : null;
+  const guestTzDiffers = !!guestTimezone && guestTimezone !== hostTimezone;
 
-  const guestTzAbbr = guestTimezone
-    ? new Intl.DateTimeFormat("en-US", { timeZone: guestTimezone, timeZoneName: "short" })
-        .formatToParts(new Date())
-        .find((p) => p.type === "timeZoneName")?.value || null
-    : null;
-
-  // Read format/duration/urgency from link rules (primary) or session (legacy fallback)
+  // Resolve effective format/duration — link rules override user preferences.
   const linkRules = (link.rules as Record<string, unknown>) || {};
-  const effectiveFormat = (linkRules.format as string) || session.format || undefined;
-  const effectiveDuration = (linkRules.duration as number) || session.duration || undefined;
-  const effectiveUrgency = (linkRules.urgency as string) || undefined;
+  const hostPrefs = (user.preferences as { explicit?: Record<string, unknown> } | null) || {};
+  const hostExplicit = (hostPrefs.explicit as Record<string, unknown>) || {};
+  const effectiveFormat =
+    (linkRules.format as string | undefined) ||
+    (hostExplicit.format as string | undefined) ||
+    session.format ||
+    undefined;
+  const effectiveDuration =
+    (linkRules.duration as number | undefined) ||
+    (hostExplicit.duration as number | undefined) ||
+    session.duration ||
+    undefined;
+  const formatIsLocked = Boolean(linkRules.format);
 
-  // Always format availability in the HOST's timezone (matches the widget)
-  const availabilityWindows = formatAvailabilityWindows(
-    scheduleSlots,
-    hostTimezone,
-    effectiveUrgency === "asap"
-  );
+  // Format availability in the HOST's timezone (matches the widget).
+  const windows = formatAvailabilityWindows(scheduleSlots, hostTimezone);
 
   let greeting: string;
 
@@ -466,75 +363,87 @@ export async function POST(req: NextRequest) {
       conversationHistory: [{ role: "user", content: greetingPrompt }],
     });
   } else {
-    // Deterministic template greeting — no LLM, no hallucination risk
+    // Deterministic template greeting — no LLM, no hallucination risk.
     const hostName = user.name || "the organizer";
-    const guestName = link.inviteeName || null;
+    const hostFirstName = hostName.split(/\s+/)[0] || hostName;
+    const inviteeName = link.inviteeName || null;
+    const topic = link.topic || null;
 
-    // 1. Intro
-    const intro = guestName
-      ? `Hi ${guestName}! I'm coordinating a time for you and ${hostName}.`
-      : `Hi! I'm coordinating a meeting with ${hostName}.`;
+    // 1. Intro — "Hi [name]! I'm coordinating a meeting with {host} [about {topic}]."
+    const hello = inviteeName ? `Hi ${inviteeName}!` : "Hi!";
+    const introCore = topic
+      ? `I'm coordinating a meeting with ${hostName} about ${topic}.`
+      : `I'm coordinating a meeting with ${hostName}.`;
+    const intro = `${hello} ${introCore}`;
 
-    // 2. Format/duration — state as fact if known, ask if not
-    let formatLine: string;
-    const fmtLabel = effectiveFormat === "phone" ? "phone call" : effectiveFormat === "video" ? "video call" : effectiveFormat === "in-person" ? "in-person meeting" : effectiveFormat;
-    if (effectiveFormat && effectiveDuration) {
-      formatLine = ` This is a ${effectiveDuration}-minute ${fmtLabel}.`;
-    } else if (effectiveFormat) {
-      formatLine = ` This is a ${fmtLabel}.`;
+    // 2. Schedule block.
+    let scheduleBlock: string;
+    if (windows.lines.length > 0) {
+      const header = `Here are some times that work (${hostTimezoneLabel}):`;
+      const body = windows.lines.join("\n");
+      const legend = windows.hasPreferred
+        ? `\n\n★ = best fit with ${hostFirstName}'s schedule`
+        : "";
+      scheduleBlock = `${header}\n\n${body}${legend}`;
+    } else {
+      scheduleBlock = `I don't have open times to show yet in ${hostTimezoneLabel} — just tell me what generally works and I'll find a match.`;
+    }
+
+    // 3. Format/duration sentence — "This would be a 30-minute video call."
+    const fmtLabel = formatLabel(effectiveFormat);
+    let formatSentence = "";
+    if (effectiveDuration && fmtLabel) {
+      formatSentence = `This would be a ${effectiveDuration}-minute ${fmtLabel}.`;
+    } else if (fmtLabel) {
+      formatSentence = `This would be a ${fmtLabel}.`;
     } else if (effectiveDuration) {
-      formatLine = ` This is a ${effectiveDuration}-minute meeting.`;
-    } else {
-      formatLine = " We can do phone, video, or in-person — let me know your preference.";
+      formatSentence = `This would be a ${effectiveDuration}-minute meeting.`;
     }
 
-    // 3. Topic — only if set
-    const topicLine = link.topic ? ` Re: ${link.topic}.` : "";
-
-    // 4. Urgency
-    const urgencyLine = effectiveUrgency === "asap"
-      ? " Looking to get this scheduled as soon as possible."
-      : "";
-
-    // 5. Timezone sentence (standalone, before times)
-    const guestTzDiffers = guestTzAbbr && guestTzAbbr !== hostTzAbbr;
-    let tzSentence: string;
-    if (guestTzDiffers) {
-      tzSentence = `Times below are in ${hostTzAbbr}.`;
-    } else if (guestTzAbbr) {
-      tzSentence = `Times below are in ${hostTzAbbr}.`;
-    } else {
-      tzSentence = `Times below are in ${hostTzAbbr}. What timezone are you in?`;
-    }
-
-    // 6. Schedule — availability with tz label
-    let scheduleLine: string;
-    const hasPreferredSlots = availabilityWindows?.includes("★") ?? false;
-    if (availabilityWindows) {
-      scheduleLine = `Here are some times that work (${hostTzAbbr}):\n${availabilityWindows}`;
-      if (hasPreferredSlots) {
-        scheduleLine += `\n  (★ = best for ${hostName})`;
+    // 4. Options sentence — conditional on what's still flexible.
+    const options: string[] = ["find another time"];
+    if (!formatIsLocked) {
+      const alts = alternateFormatsLabel(effectiveFormat);
+      if (alts) {
+        options.push(`change format (to ${alts})`);
+      } else {
+        options.push("change format");
       }
-      scheduleLine += `\n\nIf none of these work, just tell me what does and I'll find a match.`;
+    }
+    if (guestTzDiffers) {
+      options.push("convert the times to your timezone");
+    }
+    const optionsSentence =
+      options.length === 1
+        ? `If you'd like, I can ${options[0]}.`
+        : options.length === 2
+        ? `If you'd like, I can ${options[0]} or ${options[1]}.`
+        : `If you'd like, I can ${options.slice(0, -1).join(", ")}, or ${options[options.length - 1]}.`;
+
+    // 5. Closing sentence — ask for whatever's still needed.
+    const needed: string[] = [];
+    if (!topic) needed.push("the meeting subject");
+    if (!inviteeName) needed.push("your name");
+    if (!link.inviteeEmail) needed.push("your email");
+    let closing: string;
+    if (needed.length === 0) {
+      closing = "Otherwise, just pick a time and I'll get it booked.";
     } else {
-      scheduleLine = "Let me know what times generally work for you and I'll find the best fit.";
+      const joined =
+        needed.length === 1
+          ? needed[0]
+          : needed.length === 2
+          ? `${needed[0]} and ${needed[1]}`
+          : `${needed.slice(0, -1).join(", ")}, and ${needed[needed.length - 1]}`;
+      closing = `Otherwise, just pick a time and let me know ${joined} — I'll get it booked.`;
     }
 
-    // 7. What we still need
-    const needItems: string[] = [];
-    if (!guestName) needItems.push("your name");
-    if (!link.inviteeEmail) needItems.push("your email");
-    const needLine = needItems.length > 0
-      ? `\n\nJust need ${needItems.join(" and ")} to send the invite once we lock in a time.`
-      : "\n\nJust need your email to send the invite once we lock in a time.";
-
-    // 8. Timezone switch offer (only when guest is in a different tz)
-    const tzOffer = guestTzDiffers
-      ? `\n\nI notice you might be in ${guestTzAbbr}. Want me to show times in your timezone instead?`
-      : "";
-
-    // Assemble: intro + format + topic + urgency → tz sentence → times → fallback → tz offer → need
-    greeting = `${intro}${formatLine}${topicLine}${urgencyLine}\n\n${tzSentence}\n\n${scheduleLine}${tzOffer}${needLine}`;
+    // Assemble. Blank lines separate semantic blocks so the greeting skims cleanly.
+    const parts: string[] = [intro, scheduleBlock];
+    if (formatSentence) parts.push(formatSentence);
+    parts.push(optionsSentence);
+    parts.push(closing);
+    greeting = parts.join("\n\n");
   }
 
   // Save the greeting message
