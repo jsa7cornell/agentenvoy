@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ThreadCard from "./thread-card";
 import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-status";
+import { QuickReplies } from "./onboarding/quick-replies";
+import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
 
 interface ChannelMsg {
   id: string;
@@ -36,6 +38,23 @@ interface ChannelMsg {
   } | null;
 }
 
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+/** Render **bold** and [link](url) markdown in message content */
+function renderMarkdown(text: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+    }
+    const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch) {
+      return <a key={i} href={linkMatch[2]} className="text-purple-400 hover:text-purple-300 underline">{linkMatch[1]}</a>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
 function MeetLinkCard({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -47,7 +66,7 @@ function MeetLinkCard({ url }: { url: string }) {
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         }}
-        className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded-md transition flex-shrink-0"
+        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded-md transition flex-shrink-0"
       >
         {copied ? "Copied!" : "Copy link"}
       </button>
@@ -55,22 +74,34 @@ function MeetLinkCard({ url }: { url: string }) {
   );
 }
 
+// ── Feed component ──────────────────────────────────────────────────────
+
 export default function Feed() {
   const router = useRouter();
   const [messages, setMessages] = useState<ChannelMsg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [calendarConnected, setCalendarConnected] = useState(true); // default true to avoid flash
-  const [isCalibrated, setIsCalibrated] = useState(true); // default true to avoid flash
-  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
+  const [calendarConnected, setCalendarConnected] = useState(true);
+  const [isCalibrated, setIsCalibrated] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedRef = useRef(false);
 
+  // ── Onboarding state ──────────────────────────────────────────────────
+  const [onboardingPhase, setOnboardingPhase] = useState<OnboardingPhase | null>(null);
+  const [activeOptions, setActiveOptions] = useState<QuickReplyOption[] | null>(null);
+  const [optionsLocked, setOptionsLocked] = useState(false);
+  const [inputPlaceholder, setInputPlaceholder] = useState<string | null>(null);
+  const onboardingInitRef = useRef(false);
+
+  const isOnboarding = !isCalibrated && onboardingPhase !== null && onboardingPhase !== "complete";
+
   // Load channel history
   useEffect(() => {
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
     async function loadMessages() {
       try {
         const res = await fetch("/api/channel/messages");
@@ -84,24 +115,157 @@ export default function Feed() {
         console.error("Failed to load channel messages:", e);
       } finally {
         setInitialLoading(false);
-        hasLoadedRef.current = true;
       }
     }
     loadMessages();
   }, []);
 
-  // Scroll feed container to bottom (without affecting page scroll)
+  // ── Initialize onboarding when uncalibrated ───────────────────────────
+  useEffect(() => {
+    if (initialLoading || isCalibrated || onboardingInitRef.current) return;
+    onboardingInitRef.current = true;
+
+    async function initOnboarding() {
+      try {
+        const res = await fetch("/api/onboarding/chat");
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.redirect) {
+          window.location.href = data.redirect;
+          return;
+        }
+
+        processOnboardingResult(data);
+      } catch (e) {
+        console.error("Failed to initialize onboarding:", e);
+      }
+    }
+    initOnboarding();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLoading, isCalibrated]);
+
+  // ── Process onboarding API result ─────────────────────────────────────
+  const processOnboardingResult = useCallback(
+    (data: {
+      phase: OnboardingPhase;
+      messages: Array<{ content: string; options?: QuickReplyOption[]; delay?: number }>;
+      autoAdvance?: boolean;
+      onboardingComplete?: boolean;
+      placeholder?: string;
+    }) => {
+      // Onboarding finished — switch to normal chat mode (no reload)
+      if (data.onboardingComplete) {
+        for (const msg of data.messages) {
+          addEnvoyMessage(msg.content);
+        }
+        setOnboardingPhase(null);
+        setActiveOptions(null);
+        setInputPlaceholder(null);
+        setIsCalibrated(true);
+        return;
+      }
+
+      setOnboardingPhase(data.phase);
+      setInputPlaceholder(data.placeholder || null);
+
+      // Add envoy messages
+      for (const msg of data.messages) {
+        addEnvoyMessage(msg.content);
+      }
+
+      // Get options from last message (if any)
+      const lastMsg = data.messages[data.messages.length - 1];
+      if (lastMsg?.options && lastMsg.options.length > 0) {
+        setActiveOptions(lastMsg.options);
+        setOptionsLocked(false);
+      } else {
+        setActiveOptions(null);
+      }
+
+      // Auto-advance phases: show content, then auto-POST to advance
+      if (data.autoAdvance) {
+        setActiveOptions(null);
+        setTimeout(() => {
+          advanceOnboarding(data.phase, "auto");
+        }, 2500);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  function addEnvoyMessage(content: string) {
+    const msg: ChannelMsg = {
+      id: `onboarding-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      role: "envoy",
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, msg]);
+  }
+
+  function addUserMessage(content: string) {
+    const msg: ChannelMsg = {
+      id: `onboarding-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      role: "user",
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, msg]);
+  }
+
+  // ── Advance onboarding ────────────────────────────────────────────────
+  async function advanceOnboarding(
+    phase: OnboardingPhase,
+    response: string,
+    extra?: Record<string, unknown>
+  ) {
+    setLoading(true);
+    setOptionsLocked(true);
+    try {
+      const res = await fetch("/api/onboarding/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phase, response, ...extra }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error || "Failed to advance onboarding");
+      }
+      const data = await res.json();
+      processOnboardingResult(data);
+    } catch (e) {
+      console.error("Onboarding advance error:", e);
+      addEnvoyMessage("Something went wrong. Please try again.");
+      setOptionsLocked(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Handle quick reply selection ──────────────────────────────────────
+  function handleQuickReply(value: string, label: string) {
+    if (optionsLocked || !onboardingPhase) return;
+    addUserMessage(label);
+    setActiveOptions(null);
+    advanceOnboarding(onboardingPhase, value);
+  }
+
+  // Scroll feed container to bottom
   const prevMessageCount = useRef(0);
   useEffect(() => {
     if (messages.length === 0) return;
     const container = scrollContainerRef.current;
     if (!container) return;
     if (prevMessageCount.current === 0) {
-      // Initial load — jump to bottom instantly
-      container.scrollTop = container.scrollHeight;
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
     } else if (messages.length > prevMessageCount.current) {
-      // New message — smooth scroll
-      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      requestAnimationFrame(() => {
+        container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      });
     }
     prevMessageCount.current = messages.length;
   }, [messages]);
@@ -130,7 +294,6 @@ export default function Feed() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId, archived: true }),
       });
-      // Refresh messages to remove archived thread
       const res = await fetch("/api/channel/messages");
       if (res.ok) {
         const data = await res.json();
@@ -146,7 +309,17 @@ export default function Feed() {
     const text = input.trim();
     if (!text || loading) return;
 
-    // Host directive: :: prefix — global, shapes all future negotiations
+    // ── Onboarding freeform input (about_you, protection_blocks, etc.) ──
+    if (isOnboarding && onboardingPhase) {
+      setInput("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      addUserMessage(text);
+      setActiveOptions(null);
+      advanceOnboarding(onboardingPhase, text);
+      return;
+    }
+
+    // Host directive: :: prefix
     if (text.startsWith("::")) {
       const directive = text.slice(2).trim();
       if (!directive) return;
@@ -277,6 +450,11 @@ export default function Feed() {
     }
   };
 
+  // Determine placeholder text
+  const placeholder = isOnboarding && inputPlaceholder
+    ? inputPlaceholder
+    : "Tell Envoy what to schedule...";
+
   if (initialLoading) {
     return (
       <div className="flex flex-col h-full">
@@ -294,35 +472,9 @@ export default function Feed() {
   return (
     <div className="flex flex-col h-full">
       {/* Messages */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-1.5">
-        {/* Fallback banner for uncalibrated users who somehow bypassed onboarding */}
-        {!isCalibrated && !welcomeDismissed && messages.length === 0 && (
-          <div className="mx-auto max-w-md bg-purple-500/10 border border-purple-500/20 rounded-xl p-4 mb-4">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-sm font-medium text-primary">Finish setting up your Envoy</p>
-                <p className="text-xs text-secondary mt-1">
-                  Complete the quick setup to configure your availability and start scheduling.
-                </p>
-                <a
-                  href="/onboarding"
-                  className="inline-block mt-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded-lg transition"
-                >
-                  Continue setup
-                </a>
-              </div>
-              <button
-                onClick={() => setWelcomeDismissed(true)}
-                className="text-muted hover:text-primary text-lg leading-none flex-shrink-0"
-              >
-                &times;
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Empty state with example prompts */}
-        {messages.length === 0 && !loading && (
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-1.5 min-h-0">
+        {/* Empty state — only for calibrated users with no messages */}
+        {messages.length === 0 && !loading && isCalibrated && (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center space-y-4 max-w-sm">
               <p className="text-sm text-muted">Envoy manages your scheduling. Tell it who to meet with.</p>
@@ -373,27 +525,34 @@ export default function Feed() {
               (msg.thread.agreedTime && new Date(msg.thread.agreedTime) < new Date());
 
             return (
-              <ThreadCard
-                key={msg.id}
-                title={msg.thread.title || "Thread"}
-                statusLabel={msg.thread.statusLabel || status.label}
-                statusColor={status.color}
-                subtitle={[
-                  msg.thread.format === "phone" ? "Phone call" : msg.thread.format === "video" ? "Video" : msg.thread.format,
-                  msg.thread.duration ? `${msg.thread.duration} min` : null,
-                  isGroup ? `${guestParticipants.length} participant${guestParticipants.length !== 1 ? "s" : ""}` : null,
-                ].filter(Boolean).join(" · ") || undefined}
-                inviteeName={msg.thread.link.inviteeName || undefined}
-                inviteeEmail={msg.thread.link.inviteeEmail || undefined}
-                messageCount={msg.thread._count.messages}
-                linkSlug={msg.thread.link.slug}
-                linkCode={msg.thread.link.code || undefined}
-                canArchive={!!canArchive}
-                onArchive={() => handleArchive(msg.thread!.id)}
-                onClick={() => navigateToThread(msg.thread!)}
-                isGroupEvent={isGroup}
-                participants={msg.thread.participants || undefined}
-              />
+              <div key={msg.id} className="self-start flex flex-col gap-2 max-w-[85%]">
+                {msg.content && (
+                  <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed bg-black/5 dark:bg-white/7 rounded-bl-sm">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide mb-1 text-purple-400">Envoy</div>
+                    <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
+                  </div>
+                )}
+                <ThreadCard
+                  title={msg.thread.title || "Thread"}
+                  statusLabel={msg.thread.statusLabel || status.label}
+                  statusColor={status.color}
+                  subtitle={[
+                    msg.thread.format === "phone" ? "Phone call" : msg.thread.format === "video" ? "Video" : msg.thread.format,
+                    msg.thread.duration ? `${msg.thread.duration} min` : null,
+                    isGroup ? `${guestParticipants.length} participant${guestParticipants.length !== 1 ? "s" : ""}` : null,
+                  ].filter(Boolean).join(" · ") || undefined}
+                  inviteeName={msg.thread.link.inviteeName || undefined}
+                  inviteeEmail={msg.thread.link.inviteeEmail || undefined}
+                  messageCount={msg.thread._count.messages}
+                  linkSlug={msg.thread.link.slug}
+                  linkCode={msg.thread.link.code || undefined}
+                  canArchive={!!canArchive}
+                  onArchive={() => handleArchive(msg.thread!.id)}
+                  onClick={() => navigateToThread(msg.thread!)}
+                  isGroupEvent={isGroup}
+                  participants={msg.thread.participants || undefined}
+                />
+              </div>
             );
           }
 
@@ -408,7 +567,6 @@ export default function Feed() {
 
           // Chat bubble
           const isUser = msg.role === "user";
-          // Detect meet links in envoy messages for success card
           const meetLinkMatch = !isUser ? msg.content.match(/(https?:\/\/[^\s]+\/meet\/[^\s]+)/) : null;
           return (
             <div
@@ -426,11 +584,22 @@ export default function Feed() {
               >
                 {isUser ? "You" : "Envoy"}
               </div>
-              <div className="whitespace-pre-wrap">{msg.content}</div>
+              <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
               {meetLinkMatch && <MeetLinkCard url={meetLinkMatch[1]} />}
             </div>
           );
         })}
+
+        {/* Quick replies — below the last envoy message */}
+        {activeOptions && activeOptions.length > 0 && (
+          <div className="self-start max-w-[72%] mt-1">
+            <QuickReplies
+              options={activeOptions}
+              onSelect={handleQuickReply}
+              disabled={optionsLocked || loading}
+            />
+          </div>
+        )}
 
         {/* Typing indicator */}
         {loading && (
@@ -444,10 +613,11 @@ export default function Feed() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input — or calendar connection gate */}
+      {/* Input */}
       <div className="px-4 sm:px-6 py-4 border-t border-black/5 dark:border-white/5 flex-shrink-0">
-        {!calendarConnected ? (
-          <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+        {/* Calendar connection prompt — only show for calibrated users without calendar */}
+        {!calendarConnected && isCalibrated && (
+          <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 mb-3">
             <span className="text-amber-400 text-lg flex-shrink-0">&#128197;</span>
             <div className="flex-1">
               <p className="text-sm text-primary">Connect your Google Calendar</p>
@@ -460,26 +630,25 @@ export default function Feed() {
               Connect
             </a>
           </div>
-        ) : (
-          <div className="flex gap-2 items-end">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              placeholder="Tell Envoy what to schedule..."
-              rows={1}
-              className="flex-1 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-primary placeholder-muted resize-none outline-none focus:border-purple-500/50 min-h-[44px] max-h-[120px]"
-            />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || loading}
-              className="w-11 h-11 rounded-xl bg-purple-600 text-white flex items-center justify-center flex-shrink-0 hover:bg-purple-700 transition-colors disabled:opacity-30 disabled:cursor-default text-lg"
-            >
-              &uarr;
-            </button>
-          </div>
         )}
+        <div className="flex gap-2 items-end">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            rows={1}
+            className="flex-1 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-primary placeholder-muted resize-none outline-none focus:border-purple-500/50 min-h-[44px] max-h-[120px]"
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || loading}
+            className="w-11 h-11 rounded-xl bg-purple-600 text-white flex items-center justify-center flex-shrink-0 hover:bg-purple-700 transition-colors disabled:opacity-30 disabled:cursor-default text-lg"
+          >
+            &uarr;
+          </button>
+        </div>
       </div>
     </div>
   );

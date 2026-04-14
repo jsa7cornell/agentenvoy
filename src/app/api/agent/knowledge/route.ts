@@ -46,10 +46,10 @@ export async function GET() {
     preview,
     ambiguities: compiled?.ambiguities ?? [],
     activeCalendarIds: prefs.explicit?.activeCalendarIds ?? [],
-    phone: prefs.phone || "",
-    videoProvider: prefs.videoProvider || "google-meet",
-    zoomLink: prefs.zoomLink || "",
-    defaultDuration: prefs.defaultDuration || 30,
+    phone: prefs.explicit?.phone || prefs.phone || "",
+    videoProvider: prefs.explicit?.videoProvider || prefs.videoProvider || "google-meet",
+    zoomLink: prefs.explicit?.zoomLink || prefs.zoomLink || "",
+    defaultDuration: prefs.explicit?.defaultDuration || prefs.defaultDuration || 30,
   });
 }
 

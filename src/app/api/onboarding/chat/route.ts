@@ -9,6 +9,7 @@ import {
   OnboardingContext,
   getIntroMessages,
   getTimezonePickerMessages,
+  getTimezoneInputMessages,
   getDefaultsFormatMessages,
   getPhoneNumberMessages,
   getZoomLinkMessages,
@@ -141,15 +142,31 @@ export async function POST(req: NextRequest) {
   switch (currentPhase) {
     case "intro": {
       if (response === "change_tz") {
-        // User wants to change timezone — show free text input (stay on intro phase)
         advancing = false;
         result = getTimezonePickerMessages();
         return NextResponse.json(result);
       }
-      // Either confirmed timezone or typed a custom one
-      const selectedTz = safeTimezone(response || tz);
-      await updatePrefs(user.id, prefs, explicit, { timezone: selectedTz });
-      ctx.detectedTimezone = selectedTz;
+      if (response === "other_tz") {
+        // Show free-text timezone input
+        advancing = false;
+        result = getTimezoneInputMessages();
+        return NextResponse.json(result);
+      }
+      // Validate timezone — if invalid, ask again
+      const selectedTz = response || tz;
+      const validatedTz = safeTimezone(selectedTz);
+      if (validatedTz !== selectedTz && response) {
+        // User typed an invalid timezone — show error and re-prompt
+        advancing = false;
+        result = {
+          phase: "intro",
+          messages: [{ content: `"${response}" isn't a recognized timezone. Try the format **Continent/City** (e.g. America/New_York, Europe/Berlin).` }],
+          placeholder: "America/New_York",
+        };
+        return NextResponse.json(result);
+      }
+      await updatePrefs(user.id, prefs, explicit, { timezone: validatedTz });
+      ctx.detectedTimezone = validatedTz;
       break;
     }
 

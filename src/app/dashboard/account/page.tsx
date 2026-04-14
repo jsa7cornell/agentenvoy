@@ -651,7 +651,7 @@ function DevTools() {
       });
       const data = await res.json();
       if (res.ok) {
-        window.location.href = "/onboarding";
+        window.location.href = "/dashboard";
       } else {
         setDevMessage(data.message || "Reset failed");
         setResetting(false);
@@ -709,7 +709,7 @@ function DevTools() {
           <p className="text-xs text-amber-300">{devMessage}</p>
         )}
         <p className="text-[10px] text-muted">
-          Reset clears your onboarding state and takes you straight to /onboarding.
+          Reset clears your onboarding state. Reload the dashboard to restart onboarding.
         </p>
       </div>
     </section>

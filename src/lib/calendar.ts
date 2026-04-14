@@ -719,6 +719,7 @@ export async function getCachedCalendarContext(
 // --- Computed Schedule ---
 
 import { computeSchedule, computeInputHash, type ScoredSlot, type UserPreferences } from "./scoring";
+import { safeTimezone } from "./utils";
 
 /**
  * Get the computed schedule for a user, recomputing only if inputs changed.
@@ -748,7 +749,7 @@ export async function getOrComputeSchedule(userId: string, options?: { forceRefr
   if (!user) throw new Error("User not found");
 
   const prefs = (user.preferences as UserPreferences) || {};
-  const tz = prefs.explicit?.timezone ?? prefs.timezone ?? "America/Los_Angeles";
+  const tz = safeTimezone(prefs.explicit?.timezone ?? prefs.timezone);
 
   // Auto-expire stale currentLocation from DB if until date has passed
   const manualLocation = prefs.explicit?.currentLocation as { label: string; until?: string } | undefined;

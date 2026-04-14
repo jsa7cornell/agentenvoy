@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { safeTimezone } from "@/lib/utils";
 
 /**
  * Dev-only endpoint for onboarding testing.
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
     // Keep timezone from preferences, clear everything else
     const prefs = (user.preferences as Record<string, unknown>) || {};
     const explicit = (prefs.explicit as Record<string, unknown>) || {};
-    const timezone = explicit.timezone || "America/Los_Angeles";
+    const timezone = safeTimezone(explicit.timezone as string);
 
     // Clear calibration + onboarding state
     await prisma.user.update({
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
       await prisma.channelSession.deleteMany({ where: { channelId: channel.id } });
     }
 
-    return NextResponse.json({ success: true, message: "Onboarding reset. Reload to enter /onboarding." });
+    return NextResponse.json({ success: true, message: "Onboarding reset. Reload /dashboard to restart onboarding." });
   }
 
   if (mode === "create") {

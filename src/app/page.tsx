@@ -28,14 +28,14 @@ function SectionLabel({ children, className = "" }: { children: React.ReactNode;
 
 /* ── Main page ───────────────────────────────────────────── */
 export default function Home() {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const router = useRouter();
 
   useEffect(() => {
     if (status === "authenticated") {
-      router.push(session?.user?.onboardingComplete ? "/dashboard" : "/onboarding");
+      router.push("/dashboard");
     }
-  }, [status, session, router]);
+  }, [status, router]);
 
   const handleSignIn = () => signIn("google", { callbackUrl: "/dashboard" });
 

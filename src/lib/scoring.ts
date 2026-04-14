@@ -12,6 +12,7 @@ import { createHash } from "crypto";
 import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
 import type { CalendarEvent } from "./calendar";
+import { safeTimezone } from "./utils";
 
 // --- Types ---
 
@@ -623,7 +624,7 @@ export function computeSchedule(
   persistentKnowledge: string | null,
   upcomingSchedulePreferences?: string | null
 ): ScoredSlot[] {
-  const tz = preferences.explicit?.timezone ?? preferences.timezone ?? "America/Los_Angeles";
+  const tz = safeTimezone(preferences.explicit?.timezone ?? preferences.timezone);
   const blockedWindows = [...((preferences.explicit?.blockedWindows ?? []) as BlockedWindow[])];
   let bizStart = preferences.explicit?.businessHoursStart ?? 9;
   let bizEnd = preferences.explicit?.businessHoursEnd ?? 18;

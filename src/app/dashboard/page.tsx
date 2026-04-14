@@ -1,24 +1,16 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Feed from "@/components/feed";
 import { AvailabilityCalendar } from "@/components/availability-calendar";
 import Link from "next/link";
 
 export default function DashboardPage() {
-  const { data: session, status } = useSession();
-  const router = useRouter();
+  const { status } = useSession();
   const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string; score?: number }>>>({});
   const [slotTimezone, setSlotTimezone] = useState("America/Los_Angeles");
   const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
-
-  useEffect(() => {
-    if (status === "authenticated" && session?.user?.onboardingComplete === false) {
-      router.push("/onboarding");
-    }
-  }, [status, session, router]);
 
   useEffect(() => {
     if (status !== "authenticated") return;

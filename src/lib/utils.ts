@@ -14,6 +14,19 @@ export function generateCode(length = 6): string {
   return code;
 }
 
+const DEFAULT_TIMEZONE = "America/Los_Angeles";
+
+/** Validate an IANA timezone string. Returns the timezone if valid, or the default fallback. */
+export function safeTimezone(tz: string | undefined | null): string {
+  if (!tz) return DEFAULT_TIMEZONE;
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return tz;
+  } catch {
+    return DEFAULT_TIMEZONE;
+  }
+}
+
 export function formatDateTime(date: Date): string {
   return new Intl.DateTimeFormat("en-US", {
     weekday: "short",
