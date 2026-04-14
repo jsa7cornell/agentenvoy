@@ -48,6 +48,10 @@ export interface UserPreferences {
     blockedWindows?: BlockedWindow[];
     currentLocation?: { label: string; until?: string };
     activeCalendarIds?: string[]; // if set, only these calendars affect availability
+    phone?: string;
+    videoProvider?: "google-meet" | "zoom";
+    zoomLink?: string;
+    defaultDuration?: number;
   };
   learned?: Record<string, unknown>;
 }
