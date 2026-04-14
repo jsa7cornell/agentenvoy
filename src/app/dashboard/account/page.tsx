@@ -3,6 +3,7 @@
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useEffect, useState, useCallback } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { TIMEZONE_TABLE, shortTimezoneLabel, getTimezoneEntry } from "@/lib/timezone";
 
 interface ConnectionStatus {
   google: {
@@ -11,22 +12,6 @@ interface ConnectionStatus {
     scopes: string[];
   };
 }
-
-const TIMEZONES = [
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "America/Phoenix",
-  "America/Anchorage",
-  "Pacific/Honolulu",
-  "Europe/London",
-  "Europe/Paris",
-  "Europe/Berlin",
-  "Asia/Tokyo",
-  "Asia/Shanghai",
-  "Australia/Sydney",
-];
 
 export default function AccountPage() {
   const { data: session, status } = useSession();
@@ -43,11 +28,13 @@ export default function AccountPage() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
 
-  // Timezone + location (edits go to /api/tuner/preferences)
-  const [timezone, setTimezone] = useState("America/Los_Angeles");
-  const [savedTimezone, setSavedTimezone] = useState("America/Los_Angeles");
-  const [currentLocation, setCurrentLocation] = useState<{ label: string; until?: string } | null>(null);
-  const [savedLocation, setSavedLocation] = useState<{ label: string; until?: string } | null>(null);
+  // Timezone + location (edits go to /api/tuner/preferences).
+  // Start as null so we render a loading state instead of flickering
+  // from the hardcoded LA default to the user's real value.
+  const [timezone, setTimezone] = useState<string | null>(null);
+  const [savedTimezone, setSavedTimezone] = useState<string | null>(null);
+  const [defaultLocation, setDefaultLocation] = useState("");
+  const [savedDefaultLocation, setSavedDefaultLocation] = useState("");
 
   // Calendar modals
   const [calendarModal, setCalendarModal] = useState(false);
@@ -84,7 +71,8 @@ export default function AccountPage() {
       .then((data) => {
         if (data) {
           setTimezone(data.timezone); setSavedTimezone(data.timezone);
-          setCurrentLocation(data.currentLocation); setSavedLocation(data.currentLocation);
+          const loc = typeof data.defaultLocation === "string" ? data.defaultLocation : "";
+          setDefaultLocation(loc); setSavedDefaultLocation(loc);
         }
       })
       .catch(() => {});
@@ -95,12 +83,13 @@ export default function AccountPage() {
     fetchData();
   }, [status, fetchData]);
 
+  const tzLoaded = timezone !== null && savedTimezone !== null;
   const isDirty = phone !== savedPhone ||
     videoProvider !== savedVideoProvider ||
     zoomLink !== savedZoomLink ||
     defaultDuration !== savedDefaultDuration ||
-    timezone !== savedTimezone ||
-    JSON.stringify(currentLocation) !== JSON.stringify(savedLocation);
+    (tzLoaded && timezone !== savedTimezone) ||
+    defaultLocation !== savedDefaultLocation;
 
   async function handleSave() {
     if (saving) return;
@@ -119,15 +108,20 @@ export default function AccountPage() {
         }),
       });
 
-      // Save timezone + location if changed
-      if (timezone !== savedTimezone || JSON.stringify(currentLocation) !== JSON.stringify(savedLocation)) {
+      // Save timezone + location if changed (and timezone is loaded)
+      const tzChanged = tzLoaded && timezone !== savedTimezone;
+      const locChanged = defaultLocation !== savedDefaultLocation;
+      if (tzChanged || locChanged) {
         await fetch("/api/tuner/preferences", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ timezone, currentLocation }),
+          body: JSON.stringify({
+            ...(tzChanged ? { timezone } : {}),
+            ...(locChanged ? { defaultLocation } : {}),
+          }),
         });
-        setSavedTimezone(timezone);
-        setSavedLocation(currentLocation);
+        if (tzChanged) setSavedTimezone(timezone);
+        if (locChanged) setSavedDefaultLocation(defaultLocation);
       }
 
       if (meetingRes.ok) {
@@ -304,57 +298,39 @@ export default function AccountPage() {
             {/* Default Time Zone */}
             <div>
               <label className="text-[11px] text-muted font-medium block mb-1">Default time zone</label>
-              <select
-                value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-                className="w-full max-w-sm bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
-              >
-                {TIMEZONES.map((tz) => (
-                  <option key={tz} value={tz}>
-                    {tz.replace(/_/g, " ")}
-                  </option>
-                ))}
-                {!TIMEZONES.includes(timezone) && (
-                  <option value={timezone}>{timezone.replace(/_/g, " ")}</option>
-                )}
-              </select>
+              {timezone === null ? (
+                <div className="w-full max-w-sm h-[38px] rounded-lg bg-surface-secondary/40 border border-surface-tertiary/50 animate-pulse" />
+              ) : (
+                <select
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  className="w-full max-w-sm bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
+                >
+                  {TIMEZONE_TABLE.map((entry) => (
+                    <option key={entry.iana} value={entry.iana}>
+                      {entry.long} · {shortTimezoneLabel(entry.iana)} ({entry.iana})
+                    </option>
+                  ))}
+                  {!getTimezoneEntry(timezone) && (
+                    <option value={timezone}>
+                      {timezone} (custom)
+                    </option>
+                  )}
+                </select>
+              )}
             </div>
 
             {/* Default Location */}
             <div>
               <label className="text-[11px] text-muted font-medium block mb-1">Default location</label>
-              <div className="flex gap-2 max-w-sm">
-                <input
-                  type="text"
-                  value={currentLocation?.label ?? ""}
-                  onChange={(e) => {
-                    if (!e.target.value.trim()) {
-                      setCurrentLocation(null);
-                    } else {
-                      setCurrentLocation({
-                        label: e.target.value,
-                        until: currentLocation?.until,
-                      });
-                    }
-                  }}
-                  placeholder="e.g. Baja, NYC"
-                  className="flex-1 bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition"
-                />
-                <input
-                  type="date"
-                  value={currentLocation?.until ?? ""}
-                  onChange={(e) => {
-                    if (currentLocation) {
-                      setCurrentLocation({
-                        ...currentLocation,
-                        until: e.target.value || undefined,
-                      });
-                    }
-                  }}
-                  className="w-36 bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-indigo-500 transition"
-                />
-              </div>
-              <p className="text-[10px] text-muted mt-1">Leave &ldquo;until&rdquo; blank for indefinite</p>
+              <input
+                type="text"
+                value={defaultLocation}
+                onChange={(e) => setDefaultLocation(e.target.value)}
+                placeholder="e.g. San Francisco, Lisbon"
+                className="w-full max-w-sm bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition"
+              />
+              <p className="text-[10px] text-muted mt-1">Your home base. For temporary travel, add a Location rule on the <a href="/dashboard/availability" className="underline hover:text-secondary">Availability</a> page.</p>
             </div>
           </div>
         </section>

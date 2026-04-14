@@ -14,7 +14,7 @@ export interface AvailabilityRule {
   id: string;
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "location";
   timeStart?: string;     // "HH:MM" 24h
   timeEnd?: string;       // "HH:MM" 24h
   allDay?: boolean;
@@ -24,9 +24,26 @@ export interface AvailabilityRule {
   bufferMinutesBefore?: number;
   bufferMinutesAfter?: number;
   bufferAppliesTo?: string;
+  locationLabel?: string; // for action: "location" — e.g. "Baja", "NYC"
   status: "active" | "paused" | "expired";
   priority: number;       // 1-5
   createdAt: string;      // ISO datetime
+}
+
+/**
+ * Return the active location rule for today, if any.
+ * An active rule is one with status "active" whose effectiveDate has started
+ * and whose expiryDate has not passed. Picks highest priority.
+ */
+export function getActiveLocationRule(rules: AvailabilityRule[] | undefined | null): AvailabilityRule | null {
+  if (!rules || rules.length === 0) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const candidates = rules
+    .filter((r) => r.action === "location" && r.status === "active" && r.locationLabel)
+    .filter((r) => !r.effectiveDate || r.effectiveDate <= today)
+    .filter((r) => !r.expiryDate || r.expiryDate >= today)
+    .sort((a, b) => b.priority - a.priority || b.createdAt.localeCompare(a.createdAt));
+  return candidates[0] ?? null;
 }
 
 // --- Lifecycle ---
@@ -168,6 +185,13 @@ export function compileStructuredRules(
           if (rule.expiryDate) bw.expires = rule.expiryDate;
           blockedWindows.push(bw);
         }
+        break;
+      }
+
+      case "location": {
+        // No-op — location rules don't affect scoring.
+        // They're surfaced separately via getActiveLocationRule() for the UI,
+        // composer context, and widget display.
         break;
       }
 

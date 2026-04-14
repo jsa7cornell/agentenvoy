@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Clock, ChevronDown, ChevronRight,
   Plus, Check, X, Pencil, Trash2, Loader2, ToggleLeft, ToggleRight,
-  Ban, Lock, Timer, CheckCircle2, Star,
+  Ban, Lock, Timer, CheckCircle2, Star, MapPin,
 } from "lucide-react";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 
@@ -13,7 +13,7 @@ import type { AvailabilityRule } from "@/lib/availability-rules";
 interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -25,6 +25,7 @@ interface ParsedRule {
   bufferAppliesTo?: string;
   businessHoursStart?: number;
   businessHoursEnd?: number;
+  locationLabel?: string;
   priority: number;
   ambiguous?: boolean;
   interpretations?: string[];
@@ -36,9 +37,9 @@ interface PreferenceData {
   businessHoursStart: number;
   businessHoursEnd: number;
   structuredRules: AvailabilityRule[];
+  defaultLocation?: string;
   // Legacy fields (read-only, kept for backwards compat)
   blockedWindows: unknown[];
-  currentLocation: { label: string; until?: string } | null;
   blackoutDays: string[];
   persistentKnowledge: string;
   upcomingSchedulePreferences: string;
@@ -94,6 +95,7 @@ const ACTION_LABELS: Record<string, string> = {
   prefer: "Prefer",
   limit: "Limit",
   business_hours: "Business Hours",
+  location: "Location",
 };
 
 const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -102,6 +104,7 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> 
   buffer: Timer,
   prefer: Star,
   limit: Lock,
+  location: MapPin,
 };
 
 // --- Component ---
@@ -234,6 +237,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
       bufferMinutesBefore: pendingRule.bufferMinutesBefore,
       bufferMinutesAfter: pendingRule.bufferMinutesAfter,
       bufferAppliesTo: pendingRule.bufferAppliesTo,
+      locationLabel: pendingRule.locationLabel,
       status: "active",
       priority: pendingRule.priority,
       createdAt: new Date().toISOString(),
@@ -278,6 +282,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
         expiryDate: editFields.expiryDate ?? r.expiryDate,
         bufferMinutesBefore: editFields.bufferMinutesBefore ?? r.bufferMinutesBefore,
         bufferMinutesAfter: editFields.bufferMinutesAfter ?? r.bufferMinutesAfter,
+        locationLabel: editFields.locationLabel ?? r.locationLabel,
         type: editFields.type ?? r.type,
       } as AvailabilityRule;
     });
@@ -609,6 +614,26 @@ function ConfirmationCard({
             {/* Type (action) */}
             <span className="text-muted">Type</span>
             <span className="text-primary font-medium">{ACTION_LABELS[rule.action]}</span>
+            {/* Location label */}
+            {rule.action === "location" && (
+              isEditing ? (
+                <>
+                  <span className="text-muted">Place</span>
+                  <input
+                    type="text"
+                    defaultValue={rule.locationLabel ?? ""}
+                    onChange={(e) => onUpdateRule({ locationLabel: e.target.value })}
+                    placeholder="e.g. Baja"
+                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                  />
+                </>
+              ) : rule.locationLabel ? (
+                <>
+                  <span className="text-muted">Place</span>
+                  <span className="text-primary">{rule.locationLabel}</span>
+                </>
+              ) : null
+            )}
             {/* Business hours */}
             {rule.action === "business_hours" && rule.businessHoursStart != null && rule.businessHoursEnd != null && (
               isEditing ? (
@@ -898,6 +923,9 @@ function RuleCard({
     if (rule.bufferMinutesAfter) parts.push(`${rule.bufferMinutesAfter}min after`);
     summary = `Buffer ${parts.join(" & ")}`;
     if (rule.bufferAppliesTo) summary += ` ${rule.bufferAppliesTo}`;
+  } else if (rule.action === "location" && rule.locationLabel) {
+    summary = `Currently in ${rule.locationLabel}`;
+    if (rule.expiryDate) summary += ` until ${formatDate(rule.expiryDate)}`;
   } else {
     summary = rule.originalText;
   }
@@ -951,6 +979,19 @@ function RuleCard({
           {editing ? (
             /* Edit mode */
             <div className="space-y-2 pt-2">
+              {/* Location label (for location rules) */}
+              {rule.action === "location" && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted w-12">Place</span>
+                  <input
+                    type="text"
+                    value={(editFields.locationLabel as string | undefined) ?? rule.locationLabel ?? ""}
+                    onChange={(e) => onEditField({ locationLabel: e.target.value })}
+                    placeholder="e.g. Baja, NYC"
+                    className="bg-surface border border-DEFAULT rounded px-2 py-1 text-primary text-xs flex-1 max-w-[160px]"
+                  />
+                </div>
+              )}
               {/* Days of week */}
               {rule.daysOfWeek && rule.daysOfWeek.length > 0 && (
                 <div className="flex items-center gap-2 text-xs">
@@ -1089,6 +1130,13 @@ function RuleCard({
                 {/* Type */}
                 <span className="text-muted">Type</span>
                 <span className="text-primary font-medium">{ACTION_LABELS[rule.action]}</span>
+                {/* Location */}
+                {rule.action === "location" && rule.locationLabel && (
+                  <>
+                    <span className="text-muted">Place</span>
+                    <span className="text-primary">{rule.locationLabel}</span>
+                  </>
+                )}
                 {/* When — days */}
                 {rule.daysOfWeek && rule.daysOfWeek.length > 0 && (
                   <>

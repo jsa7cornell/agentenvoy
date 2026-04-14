@@ -170,7 +170,7 @@ You decide how much availability to show based on the situation. This is NOT a m
 Location is determined by signal fusion, not a single source. Signals in order of specificity:
 
 1. **Explicit dialog / channel context** — strongest. What the host says in the current conversation ("I'll be in Palo Alto for this one") overrides everything for that session. Even here, if the statement is ambiguous, ask.
-2. **Preferences (`currentLocation`)** — explicit host-stated location, set via profile or past Envoy conversations. High weight.
+2. **Active Location rule** — explicit host-stated current location, stored as an availability rule with `action: "location"`. Expires automatically via rule lifecycle. High weight. If no active location rule, fall back to `defaultLocation` (home base) from preferences.
 3. **Google Calendar `workingLocation` events** — authoritative Google-native declaration of where the host is working. High weight, same tier as preferences.
 4. **Primary calendar event locations** — inferred signal. "Lunch at Google CL2, Mountain View" = host is in the South Bay that day. Medium weight.
 5. **Non-primary calendar events** — household/family context only, not the host's location. Low weight.

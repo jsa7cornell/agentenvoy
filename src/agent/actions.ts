@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
+import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
+import type { AvailabilityRule } from "@/lib/availability-rules";
 
 // --- Types ---
 
@@ -300,9 +302,13 @@ async function handleUpdateTime(
   };
 
   if (params.duration) updateData.duration = Number(params.duration);
-  if (params.timezone) {
-    // Store proposed time info in a system message rather than overwriting agreedTime
-  }
+  // NOTE: params.timezone from the LLM is deliberately IGNORED.
+  // The host's canonical timezone is looked up from stored preferences.
+  const host = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferences: true },
+  });
+  const hostTz = getUserTimezone(host?.preferences as Record<string, unknown> | null);
 
   await prisma.negotiationSession.update({
     where: { id: session.id },
@@ -311,24 +317,26 @@ async function handleUpdateTime(
 
   // Save a system message so the guest sees the proposal
   const durationStr = params.duration ? ` (${params.duration} min)` : "";
-  const tzStr = params.timezone ? ` ${params.timezone}` : "";
+  const tzLabel = ` ${shortTimezoneLabel(hostTz, parsed)}`;
+  const timeStr = parsed.toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: hostTz,
+  });
   await prisma.message.create({
     data: {
       sessionId: session.id,
       role: "system",
-      content: `Host proposed a new time: ${parsed.toLocaleString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      })}${tzStr}${durationStr}`,
+      content: `Host proposed a new time: ${timeStr}${tzLabel}${durationStr}`,
     },
   });
 
   return {
     success: true,
-    message: `Proposed new time: ${parsed.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`,
+    message: `Proposed new time: ${timeStr}${tzLabel}`,
     data: { sessionId: session.id },
   };
 }
@@ -507,14 +515,41 @@ async function handleUpdateKnowledge(
     }
 
     if (currentLocation !== undefined) {
-      // null clears it, object sets it
+      // Location is now stored as an availability rule with action: "location".
+      // null clears the active location rule(s); object upserts a new one.
+      const existingRules = (newExplicit.structuredRules as AvailabilityRule[] | undefined) ?? [];
       if (currentLocation === null) {
-        const { currentLocation: _removed, ...rest } = newExplicit as Record<string, unknown>;
-        void _removed;
-        newExplicit = rest;
+        // Remove any active location rules
+        const filtered = existingRules.filter(
+          (r) => !(r.action === "location" && r.status === "active")
+        );
+        newExplicit = { ...newExplicit, structuredRules: filtered };
       } else {
-        newExplicit = { ...newExplicit, currentLocation };
+        // Deactivate any existing active location rules, append a new one
+        const deactivated = existingRules.map((r) =>
+          r.action === "location" && r.status === "active"
+            ? ({ ...r, status: "paused" as const })
+            : r
+        );
+        const newRule: AvailabilityRule = {
+          id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          originalText: currentLocation.until
+            ? `Currently in ${currentLocation.label} until ${currentLocation.until}`
+            : `Currently in ${currentLocation.label}`,
+          type: currentLocation.until ? "temporary" : "ongoing",
+          action: "location",
+          locationLabel: currentLocation.label,
+          expiryDate: currentLocation.until,
+          status: "active",
+          priority: 3,
+          createdAt: new Date().toISOString(),
+        };
+        newExplicit = { ...newExplicit, structuredRules: [...deactivated, newRule] };
       }
+      // Drop legacy key if present
+      const { currentLocation: _legacy, ...rest } = newExplicit as Record<string, unknown>;
+      void _legacy;
+      newExplicit = rest;
     }
 
     updateData.preferences = {
