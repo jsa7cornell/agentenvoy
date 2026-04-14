@@ -2,13 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createCalendarEvent } from "@/lib/calendar";
 import { extractLearnings } from "@/agent/administrator";
+import { getUserTimezone } from "@/lib/timezone";
 import { Resend } from "resend";
 
 // POST /api/negotiate/confirm
 // Confirm an agreed-upon time — creates calendar events, sends emails
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { sessionId, dateTime, duration, format, location, timezone } = body;
+  // NOTE: `timezone` from the request body is ignored. The host's timezone
+  // is canonical and comes from stored preferences. LLMs must not be trusted
+  // to emit IANA strings.
+  const { sessionId, dateTime, duration, format, location } = body;
 
   if (!sessionId || !dateTime) {
     return NextResponse.json(
@@ -36,13 +40,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Resolve the host's timezone for display purposes
+  // Host's timezone is canonical — read from stored preferences, never from the body.
   const hostPrefs = session.host.preferences as Record<string, unknown> | null;
-  const hostTimezone: string =
-    timezone ||
-    (hostPrefs?.timezone as string) ||
-    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ||
-    "America/Los_Angeles";
+  const hostTimezone = getUserTimezone(hostPrefs);
 
   // Parse dateTime — if it includes a UTC offset (e.g., "2026-04-03T16:00:00-07:00"),
   // new Date() handles it correctly. If it's bare (legacy, no offset), interpret it

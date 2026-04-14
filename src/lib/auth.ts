@@ -72,43 +72,12 @@ export const authOptions: NextAuthOptions = {
       }
       return session;
     },
-    async signIn({ user, account }) {
-      // Backfill timezone for existing users who signed up before timezone detection
-      if (account?.provider === "google" && user?.id) {
-        try {
-          const dbUser = await prisma.user.findUnique({
-            where: { id: user.id },
-            select: { preferences: true },
-          });
-          const prefs = (dbUser?.preferences as Record<string, unknown>) || {};
-          const explicit = (prefs.explicit as Record<string, unknown>) || {};
-          if (!explicit.timezone && account.access_token) {
-            const oauth2Client = new google.auth.OAuth2(
-              process.env.GOOGLE_CLIENT_ID,
-              process.env.GOOGLE_CLIENT_SECRET
-            );
-            oauth2Client.setCredentials({
-              access_token: account.access_token,
-              refresh_token: account.refresh_token,
-            });
-            const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-            const res = await calendar.settings.get({ setting: "timezone" });
-            if (res.data.value) {
-              await prisma.user.update({
-                where: { id: user.id },
-                data: {
-                  preferences: {
-                    ...prefs,
-                    explicit: { ...explicit, timezone: res.data.value },
-                  } as Prisma.InputJsonValue,
-                },
-              });
-            }
-          }
-        } catch (e) {
-          console.error("Failed to backfill timezone on sign-in:", e);
-        }
-      }
+    async signIn() {
+      // Timezone is seeded once in the `createUser` event below from the
+      // user's Google Calendar setting, and from then on is owned by the
+      // user's explicit preferences. We deliberately do NOT backfill from
+      // Google on subsequent sign-ins — that used to silently overwrite
+      // the value the user chose in onboarding or the account page.
       return true;
     },
     // JWT callback needed for credentials provider

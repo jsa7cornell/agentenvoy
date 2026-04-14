@@ -14,18 +14,9 @@ export function generateCode(length = 6): string {
   return code;
 }
 
-const DEFAULT_TIMEZONE = "America/Los_Angeles";
-
-/** Validate an IANA timezone string. Returns the timezone if valid, or the default fallback. */
-export function safeTimezone(tz: string | undefined | null): string {
-  if (!tz) return DEFAULT_TIMEZONE;
-  try {
-    Intl.DateTimeFormat(undefined, { timeZone: tz });
-    return tz;
-  } catch {
-    return DEFAULT_TIMEZONE;
-  }
-}
+// Re-export from the canonical timezone module so existing imports
+// continue to work. All new code should import from "@/lib/timezone".
+export { safeTimezone, DEFAULT_TIMEZONE } from "./timezone";
 
 export function formatDateTime(date: Date): string {
   return new Intl.DateTimeFormat("en-US", {

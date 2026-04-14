@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getOrComputeSchedule, CalendarEvent } from "@/lib/calendar";
+import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -43,18 +44,18 @@ export async function GET(req: NextRequest) {
   });
 
   // Filter events to the requested week (include events that overlap)
-  const events = schedule.events
-    .filter((e) => {
-      const eStart = new Date(e.start).getTime();
-      const eEnd = new Date(e.end).getTime();
-      return eEnd > weekStart.getTime() && eStart < weekEnd.getTime();
-    })
-    .map((e) => serializeEvent(e));
+  const weekFiltered = schedule.events.filter((e) => {
+    const eStart = new Date(e.start).getTime();
+    const eEnd = new Date(e.end).getTime();
+    return eEnd > weekStart.getTime() && eStart < weekEnd.getTime();
+  });
+  const events = weekFiltered.map((e) => serializeEvent(e));
 
   // Build locationByDay from workingLocation events + preferences
   const prefs = (user.preferences as Record<string, unknown>) || {};
   const explicit = (prefs.explicit as Record<string, unknown>) || {};
-  const currentLocation = explicit.currentLocation as { label: string; until?: string } | undefined;
+  const structuredRules = (explicit.structuredRules as AvailabilityRule[] | undefined) ?? [];
+  const defaultLocation = (explicit.defaultLocation as string | undefined) || undefined;
 
   const locationByDay: Record<string, string | null> = {};
   for (let d = 0; d < 7; d++) {
@@ -74,15 +75,20 @@ export async function GET(req: NextRequest) {
 
     if (wlEvent?.summary) {
       locationByDay[dayStr] = wlEvent.summary;
-    } else if (currentLocation?.label) {
-      // Check if currentLocation is still valid (not expired)
-      if (!currentLocation.until || currentLocation.until >= dayStr) {
-        locationByDay[dayStr] = currentLocation.label;
+    } else {
+      // Check for an active location rule that covers this day
+      const activeRule = structuredRules
+        .filter((r) => r.action === "location" && r.status === "active" && r.locationLabel)
+        .filter((r) => !r.effectiveDate || r.effectiveDate <= dayStr)
+        .filter((r) => !r.expiryDate || r.expiryDate >= dayStr)
+        .sort((a, b) => b.priority - a.priority)[0];
+      if (activeRule?.locationLabel) {
+        locationByDay[dayStr] = activeRule.locationLabel;
+      } else if (defaultLocation) {
+        locationByDay[dayStr] = defaultLocation;
       } else {
         locationByDay[dayStr] = null;
       }
-    } else {
-      locationByDay[dayStr] = null;
     }
   }
 

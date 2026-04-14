@@ -12,7 +12,7 @@ import { createHash } from "crypto";
 import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
 import type { CalendarEvent } from "./calendar";
-import { safeTimezone } from "./utils";
+import { safeTimezone } from "./timezone";
 
 // --- Types ---
 
@@ -46,7 +46,7 @@ export interface UserPreferences {
     bufferMinutes?: number;
     blackoutDays?: string[];
     blockedWindows?: BlockedWindow[];
-    currentLocation?: { label: string; until?: string };
+    defaultLocation?: string; // host's home base (private — never surfaced to guests)
     activeCalendarIds?: string[]; // if set, only these calendars affect availability
     phone?: string;
     videoProvider?: "google-meet" | "zoom";
@@ -628,7 +628,10 @@ export function computeSchedule(
   persistentKnowledge: string | null,
   upcomingSchedulePreferences?: string | null
 ): ScoredSlot[] {
-  const tz = safeTimezone(preferences.explicit?.timezone ?? preferences.timezone);
+  // Canonical path only: preferences.explicit.timezone. Legacy top-level
+  // field is intentionally ignored here — if data exists there, the GET
+  // sites will log a warning and migration will move it.
+  const tz = safeTimezone(preferences.explicit?.timezone);
   const blockedWindows = [...((preferences.explicit?.blockedWindows ?? []) as BlockedWindow[])];
   let bizStart = preferences.explicit?.businessHoursStart ?? 9;
   let bizEnd = preferences.explicit?.businessHoursEnd ?? 18;

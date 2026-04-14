@@ -1,6 +1,8 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import type { CalendarContext, CalendarEvent } from "@/lib/calendar";
+import { getUserTimezone } from "@/lib/timezone";
+import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
 
 // --- Playbook cache (read once per cold start) ---
 
@@ -156,7 +158,8 @@ function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: str
     if (explicit.bufferMinutes) items.push(`Buffer between meetings: ${explicit.bufferMinutes} minutes`);
     if (explicit.timezone) items.push(`Timezone: ${explicit.timezone}`);
     if (explicit.blackoutDays) items.push(`Avoid days: ${JSON.stringify(explicit.blackoutDays)}`);
-    if (explicit.location) items.push(`Default location: ${explicit.location}`);
+    const defaultLoc = (explicit.defaultLocation as string | undefined) || (explicit.location as string | undefined);
+    if (defaultLoc) items.push(`Home base / default location: ${defaultLoc}`);
     if (explicit.blockedWindows && Array.isArray(explicit.blockedWindows)) {
       const windows = (explicit.blockedWindows as Array<{ start: string; end: string; days?: string[]; label?: string; expires?: string }>)
         .filter((w) => !w.expires || w.expires >= new Date().toISOString().slice(0, 10))
@@ -168,32 +171,30 @@ function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: str
         });
       if (windows.length > 0) items.push(`Blocked windows (do not schedule): ${windows.join("; ")}`);
     }
-    // Location: both Google workingLocation and preferences are signals — pass both if they differ
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const prefLoc = explicit.currentLocation as { label: string; until?: string } | undefined;
-    const activePrefLoc = prefLoc && (!prefLoc.until || prefLoc.until >= todayStr) ? prefLoc : undefined;
+    // Location: both Google workingLocation and the active location rule are signals — pass both if they differ
+    const activeLocRule = getActiveLocationRule((explicit.structuredRules as AvailabilityRule[] | undefined) ?? []);
+    const activePrefLocLabel = activeLocRule?.locationLabel;
+    const activePrefLocUntil = activeLocRule?.expiryDate;
 
-    if (calHostLocation && activePrefLoc) {
+    if (calHostLocation && activePrefLocLabel) {
       const locNormalized = (s: string) => s.trim().toLowerCase();
-      if (locNormalized(calHostLocation) === locNormalized(activePrefLoc.label)) {
-        // Signals agree
+      if (locNormalized(calHostLocation) === locNormalized(activePrefLocLabel)) {
         items.push(
-          `Current location: ${activePrefLoc.label} (confirmed by both Google Calendar and preferences). Host is away from home base — no in-person unless guest is nearby.`
+          `Current location: ${activePrefLocLabel} (confirmed by both Google Calendar and preferences). Host is away from home base — no in-person unless guest is nearby.`
         );
       } else {
-        // Signals conflict — surface both, let LLM apply playbook rules
         items.push(
-          `Location signals conflict: Google Calendar working location says "${calHostLocation}", preferences say "${activePrefLoc.label}". If location matters for this meeting (in-person format, travel buffers), clarify with the host. If there is no active dialog (generic invite), be conservative and assume the host is traveling.`
+          `Location signals conflict: Google Calendar working location says "${calHostLocation}", preferences say "${activePrefLocLabel}". If location matters for this meeting (in-person format, travel buffers), clarify with the host. If there is no active dialog (generic invite), be conservative and assume the host is traveling.`
         );
       }
     } else if (calHostLocation) {
       items.push(
         `Current location: ${calHostLocation} (Google Calendar working location). Host is away from home base — no in-person unless guest is nearby.`
       );
-    } else if (activePrefLoc) {
-      const untilStr = activePrefLoc.until ? ` (until ${activePrefLoc.until})` : "";
+    } else if (activePrefLocLabel) {
+      const untilStr = activePrefLocUntil ? ` (until ${activePrefLocUntil})` : "";
       items.push(
-        `Current location: ${activePrefLoc.label}${untilStr} (host-stated preference). Host is away from home base — no in-person unless guest is nearby.`
+        `Current location: ${activePrefLocLabel}${untilStr} (host-stated location rule). Host is away from home base — no in-person unless guest is nearby.`
       );
     }
     if (items.length > 0) {
@@ -285,10 +286,7 @@ function buildSessionContext(options: ComposeOptions): string {
   parts.push(`Host: ${options.hostName}`);
 
   // Timezone quick reference
-  const tz =
-    (options.hostPreferences?.explicit as Record<string, unknown> | undefined)?.timezone as string | undefined ??
-    (options.hostPreferences?.timezone as string | undefined) ??
-    "America/Los_Angeles";
+  const tz = getUserTimezone(options.hostPreferences ?? null);
   const now = new Date();
   const currentTimeStr = now.toLocaleString("en-US", {
     weekday: "short",
@@ -342,10 +340,7 @@ function buildSessionContext(options: ComposeOptions): string {
   }
   // Legacy fallback: old availableSlots format
   else if (options.availableSlots && options.availableSlots.length > 0) {
-    const tz =
-      (options.hostPreferences?.explicit as Record<string, unknown> | undefined)?.timezone as string | undefined ??
-      (options.hostPreferences?.timezone as string | undefined) ??
-      "America/Los_Angeles";
+    const tz = getUserTimezone(options.hostPreferences ?? null);
 
     const tzLabel = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
       .formatToParts(new Date(options.availableSlots[0].start))

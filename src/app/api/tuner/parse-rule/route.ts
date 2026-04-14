@@ -3,11 +3,13 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
+import { prisma } from "@/lib/prisma";
+import { getUserTimezone } from "@/lib/timezone";
 
 export interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -19,6 +21,7 @@ export interface ParsedRule {
   bufferAppliesTo?: string;
   businessHoursStart?: number; // hour 0-23, set when action is "business_hours"
   businessHoursEnd?: number;   // hour 0-23, set when action is "business_hours"
+  locationLabel?: string;      // set when action is "location" — e.g. "Baja", "NYC"
   priority: number;
   ambiguous?: boolean;
   interpretations?: string[];
@@ -32,12 +35,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { text, timezone, businessHoursStart, businessHoursEnd } = await req.json();
+  const { text, businessHoursStart, businessHoursEnd } = await req.json();
   if (!text?.trim()) {
     return NextResponse.json({ error: "No text provided" }, { status: 400 });
   }
 
-  const tz = timezone ?? "America/Los_Angeles";
+  // Canonical timezone — stored preference, never from body
+  const userRow = await prisma.user.findUnique({
+    where: { email: session.user.email },
+    select: { preferences: true },
+  });
+  const tz = getUserTimezone(userRow?.preferences as Record<string, unknown> | null);
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
@@ -56,7 +64,7 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
 {
   "originalText": "the user's input verbatim",
   "type": "ongoing|recurring|temporary|one-time",
-  "action": "block|allow|buffer|prefer|limit|business_hours",
+  "action": "block|allow|buffer|prefer|limit|business_hours|location",
   "timeStart": "HH:MM or null",
   "timeEnd": "HH:MM or null",
   "allDay": false,
@@ -68,6 +76,7 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
   "bufferAppliesTo": "string or null",
   "businessHoursStart": number or null,
   "businessHoursEnd": number or null,
+  "locationLabel": "string or null",
   "priority": 1-5,
   "ambiguous": false,
   "interpretations": null,
@@ -90,6 +99,12 @@ Action rules:
   - "reduce Monday to just 12-3" → action: "limit", daysOfWeek: [1], timeStart: "12:00", timeEnd: "15:00"
   - "limit Tuesday availability to 10am-2pm" → action: "limit", daysOfWeek: [2], timeStart: "10:00", timeEnd: "14:00"
   - "Wednesdays only 9-12" → action: "limit", daysOfWeek: [3], timeStart: "09:00", timeEnd: "12:00"
+- "location": set where the host is physically located for a given period. Creates a location override that displays as "Currently in X" in the widget and tells the agent the host is away from home base. Set locationLabel to the place name. Use effectiveDate + expiryDate for traveling periods, or leave undated for an ongoing override. Examples:
+  - "I'm in Baja until April 20" → action: "location", locationLabel: "Baja", type: "temporary", expiryDate: "2026-04-20"
+  - "traveling to NYC next week" → action: "location", locationLabel: "NYC", type: "temporary", effectiveDate: <next Monday>, expiryDate: <next Sunday>
+  - "based in Lisbon" → action: "location", locationLabel: "Lisbon", type: "ongoing"
+  - "in Tokyo through Friday" → action: "location", locationLabel: "Tokyo", type: "temporary", expiryDate: <this Friday>
+  Do NOT use "location" for the user's home base — that's a separate default location setting. Only use when the user signals they are somewhere other than their usual place, OR explicitly says "set my location to X".
 - "business_hours": change when the user is available for meetings. Use this when the input is about setting/changing GENERAL availability window (all days), work hours, or business hours. Set businessHoursStart and businessHoursEnd (hour 0-23). Examples:
   - "business hours 10-4" → action: "business_hours", businessHoursStart: 10, businessHoursEnd: 16
   - "available 9am to 5pm" → action: "business_hours", businessHoursStart: 9, businessHoursEnd: 17
@@ -130,7 +145,9 @@ Summary should be a clean, unambiguous description like:
 - "Block Apr 14 (all day)"
 - "Allow Saturday before 2:00 PM for calls"
 - "Limit Monday to 12:00 PM - 3:00 PM only"
-- "Set business hours to 10:00 AM - 4:00 PM"`,
+- "Set business hours to 10:00 AM - 4:00 PM"
+- "Currently in Baja until Apr 20"
+- "Based in Lisbon (ongoing)"`,
     prompt: text.trim(),
   });
 
@@ -142,7 +159,7 @@ Summary should be a clean, unambiguous description like:
     const rule: ParsedRule = {
       originalText: text.trim(),
       type: (["ongoing", "recurring", "temporary", "one-time"].includes(parsed.type) ? parsed.type : "ongoing") as ParsedRule["type"],
-      action: (["block", "allow", "buffer", "prefer", "limit", "business_hours"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
+      action: (["block", "allow", "buffer", "prefer", "limit", "business_hours", "location"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
       timeStart: parsed.timeStart || undefined,
       timeEnd: parsed.timeEnd || undefined,
       allDay: parsed.allDay || false,
@@ -154,6 +171,7 @@ Summary should be a clean, unambiguous description like:
       bufferAppliesTo: parsed.bufferAppliesTo || undefined,
       businessHoursStart: typeof parsed.businessHoursStart === "number" ? parsed.businessHoursStart : undefined,
       businessHoursEnd: typeof parsed.businessHoursEnd === "number" ? parsed.businessHoursEnd : undefined,
+      locationLabel: typeof parsed.locationLabel === "string" && parsed.locationLabel.trim() ? parsed.locationLabel.trim() : undefined,
       priority: typeof parsed.priority === "number" ? Math.max(1, Math.min(5, parsed.priority)) : 3,
       ambiguous: parsed.ambiguous || false,
       interpretations: Array.isArray(parsed.interpretations) ? parsed.interpretations : undefined,

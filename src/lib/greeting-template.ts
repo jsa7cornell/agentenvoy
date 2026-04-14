@@ -19,35 +19,9 @@ export interface FormattedWindows {
 
 // ─── Timezone label ──────────────────────────────────────────────────────────
 
-/**
- * Render an IANA timezone as a human-readable label.
- *
- * Examples:
- *   America/Los_Angeles  → "Pacific time"
- *   America/New_York     → "Eastern time"
- *   Asia/Kolkata         → "India Standard Time"
- *
- * NEVER returns a raw UTC offset like "GMT-7" — callers rely on this for the
- * guest-facing greeting and offsets look like machine output.
- */
-export function humanTimezoneLabel(timezone: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      timeZoneName: "long",
-    }).formatToParts(new Date());
-    const name = parts.find((p) => p.type === "timeZoneName")?.value || timezone;
-    // "Pacific Daylight Time" / "Pacific Standard Time" → "Pacific time"
-    // Only collapse when the prefix is a well-known US zone name.
-    const simplified = name.replace(
-      /\b(Pacific|Eastern|Central|Mountain|Atlantic|Alaska|Hawaii(?:-Aleutian)?)\s+(Daylight|Standard)\s+Time\b/,
-      "$1 time"
-    );
-    return simplified;
-  } catch {
-    return timezone;
-  }
-}
+// Re-export the canonical long-label helper so existing call sites don't have
+// to change. New code should import `longTimezoneLabel` from "@/lib/timezone".
+export { longTimezoneLabel as humanTimezoneLabel } from "./timezone";
 
 // ─── Time formatters ─────────────────────────────────────────────────────────
 

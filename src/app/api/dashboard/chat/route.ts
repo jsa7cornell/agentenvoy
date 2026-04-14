@@ -6,6 +6,7 @@ import { streamText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
+import { getUserTimezone } from "@/lib/timezone";
 
 const DASHBOARD_SYSTEM = `You are Envoy, the user's scheduling agent. You help them:
 1. Create meeting links from natural language
@@ -82,10 +83,7 @@ export async function POST(req: NextRequest) {
 
   // Fetch calendar context — same raw-event pipeline as deal room
   const userPrefs = user?.preferences as Record<string, unknown> | null;
-  const tz =
-    (userPrefs?.timezone as string) ??
-    ((userPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
-    "America/Los_Angeles";
+  const tz = getUserTimezone(userPrefs);
   let availabilityContext = "";
   if (hasCalendar) {
     try {

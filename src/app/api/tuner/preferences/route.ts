@@ -6,6 +6,7 @@ import { invalidateSchedule } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
 import { compileStructuredRules, expireRules } from "@/lib/availability-rules";
 import type { AvailabilityRule } from "@/lib/availability-rules";
+import { getUserTimezone } from "@/lib/timezone";
 import type { Prisma } from "@prisma/client";
 
 // GET /api/tuner/preferences — fetch current user preferences for the tuner panel
@@ -59,11 +60,11 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    timezone: (explicit.timezone as string) ?? (prefs.timezone as string) ?? "America/Los_Angeles",
+    timezone: getUserTimezone(prefs),
     businessHoursStart: (explicit.businessHoursStart as number) ?? 9,
     businessHoursEnd: (explicit.businessHoursEnd as number) ?? 18,
     blockedWindows: (explicit.blockedWindows as unknown[]) ?? [],
-    currentLocation: (explicit.currentLocation as { label: string; until?: string }) ?? null,
+    defaultLocation: (explicit.defaultLocation as string) ?? "",
     blackoutDays: (explicit.blackoutDays as string[]) ?? [],
     persistentKnowledge: user.persistentKnowledge ?? "",
     upcomingSchedulePreferences: user.upcomingSchedulePreferences ?? "",
@@ -93,7 +94,7 @@ export async function PUT(req: NextRequest) {
     businessHoursStart,
     businessHoursEnd,
     blockedWindows,
-    currentLocation,
+    defaultLocation,
     blackoutDays,
     persistentKnowledge,
     upcomingSchedulePreferences,
@@ -112,16 +113,24 @@ export async function PUT(req: NextRequest) {
   if (blackoutDays !== undefined) newExplicit.blackoutDays = blackoutDays;
   if (structuredRules !== undefined) newExplicit.structuredRules = structuredRules;
 
-  if (currentLocation !== undefined) {
-    if (currentLocation === null) {
-      delete newExplicit.currentLocation;
+  if (defaultLocation !== undefined) {
+    const trimmed = typeof defaultLocation === "string" ? defaultLocation.trim() : "";
+    if (!trimmed) {
+      delete newExplicit.defaultLocation;
     } else {
-      newExplicit.currentLocation = currentLocation;
+      newExplicit.defaultLocation = trimmed;
     }
+    // Drop legacy currentLocation shape if present — replaced by location rules
+    delete newExplicit.currentLocation;
   }
 
-  // Compile rules — use structured rules if available, fall back to free text
-  const tz = (timezone as string) ?? (newExplicit.timezone as string) ?? "America/Los_Angeles";
+  // Compile rules — use structured rules if available, fall back to free text.
+  // Use the incoming value if present (PUT may be updating it), otherwise the
+  // stored value via the canonical getter.
+  const tz =
+    typeof timezone === "string" && timezone.length > 0
+      ? timezone
+      : getUserTimezone({ ...prefs, explicit: newExplicit });
   let compiledRules = null;
 
   const rules = (structuredRules as AvailabilityRule[] | undefined) ?? (newExplicit.structuredRules as AvailabilityRule[] | undefined);

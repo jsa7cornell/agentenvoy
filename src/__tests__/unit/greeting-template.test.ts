@@ -132,9 +132,9 @@ describe("humanTimezoneLabel", () => {
     expect(humanTimezoneLabel("America/New_York")).toBe("Eastern time");
   });
 
-  it("keeps non-US zones in their full long form", () => {
-    // India has no DST — stays as "India Standard Time"
-    expect(humanTimezoneLabel("Asia/Kolkata")).toBe("India Standard Time");
+  it("uses the canonical TIMEZONE_TABLE label for zones in the table", () => {
+    // Asia/Kolkata is in the table; label is the hand-curated "India time"
+    expect(humanTimezoneLabel("Asia/Kolkata")).toBe("India time");
   });
 
   it("never returns a raw UTC offset", () => {

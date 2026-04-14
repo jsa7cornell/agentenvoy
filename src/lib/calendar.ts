@@ -248,15 +248,16 @@ export async function getCalendarContext(
   dedupedEvents.sort((a, b) => a.start.getTime() - b.start.getTime());
 
   // Prioritize relevant events: filter declined and transparent to the end
-  // so the cap doesn't silently drop important week-2 events
+  // so the cap doesn't silently drop important later-week events
   const relevant = dedupedEvents.filter(
     (ev) => ev.responseStatus !== "declined" && !ev.isTransparent
   );
   const context = dedupedEvents.filter(
     (ev) => ev.responseStatus === "declined" || ev.isTransparent
   );
-  // Keep up to 80 relevant events + up to 20 context events
-  const capped = [...relevant.slice(0, 80), ...context.slice(0, 20)]
+  // Cap sized for an 8-week horizon (~50/week busy ceiling + buffer).
+  // The LLM context builder re-caps as needed downstream.
+  const capped = [...relevant.slice(0, 400), ...context.slice(0, 100)]
     .sort((a, b) => a.start.getTime() - b.start.getTime());
 
   return {
@@ -465,10 +466,16 @@ export async function syncCalendar(userId: string, activeCalendarIds?: string[])
     })
   );
 
-  // Collect all events from cache
+  // Collect all events from cache — honor the activeCalendarIds filter so
+  // stale cached entries from deselected calendars don't bleed into results.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allCaches = await (prisma as any).calendarCache.findMany({
-    where: { userId },
+    where: {
+      userId,
+      ...(activeCalendarIds && activeCalendarIds.length > 0
+        ? { calendarId: { in: activeCalendarIds } }
+        : {}),
+    },
     select: { events: true },
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -488,23 +495,28 @@ async function fullSync(
   hostEmail: string
 ): Promise<{ events: StoredCalendarEvent[]; syncToken?: string }> {
   const now = new Date();
-  const horizon = new Date(now.getTime() + 56 * 24 * 60 * 60 * 1000); // 8 weeks
+  // Start 7 days in the past so the current week (which may be partially in the past)
+  // still gets fully populated. Google returns events whose end > timeMin.
+  const timeMin = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const horizon = new Date(now.getTime() + 56 * 24 * 60 * 60 * 1000); // 8 weeks forward
   const events: StoredCalendarEvent[] = [];
   let pageToken: string | undefined;
   let syncToken: string | undefined;
+  let pageCount = 0;
+  let rawItemCount = 0;
 
   do {
+    pageCount++;
     const { data } = await client.events.list({
       calendarId: cal.id,
-      timeMin: now.toISOString(),
+      timeMin: timeMin.toISOString(),
       timeMax: horizon.toISOString(),
       singleEvents: true,
       orderBy: "startTime",
       maxResults: 250,
       pageToken,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      eventTypes: ["default", "workingLocation", "outOfOffice"] as any,
     });
+    rawItemCount += (data.items ?? []).length;
 
     for (const ev of data.items ?? []) {
       const isAllDay = !ev.start?.dateTime;
@@ -548,6 +560,10 @@ async function fullSync(
     pageToken = data.nextPageToken || undefined;
     if (!pageToken) syncToken = data.nextSyncToken || undefined;
   } while (pageToken);
+
+  console.log(
+    `[fullSync] cal="${cal.name}" id=${cal.id} pages=${pageCount} rawItems=${rawItemCount} stored=${events.length} timeMin=${timeMin.toISOString()} timeMax=${horizon.toISOString()}`
+  );
 
   return { events, syncToken };
 }
@@ -666,13 +682,23 @@ export async function getCachedCalendarContext(
 
     // Deduplicate by iCalUID (cross-calendar) then by id (same calendar)
     const seen = new Set<string>();
+    const droppedSamples: string[] = [];
     const deduped = events.filter((ev) => {
       const dedupKey = ev.iCalUID || ev.id;
-      if (seen.has(dedupKey)) return false;
+      if (seen.has(dedupKey)) {
+        if (droppedSamples.length < 5) {
+          droppedSamples.push(`${ev.summary} [${ev.calendar}] key=${dedupKey.slice(0, 20)}`);
+        }
+        return false;
+      }
       seen.add(dedupKey);
       if (ev.iCalUID) seen.add(ev.id);
       return true;
     });
+    console.log(
+      `[getCachedCalendarContext] events=${events.length} deduped=${deduped.length} dropped=${events.length - deduped.length}` +
+        (droppedSamples.length > 0 ? ` samples=${JSON.stringify(droppedSamples)}` : "")
+    );
     deduped.sort((a, b) => a.start.getTime() - b.start.getTime());
 
     const relevant = deduped.filter(
@@ -681,7 +707,9 @@ export async function getCachedCalendarContext(
     const context = deduped.filter(
       (ev) => ev.responseStatus === "declined" || ev.isTransparent
     );
-    const capped = [...relevant.slice(0, 80), ...context.slice(0, 20)]
+    // Cap sized for an 8-week horizon (~50/week busy ceiling + buffer).
+    // The LLM context builder re-caps as needed downstream.
+    const capped = [...relevant.slice(0, 400), ...context.slice(0, 100)]
       .sort((a, b) => a.start.getTime() - b.start.getTime());
 
     const calendarNames = Array.from(new Set(events.map((e) => e.calendar)));
@@ -719,7 +747,7 @@ export async function getCachedCalendarContext(
 // --- Computed Schedule ---
 
 import { computeSchedule, computeInputHash, type ScoredSlot, type UserPreferences } from "./scoring";
-import { safeTimezone } from "./utils";
+import { safeTimezone } from "./timezone";
 
 /**
  * Get the computed schedule for a user, recomputing only if inputs changed.
@@ -749,31 +777,10 @@ export async function getOrComputeSchedule(userId: string, options?: { forceRefr
   if (!user) throw new Error("User not found");
 
   const prefs = (user.preferences as UserPreferences) || {};
-  const tz = safeTimezone(prefs.explicit?.timezone ?? prefs.timezone);
+  const tz = safeTimezone(prefs.explicit?.timezone);
 
-  // Auto-expire stale currentLocation from DB if until date has passed
-  const manualLocation = prefs.explicit?.currentLocation as { label: string; until?: string } | undefined;
-  if (manualLocation?.until) {
-    // Use timezone-aware date, not UTC
-    const todayParts = new Intl.DateTimeFormat("en-CA", {
-      year: "numeric", month: "2-digit", day: "2-digit", timeZone: tz,
-    }).format(new Date()); // en-CA = YYYY-MM-DD
-    if (manualLocation.until < todayParts) {
-      const { currentLocation: _removed, ...explicitWithout } = (prefs.explicit || {}) as Record<string, unknown>;
-      void _removed;
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          preferences: {
-            ...prefs,
-            explicit: explicitWithout,
-          } as unknown as Prisma.InputJsonValue,
-        },
-      });
-      // Update local prefs so recomputation uses the cleaned state
-      if (prefs.explicit) delete (prefs.explicit as Record<string, unknown>).currentLocation;
-    }
-  }
+  // Location expiry is handled by the availability rule lifecycle
+  // (expireRules() runs on GET /api/tuner/preferences) — no cleanup needed here.
 
   // Force-clear calendar cache if requested (e.g., host said "check again")
   if (options?.forceRefresh) {

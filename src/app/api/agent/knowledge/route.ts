@@ -7,6 +7,7 @@ import { buildKnowledgePreview } from "@/agent/administrator";
 import { invalidateSchedule } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
 import type { UserPreferences } from "@/lib/scoring";
+import { getUserTimezone } from "@/lib/timezone";
 
 // GET /api/agent/knowledge
 // Returns the host's knowledge base + a rendered preview
@@ -97,7 +98,7 @@ export async function PUT(req: NextRequest) {
 
   // Compile free-text preferences into deterministic scheduling rules
   const prefs = (user.preferences as UserPreferences) || {};
-  const tz = prefs.explicit?.timezone ?? prefs.timezone ?? "America/Los_Angeles";
+  const tz = getUserTimezone(prefs as unknown as Record<string, unknown>);
 
   const compiled = await compilePreferenceRules(
     user.persistentKnowledge,

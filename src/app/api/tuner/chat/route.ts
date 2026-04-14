@@ -8,6 +8,7 @@ import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule } from "@/agent/composer";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { sanitizeHistory, roleSummary } from "@/lib/conversation";
+import { getUserTimezone } from "@/lib/timezone";
 
 const TUNER_SYSTEM = `You are Envoy, operating inside the Availability Tuner. The user is viewing a weekly calendar overlay that shows their Google Calendar events alongside your scored availability slots. Your job is to help them understand and adjust their availability.
 
@@ -43,7 +44,7 @@ Use the update_knowledge action when the user wants to change their availability
   - "Keep Friday afternoons free" → blockedWindows: [{ start: "12:00", end: "18:00", days: ["Fri"], label: "Friday afternoons free" }]
   - "I'm surfing 8-10 every morning" → blockedWindows: [{ start: "08:00", end: "10:00", days: ["Mon","Tue","Wed","Thu","Fri"], label: "surfing" }]
   - "Open up Saturday mornings" → persistent: mention Saturday morning availability
-- Current location → currentLocation: { label: "Baja", until: "2026-04-14" }
+- Current location (traveling or away from home base) → currentLocation: { label: "Baja", until: "2026-04-14" } — this creates a location rule on the Availability page with automatic expiry.
 
 After saving, tell the user to check the calendar view — it will refresh automatically with the updated scores.
 
@@ -105,10 +106,7 @@ export async function POST(req: NextRequest) {
 
     // Schedule context
     const hostPrefs = user.preferences as Record<string, unknown> | null;
-    const tz =
-      (hostPrefs?.timezone as string) ??
-      ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string) ??
-      "America/Los_Angeles";
+    const tz = getUserTimezone(hostPrefs);
 
     try {
       const schedule = await getOrComputeSchedule(user.id);

@@ -17,6 +17,7 @@ import {
   formatTimeLabel,
   layoutEvents,
 } from "@/lib/calendar-utils";
+import { shortTimezoneLabel } from "@/lib/timezone";
 
 export interface TunerEvent {
   id: string;
@@ -92,9 +93,7 @@ export function WeeklyCalendar({
       if (e.eventType === "workingLocation" || e.eventType === "outOfOffice") continue;
       if (e.isAllDay) continue;
       const dayStr = toDayStr(e.start, timezone);
-      if (grouped[dayStr]) {
-        grouped[dayStr].push(e);
-      }
+      if (grouped[dayStr]) grouped[dayStr].push(e);
     }
     return grouped;
   }, [events, days, timezone]);
@@ -139,12 +138,15 @@ export function WeeklyCalendar({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Score legend */}
+      {/* Score legend + timezone badge */}
       <div className="flex items-center gap-4 px-4 py-2 border-b border-secondary text-[11px] text-muted shrink-0">
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-100 dark:bg-emerald-600/60 border border-emerald-500 dark:border-emerald-400" /> Available</span>
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-100 dark:bg-amber-600/50 border border-amber-500 dark:border-amber-400" /> Protected</span>
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-100 dark:bg-red-600/50 border border-red-600 dark:border-red-500" /> Blocked</span>
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-50 dark:bg-indigo-900/80 border border-indigo-500 dark:border-indigo-400" /> Calendar event</span>
+        <span className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-secondary/60 border border-DEFAULT/60 text-primary font-medium" title={timezone}>
+          {shortTimezoneLabel(timezone)}
+        </span>
       </div>
 
       {/* Scrollable calendar area */}

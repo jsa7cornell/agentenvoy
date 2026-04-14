@@ -6,7 +6,8 @@ import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
-import { generateCode, safeTimezone } from "@/lib/utils";
+import { generateCode } from "@/lib/utils";
+import { getUserTimezone } from "@/lib/timezone";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { sanitizeHistory, roleSummary } from "@/lib/conversation";
 import { readFileSync } from "fs";
@@ -115,7 +116,7 @@ Low-confidence scores (2, 3) are starting points — adjust based on context:
 - But never present a protected (4+) slot as available without the host explicitly overriding it.
 
 Non-primary calendars (tagged "from Family Calendar" or similar): these are OTHER PEOPLE'S events. They provide household context but do not block the host's time.
-currentLocation in preferences is the authoritative source for where the host is.
+The active Location rule (from structuredRules) is the authoritative source for where the host is right now. If no location rule is active, the defaultLocation from preferences is home base.
 
 PROPOSING TIMES FOR CUSTOM EVENTS:
 When the host asks you to find time for a specific meeting, be an active collaborator:
@@ -297,10 +298,7 @@ export async function POST(req: NextRequest) {
   // Scored schedule — pre-computed slots with protection scores
   let calendarConnected = false;
   const hostPrefs = user.preferences as Record<string, unknown> | null;
-  const tz = safeTimezone(
-    (hostPrefs?.timezone as string) ??
-    ((hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string)
-  );
+  const tz = getUserTimezone(hostPrefs);
   try {
     const schedule = await getOrComputeSchedule(user.id, { forceRefresh: isRefreshRequest });
     if (schedule.connected) {

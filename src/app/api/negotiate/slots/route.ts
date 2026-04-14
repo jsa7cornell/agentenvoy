@@ -4,6 +4,8 @@ import { getOrComputeSchedule } from "@/lib/calendar";
 import { applyEventOverrides, type LinkRules, type ScoredSlot } from "@/lib/scoring";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { getUserTimezone } from "@/lib/timezone";
+import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
 
 // GET /api/negotiate/slots?sessionId=xxx  (guest view — by session)
 // GET /api/negotiate/slots?self=true      (host view — authenticated user's own availability)
@@ -53,10 +55,7 @@ export async function GET(req: NextRequest) {
   }
 
   const explicit = prefs.explicit as Record<string, unknown> | undefined;
-  const timezone =
-    (explicit?.timezone as string) ||
-    (prefs.timezone as string) ||
-    "America/Los_Angeles";
+  const timezone = getUserTimezone(prefs);
 
   const slotsByDay: Record<
     string,
@@ -68,10 +67,12 @@ export async function GET(req: NextRequest) {
   try {
     const schedule = await getOrComputeSchedule(hostId);
 
-    // Widget display: combine both signals — neither suppresses the other
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const rawLocation = explicit?.currentLocation as { label: string; until?: string } | undefined;
-    const activePrefLocation = rawLocation && (!rawLocation.until || rawLocation.until >= todayStr) ? rawLocation : null;
+    // Widget display: combine both signals — active location rule + Google workingLocation.
+    // The host's private defaultLocation is NEVER surfaced here (guest-facing widget).
+    const activeLocRule = getActiveLocationRule((explicit?.structuredRules as AvailabilityRule[] | undefined) ?? []);
+    const activePrefLocation = activeLocRule?.locationLabel
+      ? { label: activeLocRule.locationLabel, until: activeLocRule.expiryDate }
+      : null;
     const googleLocation = schedule.hostLocation;
 
     if (activePrefLocation && googleLocation) {
