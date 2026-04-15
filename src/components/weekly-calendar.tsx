@@ -41,6 +41,50 @@ export interface TunerSlot {
   confidence: string;
   reason: string;
   eventSummary?: string;
+  /** Factual category (open, event, blocked_window, off_hours, weekend, blackout).
+   *  Used for heatmap color coding. */
+  kind?: string;
+  /** Intrinsic protection category: "none" | "preference" | "commitment".
+   *  Surfaces in the slot tooltip so the host can see why a slot is protected. */
+  blockCost?: string;
+  /** Protection firmness: "weak" | "strong". Paired with blockCost in the tooltip. */
+  firmness?: string;
+}
+
+/**
+ * Human-readable tier label derived from score + VIP reachability. Used in
+ * the slot tooltip so the host can see at a glance which tier a slot lives
+ * in ("first offer", "stretch", "deep stretch", "never") without having to
+ * memorize the numeric score table.
+ */
+export function slotTierLabel(score: number): string {
+  if (score <= 0) return "host preferred";
+  if (score <= 2) return "first offer";
+  if (score === 3) return "stretch (VIP)";
+  if (score === 4) return "deep stretch (VIP + explicit)";
+  return "never offered";
+}
+
+/**
+ * Build a descriptive tooltip string for a slot. Shows tier, score, reason,
+ * and (when set) the intrinsic block-cost/firmness label — so a host
+ * hovering Tuesday 7 AM sees "stretch (VIP) — off hours · preference:strong".
+ * This is the single source of tooltip truth; WeeklyCalendar and DayView
+ * both call it.
+ */
+export function slotTooltip(slot: TunerSlot): string {
+  const parts: string[] = [
+    `${slotTierLabel(slot.score)} (score ${slot.score})`,
+    slot.reason,
+  ];
+  if (slot.blockCost && slot.blockCost !== "none") {
+    const firm = slot.firmness ? `:${slot.firmness}` : "";
+    parts.push(`${slot.blockCost}${firm}`);
+  }
+  if (slot.eventSummary) {
+    parts.push(slot.eventSummary);
+  }
+  return parts.join(" · ");
 }
 
 interface WeeklyCalendarProps {
@@ -233,7 +277,7 @@ export function WeeklyCalendar({
                       key={row}
                       className={`absolute inset-x-0 ${scoreColor} ${isHourBoundary ? "border-t border-DEFAULT/60" : ""} cursor-pointer hover:brightness-125 transition-all group`}
                       style={{ top: row * ROW_HEIGHT, height: ROW_HEIGHT }}
-                      title={slot ? `Score ${slot.score}: ${slot.reason}${slot.eventSummary ? ` — ${slot.eventSummary}` : ""}` : "No data"}
+                      title={slot ? slotTooltip(slot) : "No data"}
                       onClick={() => {
                         if (onSlotClick && slot) {
                           const dayLabel = formatDayHeader(day);
@@ -246,11 +290,17 @@ export function WeeklyCalendar({
                       {slot && slot.score >= 2 && (
                         <div className={`absolute left-0 top-0 bottom-0 w-0.5 ${scoreBorder}`} />
                       )}
-                      {/* Tooltip on hover */}
+                      {/* Tooltip on hover — surfaces tier + block intrinsics */}
                       {slot && (
                         <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-surface-secondary border border-DEFAULT text-[10px] text-primary whitespace-nowrap shadow-lg pointer-events-none">
-                          Score {slot.score}: {slot.reason}
-                          {slot.eventSummary && <span className="text-muted"> — {slot.eventSummary}</span>}
+                          <div className="font-semibold">{slotTierLabel(slot.score)}</div>
+                          <div className="text-muted">
+                            score {slot.score} · {slot.reason}
+                            {slot.blockCost && slot.blockCost !== "none" && (
+                              <> · {slot.blockCost}{slot.firmness ? `:${slot.firmness}` : ""}</>
+                            )}
+                            {slot.eventSummary && <> · {slot.eventSummary}</>}
+                          </div>
                         </div>
                       )}
                     </div>

@@ -184,6 +184,8 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
       "end": "HH:MM",         // 24-hour, e.g. "10:00"
       "days": ["Mon","Tue"],   // optional — short day names, omit for all days
       "label": "surfing",      // brief reason
+      "blockCost": "preference", // "preference" = host-only cost (host can break it for the right meeting); "commitment" = someone else is expecting this slot (family, school, specific person)
+      "firmness": "strong",    // "weak" = host could break this for important meetings (focus time, prep, buffer, heads-down); "strong" = body/habit/routine/family that's genuinely hard to move (surfing, gym, prayer, family dinner, Mia's pickup)
       "expires": "YYYY-MM-DD"  // REQUIRED for one-off items. Omit ONLY for explicitly permanent rules ("every", "always", "weekly").
     }
   ],
@@ -218,7 +220,29 @@ Rules:
 - Day-bounded rules (daily activities) should use "days" array.
 - ONE-OFF ITEMS: if the preference mentions a specific date/day without "every", "always", or "weekly", it is ONE-OFF. Set "expires" to the end of that day or week. Example: "yoga Wed 7-9 AM" (without "every") → expires end of this week. "I always surf 8-10" → no expires.
 - If a preference is TRULY ambiguous (unclear timezone, vague duration, contradictory), add to "ambiguities" and DO NOT generate a rule for it. But do NOT mark dynamic/runtime rules (buffers, priority buckets) as ambiguous just because you can't see the calendar — those rules are applied later.
-- Only extract what is clearly stated. Do not infer unstated preferences.`,
+- Only extract what is clearly stated. Do not infer unstated preferences.
+
+BLOCK CLASSIFICATION — intrinsic protection tags (blockCost + firmness):
+Each blockedWindow gets TWO tags that govern how Envoy reaches into it for VIP meetings. Choose carefully from the natural-language context:
+
+blockCost:
+- "commitment" — the block exists because a specific other party is expecting this slot. Examples: "family dinner", "Mia's school pickup", "Dad's birthday call", "weekly 1:1 with Sarah". If you see a specific person or group named (or strongly implied like "family"), emit commitment.
+- "preference" — the block exists for the host's own reasons. Examples: "surfing 6-9am", "focus time", "gym", "prep", "prayer", "quiet hours", "heads down". No named third party. Default to preference when unclear.
+
+firmness:
+- "strong" — the host would genuinely struggle to move this. Physical/bodily commitments (surf, gym, yoga, prayer, meditation, sleep), family obligations (dinner, pickup, school), named-person commitments. Default firmness for commitment blocks is strong.
+- "weak" — the host explicitly or implicitly indicated flexibility. Phrases like "I try to", "prefer", "usually hold", "focus time I'd break for the right meeting". Focus time, prep buffer, quiet hours, deep work blocks default to weak UNLESS the host said something like "really protect" or "don't touch."
+- When in doubt, default to strong. Safer for the host — they can always downgrade later.
+
+Examples:
+- "I surf every morning 6-9 AM" → blockCost: preference, firmness: strong
+- "focus time Mon/Wed 9-11 AM" → blockCost: preference, firmness: weak
+- "family dinner 6-7 PM weekdays" → blockCost: commitment, firmness: strong
+- "Mia's school pickup 3-4 PM" → blockCost: commitment, firmness: strong
+- "prep buffer 30 min before meetings" → blockCost: preference, firmness: weak
+- "never schedule before 10 AM — sleep" → blockCost: preference, firmness: strong
+- "weekly 1:1 with Sarah Tue 2 PM" → blockCost: commitment, firmness: strong (named person)
+- "I protect Tuesday mornings for deep work" → blockCost: preference, firmness: weak (implicit: "protect" but it's own work)`,
     prompt: texts.join("\n\n"),
   });
 
@@ -227,13 +251,26 @@ Rules:
     const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
     const parsed = JSON.parse(cleaned);
     return {
-      blockedWindows: (parsed.blockedWindows ?? []).map((w: Record<string, unknown>) => ({
-        start: String(w.start ?? "00:00"),
-        end: String(w.end ?? "23:59"),
-        ...(w.days ? { days: w.days as string[] } : {}),
-        ...(w.label ? { label: String(w.label) } : {}),
-        ...(w.expires ? { expires: String(w.expires) } : {}),
-      })),
+      blockedWindows: (parsed.blockedWindows ?? []).map((w: Record<string, unknown>) => {
+        // Coerce blockCost to the canonical type — accept only "preference"
+        // and "commitment"; anything else (including "none", which makes no
+        // sense for a blocked window) collapses to the "preference" default.
+        const blockCost: BlockCost =
+          w.blockCost === "commitment" ? "commitment" : "preference";
+        // Firmness: accept "weak" / "strong"; default to "strong" (safer
+        // for the host — weak is an explicit opt-in to flexibility).
+        const firmness: BlockFirmness =
+          w.firmness === "weak" ? "weak" : "strong";
+        return {
+          start: String(w.start ?? "00:00"),
+          end: String(w.end ?? "23:59"),
+          blockCost,
+          firmness,
+          ...(w.days ? { days: w.days as string[] } : {}),
+          ...(w.label ? { label: String(w.label) } : {}),
+          ...(w.expires ? { expires: String(w.expires) } : {}),
+        };
+      }),
       buffers: (parsed.buffers ?? []).map((b: Record<string, unknown>) => ({
         beforeMinutes: Number(b.beforeMinutes ?? 0),
         afterMinutes: Number(b.afterMinutes ?? 0),

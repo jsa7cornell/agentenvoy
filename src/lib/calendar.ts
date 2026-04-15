@@ -1007,3 +1007,74 @@ export async function createCalendarEvent(
     )?.uri,
   };
 }
+
+/**
+ * Create a tentative calendar event backing a Hold. Unlike createCalendarEvent,
+ * this sets:
+ *   - status: "tentative" (appears muted in the host's calendar UI)
+ *   - transparency: "opaque" (DOES block the slot from double-booking, which
+ *     is the whole point of a hold)
+ *   - no attendees (the guest hasn't confirmed yet; inviting them prematurely
+ *     would be confusing)
+ *   - sendUpdates: "none" (nobody needs a notification about a hold)
+ *
+ * Returns the gcal event id so handleHoldSlot can store it on Hold.calendarEventId
+ * and handleReleaseHold can delete it later. Throws if the user has no
+ * writable Google Calendar — callers should treat the hold as best-effort
+ * (written to the Hold table but without calendar protection).
+ */
+export async function createTentativeHoldEvent(
+  userId: string,
+  params: {
+    summary: string;
+    description?: string;
+    startTime: Date;
+    endTime: Date;
+  }
+): Promise<{ eventId: string | null; htmlLink: string | null }> {
+  const calendar = await getGoogleCalendarClient(userId);
+  const { data } = await calendar.events.insert({
+    calendarId: "primary",
+    requestBody: {
+      summary: params.summary,
+      description: params.description,
+      start: { dateTime: params.startTime.toISOString() },
+      end: { dateTime: params.endTime.toISOString() },
+      status: "tentative",
+      transparency: "opaque",
+    },
+    sendUpdates: "none",
+  });
+  return {
+    eventId: data.id ?? null,
+    htmlLink: data.htmlLink ?? null,
+  };
+}
+
+/**
+ * Delete a calendar event by id. Used by handleReleaseHold and by the
+ * hold-expiry sweeper to clean up tentative events when their Hold row
+ * transitions out of "active". Silently swallows 404/410 — if the event
+ * is already gone, the caller's intent is satisfied.
+ */
+export async function deleteCalendarEvent(
+  userId: string,
+  eventId: string
+): Promise<void> {
+  try {
+    const calendar = await getGoogleCalendarClient(userId);
+    await calendar.events.delete({
+      calendarId: "primary",
+      eventId,
+      sendUpdates: "none",
+    });
+  } catch (e: unknown) {
+    const err = e as { code?: number; response?: { status?: number } };
+    const status = err?.code ?? err?.response?.status;
+    if (status === 404 || status === 410) {
+      // Already gone — treat as success.
+      return;
+    }
+    throw e;
+  }
+}

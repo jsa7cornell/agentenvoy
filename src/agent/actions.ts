@@ -3,6 +3,7 @@ import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { normalizeLinkRules } from "@/lib/scoring";
+import { createTentativeHoldEvent, deleteCalendarEvent } from "@/lib/calendar";
 
 // --- Types ---
 
@@ -873,10 +874,10 @@ async function handleHoldSlot(
 
   const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
 
-  // Create the Hold row. Calendar event creation is done separately by the
-  // caller (it requires the gcal writer and the host's OAuth token) and
-  // the resulting calendarEventId is written back via hold.update. For
-  // now we persist the hold; the calendar side-effect is a follow-up.
+  // Create the Hold row first — it's the source of truth. The calendar
+  // tentative event is a best-effort side effect; if the host has no
+  // writable calendar (or gcal is temporarily unreachable), the hold still
+  // exists in our DB and the composer/widget will respect it.
   const hold = await prisma.hold.create({
     data: {
       sessionId,
@@ -887,6 +888,27 @@ async function handleHoldSlot(
       expiresAt,
     },
   });
+
+  // Create the backing tentative calendar event. Non-blocking on failure —
+  // the Hold row is authoritative. If this succeeds, persist the gcal id
+  // so handleReleaseHold can clean it up later.
+  const guestName = session.link.inviteeName || "guest";
+  try {
+    const result = await createTentativeHoldEvent(userId, {
+      summary: `[HOLD] ${guestName}`,
+      description: `Tentative hold placed by AgentEnvoy. Expires ${expiresAt.toISOString()} unless confirmed or released.`,
+      startTime: slotStart,
+      endTime: slotEnd,
+    });
+    if (result.eventId) {
+      await prisma.hold.update({
+        where: { id: hold.id },
+        data: { calendarEventId: result.eventId },
+      });
+    }
+  } catch (e) {
+    console.warn("[hold_slot] could not create tentative calendar event:", e);
+  }
 
   // Post a system message into the negotiation session so the host channel
   // has an auditable record of when + why the hold was placed.
@@ -943,7 +965,7 @@ async function handleReleaseHold(
     return { success: false, message: "Not authorized for this session" };
   }
 
-  const where: Parameters<typeof prisma.hold.updateMany>[0]["where"] = {
+  const where: NonNullable<Parameters<typeof prisma.hold.findMany>[0]>["where"] = {
     sessionId,
     status: "active",
   };
@@ -955,12 +977,14 @@ async function handleReleaseHold(
     where.slotStart = slotStart;
   }
 
-  const result = await prisma.hold.updateMany({
+  // Fetch the matching active holds first so we can clean up each one's
+  // tentative calendar event. We then mark them released in a single update.
+  const holdsToRelease = await prisma.hold.findMany({
     where,
-    data: { status: "released" },
+    select: { id: true, calendarEventId: true },
   });
 
-  if (result.count === 0) {
+  if (holdsToRelease.length === 0) {
     return {
       success: false,
       message: slotStartRaw
@@ -968,6 +992,24 @@ async function handleReleaseHold(
         : `No active holds found for session ${sessionId}`,
     };
   }
+
+  // Delete each backing tentative calendar event. Non-blocking per hold —
+  // a gcal failure shouldn't leave the hold in a half-released state.
+  await Promise.all(
+    holdsToRelease.map(async (h) => {
+      if (!h.calendarEventId) return;
+      try {
+        await deleteCalendarEvent(userId, h.calendarEventId);
+      } catch (e) {
+        console.warn(`[release_hold] could not delete tentative event ${h.calendarEventId}:`, e);
+      }
+    })
+  );
+
+  const result = await prisma.hold.updateMany({
+    where,
+    data: { status: "released" },
+  });
 
   const name = session.link.inviteeName || session.link.code || "the guest";
   return {

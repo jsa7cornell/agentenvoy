@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createCalendarEvent } from "@/lib/calendar";
+import { createCalendarEvent, deleteCalendarEvent } from "@/lib/calendar";
 import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
 import { Resend } from "resend";
@@ -180,6 +180,48 @@ export async function POST(req: NextRequest) {
     .formatToParts(startTime)
     .find((p) => p.type === "timeZoneName")?.value ?? hostTimezone;
 
+  // Clear any active holds on this session — the meeting is now confirmed,
+  // so the tentative protection is no longer needed. We flip hold.status to
+  // "satisfied" and delete the backing tentative calendar event so the
+  // real confirmed event (created above) is the only thing on the host's
+  // calendar for this time. Non-blocking on gcal failures.
+  //
+  // If any holds were satisfied, this was a "stretch booking" — Envoy
+  // reached into the host's protected time on a VIP link and the guest
+  // confirmed. Post a system message into the host's dashboard channel
+  // so the host is explicitly aware ("that stretch slot just landed").
+  let hadStretchHold = false;
+  try {
+    const activeHolds = await prisma.hold.findMany({
+      where: { sessionId, status: "active" },
+      select: { id: true, calendarEventId: true },
+    });
+    if (activeHolds.length > 0) {
+      hadStretchHold = true;
+      await Promise.all(
+        activeHolds.map(async (h) => {
+          if (!h.calendarEventId) return;
+          try {
+            await deleteCalendarEvent(session.hostId, h.calendarEventId);
+          } catch (e) {
+            console.warn(
+              `[confirm] could not delete tentative hold event ${h.calendarEventId}:`,
+              e
+            );
+          }
+        })
+      );
+      await prisma.hold.updateMany({
+        where: { sessionId, status: "active" },
+        data: { status: "satisfied" },
+      });
+    }
+  } catch (e) {
+    // Non-blocking — confirmation itself still succeeds even if hold
+    // cleanup fails. The cron sweeper will pick up any orphaned holds.
+    console.error("[confirm] hold satisfaction cleanup failed:", e);
+  }
+
   // Update session(s) — for group events, update ALL linked sessions
   const sessionIdsToUpdate = isGroupEvent ? allParticipantSessions : [sessionId];
   const confirmSummary = `${meetingFormat} meeting on ${displayDate} at ${displayTime} ${tzAbbr}${location ? ` at ${location}` : ""}`;
@@ -217,6 +259,39 @@ export async function POST(req: NextRequest) {
       })
     )
   );
+
+  // Stretch booking notification — when a confirmed meeting had an active
+  // hold on it, that means Envoy reached into the host's protected time on
+  // a VIP link and this was the payoff. Post a system message into the
+  // host's dashboard channel so the host is explicitly notified ("that
+  // stretch slot you approved just landed"). Linked to the thread so it
+  // renders as a thread-card update in the dashboard feed.
+  if (hadStretchHold) {
+    try {
+      let channel = await prisma.channel.findUnique({
+        where: { userId: session.hostId },
+      });
+      if (!channel) {
+        channel = await prisma.channel.create({ data: { userId: session.hostId } });
+      }
+      const guestLabel = session.link.inviteeName || guestEmail || "the guest";
+      const stretchNote =
+        `Stretch slot confirmed for ${guestLabel}: ${displayDate} at ${displayTime} ${tzAbbr}. ` +
+        `This was a VIP hold you approved earlier — the guest accepted and it's now on your calendar.`;
+      await prisma.channelMessage.create({
+        data: {
+          channelId: channel.id,
+          role: "envoy",
+          content: stretchNote,
+          threadId: sessionId,
+        },
+      });
+    } catch (e) {
+      // Non-blocking — the confirmation succeeded, this is just the
+      // courtesy heads-up in the dashboard feed.
+      console.error("[confirm] stretch booking channel notification failed:", e);
+    }
+  }
 
   // Create NegotiationOutcome for tracking
   try {

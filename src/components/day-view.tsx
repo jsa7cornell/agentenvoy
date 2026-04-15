@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { TunerEvent, TunerSlot } from "@/components/weekly-calendar";
+import { TunerEvent, TunerSlot, slotTooltip, slotTierLabel } from "@/components/weekly-calendar";
 import {
   HOUR_START,
   HOUR_END,
@@ -229,16 +229,22 @@ export function DayView({
                   key={row}
                   className={`absolute inset-x-0 ${scoreColor} ${isHourBoundary ? "border-t border-DEFAULT/60" : ""} group`}
                   style={{ top: row * ROW_HEIGHT, height: ROW_HEIGHT }}
-                  title={slot ? `Score ${slot.score}: ${slot.reason}` : undefined}
+                  title={slot ? slotTooltip(slot) : undefined}
                 >
                   {slot && slot.score >= 2 && (
                     <div className={`absolute left-0 top-0 bottom-0 w-0.5 ${scoreBorder}`} />
                   )}
-                  {/* Tooltip */}
+                  {/* Tooltip — surfaces tier + block intrinsics */}
                   {slot && (
                     <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-surface-secondary border border-DEFAULT text-[10px] text-primary whitespace-nowrap shadow-lg pointer-events-none">
-                      Score {slot.score}: {slot.reason}
-                      {slot.eventSummary && <span className="text-muted"> — {slot.eventSummary}</span>}
+                      <div className="font-semibold">{slotTierLabel(slot.score)}</div>
+                      <div className="text-muted">
+                        score {slot.score} · {slot.reason}
+                        {slot.blockCost && slot.blockCost !== "none" && (
+                          <> · {slot.blockCost}{slot.firmness ? `:${slot.firmness}` : ""}</>
+                        )}
+                        {slot.eventSummary && <> · {slot.eventSummary}</>}
+                      </div>
                     </div>
                   )}
                 </div>

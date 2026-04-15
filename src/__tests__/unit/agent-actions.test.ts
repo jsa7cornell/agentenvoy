@@ -259,12 +259,26 @@ const mockPrisma = vi.hoisted(() => ({
   hold: {
     create: vi.fn(),
     findFirst: vi.fn(),
+    findMany: vi.fn(),
+    update: vi.fn(),
     updateMany: vi.fn(),
   },
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: mockPrisma }));
 vi.mock("@/lib/utils", () => ({ generateCode: () => "test-code-123" }));
+
+// Mock the calendar writer so hold_slot / release_hold don't try to reach
+// Google during tests. createTentativeHoldEvent is stubbed to return a fake
+// event id (exercising the calendarEventId persistence path); deleteCalendarEvent
+// is a no-op.
+vi.mock("@/lib/calendar", () => ({
+  createTentativeHoldEvent: vi.fn(async () => ({
+    eventId: "test-gcal-event-id",
+    htmlLink: "https://calendar.google.com/test",
+  })),
+  deleteCalendarEvent: vi.fn(async () => undefined),
+}));
 
 // Test fixtures
 const HOST_USER_ID = "host-user-1";
@@ -990,6 +1004,11 @@ describe("executeActions", () => {
     beforeEach(() => {
       mockPrisma.hold.findFirst.mockResolvedValue(null);
       mockPrisma.hold.create.mockResolvedValue({ id: "hold-1" });
+      // handleHoldSlot may attempt to persist a calendarEventId on the
+      // hold row after the tentative gcal event is created. Stub update
+      // so the gcal side effect doesn't blow up even if the mocked
+      // createTentativeHoldEvent returns an id.
+      mockPrisma.hold.update.mockResolvedValue({ id: "hold-1" });
     });
 
     it("creates a Hold row and returns success", async () => {
@@ -1118,6 +1137,10 @@ describe("executeActions", () => {
 
     it("releases all active holds on a session when no slotStart is given", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(sessionWithLink);
+      mockPrisma.hold.findMany.mockResolvedValue([
+        { id: "hold-1", calendarEventId: null },
+        { id: "hold-2", calendarEventId: null },
+      ]);
       mockPrisma.hold.updateMany.mockResolvedValue({ count: 2 });
 
       const results = await executeActions(
@@ -1127,6 +1150,10 @@ describe("executeActions", () => {
 
       expect(results[0].success).toBe(true);
       expect(results[0].message).toContain("2 holds");
+      expect(mockPrisma.hold.findMany).toHaveBeenCalledWith({
+        where: { sessionId: SESSION_ID, status: "active" },
+        select: { id: true, calendarEventId: true },
+      });
       expect(mockPrisma.hold.updateMany).toHaveBeenCalledWith({
         where: { sessionId: SESSION_ID, status: "active" },
         data: { status: "released" },
@@ -1135,6 +1162,7 @@ describe("executeActions", () => {
 
     it("targets a specific slot when slotStart is provided", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(sessionWithLink);
+      mockPrisma.hold.findMany.mockResolvedValue([{ id: "hold-1", calendarEventId: null }]);
       mockPrisma.hold.updateMany.mockResolvedValue({ count: 1 });
 
       await executeActions(
@@ -1147,7 +1175,7 @@ describe("executeActions", () => {
         HOST_USER_ID
       );
 
-      const call = mockPrisma.hold.updateMany.mock.calls[0][0];
+      const call = mockPrisma.hold.findMany.mock.calls[0][0];
       expect(call.where.sessionId).toBe(SESSION_ID);
       expect(call.where.status).toBe("active");
       expect(call.where.slotStart).toBeInstanceOf(Date);
@@ -1155,7 +1183,7 @@ describe("executeActions", () => {
 
     it("returns failure when no active holds match", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(sessionWithLink);
-      mockPrisma.hold.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.hold.findMany.mockResolvedValue([]);
 
       const results = await executeActions(
         [{ action: "release_hold", params: { sessionId: SESSION_ID } }],
