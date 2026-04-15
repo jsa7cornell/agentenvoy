@@ -22,7 +22,8 @@ import {
   PhaseResult,
 } from "@/lib/onboarding-machine";
 import type { AvailabilityRule } from "@/lib/availability-rules";
-import { safeTimezone } from "@/lib/utils";
+import { safeTimezone, getUserTimezone } from "@/lib/timezone";
+import { generateOnboardingCalendarRead } from "@/lib/calendar-read";
 
 interface UserPreferences {
   timezone?: string;
@@ -73,7 +74,7 @@ export async function GET() {
   }
 
   const prefs = (user.preferences as UserPreferences) || {};
-  const tz = safeTimezone(prefs.explicit?.timezone ?? prefs.timezone);
+  const tz = getUserTimezone(prefs as unknown as Record<string, unknown>);
 
   const ctx: OnboardingContext = {
     userName: user.name || undefined,
@@ -83,6 +84,18 @@ export async function GET() {
 
   // Resume at saved phase or start fresh
   const phase = (user.onboardingPhase as OnboardingPhase) || "intro";
+
+  // Wow-factor calendar read — best-effort, only on the intro phase.
+  // Generated fresh on each GET so a user who refreshes gets a new riff;
+  // if it's slow or fails, onboarding still renders without it.
+  if (phase === "intro") {
+    const paragraph = await generateOnboardingCalendarRead(
+      user.id,
+      tz,
+      user.name || undefined
+    );
+    if (paragraph) ctx.calendarReadParagraph = paragraph;
+  }
 
   const result = getMessagesForPhase(phase, ctx);
   return NextResponse.json({ ...result, currentPhase: phase });
@@ -123,7 +136,7 @@ export async function POST(req: NextRequest) {
 
   const prefs = (user.preferences as UserPreferences) || {};
   const explicit = prefs.explicit || {};
-  const tz = safeTimezone(explicit.timezone ?? prefs.timezone);
+  const tz = getUserTimezone(prefs as unknown as Record<string, unknown>);
 
   let advancing = true;
   let result: PhaseResult;

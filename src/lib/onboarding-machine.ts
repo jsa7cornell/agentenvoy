@@ -1,3 +1,5 @@
+import { shortTimezoneLabel, longTimezoneLabel, getTimezoneEntry } from "./timezone";
+
 /**
  * Onboarding state machine — drives the chat-led calibration conversation.
  *
@@ -52,6 +54,14 @@ export interface OnboardingContext {
   userName?: string;
   detectedTimezone?: string;
   meetSlug?: string;
+  /**
+   * Optional LLM-generated riff on the user's calendar, shown as the
+   * very first message of onboarding. Generated in the route handler
+   * (NOT the state machine — the machine stays pure) and passed in.
+   * Undefined when the calendar is empty or LLM generation failed;
+   * onboarding proceeds normally without the paragraph.
+   */
+  calendarReadParagraph?: string;
 }
 
 // ── Phase handlers ─────────────────────────────────────────────────────
@@ -60,40 +70,57 @@ export interface OnboardingContext {
 export function getIntroMessages(ctx: OnboardingContext): PhaseResult {
   const name = ctx.userName ? ctx.userName.split(" ")[0] : "there";
   const tz = ctx.detectedTimezone || "America/Los_Angeles";
-  const tzLabel = tz.replace(/_/g, " ");
-  return {
-    phase: "intro",
-    messages: [
-      {
-        content: `Hey ${name}! I'm Envoy — I negotiate your schedule so you don't have to. When you need to meet with someone, tell me and I handle the back-and-forth: I talk to them, find a time that works, and put it on both your calendars.\n\nLet's get you set up. Takes about a minute — mostly quick choices.\n\nI detected your timezone as **${tzLabel}**. Correct?`,
-        options: [
-          { number: 1, label: `Yes, ${tzLabel}`, value: tz },
-          { number: 2, label: "No, let me change it", value: "change_tz" },
-        ],
-      },
+  // Prefer the curated long label from the table; fall back to Intl-derived text.
+  const tzLabel = `${longTimezoneLabel(tz)} (${shortTimezoneLabel(tz)})`;
+  const messages: EnvoyMessage[] = [];
+  // Optional wow-factor calendar read — generated in the route and passed
+  // in via ctx. Rendered as its own message (no options) so the quick-reply
+  // row still attaches to the tz-confirm message below.
+  if (ctx.calendarReadParagraph) {
+    messages.push({ content: ctx.calendarReadParagraph });
+  }
+  messages.push({
+    content: `Hey ${name}! I'm Envoy — I negotiate your schedule so you don't have to. When you need to meet with someone, tell me and I handle the back-and-forth: I talk to them, find a time that works, and put it on both your calendars.\n\nLet's get you set up. Takes about a minute — mostly quick choices.\n\nI detected your timezone as **${tzLabel}**. Correct?`,
+    options: [
+      { number: 1, label: `Yes, ${tzLabel}`, value: tz },
+      { number: 2, label: "No, let me change it", value: "change_tz" },
     ],
-  };
+  });
+  return { phase: "intro", messages };
 }
 
-// Phase 1b: Timezone picker (shown only if user wants to change)
+// Phase 1b: Timezone picker (shown only if user wants to change).
+// Options are driven by TIMEZONE_TABLE — single source of truth.
+// A compact picker of ~9 zones from different regions keeps the quick-reply
+// list short; anything not here uses "Other" → freetext.
+const ONBOARDING_TIMEZONE_PICKS: string[] = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "Europe/London",
+  "Europe/Paris",
+  "Asia/Kolkata",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+];
+
 export function getTimezonePickerMessages(): PhaseResult {
+  const options = ONBOARDING_TIMEZONE_PICKS.map((iana, i) => {
+    const entry = getTimezoneEntry(iana);
+    const label = entry
+      ? `${entry.long} · ${shortTimezoneLabel(iana)}`
+      : iana;
+    return { number: i + 1, label, value: iana };
+  });
+  options.push({ number: options.length + 1, label: "Other", value: "other_tz" });
+
   return {
     phase: "intro",
     messages: [
       {
         content: `What timezone are you in?`,
-        options: [
-          { number: 1, label: "Eastern (New York)", value: "America/New_York" },
-          { number: 2, label: "Central (Chicago)", value: "America/Chicago" },
-          { number: 3, label: "Mountain (Denver)", value: "America/Denver" },
-          { number: 4, label: "Pacific (Los Angeles)", value: "America/Los_Angeles" },
-          { number: 5, label: "GMT / London", value: "Europe/London" },
-          { number: 6, label: "Central Europe (Paris)", value: "Europe/Paris" },
-          { number: 7, label: "India (Kolkata)", value: "Asia/Kolkata" },
-          { number: 8, label: "Japan (Tokyo)", value: "Asia/Tokyo" },
-          { number: 9, label: "Australia (Sydney)", value: "Australia/Sydney" },
-          { number: 10, label: "Other", value: "other_tz" },
-        ],
+        options,
       },
     ],
   };

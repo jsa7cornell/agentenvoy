@@ -36,6 +36,8 @@ complete           — sets lastCalibratedAt, shows welcome, invalidates schedul
 
 Conditional phases (`phone_number`, `zoom_link`) are skipped via flags in the POST handler based on the previous answer. See `route.ts` for the skip logic.
 
+**Wow-factor calendar paragraph (shipped 2026-04-15):** The `intro` phase optionally renders an LLM-generated paragraph as its first message — a warm, specific riff on the user's actual calendar. This is NOT a new phase; it's a decoration on `intro`. Generated in `GET /api/onboarding/chat` via `generateOnboardingCalendarRead()` in `src/lib/calendar-read.ts`, passed into the state machine via `OnboardingContext.calendarReadParagraph`. If generation fails or the calendar is empty, the paragraph is simply omitted — onboarding proceeds identically to pre-feature behavior. Do NOT let the LLM drive phase transitions; the paragraph is presentation only.
+
 ### What gets saved where
 
 | Phase | Writes to | Via |

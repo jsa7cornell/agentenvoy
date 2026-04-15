@@ -4,6 +4,7 @@ import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import Feed from "@/components/feed";
 import { AvailabilityCalendar } from "@/components/availability-calendar";
+import { TodayInsight } from "@/components/today-insight";
 import Link from "next/link";
 
 export default function DashboardPage() {
@@ -46,6 +47,7 @@ export default function DashboardPage() {
         <Link href="/dashboard/availability" className="text-xs text-muted hover:text-secondary underline mt-2 inline-block">
           Fine-tune availability
         </Link>
+        <TodayInsight />
       </div>
     </div>
   );
