@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
       if (myParticipant) {
         const existingSession = myParticipant.session;
 
-        if (existingSession.archived) {
+        if (existingSession.archived || existingSession.status === "expired") {
           return NextResponse.json(
             { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
             { status: 410 }
@@ -204,7 +204,7 @@ export async function POST(req: NextRequest) {
       });
 
       if (existingSession) {
-        if (existingSession.archived) {
+        if (existingSession.archived || existingSession.status === "expired") {
           return NextResponse.json(
             { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
             { status: 410 }
