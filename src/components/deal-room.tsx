@@ -178,7 +178,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (data.error === "Session already confirmed") {
           setConfirmed(true);
           setSessionStatus("agreed");
-          setSessionStatusLabel("Confirmed");
+          setSessionStatusLabel("");
         } else {
           setConfirmError(data.error || "Failed to confirm meeting");
         }
@@ -187,7 +187,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       setConfirmData(data);
       setConfirmed(true);
       setSessionStatus("agreed");
-      setSessionStatusLabel("Confirmed");
+      setSessionStatusLabel("");
       if (data.emailSent === false) {
         setEmailWarning("Meeting confirmed, but the confirmation email failed to send.");
       }
@@ -650,9 +650,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />
           <span className="text-sm font-semibold text-primary truncate">{getEventTitle()}</span>
           <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color} flex-shrink-0`}>{statusConfig.label}</span>
-          {sessionStatusLabel && (
-            <span className="text-[10px] text-muted ml-2">{sessionStatusLabel}</span>
-          )}
+          {sessionStatusLabel &&
+            sessionStatusLabel.trim().toLowerCase() !== statusConfig.label.toLowerCase() && (
+              <span className="text-[10px] text-muted ml-2">{sessionStatusLabel}</span>
+            )}
         </div>
 
         {/* Participants row (group events) */}
@@ -845,6 +846,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               }
             }
 
+            // Legacy "Meeting confirmed:" system messages — hidden. The
+            // inline green card below the confirmed proposal already
+            // conveys this. New sessions won't write this message; this
+            // branch hides it for historical sessions.
+            if (msg.role === "system" && /^Meeting confirmed:/i.test(msg.content)) {
+              return null;
+            }
+
             // Host notes — only visible to host
             if (msg.role === "host_note") {
               if (!isHost) return null;
@@ -861,10 +870,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               );
             }
 
-            const { text, proposal, proposalWarning } =
+            const parsed =
               msg.role === "administrator"
                 ? parseConfirmationProposal(msg.content)
                 : { text: msg.content, proposal: null, proposalWarning: undefined };
+            const { proposal, proposalWarning } = parsed;
+            // Once the meeting is confirmed, Envoy's original proposal
+            // message still contains call-to-action text like "Click confirm
+            // to lock it in!" — strip those trailing CTA lines so the history
+            // reads cleanly in past tense. The green "Meeting confirmed!" card
+            // renders below the message and is the new call-to-nothing.
+            const text = (proposal && confirmed)
+              ? parsed.text
+                  .replace(/\s*(?:just\s+)?click (?:the )?confirm(?:\s+button)?[^\n.!]*[.!]*/gi, "")
+                  .replace(/\s*(?:lock it in|locked in)[!.]?/gi, "")
+                  .replace(/\s*let me know if[^\n]*/gi, "")
+                  .replace(/\n{3,}/g, "\n\n")
+                  .trim()
+              : parsed.text;
 
             // 3-party model: Envoy (AI) + system notices always left;
             // humans (host + guest) always right. Color distinguishes which

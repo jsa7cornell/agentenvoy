@@ -225,13 +225,15 @@ export async function POST(req: NextRequest) {
   // Update session(s) — for group events, update ALL linked sessions
   const sessionIdsToUpdate = isGroupEvent ? allParticipantSessions : [sessionId];
   const confirmSummary = `${meetingFormat} meeting on ${displayDate} at ${displayTime} ${tzAbbr}${location ? ` at ${location}` : ""}`;
-  const confirmMessage = `Meeting confirmed: ${meetingFormat} on ${displayDate} at ${displayTime} ${tzAbbr}${meetLink ? `. Meet link: ${meetLink}` : ""}`;
 
   await prisma.negotiationSession.updateMany({
     where: { id: { in: sessionIdsToUpdate } },
     data: {
       status: "agreed",
-      statusLabel: "Confirmed",
+      // statusLabel stays null on confirmation — the status pill in the
+      // header already renders "Confirmed" from statusConfig, and setting
+      // it here used to produce a duplicate label next to the pill.
+      statusLabel: null,
       agreedTime: startTime,
       agreedFormat: meetingFormat,
       meetLink: meetLink || null,
@@ -247,18 +249,10 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Save system message in ALL sessions
-  await Promise.all(
-    sessionIdsToUpdate.map((sid) =>
-      prisma.message.create({
-        data: {
-          sessionId: sid,
-          role: "system",
-          content: confirmMessage,
-        },
-      })
-    )
-  );
+  // (No system "Meeting confirmed" message — the inline green card below
+  // the administrator's proposal, plus the header status pill, already
+  // communicate the confirmation. The duplicate system notice under the
+  // last message was visual noise.)
 
   // Stretch booking notification — when a confirmed meeting had an active
   // hold on it, that means Envoy reached into the host's protected time on
