@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createCalendarEvent, deleteCalendarEvent } from "@/lib/calendar";
+import { createCalendarEvent, deleteCalendarEvent, invalidateSchedule } from "@/lib/calendar";
 import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
 import { Resend } from "resend";
@@ -105,6 +105,10 @@ export async function POST(req: NextRequest) {
   }
 
   const guestEmail = session.guestEmail || session.link.inviteeEmail;
+  if (!guestEmail) {
+    console.warn(`[confirm] sessionId=${sessionId} — no guest email found; calendar invite will only have host. ` +
+      `save_guest_info may not have been called before confirm.`);
+  }
   const attendeeEmails = isGroupEvent
     ? [hostEmail, ...allParticipantEmails.filter((e) => e !== hostEmail)]
     : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
@@ -179,6 +183,14 @@ export async function POST(req: NextRequest) {
     // Continue anyway — calendar isn't strictly required
   }
 
+  // Invalidate the schedule cache so the availability widget immediately
+  // reflects the new booking instead of showing the slot for up to 5 minutes.
+  try {
+    await invalidateSchedule(session.hostId);
+  } catch (e) {
+    console.warn("[confirm] schedule cache invalidation failed (non-blocking):", e);
+  }
+
   // Format times in the host's timezone for display
   const displayDate = startTime.toLocaleDateString("en-US", {
     weekday: "long",
@@ -243,7 +255,7 @@ export async function POST(req: NextRequest) {
 
   // Update session(s) — for group events, update ALL linked sessions
   const sessionIdsToUpdate = isGroupEvent ? allParticipantSessions : [sessionId];
-  const confirmSummary = `${meetingFormat} meeting on ${displayDate} at ${displayTime} ${tzAbbr}${location ? ` at ${location}` : ""}`;
+  const confirmSummary = `${meetingFormat} meeting on ${displayDate} at ${displayTime} ${tzAbbr}${effectiveLocation ? ` — ${effectiveLocation}` : ""}`;
 
   await prisma.negotiationSession.updateMany({
     where: { id: { in: sessionIdsToUpdate } },
@@ -371,7 +383,7 @@ export async function POST(req: NextRequest) {
     dateTime: startTime,
     duration: durationMin,
     format: meetingFormat,
-    location,
+    location: effectiveLocation || undefined,
     meetLink,
     timezone: hostTimezone,
     dealRoomUrl,
@@ -400,7 +412,7 @@ export async function POST(req: NextRequest) {
     dateTime: startTime.toISOString(),
     duration: durationMin,
     format: meetingFormat,
-    location,
+    location: effectiveLocation || location || null,
     meetLink,
     eventLink,
     emailSent,
