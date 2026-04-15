@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { shortTimezoneLabel } from "@/lib/timezone";
 
 // GET /api/channel/messages
 // Returns channel messages with thread snapshots for ThreadCard rendering
@@ -55,6 +56,7 @@ export async function GET() {
           createdAt: true,
           updatedAt: true,
           linkId: true,
+          guestTimezone: true, // populated on first guest visit (Layer 4)
           link: {
             select: {
               inviteeName: true,
@@ -63,6 +65,7 @@ export async function GET() {
               code: true,
               slug: true,
               mode: true,
+              rules: true, // read by the client to extract priority (Layer 5)
             },
           },
           _count: {
@@ -96,19 +99,42 @@ export async function GET() {
     }
   }
 
-  // Enrich thread data with group info
+  // Enrich thread data: group info, extracted priority from rules JSON, and
+  // a short human-readable guest TZ label so the ThreadCard doesn't need to
+  // parse JSON or import timezone helpers.
   const enrichedMessages = messages.map((msg) => {
-    if (msg.thread?.link?.mode === "group" && msg.thread.linkId) {
+    if (!msg.thread) return msg;
+
+    const rules = (msg.thread.link?.rules as Record<string, unknown> | null) || null;
+    const rawPriority = rules?.priority;
+    // Only surface canonical values — anything else (undefined, garbage) is
+    // rendered as the default "normal" tier, which shows no badge on the card.
+    const priority: "normal" | "high" | "vip" =
+      rawPriority === "high" || rawPriority === "vip" ? rawPriority : "normal";
+
+    const guestTz = msg.thread.guestTimezone;
+    const guestTimezoneLabel = guestTz ? shortTimezoneLabel(guestTz, new Date()) : null;
+
+    const base = {
+      ...msg,
+      thread: {
+        ...msg.thread,
+        priority,
+        guestTimezoneLabel,
+      },
+    };
+
+    if (msg.thread.link?.mode === "group" && msg.thread.linkId) {
       return {
-        ...msg,
+        ...base,
         thread: {
-          ...msg.thread,
+          ...base.thread,
           isGroupEvent: true,
           participants: participantsByLink[msg.thread.linkId] || [],
         },
       };
     }
-    return msg;
+    return base;
   });
 
   // Check calendar connection for onboarding UI

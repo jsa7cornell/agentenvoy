@@ -26,6 +26,10 @@ interface ChannelMsg {
     agreedTime?: string;
     isGroupEvent?: boolean;
     participants?: Array<{ name: string | null; status: string; role: string }>;
+    /** Link priority derived server-side from rules.priority. */
+    priority?: "normal" | "high" | "vip";
+    /** Short TZ label (e.g. "CEST") resolved server-side from NegotiationSession.guestTimezone. */
+    guestTimezoneLabel?: string | null;
     link: {
       inviteeName?: string;
       inviteeEmail?: string;
@@ -556,6 +560,8 @@ export default function Feed() {
                   onClick={() => navigateToThread(msg.thread!)}
                   isGroupEvent={isGroup}
                   participants={msg.thread.participants || undefined}
+                  priority={msg.thread.priority || undefined}
+                  guestTimezoneLabel={msg.thread.guestTimezoneLabel || undefined}
                 />
               </div>
             );

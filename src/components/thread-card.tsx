@@ -25,6 +25,12 @@ interface ThreadCardProps {
   onClick?: () => void;
   isGroupEvent?: boolean;
   participants?: Participant[];
+  /** Link priority — shows a badge on the card when "high" or "vip". */
+  priority?: "normal" | "high" | "vip";
+  /** Short TZ label (e.g. "CEST", "JST") detected from the guest's browser on
+   *  first visit. When set, shows as a small "guest in X" chip so the host can
+   *  see the timezone context at a glance. */
+  guestTimezoneLabel?: string | null;
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
@@ -60,6 +66,8 @@ export default function ThreadCard({
   onClick,
   isGroupEvent,
   participants,
+  priority = "normal",
+  guestTimezoneLabel,
 }: ThreadCardProps) {
   const style = STATUS_STYLES[statusColor] || STATUS_STYLES.gray;
   const [linkCopied, setLinkCopied] = useState(false);
@@ -97,7 +105,28 @@ export default function ThreadCard({
           <span role="img" aria-label="calendar">&#128197;</span>
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-primary truncate">{title}</div>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="text-sm font-semibold text-primary truncate flex-1">{title}</div>
+            {/* Priority badge — only rendered for high/vip so the default
+                "normal" case stays visually quiet. Colors track the tier:
+                amber for "making room" (high), purple for "cleared space" (vip). */}
+            {priority === "high" && (
+              <span
+                className="flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-500/15 text-amber-400"
+                title="High priority — host has opened weekend daytime and just-outside-biz hours for this guest"
+              >
+                High
+              </span>
+            )}
+            {priority === "vip" && (
+              <span
+                className="flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-purple-500/15 text-purple-400"
+                title="VIP — host has cleared early-morning, late-evening, and weekend off-hours for this guest"
+              >
+                VIP
+              </span>
+            )}
+          </div>
           {subtitle && (
             <div className="text-xs text-muted mt-0.5 truncate">{subtitle}</div>
           )}
@@ -117,10 +146,21 @@ export default function ThreadCard({
       )}
 
       {/* Meta */}
-      <div className="flex gap-3 px-4 pb-2 text-xs text-muted">
+      <div className="flex gap-3 px-4 pb-2 text-xs text-muted items-center">
         {!isGroupEvent && inviteeEmail && <span>{inviteeEmail}</span>}
         {messageCount !== undefined && messageCount > 0 && (
           <span>{messageCount} messages</span>
+        )}
+        {guestTimezoneLabel && (
+          <span
+            className="inline-flex items-center gap-1 text-[11px]"
+            title={`Guest opened this deal room from ${guestTimezoneLabel}`}
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 0v20m-10-10h20" />
+            </svg>
+            {guestTimezoneLabel}
+          </span>
         )}
       </div>
 
