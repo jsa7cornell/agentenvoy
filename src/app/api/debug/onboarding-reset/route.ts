@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { safeTimezone } from "@/lib/utils";
+import { safeTimezone } from "@/lib/timezone";
 
 /**
  * Dev-only endpoint for onboarding testing.
@@ -34,82 +34,95 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, message: "User marked as calibrated." });
   }
 
-  if (mode === "reset") {
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-      select: { id: true, preferences: true },
-    });
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+  try {
+    if (mode === "reset") {
+      const user = await prisma.user.findUnique({
+        where: { email: session.user.email },
+        select: { id: true, preferences: true },
+      });
+      if (!user) {
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      }
+
+      // Keep timezone from preferences, clear everything else
+      const prefs = (user.preferences as Record<string, unknown>) || {};
+      const explicit = (prefs.explicit as Record<string, unknown>) || {};
+      const timezone = safeTimezone(explicit.timezone as string);
+
+      // Clear calibration + onboarding state
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          lastCalibratedAt: null,
+          onboardingPhase: null,
+          persistentKnowledge: [
+            "- This host has not been calibrated yet. Run the onboarding calibration exercise to learn their scheduling preferences.",
+            "- Default posture: balanced — offer open slots, flag flexible blocks, ask before moving anything.",
+            "- Default to 30-minute meetings unless context suggests otherwise.",
+            "- Prefer consolidating meetings on fewer days over spreading them out.",
+          ].join("\n"),
+          upcomingSchedulePreferences: null,
+          preferences: { explicit: { timezone } },
+        },
+      });
+
+      // Clear calendar cache
+      await prisma.calendarCache.deleteMany({ where: { userId: user.id } });
+
+      // Clear computed schedule (uses any cast per project pattern)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (prisma as any).computedSchedule.deleteMany({ where: { userId: user.id } });
+
+      // Clear channel messages + sessions
+      const channel = await prisma.channel.findUnique({ where: { userId: user.id } });
+      if (channel) {
+        await prisma.channelMessage.deleteMany({ where: { channelId: channel.id } });
+        await prisma.channelSession.deleteMany({ where: { channelId: channel.id } });
+      }
+
+      return NextResponse.json({ success: true, message: "Onboarding reset. Reload /dashboard to restart onboarding." });
     }
 
-    // Keep timezone from preferences, clear everything else
-    const prefs = (user.preferences as Record<string, unknown>) || {};
-    const explicit = (prefs.explicit as Record<string, unknown>) || {};
-    const timezone = safeTimezone(explicit.timezone as string);
+    if (mode === "create") {
+      const timestamp = Date.now();
+      const email = `onboarding-test-${timestamp}@agentenvoy.dev`;
+      const name = `Test User ${timestamp}`;
+      const slug = `test${timestamp}`;
 
-    // Clear calibration + onboarding state
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        lastCalibratedAt: null,
-        onboardingPhase: null,
-        persistentKnowledge: [
-          "- This host has not been calibrated yet. Run the onboarding calibration exercise to learn their scheduling preferences.",
-          "- Default posture: balanced — offer open slots, flag flexible blocks, ask before moving anything.",
-          "- Default to 30-minute meetings unless context suggests otherwise.",
-          "- Prefer consolidating meetings on fewer days over spreading them out.",
-        ].join("\n"),
-        upcomingSchedulePreferences: null,
-        preferences: { explicit: { timezone } },
-      },
-    });
+      const user = await prisma.user.create({
+        data: {
+          email,
+          name,
+          meetSlug: slug,
+          preferences: { explicit: { timezone: "America/Los_Angeles" } },
+          persistentKnowledge: [
+            "- This host has not been calibrated yet.",
+            "- Default posture: balanced.",
+          ].join("\n"),
+        },
+      });
 
-    // Clear calendar cache
-    await prisma.calendarCache.deleteMany({ where: { userId: user.id } });
-
-    // Clear computed schedule (uses any cast per project pattern)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (prisma as any).computedSchedule.deleteMany({ where: { userId: user.id } });
-
-    // Clear channel messages + sessions
-    const channel = await prisma.channel.findUnique({ where: { userId: user.id } });
-    if (channel) {
-      await prisma.channelMessage.deleteMany({ where: { channelId: channel.id } });
-      await prisma.channelSession.deleteMany({ where: { channelId: channel.id } });
-    }
-
-    return NextResponse.json({ success: true, message: "Onboarding reset. Reload /dashboard to restart onboarding." });
-  }
-
-  if (mode === "create") {
-    const timestamp = Date.now();
-    const email = `onboarding-test-${timestamp}@agentenvoy.dev`;
-    const name = `Test User ${timestamp}`;
-    const slug = `test${timestamp}`;
-
-    const user = await prisma.user.create({
-      data: {
+      return NextResponse.json({
+        success: true,
         email,
         name,
+        userId: user.id,
         meetSlug: slug,
-        preferences: { explicit: { timezone: "America/Los_Angeles" } },
-        persistentKnowledge: [
-          "- This host has not been calibrated yet.",
-          "- Default posture: balanced.",
-        ].join("\n"),
-      },
-    });
+        message: `Test account created. Sign in with dev credentials using email: ${email}`,
+      });
+    }
 
-    return NextResponse.json({
-      success: true,
-      email,
-      name,
-      userId: user.id,
-      meetSlug: slug,
-      message: `Test account created. Sign in with dev credentials using email: ${email}`,
-    });
+    return NextResponse.json({ error: "Invalid mode. Use 'reset' or 'create'." }, { status: 400 });
+  } catch (err) {
+    // Surface the real error instead of a 500 HTML page. The client was
+    // swallowing exceptions and showing a generic "Reset failed" — this
+    // returns the actual message + stack prefix so we can diagnose.
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error && err.stack ? err.stack.split("\n").slice(0, 3).join(" | ") : undefined;
+    console.error("[onboarding-reset] mode=%s error:", mode, err);
+    return NextResponse.json(
+      { error: "Onboarding reset/create threw", mode, message, stack },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ error: "Invalid mode. Use 'reset' or 'create'." }, { status: 400 });
 }

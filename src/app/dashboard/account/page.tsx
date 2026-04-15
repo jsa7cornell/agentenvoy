@@ -629,11 +629,14 @@ function DevTools() {
       if (res.ok) {
         window.location.href = "/dashboard";
       } else {
-        setDevMessage(data.message || "Reset failed");
+        // Surface the real server error so we can see what's failing.
+        const detail = data.message || data.error || `HTTP ${res.status}`;
+        setDevMessage(`Reset failed: ${detail}`);
+        console.error("[dev-tools] reset failed:", data);
         setResetting(false);
       }
-    } catch {
-      setDevMessage("Reset failed");
+    } catch (err) {
+      setDevMessage(`Reset failed: ${err instanceof Error ? err.message : String(err)}`);
       setResetting(false);
     }
   }
@@ -652,10 +655,12 @@ function DevTools() {
         setDevMessage(`Created: ${data.email} (copied to clipboard)`);
         navigator.clipboard.writeText(data.email);
       } else {
-        setDevMessage(data.message || "Failed");
+        const detail = data.message || data.error || `HTTP ${res.status}`;
+        setDevMessage(`Create failed: ${detail}`);
+        console.error("[dev-tools] create failed:", data);
       }
-    } catch {
-      setDevMessage("Create failed");
+    } catch (err) {
+      setDevMessage(`Create failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setCreating(false);
     }
