@@ -8,9 +8,6 @@ import {
   computeSchedule,
   type ScoredSlot,
   type LinkRules,
-  type SlotKind,
-  type BlockCost,
-  type BlockFirmness,
   type UserPreferences,
 } from "@/lib/scoring";
 
