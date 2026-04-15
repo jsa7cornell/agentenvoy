@@ -269,6 +269,41 @@ export async function getCalendarContext(
   };
 }
 
+/**
+ * Detect whether an error thrown from the Google client chain is a
+ * "token is dead, user needs to reconnect" situation rather than a
+ * transient API failure. Covers:
+ *   - our own "No Google account connected" throw from getGoogleCalendarClient
+ *   - `invalid_grant` from refreshAccessToken (revoked, password changed, expired)
+ *   - explicit 401/403 responses from googleapis (GaxiosError shape)
+ */
+export function isDeadGoogleAuthError(err: unknown): boolean {
+  if (!err) return false;
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes("No Google account connected")) return true;
+  if (message.includes("invalid_grant")) return true;
+  if (/token.*(expired|revoked)/i.test(message)) return true;
+  const code = (err as { code?: number | string }).code;
+  if (code === 401 || code === 403 || code === "401" || code === "403") return true;
+  return false;
+}
+
+/**
+ * Clear a user's Google refresh token so subsequent `/api/connections/status`
+ * reads correctly report `connected: false`. Use this when the token is
+ * confirmed dead — the user will be prompted to sign in again. Idempotent.
+ */
+export async function clearGoogleRefreshToken(userId: string): Promise<void> {
+  await prisma.account.updateMany({
+    where: { userId, provider: "google" },
+    data: {
+      refresh_token: null,
+      access_token: null,
+      expires_at: null,
+    },
+  });
+}
+
 export async function getGoogleCalendarClient(userId: string) {
   const account = await prisma.account.findFirst({
     where: { userId, provider: "google" },

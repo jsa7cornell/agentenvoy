@@ -1,6 +1,6 @@
 "use client";
 
-import { useSession } from "next-auth/react";
+import { useSession, signIn } from "next-auth/react";
 import { useEffect, useState, useCallback } from "react";
 import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calendar";
 import { DayView } from "@/components/day-view";
@@ -42,23 +42,60 @@ export default function AvailabilityPage() {
   const [modalSelectedIds, setModalSelectedIds] = useState<string[]>([]);
   const [activeCalendarIds, setActiveCalendarIds] = useState<string[]>([]);
   const [savingCalendarFilter, setSavingCalendarFilter] = useState(false);
+  const [calendarsLoading, setCalendarsLoading] = useState(false);
+  const [calendarsError, setCalendarsError] = useState<
+    | null
+    | { kind: "reconnect"; message: string }
+    | { kind: "generic"; message: string }
+  >(null);
+
+  const loadGoogleCalendars = useCallback(async () => {
+    setCalendarsLoading(true);
+    setCalendarsError(null);
+    try {
+      const res = await fetch("/api/connections/google-calendars");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401 && data?.error === "reconnect_required") {
+          setCalendarsError({
+            kind: "reconnect",
+            message:
+              "Your Google connection has expired. Sign in again to restore calendar access.",
+          });
+        } else {
+          setCalendarsError({
+            kind: "generic",
+            message: data?.detail || data?.error || `Request failed (${res.status})`,
+          });
+        }
+        return;
+      }
+      if (!Array.isArray(data?.calendars)) {
+        setCalendarsError({ kind: "generic", message: "Unexpected response from server." });
+        return;
+      }
+      setGoogleCalendars(data.calendars);
+      const ids = data.calendars.map((c: { id: string }) => c.id);
+      setModalSelectedIds(activeCalendarIds.length > 0 ? activeCalendarIds : ids);
+    } catch (err) {
+      setCalendarsError({
+        kind: "generic",
+        message: err instanceof Error ? err.message : "Network error",
+      });
+    } finally {
+      setCalendarsLoading(false);
+    }
+  }, [activeCalendarIds]);
 
   function openCalendarFilter() {
-    if (googleCalendars.length === 0) {
-      fetch("/api/connections/google-calendars")
-        .then((r) => r.json())
-        .then((d) => {
-          if (d.calendars) {
-            setGoogleCalendars(d.calendars);
-            const ids = d.calendars.map((c: { id: string }) => c.id);
-            setModalSelectedIds(activeCalendarIds.length > 0 ? activeCalendarIds : ids);
-          }
-        })
-        .catch(() => {});
-    } else {
-      setModalSelectedIds(activeCalendarIds.length > 0 ? activeCalendarIds : googleCalendars.map((c) => c.id));
-    }
     setCalendarFilterModal(true);
+    if (googleCalendars.length === 0) {
+      loadGoogleCalendars();
+    } else {
+      setModalSelectedIds(
+        activeCalendarIds.length > 0 ? activeCalendarIds : googleCalendars.map((c) => c.id),
+      );
+    }
   }
 
 
@@ -253,15 +290,44 @@ export default function AvailabilityPage() {
 
       {/* Calendar Filter Modal */}
       {calendarFilterModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setCalendarFilterModal(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => {
+            setCalendarFilterModal(false);
+            setCalendarsError(null);
+          }}
+        >
           <div
             className="bg-surface-inset border border-DEFAULT rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-primary mb-1">Which calendars affect your availability?</h3>
             <p className="text-xs text-muted mb-4">Only checked calendars will be used when scheduling.</p>
-            {googleCalendars.length === 0 ? (
+            {calendarsLoading ? (
               <div className="text-xs text-muted py-4 text-center">Loading calendars...</div>
+            ) : calendarsError?.kind === "reconnect" ? (
+              <div className="py-4 text-center space-y-3">
+                <p className="text-xs text-muted">{calendarsError.message}</p>
+                <button
+                  onClick={() => signIn("google", { callbackUrl: "/dashboard/availability" })}
+                  className="px-3 py-2 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-lg transition"
+                >
+                  Reconnect Google Calendar
+                </button>
+              </div>
+            ) : calendarsError?.kind === "generic" ? (
+              <div className="py-4 text-center space-y-3">
+                <p className="text-xs text-red-400">Couldn&apos;t load calendars.</p>
+                <p className="text-[10px] text-muted break-all">{calendarsError.message}</p>
+                <button
+                  onClick={loadGoogleCalendars}
+                  className="px-3 py-2 text-xs font-medium text-primary border border-DEFAULT hover:border-surface-tertiary rounded-lg transition"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : googleCalendars.length === 0 ? (
+              <div className="text-xs text-muted py-4 text-center">No calendars found.</div>
             ) : (
               <>
                 <div className="flex items-center justify-between mb-2">
@@ -313,7 +379,10 @@ export default function AvailabilityPage() {
             )}
             <div className="flex gap-2">
               <button
-                onClick={() => setCalendarFilterModal(false)}
+                onClick={() => {
+                  setCalendarFilterModal(false);
+                  setCalendarsError(null);
+                }}
                 className="flex-1 px-3 py-2 text-xs font-medium text-secondary border border-DEFAULT rounded-lg hover:border-surface-tertiary transition"
               >
                 Cancel
