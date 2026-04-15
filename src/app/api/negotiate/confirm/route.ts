@@ -50,10 +50,29 @@ export async function POST(req: NextRequest) {
   let dateTimeStr = dateTime as string;
   const hasOffset = /[+-]\d{2}:\d{2}$/.test(dateTimeStr) || dateTimeStr.endsWith("Z");
   if (!hasOffset) {
-    // Legacy: bare ISO string without offset. Compute host's current UTC offset
-    // and append it so the time is interpreted in the host's timezone, not UTC.
-    const offsetStr = computeUtcOffset(hostTimezone);
-    dateTimeStr = `${dateTimeStr}${offsetStr}`;
+    // Legacy: bare ISO string without offset. Compute a rough date with the
+    // current offset, then re-compute the offset for THAT specific date so
+    // meetings scheduled across a DST boundary get the right offset.
+    const roughOffset = computeUtcOffset(hostTimezone);
+    const roughDate = new Date(`${dateTimeStr}${roughOffset}`);
+    const dstCorrectOffset = computeUtcOffset(hostTimezone, roughDate);
+    dateTimeStr = `${dateTimeStr}${dstCorrectOffset}`;
+  } else {
+    // Has an offset — but it may be stale if the LLM embedded "now"s offset
+    // at session-creation time and the meeting crosses a DST boundary.
+    // Auto-correct: parse the date as-is, compute the correct offset for that
+    // date in the host timezone, and if they differ by exactly 1h re-stamp.
+    const embeddedDate = new Date(dateTimeStr);
+    const correctOffset = computeUtcOffset(hostTimezone, embeddedDate);
+    const embeddedOffsetMatch = dateTimeStr.match(/([+-]\d{2}:\d{2})$/);
+    const embeddedOffset = embeddedOffsetMatch?.[1];
+    if (embeddedOffset && embeddedOffset !== correctOffset) {
+      const bare = dateTimeStr.slice(0, dateTimeStr.length - embeddedOffset.length);
+      dateTimeStr = `${bare}${correctOffset}`;
+      console.log(
+        `[confirm] DST offset corrected: ${embeddedOffset} → ${correctOffset} for "${bare}" (${hostTimezone})`
+      );
+    }
   }
 
   const startTime = new Date(dateTimeStr);
@@ -416,10 +435,13 @@ export async function PATCH(req: NextRequest) {
 }
 
 /**
- * Compute the UTC offset string for an IANA timezone (e.g., "-07:00" for America/Los_Angeles in PDT).
+ * Compute the UTC offset string for an IANA timezone at a specific date
+ * (e.g., "-07:00" for America/Los_Angeles in PDT, "-08:00" in PST).
+ * Pass `date` to get the DST-correct offset for a future meeting time — if
+ * omitted, defaults to now (stale for meetings that cross a DST boundary).
  */
-function computeUtcOffset(tz: string): string {
-  const now = new Date();
+function computeUtcOffset(tz: string, date: Date = new Date()): string {
+  const now = date;
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     timeZoneName: "longOffset",

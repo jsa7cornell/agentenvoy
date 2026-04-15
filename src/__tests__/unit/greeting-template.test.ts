@@ -6,6 +6,7 @@ import {
   alternateFormatsLabel,
 } from "@/lib/greeting-template";
 import type { ScoredSlot } from "@/lib/scoring";
+import { filterByDuration } from "@/lib/scoring";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -209,5 +210,60 @@ describe("alternateFormatsLabel", () => {
     expect(alternateFormatsLabel("video")).toBe("a call or in-person");
     expect(alternateFormatsLabel("phone")).toBe("video or in-person");
     expect(alternateFormatsLabel("in-person")).toBe("phone or video");
+  });
+});
+
+// ─── filterByDuration ────────────────────────────────────────────────────────
+
+describe("filterByDuration", () => {
+  it("is a pass-through for 30-min meetings", () => {
+    const slots = run([2026, 4, 15], 17, 0, 3, 1);
+    expect(filterByDuration(slots, 30)).toEqual(slots);
+  });
+
+  it("is a pass-through when durationMin is 0 or undefined", () => {
+    const slots = run([2026, 4, 15], 17, 0, 3, 1);
+    expect(filterByDuration(slots, 0)).toEqual(slots);
+  });
+
+  it("keeps only valid start positions for a 60-min meeting", () => {
+    // 3 consecutive slots: 10:00, 10:30, 11:00 → valid 60-min starts are 10:00 and 10:30
+    const slots = run([2026, 4, 15], 17, 0, 3, 1); // UTC 17:00, 17:30, 18:00
+    const filtered = filterByDuration(slots, 60);
+    expect(filtered).toHaveLength(2);
+    expect(filtered[0].start).toBe(slots[0].start); // 10:00 has 10:30 following
+    expect(filtered[1].start).toBe(slots[1].start); // 10:30 has 11:00 following
+    // 11:00 alone is NOT a valid 60-min start (no 11:30 in the list)
+  });
+
+  it("removes an isolated 30-min slot that cannot host a 60-min meeting", () => {
+    const isolated = [slot([2026, 4, 15], 17, 0, 1)]; // lone slot
+    expect(filterByDuration(isolated, 60)).toHaveLength(0);
+  });
+
+  it("handles a 90-min meeting requiring 3 consecutive slots", () => {
+    // 4 consecutive slots → valid 90-min starts: first 2 (each has 2 successors)
+    const slots = run([2026, 4, 15], 17, 0, 4, 1);
+    const filtered = filterByDuration(slots, 90);
+    expect(filtered).toHaveLength(2);
+  });
+
+  it("works across a gap — non-consecutive slots are correctly excluded", () => {
+    // Slots at 10:00 and 11:00 (gap at 10:30) — neither is a valid 60-min start
+    const gapped = [
+      slot([2026, 4, 15], 17, 0, 1),  // 10:00 PT
+      slot([2026, 4, 15], 18, 0, 1),  // 11:00 PT (gap at 10:30)
+    ];
+    expect(filterByDuration(gapped, 60)).toHaveLength(0);
+  });
+
+  it("integrates with formatAvailabilityWindows via durationMin param", () => {
+    // Only the first 2 of 3 consecutive slots are valid 60-min starts.
+    // The greeting should show the block range, not individual slots.
+    const slots = run([2026, 4, 15], 17, 0, 3, 1); // 10:00, 10:30, 11:00 PT
+    const out = formatAvailabilityWindows(slots, TZ, NOW, undefined, 60);
+    // 10:00 and 10:30 are kept → merges into "10–11 AM" (2 slots = 1h)
+    expect(out.lines).toHaveLength(1);
+    expect(out.lines[0]).toContain("10–11 AM");
   });
 });

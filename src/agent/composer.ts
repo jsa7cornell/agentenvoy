@@ -481,8 +481,7 @@ export function formatCalendarContext(ctx: CalendarContext): string {
 // --- Computed Schedule Format (compact, scored) ---
 
 import type { ScoredSlot, LinkRules } from "@/lib/scoring";
-import { getTier } from "@/lib/scoring";
-import { applyEventOverrides } from "@/lib/scoring";
+import { getTier, applyEventOverrides, filterByDuration } from "@/lib/scoring";
 
 /**
  * Format a computed schedule (pre-scored slots) for the LLM prompt.
@@ -630,7 +629,15 @@ export function formatOfferableSlots(
   const utcOffset = getUtcOffsetString(tz);
 
   // Apply event-level overrides if provided
-  const finalSlots = linkRules ? applyEventOverrides(slots, linkRules, tz) : slots;
+  const overriddenSlots = linkRules ? applyEventOverrides(slots, linkRules, tz) : slots;
+
+  // Filter to valid start positions for the meeting duration. A lone 30-min
+  // slot can't host a 60-min meeting — the agent would propose a time that
+  // bleeds into a blocked window. filterByDuration is a no-op for ≤ 30 min.
+  // LinkRules doesn't type `duration` (it lives in the rules JSON blob) so we
+  // cast through unknown to read it safely.
+  const meetingDuration = ((linkRules as unknown as Record<string, unknown>)?.duration as number | undefined);
+  const finalSlots = meetingDuration ? filterByDuration(overriddenSlots, meetingDuration) : overriddenSlots;
 
   const now = new Date();
   const rules = linkRules ?? {};

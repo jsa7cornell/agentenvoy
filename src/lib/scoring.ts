@@ -1372,3 +1372,29 @@ export function applyEventOverrides(
 
   return slots;
 }
+
+/**
+ * Filter a slot list so that only slots with a sufficient consecutive run are
+ * kept as valid start positions for a meeting of `durationMin` minutes.
+ *
+ * The scoring engine always generates 30-min granularity slots. If a meeting is
+ * 60 min, a lone 30-min slot should never appear as an offerable start — the
+ * meeting would bleed into a blocked slot. This filter ensures every returned
+ * slot has `ceil(durationMin / 30) - 1` consecutive successors also present in
+ * the list.
+ *
+ * Pass-through when durationMin ≤ 30 (every 30-min slot is independently valid).
+ */
+export function filterByDuration(slots: ScoredSlot[], durationMin: number): ScoredSlot[] {
+  if (!durationMin || durationMin <= 30) return slots;
+  const slotsNeeded = Math.ceil(durationMin / 30);
+  const startSet = new Set(slots.map((s) => s.start));
+  return slots.filter((slot) => {
+    const t = new Date(slot.start).getTime();
+    for (let i = 1; i < slotsNeeded; i++) {
+      const nextStart = new Date(t + i * 30 * 60 * 1000).toISOString();
+      if (!startSet.has(nextStart)) return false;
+    }
+    return true;
+  });
+}

@@ -7,6 +7,7 @@
  */
 
 import type { ScoredSlot } from "@/lib/scoring";
+import { filterByDuration } from "@/lib/scoring";
 import { shortTimezoneLabel } from "./timezone";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -83,14 +84,19 @@ export function formatAvailabilityWindows(
   slots: ScoredSlot[],
   timezone: string,
   now: Date = new Date(),
-  guestTimezone?: string
+  guestTimezone?: string,
+  durationMin?: number
 ): FormattedWindows {
-  const goodSlots = slots
-    .filter((s) => {
-      const start = new Date(s.start);
-      return start > now && s.score <= 1;
-    })
-    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  const offerable = slots.filter((s) => {
+    const start = new Date(s.start);
+    return start > now && s.score <= 1;
+  });
+  // Remove isolated slots that don't have enough consecutive room for the
+  // meeting duration (e.g. a lone 30-min gap can't host a 60-min meeting).
+  const durationFiltered = durationMin ? filterByDuration(offerable, durationMin) : offerable;
+  const goodSlots = durationFiltered.sort(
+    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
+  );
 
   if (goodSlots.length === 0) return { lines: [], hasPreferred: false };
 

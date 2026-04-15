@@ -473,7 +473,8 @@ export async function POST(req: NextRequest) {
     filteredSlots,
     hostTimezone,
     new Date(),
-    guestTzDiffers ? effectiveGuestTz : undefined
+    guestTzDiffers ? effectiveGuestTz : undefined,
+    effectiveDuration ?? undefined
   );
 
   let greeting: string;
