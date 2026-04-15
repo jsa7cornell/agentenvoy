@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Feed from "@/components/feed";
 import { AvailabilityCalendar } from "@/components/availability-calendar";
 import { TodayInsight } from "@/components/today-insight";
+import { DidYouKnow } from "@/components/did-you-know";
 import Link from "next/link";
 
 export default function DashboardPage() {
@@ -48,6 +49,7 @@ export default function DashboardPage() {
           Fine-tune availability
         </Link>
         <TodayInsight />
+        <DidYouKnow />
       </div>
     </div>
   );
