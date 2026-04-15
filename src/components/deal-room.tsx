@@ -808,7 +808,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // --- Main content ---
   const chatContent = (
     <>
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4">
         {isLoading ? (
           <div className="flex justify-center py-12">
             <div className="flex gap-1">
@@ -899,14 +899,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             return (
               <div key={msg.id}>
                 {dateSeparator}
-                <div className={`flex ${isOwnMessage ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${messageStyle}`}>
+                <div className={`flex min-w-0 ${isOwnMessage ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 text-sm leading-relaxed ${messageStyle}`}>
                     {senderLabel && (
                       <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${labelColor}`}>
                         {senderLabel}
                       </div>
                     )}
-                    <div className="whitespace-pre-wrap">{text}</div>
+                    <div className="whitespace-pre-wrap break-words">{text}</div>
                   </div>
                 </div>
 
@@ -991,7 +991,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             placeholder={isHost ? `Message as ${hostName || "Host"}...` : "Type your message..."}
             rows={1}
             disabled={isLoading}
-            className="flex-1 resize-none bg-surface-secondary border border-DEFAULT rounded-xl px-4 py-3 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
+            name="message"
+            autoComplete="off"
+            autoCorrect="on"
+            autoCapitalize="sentences"
+            spellCheck
+            inputMode="text"
+            enterKeyHint="send"
+            data-lpignore="true"
+            data-1p-ignore="true"
+            data-form-type="other"
+            className="flex-1 min-w-0 resize-none bg-surface-secondary border border-DEFAULT rounded-xl px-4 py-3 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
           />
           <button
             type="submit"
