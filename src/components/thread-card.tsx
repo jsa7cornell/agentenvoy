@@ -96,7 +96,7 @@ export default function ThreadCard({
         w-full max-w-[440px] rounded-2xl border cursor-pointer transition-all duration-200
         ${selected
           ? "border-purple-500/60 bg-purple-500/5"
-          : "border-black/8 dark:border-white/8 bg-black/[0.02] dark:bg-white/[0.03] hover:border-purple-500/30 hover:bg-black/[0.04] dark:hover:bg-white/[0.05]"
+          : "border-black/15 dark:border-white/15 bg-black/[0.02] dark:bg-white/[0.03] hover:border-purple-500/40 hover:bg-black/[0.04] dark:hover:bg-white/[0.05]"
         }
       `}
     >

@@ -643,8 +643,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
 
   const eventCard = (
-    <div className={`z-10 mx-0 px-4 sm:px-5 py-3 sm:py-4 bg-surface/95 backdrop-blur-sm border-b ${statusConfig.border} flex-shrink-0 transition-all duration-500 ${statusAnimating ? "ring-1 ring-inset " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-500/40 bg-amber-500/5") : ""}`}>
-      <div className="max-w-3xl mx-auto">
+    <div className={`z-10 px-4 sm:px-5 pt-3 sm:pt-4 pb-2 bg-surface/95 backdrop-blur-sm flex-shrink-0 transition-all duration-500`}>
+      <div className={`max-w-3xl rounded-xl border ${statusConfig.border} bg-black/[0.02] dark:bg-white/[0.03] px-4 py-3 transition-all duration-500 ${statusAnimating ? "ring-1 " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-500/40 bg-amber-500/5") : ""}`}>
         {/* Row 1: Title + status */}
         <div className="flex items-center gap-2.5 mb-1.5">
           <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />

@@ -480,9 +480,11 @@ export default function Feed() {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Messages */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-1.5 min-h-0">
+    <div className="flex flex-col h-full min-h-0">
+      {/* Messages — scroll container spans full column width so the scrollbar
+          lands at the sidebar divider; inner wrapper re-centers the content. */}
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
+        <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 py-5 flex flex-col gap-1.5">
         {/* Empty state — only for calibrated users with no messages */}
         {messages.length === 0 && !loading && isCalibrated && (
           <div className="flex-1 flex items-center justify-center">
@@ -623,10 +625,12 @@ export default function Feed() {
         )}
 
         <div ref={messagesEndRef} />
+        </div>
       </div>
 
       {/* Input */}
       <div className="px-4 sm:px-6 py-4 border-t border-black/5 dark:border-white/5 flex-shrink-0">
+        <div className="max-w-3xl mx-auto w-full">
         {/* Calendar connection prompt — only show for calibrated users without calendar */}
         {!calendarConnected && isCalibrated && (
           <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 mb-3">
@@ -660,6 +664,7 @@ export default function Feed() {
           >
             &uarr;
           </button>
+        </div>
         </div>
       </div>
     </div>

@@ -29,10 +29,8 @@ export default function DashboardPage() {
   return (
     <div className="flex-1 flex overflow-hidden">
       {/* Feed — main content */}
-      <div className="flex-1 overflow-hidden min-h-0">
-        <div className="max-w-3xl mx-auto h-full min-h-0">
-          <Feed />
-        </div>
+      <div className="flex-1 overflow-hidden min-h-0 min-w-0">
+        <Feed />
       </div>
 
       {/* Availability sidebar — desktop only */}

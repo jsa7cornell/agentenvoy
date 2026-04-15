@@ -133,6 +133,14 @@ export default function MeetingsPage() {
                   : `Created ${new Date(s.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
                 const guestLabel = s.link.inviteeName || s.guestEmail || s.link.inviteeEmail || "Guest";
                 const title = s.title || s.link.topic || `Meeting with ${guestLabel}`;
+                // Mirror the backend archive guard so we only surface the
+                // button where it will actually work. The backend only allows
+                // archiving agreed/expired sessions or sessions whose agreedTime
+                // has already passed — every other status 400s.
+                const canArchive =
+                  s.status === "agreed" ||
+                  s.status === "expired" ||
+                  (!!s.agreedTime && new Date(s.agreedTime) < new Date());
                 return (
                   <div key={s.id} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-secondary/40 transition group">
                     <Link href={getDealRoomUrl(s)} className="flex-1 min-w-0 flex items-center gap-3">
@@ -145,16 +153,22 @@ export default function MeetingsPage() {
                       </span>
                       <span className="flex-shrink-0 text-[10px] text-muted">{displayDate}</span>
                     </Link>
-                    <button
-                      onClick={() => handleArchive(s.id)}
-                      disabled={archiving === s.id}
-                      title="Archive"
-                      className="flex-shrink-0 p-1.5 rounded-md text-muted opacity-0 group-hover:opacity-100 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-                      </svg>
-                    </button>
+                    {canArchive && (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleArchive(s.id);
+                        }}
+                        disabled={archiving === s.id}
+                        title="Archive"
+                        className="flex-shrink-0 p-1.5 rounded-md text-muted opacity-0 group-hover:opacity-100 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 );
               })}
