@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LogoFull } from "./logo";
 import { AvailabilityCalendar } from "./availability-calendar";
-import Link from "next/link";
+import { DashboardHeader } from "./dashboard-header";
 
 interface Message {
   id: string;
@@ -866,10 +866,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 ? parseConfirmationProposal(msg.content)
                 : { text: msg.content, proposal: null, proposalWarning: undefined };
 
-            // Determine alignment and styling
-            const isOwnMessage =
-              (isHost && msg.role === "host") ||
-              (!isHost && msg.role === "guest");
+            // 3-party model: Envoy (AI) + system notices always left;
+            // humans (host + guest) always right. Color distinguishes which
+            // human spoke — purple = host, indigo = guest.
+            const rightAligned = msg.role === "host" || msg.role === "guest";
 
             const messageStyle =
               msg.role === "host"
@@ -899,7 +899,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             return (
               <div key={msg.id}>
                 {dateSeparator}
-                <div className={`flex min-w-0 ${isOwnMessage ? "justify-end" : "justify-start"}`}>
+                <div className={`flex min-w-0 ${rightAligned ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 text-sm leading-relaxed ${messageStyle}`}>
                     {senderLabel && (
                       <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${labelColor}`}>
@@ -1022,21 +1022,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   return (
     <div className="fixed inset-0 bg-surface text-primary flex flex-col overflow-hidden z-20">
-      {/* Header */}
-      <header className="border-b border-secondary px-6 py-3 flex items-center justify-between flex-shrink-0">
-        <a href="/">
-          <LogoFull height={24} className="text-primary" />
-        </a>
-        {isHost ? (
-          <Link href="/dashboard" className="text-xs text-muted hover:text-primary transition">
-            &larr; Dashboard
-          </Link>
-        ) : (
+      {/* Header — full dashboard chrome for the host, minimal brand bar for guests */}
+      {isHost ? (
+        <DashboardHeader />
+      ) : (
+        <header className="border-b border-secondary px-6 py-3 flex items-center justify-between flex-shrink-0">
+          <a href="/">
+            <LogoFull height={24} className="text-primary" />
+          </a>
           <a href="/" className="text-xs text-muted hover:text-primary transition">
             Sign in
           </a>
-        )}
-      </header>
+        </header>
+      )}
 
       {/* Main area — chat + sidebar on desktop */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
