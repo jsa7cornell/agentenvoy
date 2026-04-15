@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
 import type { AvailabilityRule } from "@/lib/availability-rules";
+import { normalizeLinkRules } from "@/lib/scoring";
 
 // --- Types ---
 
@@ -405,13 +406,15 @@ async function handleCreateLink(
   const urgency = (params.urgency as string) || null;
   const rules = (params.rules as Record<string, unknown>) || {};
 
-  // Merge format/duration/urgency into rules so they're available at greeting time
-  const linkRules = {
+  // Merge format/duration/urgency into rules so they're available at greeting time.
+  // Normalize day-name arrays and dateRange shape — LLMs occasionally emit
+  // long day names ("Monday") or short ones ("Mon"); persist the canonical form.
+  const linkRules = normalizeLinkRules({
     ...rules,
     ...(format ? { format } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(urgency ? { urgency } : {}),
-  };
+  });
 
   const link = await prisma.negotiationLink.create({
     data: {

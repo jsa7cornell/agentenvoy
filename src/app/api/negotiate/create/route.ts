@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { parsePreferences } from "@/agent/administrator";
 import { authenticateRequest } from "@/lib/api-auth";
+import { normalizeLinkRules } from "@/lib/scoring";
+import type { Prisma } from "@prisma/client";
 
 // POST /api/negotiate/create
 // Creates a contextual negotiation link
@@ -35,6 +37,7 @@ export async function POST(req: NextRequest) {
   }
 
   const code = generateCode();
+  const normalizedRules = normalizeLinkRules(parsedRules);
 
   const link = await prisma.negotiationLink.create({
     data: {
@@ -45,7 +48,7 @@ export async function POST(req: NextRequest) {
       inviteeEmail: inviteeEmail || parsedRules.inviteeEmail || null,
       inviteeName: inviteeName || parsedRules.inviteeName || null,
       topic: topic || parsedRules.topic || null,
-      rules: parsedRules,
+      rules: normalizedRules as Prisma.InputJsonValue,
     },
   });
 

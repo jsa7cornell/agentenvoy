@@ -6,7 +6,8 @@ import { generateAgentResponse, AgentContext } from "@/agent/administrator";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";
-import type { ScoredSlot } from "@/lib/scoring";
+import type { ScoredSlot, LinkRules } from "@/lib/scoring";
+import { applyEventOverrides } from "@/lib/scoring";
 import {
   formatAvailabilityWindows,
   humanTimezoneLabel,
@@ -349,8 +350,18 @@ export async function POST(req: NextRequest) {
     undefined;
   const formatIsLocked = Boolean(linkRules.format);
 
+  // Apply link-level rules (preferredDays, dateRange, lastResort, slot overrides)
+  // BEFORE formatting so the greeting shows the same set of times the LLM will
+  // see in `formatOfferableSlots` on follow-up turns. Without this, the greeting
+  // and the LLM disagree about availability and the agent contradicts itself.
+  const filteredSlots = applyEventOverrides(
+    scheduleSlots,
+    linkRules as LinkRules,
+    hostTimezone
+  );
+
   // Format availability in the HOST's timezone (matches the widget).
-  const windows = formatAvailabilityWindows(scheduleSlots, hostTimezone);
+  const windows = formatAvailabilityWindows(filteredSlots, hostTimezone);
 
   let greeting: string;
 

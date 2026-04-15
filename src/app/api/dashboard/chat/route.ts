@@ -38,7 +38,7 @@ Be thorough in extracting rules. If the user says "phone only since I'll be driv
 IMPORTANT: When you create a link, include the structured data in a JSON block at the end of your message. Do NOT include a URL in your text — the UI will display the contextual URL automatically.
 
 \`\`\`agentenvoy-action
-{"action": "create_link", "inviteeEmail": "...", "inviteeName": "...", "topic": "...", "rules": {"preferredDays": [...], "preferredTimes": [...], "format": "...", "duration": 30, "constraints": [...], "conditionalRules": [...], "priority": "...", "notes": "..."}}
+{"action": "create_link", "inviteeEmail": "...", "inviteeName": "...", "topic": "...", "rules": {"preferredDays": ["Mon","Tue"], "lastResort": ["Fri"], "format": "...", "duration": 30, "dateRange": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}, "notes": "..."}}
 \`\`\`
 
 If the user just wants to update their default preferences:

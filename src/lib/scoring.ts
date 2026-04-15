@@ -754,13 +754,81 @@ export interface SlotOverride {
 export interface LinkRules {
   format?: string;
   conditionalRules?: Array<{ condition: string; rule: string }>;
+  /** Short day names: "Mon", "Tue", etc. `normalizeLinkRules()` coerces any input shape. */
   preferredDays?: string[];
+  /** Short day names: "Mon", "Tue", etc. */
   lastResort?: string[];
   preferredTimeStart?: string; // "09:00"
   preferredTimeEnd?: string; // "12:00"
+  /** Inclusive date window in host's local calendar. "YYYY-MM-DD". */
+  dateRange?: { start?: string; end?: string };
   slotOverrides?: SlotOverride[];
   /** @deprecated Use score -2 in slotOverrides instead. Kept for backward compat. */
   exclusiveSlots?: boolean;
+}
+
+// Canonical short day-name table. All persisted `preferredDays` / `lastResort` /
+// `blockedWindows.days` values use this form.
+const SHORT_DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+const SHORT_DAY_SET = new Set<string>(SHORT_DAY_NAMES);
+
+/**
+ * Coerce any day-name input ("Monday", "mon", "MON", "Mon") to canonical short
+ * form ("Mon"). Returns `null` for unrecognized input so callers can drop
+ * garbage rather than mis-match the filter.
+ */
+export function normalizeDayName(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const prefix = trimmed.slice(0, 3).toLowerCase();
+  const match = SHORT_DAY_NAMES.find((d) => d.toLowerCase() === prefix);
+  return match ?? null;
+}
+
+/**
+ * Normalize a LinkRules object for persistence. Coerces day-name arrays to
+ * short form and drops a `dateRange` that is structurally malformed. Safe to
+ * call on unknown input — unknown keys are preserved as-is.
+ */
+export function normalizeLinkRules(
+  input: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  if (!input || typeof input !== "object") return {};
+  const out: Record<string, unknown> = { ...input };
+
+  const normalizeDayArray = (raw: unknown): string[] | undefined => {
+    if (!Array.isArray(raw)) return undefined;
+    const cleaned = raw
+      .map(normalizeDayName)
+      .filter((d): d is string => d !== null);
+    // De-dupe while preserving order.
+    return Array.from(new Set(cleaned));
+  };
+
+  const pd = normalizeDayArray(input.preferredDays);
+  if (pd !== undefined) out.preferredDays = pd;
+
+  const lr = normalizeDayArray(input.lastResort);
+  if (lr !== undefined) out.lastResort = lr;
+
+  // dateRange: keep only if it's an object with at least one valid ISO date.
+  const dr = input.dateRange;
+  if (dr && typeof dr === "object") {
+    const { start, end } = dr as { start?: unknown; end?: unknown };
+    const isIsoDate = (v: unknown): v is string =>
+      typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+    const cleaned: { start?: string; end?: string } = {};
+    if (isIsoDate(start)) cleaned.start = start;
+    if (isIsoDate(end)) cleaned.end = end;
+    if (cleaned.start || cleaned.end) {
+      out.dateRange = cleaned;
+    } else {
+      delete out.dateRange;
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -810,25 +878,54 @@ export function applyEventOverrides(
     });
   }
 
-  // Apply preferredDays filter
-  if (rules.preferredDays && rules.preferredDays.length > 0) {
-    const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: tz });
-    slots = slots.filter((s) => {
-      const dayName = dayFmt.format(new Date(s.start));
-      return rules.preferredDays!.includes(dayName);
+  // Apply dateRange filter (inclusive in host tz).
+  if (rules.dateRange && (rules.dateRange.start || rules.dateRange.end)) {
+    const dateFmt = new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone: tz,
     });
+    const { start, end } = rules.dateRange;
+    slots = slots.filter((s) => {
+      const localDate = dateFmt.format(new Date(s.start)); // YYYY-MM-DD
+      if (start && localDate < start) return false;
+      if (end && localDate > end) return false;
+      return true;
+    });
+  }
+
+  // Apply preferredDays filter. Tolerate any day-name shape on read via
+  // normalizeDayName — persisted values are short form, but old rows or
+  // hand-written rules might not be.
+  if (rules.preferredDays && rules.preferredDays.length > 0) {
+    const allowed = new Set(
+      rules.preferredDays
+        .map((d) => normalizeDayName(d))
+        .filter((d): d is string => d !== null && SHORT_DAY_SET.has(d))
+    );
+    if (allowed.size > 0) {
+      const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
+      slots = slots.filter((s) => allowed.has(dayFmt.format(new Date(s.start))));
+    }
   }
 
   // Apply lastResort filter (remove these days if other days have slots)
   if (rules.lastResort && rules.lastResort.length > 0) {
-    const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: tz });
-    const nonLastResort = slots.filter((s) => {
-      const dayName = dayFmt.format(new Date(s.start));
-      return !rules.lastResort!.includes(dayName);
-    });
-    // Only filter if there are non-last-resort options
-    if (nonLastResort.length > 0) {
-      slots = nonLastResort;
+    const lastResortSet = new Set(
+      rules.lastResort
+        .map((d) => normalizeDayName(d))
+        .filter((d): d is string => d !== null && SHORT_DAY_SET.has(d))
+    );
+    if (lastResortSet.size > 0) {
+      const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
+      const nonLastResort = slots.filter(
+        (s) => !lastResortSet.has(dayFmt.format(new Date(s.start)))
+      );
+      // Only filter if there are non-last-resort options
+      if (nonLastResort.length > 0) {
+        slots = nonLastResort;
+      }
     }
   }
 

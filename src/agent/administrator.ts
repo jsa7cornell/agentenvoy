@@ -98,7 +98,7 @@ export async function parsePreferences(
   const { text } = await generateText({
     model: envoyModel("claude-sonnet-4-6"),
     system: `You parse natural language scheduling preferences into structured JSON. Extract:
-- preferredDays: array of day names or "any"
+- preferredDays: array of short day names (e.g. ["Mon","Tue","Wed","Thu","Fri"]) or "any"
 - preferredTimes: array of time ranges like "morning", "afternoon", "9am-12pm"
 - format: "phone" | "video" | "in-person" | "any" (aliases: "vc", "video conference", "videoconference", "zoom", "meet" → "video"; "call" alone without video/vc qualifier → "phone"; "coffee", "lunch", "drinks" → "in-person")
 - duration: number in minutes (default 30)

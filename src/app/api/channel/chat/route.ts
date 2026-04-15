@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
@@ -9,6 +10,7 @@ import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
 import { generateCode } from "@/lib/utils";
 import { getUserTimezone } from "@/lib/timezone";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
+import { normalizeLinkRules } from "@/lib/scoring";
 import { sanitizeHistory, roleSummary } from "@/lib/conversation";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -33,7 +35,7 @@ CREATING THREADS:
 When the user wants to schedule something, extract what you can: who (name), what (topic), when (preferences), format (phone/video/in-person), duration, urgency.
 Then emit an action block:
 \`\`\`agentenvoy-action
-{"action":"create_thread","inviteeName":"Sarah Chen","topic":"Q2 Roadmap","format":"phone","duration":30,"urgency":"asap","rules":{"preferredDays":["Tuesday"],"lastResort":["Friday"]}}
+{"action":"create_thread","inviteeName":"Sarah Chen","topic":"Q2 Roadmap","format":"phone","duration":30,"urgency":"asap","rules":{"preferredDays":["Tue"],"lastResort":["Fri"]}}
 \`\`\`
 - "urgency" is optional. Use "asap" if the user says soon/asap/urgent/high-pri. Use "this-week" or "next-week" if they give a timeframe. Omit if no urgency specified.
 
@@ -445,13 +447,14 @@ export async function POST(req: NextRequest) {
           : `Catch up — ${action.inviteeName || "Invitee"}`;
 
         // Create contextual link — merge format/duration/urgency into rules
-        // so they're available when generating the deal room greeting
-        const linkRules = {
+        // so they're available when generating the deal room greeting.
+        // Normalize day-name arrays / dateRange to canonical persistence shape.
+        const linkRules = normalizeLinkRules({
           ...(action.rules || {}),
           ...(action.format ? { format: action.format } : {}),
           ...(action.duration ? { duration: action.duration } : {}),
           ...(action.urgency ? { urgency: action.urgency } : {}),
-        };
+        });
         const link = await prisma.negotiationLink.create({
           data: {
             userId: user.id,
@@ -461,7 +464,7 @@ export async function POST(req: NextRequest) {
             inviteeEmail: action.inviteeEmail || null,
             inviteeName: action.inviteeName || null,
             topic: action.topic || null,
-            rules: linkRules,
+            rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
           },
         });
 
