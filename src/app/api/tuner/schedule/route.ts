@@ -3,7 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getOrComputeSchedule, CalendarEvent } from "@/lib/calendar";
-import { type AvailabilityRule } from "@/lib/availability-rules";
+import { type AvailabilityRule, compileOfficeHoursLinks } from "@/lib/availability-rules";
+import { applyOfficeHoursWindow } from "@/lib/office-hours";
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -37,11 +38,35 @@ export async function GET(req: NextRequest) {
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 7);
 
+  // Read prefs once — used for both office-hours transforms and locationByDay.
+  const prefs = (user.preferences as Record<string, unknown>) || {};
+  const explicit = (prefs.explicit as Record<string, unknown>) || {};
+  const structuredRules = (explicit.structuredRules as AvailabilityRule[] | undefined) ?? [];
+  const defaultLocation = (explicit.defaultLocation as string | undefined) || undefined;
+
   // Filter slots to the requested week
-  const slots = schedule.slots.filter((s) => {
+  let slots = schedule.slots.filter((s) => {
     const t = new Date(s.start).getTime();
     return t >= weekStart.getTime() && t < weekEnd.getTime();
   });
+
+  // Apply office-hours transforms so the host's own availability view
+  // reflects any office-hours rules (soft-protection override inside window).
+  // Confirmed bookings are already present as real calendar events via the
+  // Google Calendar sync path, so we pass an empty array here.
+  const compiledOH = compileOfficeHoursLinks(structuredRules);
+  for (const ohRule of compiledOH) {
+    const transformed = applyOfficeHoursWindow({
+      rule: ohRule,
+      slots,
+      confirmedBookings: [],
+      timezone: schedule.timezone,
+    });
+    // applyOfficeHoursWindow drops slots outside the window — merge its
+    // overrides back into the full week set so the rest of the day still renders.
+    const overrideByKey = new Map(transformed.map((s) => [`${s.start}|${s.end}`, s]));
+    slots = slots.map((s) => overrideByKey.get(`${s.start}|${s.end}`) ?? s);
+  }
 
   // Filter events to the requested week (include events that overlap)
   const weekFiltered = schedule.events.filter((e) => {
@@ -50,12 +75,6 @@ export async function GET(req: NextRequest) {
     return eEnd > weekStart.getTime() && eStart < weekEnd.getTime();
   });
   const events = weekFiltered.map((e) => serializeEvent(e));
-
-  // Build locationByDay from workingLocation events + preferences
-  const prefs = (user.preferences as Record<string, unknown>) || {};
-  const explicit = (prefs.explicit as Record<string, unknown>) || {};
-  const structuredRules = (explicit.structuredRules as AvailabilityRule[] | undefined) ?? [];
-  const defaultLocation = (explicit.defaultLocation as string | undefined) || undefined;
 
   const locationByDay: Record<string, string | null> = {};
   for (let d = 0; d < 7; d++) {

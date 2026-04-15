@@ -206,7 +206,11 @@ function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: str
   const meetingItems: string[] = [];
   const defaultDur = (prefs.defaultDuration as number) || (explicit?.defaultDuration as number) || 30;
   meetingItems.push(`Default meeting duration: ${defaultDur} minutes. Use this when no duration is specified in the link rules.`);
-  if (prefs.phone) meetingItems.push(`Host phone: ${prefs.phone} (default location for phone calls — "guest calls host @ number")`);
+  if (prefs.phone) {
+    meetingItems.push(`Host phone: ${prefs.phone} (default location for phone calls — "guest calls host @ number")`);
+  } else {
+    meetingItems.push(`Host phone: NOT SET. If this meeting is a phone call and the host mentions a phone number in chat, save it with update_meeting_settings so the confirmation invite auto-populates. If a phone call is being arranged and no number is on file, ask the host for it.`);
+  }
   if (prefs.videoProvider === "zoom" && prefs.zoomLink) {
     meetingItems.push(`Video provider: Zoom (link: ${prefs.zoomLink}). Use "Zoom" not "Google Meet" when discussing video meetings.`);
   } else if (prefs.videoProvider === "zoom") {

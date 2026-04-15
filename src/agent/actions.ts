@@ -125,6 +125,8 @@ async function executeAction(
       return handleReleaseHold(action.params, userId);
     case "update_knowledge":
       return handleUpdateKnowledge(action.params, userId);
+    case "update_meeting_settings":
+      return handleUpdateMeetingSettings(action.params, userId);
     case "save_guest_info":
       return handleSaveGuestInfo(action.params, userId, context?.sessionId);
     default:
@@ -604,6 +606,72 @@ async function handleUpdateKnowledge(
   return {
     success: true,
     message: `Updated ${parts.join(" and ")}`,
+  };
+}
+
+/**
+ * Save host meeting settings (phone, video provider, zoom link, default duration)
+ * to user.preferences. Used when the host supplies one of these mid-negotiation
+ * (e.g., drops a phone number into chat for a phone call).
+ *
+ * Writes at the top level of preferences (not inside `explicit`), matching the
+ * /api/agent/knowledge PUT contract so the account page + confirm route + composer
+ * all read the same values. The confirm route reads hostPrefs.phone fresh at
+ * confirm-time, so saving here auto-applies to any pending (unconfirmed) invites.
+ */
+async function handleUpdateMeetingSettings(
+  params: Record<string, unknown>,
+  userId: string
+): Promise<ActionResult> {
+  const phone = params.phone as string | undefined;
+  const videoProvider = params.videoProvider as string | undefined;
+  const zoomLink = params.zoomLink as string | undefined;
+  const defaultDuration = params.defaultDuration as number | undefined;
+
+  if (
+    phone === undefined &&
+    videoProvider === undefined &&
+    zoomLink === undefined &&
+    defaultDuration === undefined
+  ) {
+    return { success: false, message: "No meeting settings to update" };
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferences: true },
+  });
+  const currentPrefs = (user?.preferences as Record<string, unknown>) || {};
+
+  const updates: Record<string, unknown> = { ...currentPrefs };
+  const changed: string[] = [];
+  if (phone !== undefined) {
+    updates.phone = phone || null;
+    changed.push(phone ? `phone: ${phone}` : "cleared phone");
+  }
+  if (videoProvider !== undefined) {
+    updates.videoProvider = videoProvider || "google-meet";
+    changed.push(`video provider: ${videoProvider}`);
+  }
+  if (zoomLink !== undefined) {
+    updates.zoomLink = zoomLink || null;
+    changed.push(zoomLink ? `zoom link saved` : "cleared zoom link");
+  }
+  if (defaultDuration !== undefined) {
+    updates.defaultDuration = defaultDuration || 30;
+    changed.push(`default duration: ${defaultDuration} min`);
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      preferences: updates as unknown as Parameters<typeof prisma.user.update>[0]["data"]["preferences"],
+    },
+  });
+
+  return {
+    success: true,
+    message: `Saved to settings — ${changed.join(", ")}`,
   };
 }
 
