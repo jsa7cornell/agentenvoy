@@ -247,6 +247,8 @@ const mockPrisma = vi.hoisted(() => ({
   },
   negotiationLink: {
     create: vi.fn(),
+    findFirst: vi.fn(),
+    update: vi.fn(),
   },
   message: {
     create: vi.fn(),
@@ -766,6 +768,49 @@ describe("executeActions", () => {
       expect(results[0].message).toContain("No meet slug");
     });
 
+    it("persists priority onto link rules when provided", async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john" });
+      mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
+      mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
+
+      await executeActions(
+        [
+          {
+            action: "create_link",
+            params: {
+              inviteeName: "Katherine",
+              topic: "Roadmap",
+              format: "video",
+              priority: "high",
+            },
+          },
+        ],
+        HOST_USER_ID
+      );
+
+      const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+      expect(call.data.rules).toMatchObject({ priority: "high", format: "video" });
+    });
+
+    it("drops invalid priority values via normalizeLinkRules", async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john" });
+      mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
+      mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
+
+      await executeActions(
+        [
+          {
+            action: "create_link",
+            params: { inviteeName: "Noah", priority: "urgent" }, // not a canonical value
+          },
+        ],
+        HOST_USER_ID
+      );
+
+      const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+      expect(call.data.rules.priority).toBeUndefined();
+    });
+
     it("handles missing optional fields gracefully", async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john" });
       mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
@@ -784,6 +829,120 @@ describe("executeActions", () => {
           topic: null,
         }),
       });
+    });
+  });
+
+  // --- Expand Link ---
+
+  describe("expand_link", () => {
+    const existingLink = {
+      id: "link-1",
+      userId: HOST_USER_ID,
+      code: "hhkkkw",
+      inviteeName: "Katherine",
+      rules: { format: "video", duration: 30, preferredDays: ["Mon", "Tue"] },
+    };
+
+    it("upgrades priority by code", async () => {
+      mockPrisma.negotiationLink.findFirst.mockResolvedValue(existingLink);
+      mockPrisma.negotiationLink.update.mockResolvedValue({ id: "link-1" });
+
+      const results = await executeActions(
+        [{ action: "expand_link", params: { code: "hhkkkw", priority: "vip" } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(results[0].message).toContain("Katherine");
+      expect(results[0].message).toContain("vip");
+      // Merged rules should preserve existing fields AND have new priority
+      const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
+      expect(call.data.rules).toMatchObject({
+        format: "video",
+        duration: 30,
+        preferredDays: ["Mon", "Tue"],
+        priority: "vip",
+      });
+    });
+
+    it("downgrades priority (merge, not replace)", async () => {
+      mockPrisma.negotiationLink.findFirst.mockResolvedValue({
+        ...existingLink,
+        rules: { ...existingLink.rules, priority: "vip" },
+      });
+      mockPrisma.negotiationLink.update.mockResolvedValue({ id: "link-1" });
+
+      await executeActions(
+        [{ action: "expand_link", params: { code: "hhkkkw", priority: "normal" } }],
+        HOST_USER_ID
+      );
+
+      const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
+      expect(call.data.rules.priority).toBe("normal");
+      // Other fields preserved
+      expect(call.data.rules.preferredDays).toEqual(["Mon", "Tue"]);
+    });
+
+    it("narrows the daily time window via preferredTimeEnd", async () => {
+      mockPrisma.negotiationLink.findFirst.mockResolvedValue(existingLink);
+      mockPrisma.negotiationLink.update.mockResolvedValue({ id: "link-1" });
+
+      await executeActions(
+        [
+          {
+            action: "expand_link",
+            params: { code: "hhkkkw", priority: "high", preferredTimeEnd: "10:00" },
+          },
+        ],
+        HOST_USER_ID
+      );
+
+      const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
+      expect(call.data.rules.priority).toBe("high");
+      expect(call.data.rules.preferredTimeEnd).toBe("10:00");
+    });
+
+    it("rejects when no identifying code or sessionId provided", async () => {
+      const results = await executeActions(
+        [{ action: "expand_link", params: { priority: "high" } }],
+        HOST_USER_ID
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("code");
+    });
+
+    it("rejects when no mutation fields provided", async () => {
+      mockPrisma.negotiationLink.findFirst.mockResolvedValue(existingLink);
+      const results = await executeActions(
+        [{ action: "expand_link", params: { code: "hhkkkw" } }],
+        HOST_USER_ID
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("at least one field");
+    });
+
+    it("rejects when link not found", async () => {
+      mockPrisma.negotiationLink.findFirst.mockResolvedValue(null);
+      const results = await executeActions(
+        [{ action: "expand_link", params: { code: "nope", priority: "vip" } }],
+        HOST_USER_ID
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("not found");
+    });
+
+    it("rejects when link belongs to another user (session path)", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue({
+        hostId: OTHER_USER_ID,
+        linkId: "link-1",
+        link: { ...existingLink, userId: OTHER_USER_ID },
+      });
+      const results = await executeActions(
+        [{ action: "expand_link", params: { sessionId: "session-1", priority: "vip" } }],
+        HOST_USER_ID
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("Not authorized");
     });
   });
 

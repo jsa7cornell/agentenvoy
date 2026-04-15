@@ -224,12 +224,24 @@ export async function POST(req: NextRequest) {
   const isGroupEvent = link.mode === "group";
   const isHost = authSession?.user?.id === user.id;
 
-  // Create the session (or reuse an existing empty one)
+  // Create the session (or reuse an existing empty one).
+  // guestTimezone (from browser) is persisted on first write and never
+  // overwritten on subsequent visits — so the host stays honest to the
+  // first-observed guest location even across re-visits from different
+  // devices. The column is nullable and defaults to null.
   let session;
   if (reuseSessionId) {
     session = await prisma.negotiationSession.findUnique({
       where: { id: reuseSessionId },
     });
+    // First-write-wins: if the existing row has no guestTimezone and the
+    // current request provided one, backfill it now.
+    if (session && !session.guestTimezone && guestTimezone) {
+      session = await prisma.negotiationSession.update({
+        where: { id: session.id },
+        data: { guestTimezone },
+      });
+    }
     if (!session) {
       // Shouldn't happen, but fall through to create
       session = await prisma.negotiationSession.create({
@@ -242,6 +254,7 @@ export async function POST(req: NextRequest) {
             ? `${link.topic}${link.inviteeName ? ` — ${link.inviteeName}` : ''}`
             : `Meeting${link.inviteeName ? ` with ${link.inviteeName}` : ''}`,
           statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
+          guestTimezone: guestTimezone || null,
         },
       });
     }
@@ -256,9 +269,16 @@ export async function POST(req: NextRequest) {
           ? `${link.topic}${link.inviteeName ? ` — ${link.inviteeName}` : ''}`
           : `Meeting${link.inviteeName ? ` with ${link.inviteeName}` : ''}`,
         statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
+        guestTimezone: guestTimezone || null,
       },
     });
   }
+
+  // Effective guest timezone used for downstream formatting. Prefer the
+  // persisted value (first-observed) over what the current request provided
+  // — they're usually the same, but a re-visit from a different browser
+  // shouldn't flip the greeting's timezone mid-conversation.
+  const effectiveGuestTz = session.guestTimezone || guestTimezone || undefined;
 
   // For group links, create a SessionParticipant row
   if (isGroupEvent) {
@@ -319,7 +339,7 @@ export async function POST(req: NextRequest) {
     hostDirectives: (user.hostDirectives as string[]) || [],
     guestName: link.inviteeName || undefined,
     guestEmail: link.inviteeEmail || undefined,
-    guestTimezone: guestTimezone || undefined,
+    guestTimezone: effectiveGuestTz,
     topic: link.topic || undefined,
     rules: (link.rules as Record<string, unknown>) || {},
     calendarContext,
@@ -332,7 +352,8 @@ export async function POST(req: NextRequest) {
 
   // Human-readable timezone label for the greeting ("Pacific time", not "GMT-7").
   const hostTimezoneLabel = humanTimezoneLabel(hostTimezone);
-  const guestTzDiffers = !!guestTimezone && guestTimezone !== hostTimezone;
+  const guestTzDiffers = !!effectiveGuestTz && effectiveGuestTz !== hostTimezone;
+  const guestTimezoneLabel = guestTzDiffers ? humanTimezoneLabel(effectiveGuestTz!) : null;
 
   // Resolve effective format/duration — link rules override user preferences.
   const linkRules = (link.rules as Record<string, unknown>) || {};
@@ -360,8 +381,15 @@ export async function POST(req: NextRequest) {
     hostTimezone
   );
 
-  // Format availability in the HOST's timezone (matches the widget).
-  const windows = formatAvailabilityWindows(filteredSlots, hostTimezone);
+  // Format availability. When the guest is in a different timezone, the
+  // template shows times primary in guest-local with host-local in parens,
+  // and groups by guest-local day — the guest should never have to translate.
+  const windows = formatAvailabilityWindows(
+    filteredSlots,
+    hostTimezone,
+    new Date(),
+    guestTzDiffers ? effectiveGuestTz : undefined
+  );
 
   let greeting: string;
 
@@ -386,10 +414,15 @@ export async function POST(req: NextRequest) {
       : `I'm coordinating a meeting with ${hostName}.`;
     const intro = `${hello} ${introCore}`;
 
-    // 2. Schedule block.
+    // 2. Schedule block. When guest TZ differs from host, the window lines
+    // already contain dual-labeled ranges ("5–7 PM CEST (8–10 AM PT)") and
+    // are grouped by the guest-local day, so the header just says "in your
+    // local time" rather than naming the host timezone.
     let scheduleBlock: string;
     if (windows.lines.length > 0) {
-      const header = `Here are some times that work (${hostTimezoneLabel}):`;
+      const header = guestTzDiffers
+        ? `Here are some times that work — times in your local time (${guestTimezoneLabel}), ${hostFirstName}'s time in parentheses:`
+        : `Here are some times that work (${hostTimezoneLabel}):`;
       const body = windows.lines.join("\n");
       const legend = windows.hasPreferred
         ? `\n\n★ = best fit with ${hostFirstName}'s schedule`

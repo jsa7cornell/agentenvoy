@@ -7,6 +7,7 @@
  */
 
 import type { ScoredSlot } from "@/lib/scoring";
+import { shortTimezoneLabel } from "./timezone";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -71,11 +72,18 @@ interface Block {
  *   should stay skimmable, and the agent can widen the search in later turns)
  * - Returns up to 5 days, prioritizing days with preferred slots and then by
  *   chronological order
+ *
+ * @param guestTimezone Optional IANA timezone for the GUEST. When set, day
+ *   grouping and the primary time label switch to guest-local, with the
+ *   host-local time shown in parentheses — "5–7 PM CEST (8–10 AM PT)". When
+ *   omitted or equal to the host timezone, behavior is unchanged from
+ *   pre-v2 and all existing callers stay correct.
  */
 export function formatAvailabilityWindows(
   slots: ScoredSlot[],
   timezone: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  guestTimezone?: string
 ): FormattedWindows {
   const goodSlots = slots
     .filter((s) => {
@@ -86,12 +94,19 @@ export function formatAvailabilityWindows(
 
   if (goodSlots.length === 0) return { lines: [], hasPreferred: false };
 
+  // When the guest has a distinct timezone, group by the GUEST's local calendar
+  // so "Wednesday 8 PM CEST" doesn't visually split across two days in PT.
+  // Time ranges are rendered primary in the guest TZ and secondary in the
+  // host TZ via fmtDualTimeRange below.
+  const hasGuestTz = !!guestTimezone && guestTimezone !== timezone;
+  const groupTz = hasGuestTz ? guestTimezone! : timezone;
+
   const dayFmt = (d: Date) =>
     d.toLocaleDateString("en-US", {
       weekday: "short",
       month: "short",
       day: "numeric",
-      timeZone: timezone,
+      timeZone: groupTz,
     });
 
   // Step 1: build contiguous blocks, grouped by day.
@@ -196,15 +211,34 @@ export function formatAvailabilityWindows(
   // Re-sort chronologically for display.
   picked.sort((a, b) => a.firstStart.getTime() - b.firstStart.getTime());
 
+  // Short TZ labels are resolved at render time against "now" so DST is
+  // handled correctly for both sides.
+  const guestShort = hasGuestTz ? shortTimezoneLabel(guestTimezone!, now) : null;
+  const hostShort = shortTimezoneLabel(timezone, now);
+
   let hasPreferred = false;
   const lines = picked.map((entry) => {
     const parts = entry.blocks.map((b) => {
-      const range = fmtTimeRange(b.start, b.end, timezone);
+      // Default (no guest TZ): single range in the given timezone, no label —
+      // matches pre-v2 behavior so every existing test stays green.
+      if (!hasGuestTz) {
+        const range = fmtTimeRange(b.start, b.end, timezone);
+        if (b.hasPreferred) {
+          hasPreferred = true;
+          return `${range} ★`;
+        }
+        return range;
+      }
+      // Dual render: "5–7 PM CEST (8–10 AM PT)". Primary is guest-local
+      // because that's where the guest is making decisions.
+      const guestRange = fmtTimeRange(b.start, b.end, guestTimezone!);
+      const hostRange = fmtTimeRange(b.start, b.end, timezone);
+      const dual = `${guestRange} ${guestShort} (${hostRange} ${hostShort})`;
       if (b.hasPreferred) {
         hasPreferred = true;
-        return `${range} ★`;
+        return `${dual} ★`;
       }
-      return range;
+      return dual;
     });
     return `  • ${entry.day} — ${parts.join(", ")}`;
   });

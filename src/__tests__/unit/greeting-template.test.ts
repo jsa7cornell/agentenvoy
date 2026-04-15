@@ -124,6 +124,53 @@ describe("formatAvailabilityWindows", () => {
   });
 });
 
+// ─── formatAvailabilityWindows — guest timezone dual rendering ──────────────
+
+describe("formatAvailabilityWindows — guest timezone", () => {
+  // Slots on 4/15 17:00Z → 10 AM PT → 7 PM CEST
+  const slots = run([2026, 4, 15], 17, 0, 4, 1);
+
+  it("renders time range primary in guest TZ with host TZ in parens", () => {
+    const out = formatAvailabilityWindows(slots, TZ, NOW, "Europe/Paris");
+    expect(out.lines).toHaveLength(1);
+    // 10:00 UTC on Apr 15 in Paris is 6 PM CEST (CEST is UTC+2). Primary
+    // should be the CEST range, parens should hold the PT range.
+    const line = out.lines[0];
+    // Primary (CEST range) comes first
+    expect(line).toMatch(/7–9 PM/);
+    // Host (PT) range in parens
+    expect(line).toMatch(/\(10 AM–12 PM/);
+    // Short labels: "CEST" and "PT" (or similar native abbreviations)
+    expect(line).toMatch(/CEST|CET|GMT/);
+    expect(line).toMatch(/PT|PDT|PST/);
+  });
+
+  it("groups by guest-local day when guest TZ differs", () => {
+    // A slot at 2026-04-15 06:30 UTC falls at:
+    //   Host PT: 2026-04-14 23:30 (late night)  → "Tue Apr 14"
+    //   Guest CEST: 2026-04-15 08:30 (morning)  → "Wed Apr 15"
+    // With guest-local grouping the day label should reference Apr 15.
+    const earlyAm = slot([2026, 4, 15], 6, 30, 1);
+    const out = formatAvailabilityWindows([earlyAm], TZ, NOW, "Europe/Paris");
+    expect(out.lines).toHaveLength(1);
+    expect(out.lines[0]).toContain("Apr 15");
+  });
+
+  it("falls back to single-TZ rendering when guest TZ equals host TZ", () => {
+    const out = formatAvailabilityWindows(slots, TZ, NOW, "America/Los_Angeles");
+    // Same TZ — should behave identically to no guestTz arg (no parens, no CEST)
+    expect(out.lines[0]).not.toContain("(");
+    expect(out.lines[0]).not.toContain("CEST");
+  });
+
+  it("passing undefined guestTz matches the 3-arg legacy call", () => {
+    const a = formatAvailabilityWindows(slots, TZ, NOW);
+    const b = formatAvailabilityWindows(slots, TZ, NOW, undefined);
+    expect(a.lines).toEqual(b.lines);
+    expect(a.hasPreferred).toBe(b.hasPreferred);
+  });
+});
+
 // ─── humanTimezoneLabel ──────────────────────────────────────────────────────
 
 describe("humanTimezoneLabel", () => {

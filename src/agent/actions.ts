@@ -116,6 +116,8 @@ async function executeAction(
       return handleUpdateLocation(action.params, userId, context?.sessionId);
     case "create_link":
       return handleCreateLink(action.params, userId, context?.meetSlug);
+    case "expand_link":
+      return handleExpandLink(action.params, userId);
     case "update_knowledge":
       return handleUpdateKnowledge(action.params, userId);
     case "save_guest_info":
@@ -406,14 +408,19 @@ async function handleCreateLink(
   const urgency = (params.urgency as string) || null;
   const rules = (params.rules as Record<string, unknown>) || {};
 
-  // Merge format/duration/urgency into rules so they're available at greeting time.
-  // Normalize day-name arrays and dateRange shape — LLMs occasionally emit
-  // long day names ("Monday") or short ones ("Mon"); persist the canonical form.
+  // Merge format/duration/urgency/priority into rules so they're available
+  // at greeting/composer time. Priority is the key new field — it tells the
+  // scoring engine which protection layers this link can pierce (see
+  // scoring.ts :: PriorityConfig). Normalize day-name arrays and dateRange
+  // shape — LLMs occasionally emit long day names ("Monday") or short ones
+  // ("Mon"); persist the canonical form.
+  const priority = (params.priority as string) || null;
   const linkRules = normalizeLinkRules({
     ...rules,
     ...(format ? { format } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(urgency ? { urgency } : {}),
+    ...(priority ? { priority } : {}),
   });
 
   const link = await prisma.negotiationLink.create({
@@ -640,5 +647,125 @@ async function handleSaveGuestInfo(
   return {
     success: true,
     message: `Saved guest info — ${parts.join(", ")}`,
+  };
+}
+
+/**
+ * Expand or downgrade the priority/rules of an existing negotiation link.
+ *
+ * Lookup:
+ *   - `code`: string — the 6-char link code from the URL
+ *   - OR `sessionId`: string — the deal-room session id (we walk to its link)
+ *
+ * Mutations (all optional; provide the ones you want to change):
+ *   - `priority`: "normal" | "high" | "vip" — bumps/lowers the protection
+ *     ceiling used by the composer. The greeting and the LLM's offerable
+ *     slot list both reflect this on the NEXT guest message.
+ *   - `preferredTimeStart` / `preferredTimeEnd`: "HH:MM" — narrow the
+ *     per-day time window (independent of priority; can be used together).
+ *   - `dateRange`: { start?, end? } — YYYY-MM-DD host-local inclusive.
+ *   - `preferredDays`, `lastResort`: day-name arrays (normalized on write).
+ *
+ * Supports both upgrade ("make Jack's link VIP") and downgrade ("tone
+ * Katie's link back to normal") since rules are merged — an explicit
+ * `priority: "normal"` will overwrite an existing `"vip"`.
+ */
+async function handleExpandLink(
+  params: Record<string, unknown>,
+  userId: string
+): Promise<ActionResult> {
+  const code = (params.code as string) || null;
+  const sessionId = (params.sessionId as string) || null;
+
+  if (!code && !sessionId) {
+    return {
+      success: false,
+      message: "expand_link requires either a `code` (link code) or `sessionId`",
+    };
+  }
+
+  // Resolve link by code (preferred) or via session.linkId.
+  let link: { id: string; userId: string; rules: unknown; inviteeName: string | null; code: string | null } | null = null;
+  if (code) {
+    link = await prisma.negotiationLink.findFirst({
+      where: { code, userId },
+      select: { id: true, userId: true, rules: true, inviteeName: true, code: true },
+    });
+  } else if (sessionId) {
+    const session = await prisma.negotiationSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        hostId: true,
+        linkId: true,
+        link: { select: { id: true, userId: true, rules: true, inviteeName: true, code: true } },
+      },
+    });
+    if (!session) {
+      return { success: false, message: `Session not found: ${sessionId}` };
+    }
+    if (session.hostId !== userId) {
+      return { success: false, message: "Not authorized for this session" };
+    }
+    link = session.link;
+  }
+
+  if (!link) {
+    return { success: false, message: "Link not found" };
+  }
+  if (link.userId !== userId) {
+    return { success: false, message: "Not authorized for this link" };
+  }
+
+  // Merge new rule fragments onto the existing rules, then normalize the
+  // whole thing so day-name arrays and dateRange stay canonical even if the
+  // host started from a mixed-shape row.
+  const existingRules = (link.rules as Record<string, unknown>) || {};
+  const patch: Record<string, unknown> = {};
+  if (params.priority !== undefined) patch.priority = params.priority;
+  if (params.preferredTimeStart !== undefined) patch.preferredTimeStart = params.preferredTimeStart;
+  if (params.preferredTimeEnd !== undefined) patch.preferredTimeEnd = params.preferredTimeEnd;
+  if (params.preferredDays !== undefined) patch.preferredDays = params.preferredDays;
+  if (params.lastResort !== undefined) patch.lastResort = params.lastResort;
+  if (params.dateRange !== undefined) patch.dateRange = params.dateRange;
+
+  if (Object.keys(patch).length === 0) {
+    return {
+      success: false,
+      message: "expand_link needs at least one field to change (priority, preferredTimeStart/End, preferredDays, lastResort, dateRange)",
+    };
+  }
+
+  const mergedRules = normalizeLinkRules({ ...existingRules, ...patch });
+
+  await prisma.negotiationLink.update({
+    where: { id: link.id },
+    data: {
+      rules: mergedRules as Parameters<typeof prisma.negotiationLink.update>[0]["data"]["rules"],
+    },
+  });
+
+  // Human-readable confirmation message. Prioritize the priority change
+  // since that's the most common use case.
+  const changedParts: string[] = [];
+  if (patch.priority !== undefined) {
+    changedParts.push(`priority: ${patch.priority}`);
+  }
+  if (patch.preferredTimeStart !== undefined || patch.preferredTimeEnd !== undefined) {
+    const start = patch.preferredTimeStart ?? existingRules.preferredTimeStart ?? "—";
+    const end = patch.preferredTimeEnd ?? existingRules.preferredTimeEnd ?? "—";
+    changedParts.push(`time window: ${start}–${end}`);
+  }
+  if (patch.preferredDays !== undefined) {
+    changedParts.push(`days: ${Array.isArray(patch.preferredDays) ? patch.preferredDays.join(",") : "updated"}`);
+  }
+  if (patch.dateRange !== undefined) {
+    changedParts.push(`dateRange: updated`);
+  }
+
+  const name = link.inviteeName || link.code;
+  return {
+    success: true,
+    message: `Updated ${name}'s link — ${changedParts.join(", ")}`,
+    data: { linkId: link.id, code: link.code, rules: mergedRules },
   };
 }

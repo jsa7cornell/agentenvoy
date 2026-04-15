@@ -381,8 +381,13 @@ export default function Feed() {
 
       if (contentType.includes("application/json")) {
         const data = await res.json();
+        // Trim trailing whitespace on the main message before concatenating
+        // the share note — the LLM often emits messages ending in a newline,
+        // and combining that with our literal \n\n separator produces \n\n\n
+        // inside a `whitespace-pre-wrap` bubble, which shows as a visible
+        // blank line mid-message. Trimming restores a clean single gap.
         const envoyContent = data.shareNote
-          ? `${data.message}\n\n${data.shareNote}`
+          ? `${(data.message ?? "").trimEnd()}\n\n${data.shareNote}`
           : data.message;
 
         const envoyMsg: ChannelMsg = {

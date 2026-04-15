@@ -97,18 +97,28 @@ export async function parsePreferences(
 ): Promise<Record<string, unknown>> {
   const { text } = await generateText({
     model: envoyModel("claude-sonnet-4-6"),
-    system: `You parse natural language scheduling preferences into structured JSON. Extract:
-- preferredDays: array of short day names (e.g. ["Mon","Tue","Wed","Thu","Fri"]) or "any"
-- preferredTimes: array of time ranges like "morning", "afternoon", "9am-12pm"
-- format: "phone" | "video" | "in-person" | "any" (aliases: "vc", "video conference", "videoconference", "zoom", "meet" → "video"; "call" alone without video/vc qualifier → "phone"; "coffee", "lunch", "drinks" → "in-person")
+    system: `You parse natural language scheduling preferences into structured JSON for a meeting negotiation link. Extract ONLY these fields (never invent new ones — the downstream engine ignores unknown keys):
+
+- preferredDays: array of short day names (["Mon","Tue","Wed","Thu","Fri"]) or omit for "any"
+- preferredTimeStart: "HH:MM" 24-hour, earliest time in each day to offer (e.g. "09:00"). Omit if no constraint.
+- preferredTimeEnd: "HH:MM" 24-hour, latest time in each day to offer (e.g. "17:00"). Omit if no constraint.
+- dateRange: { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } — inclusive host-local window. Omit if open-ended.
+- format: "phone" | "video" | "in-person" | "any". Aliases: "vc","video conference","videoconference","zoom","meet" → "video"; bare "call" → "phone"; "coffee","lunch","drinks" → "in-person".
 - duration: number in minutes (default 30)
-- location: string or null
-- constraints: array of strings (things to avoid)
-- priority: "high" | "normal" | "low"
+- priority: "normal" | "high" | "vip" — see PRIORITY RULES below
 - inviteeEmail: string or null
 - inviteeName: string or null
 - topic: string or null
 - notes: string or null
+
+PRIORITY RULES (critical — governs which protection layers the link pierces):
+- "normal" is the default. Use for anything routine with no urgency signal.
+- "high" when the host signals this is important: "important client", "high priority", "urgent", "make room", "open it up for her", "investor", "she's stuck in another timezone", "he's in Europe and can only meet early PT", "he can only meet late". A high link auto-opens weekend daytime and weekday hours just outside the host's normal window.
+- "vip" for the strongest signals: "VIP", "CEO", "board member", "clear my calendar for him", "any time at all", "drop everything", "most important meeting of the month". A vip link additionally opens early-morning, late-evening, weekend off-hours, AND pierces the host's own soft blocks like morning routines.
+- International context ALONE is a "high" signal even without urgency language. If the host says "she's in Europe" or "he's in Tokyo", set priority to "high" so off-hours in the host's timezone become available.
+- Never use "low" — it's not a valid value. Downgrade to "normal" for low-priority language.
+
+IMPORTANT: If the host says "open up mornings" or "even early is fine" without naming a time, that's still a priority signal — emit priority: "high" rather than trying to pick a specific preferredTimeStart. Only emit preferredTimeStart when the host names a concrete clock time.
 
 Return ONLY valid JSON, no markdown or explanation.`,
     prompt: userPrompt,

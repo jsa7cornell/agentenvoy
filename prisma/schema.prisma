@@ -127,6 +127,11 @@ model NegotiationSession {
   summary       String?  @db.Text
   meetLink      String?
   guestEmail     String?
+  /// IANA timezone captured from the guest's browser on first visit
+  /// (Intl.DateTimeFormat().resolvedOptions().timeZone). First-write-wins —
+  /// not overwritten on subsequent visits. Null when the guest visited
+  /// before we started capturing, or when detection failed.
+  guestTimezone String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
