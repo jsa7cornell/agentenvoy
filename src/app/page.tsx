@@ -237,6 +237,69 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ── OFFICE HOURS SHOWCASE ──────────────────────── */}
+      <section id="office-hours" className="py-24 px-6">
+        <div className="max-w-[1000px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+          {/* Text */}
+          <div>
+            <SectionLabel>New · Office Hours</SectionLabel>
+            <h2 className="text-3xl md:text-4xl font-bold text-primary mb-4">
+              One link. A recurring window. As many bookings as you want.
+            </h2>
+            <p className="text-base text-secondary leading-relaxed mb-7">
+              Declare a window once &mdash; &ldquo;Tuesdays 2&ndash;4pm, 20-min video calls&rdquo; &mdash;
+              and share a single URL. Anyone with the link can book an open slot without asking.
+              Envoy handles conflicts, double-booking, and the calendar invite.
+            </p>
+            <ul className="space-y-2">
+              {[
+                ["Plain-English setup", "type it like a rule: \u201Coffice hours Fridays 10\u2013noon, 30-min phone\u201D"],
+                ["One link, many guests", "each visitor books independently; already-taken slots disappear"],
+                ["Overrides soft blocks", "focus time and weekends don\u2019t hide office hours; real events still do"],
+                ["Lives with your rules", "pause, expire, or edit like any other availability rule"],
+              ].map(([title, desc]) => (
+                <li key={title} className="flex items-start gap-2.5 text-sm text-secondary">
+                  <span className="text-accent font-bold mt-0.5 shrink-0">✓</span>
+                  <span><strong className="text-primary font-medium">{title}</strong> &mdash; {desc}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Mock office hours card */}
+          <div className="relative">
+            <div className="bg-surface-secondary border border-DEFAULT rounded-2xl overflow-hidden shadow-lg dark:shadow-[0_8px_40px_rgba(0,0,0,0.3)]">
+              <div className="px-5 py-3.5 border-b border-secondary flex items-center gap-2.5">
+                <span className="w-2 h-2 rounded-full bg-accent" />
+                <span className="font-mono text-xs text-muted flex-1">agentenvoy.ai/meet/john/a7k2mp9q</span>
+              </div>
+              <div className="px-5 py-5">
+                <p className="font-semibold text-primary text-sm mb-0.5">Advising Office Hours</p>
+                <p className="text-xs text-muted mb-5">Tuesdays 2&ndash;4 PM &middot; 20-min video &middot; No end date</p>
+                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-accent mb-2">
+                  Open slots this week
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {["2:00 PM", "2:20 PM", "2:40 PM", "3:00 PM", "3:20 PM", "3:40 PM"].map((slot, i) => (
+                    <span
+                      key={slot}
+                      className={`text-xs font-medium rounded-lg px-2 py-1.5 text-center border ${
+                        i === 1
+                          ? "text-muted line-through border-DEFAULT bg-surface"
+                          : "text-primary border-accent bg-accent-surface"
+                      }`}
+                    >
+                      {slot}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[10px] text-muted mt-3 italic">2:20 already booked &mdash; Envoy won&rsquo;t offer it again</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── GROUP MEETINGS SHOWCASE ────────────────────── */}
       <section id="groups" className="py-24 px-6">
         <div className="max-w-[1000px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">

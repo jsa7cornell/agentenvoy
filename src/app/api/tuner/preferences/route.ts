@@ -22,6 +22,7 @@ export async function GET() {
     select: {
       id: true,
       preferences: true,
+      meetSlug: true,
       persistentKnowledge: true,
       upcomingSchedulePreferences: true,
     },
@@ -36,7 +37,25 @@ export async function GET() {
   const structuredRules = (explicit.structuredRules as AvailabilityRule[]) ?? [];
 
   // Auto-expire rules on read
-  const { rules: cleanedRules, changed } = expireRules(structuredRules);
+  const { rules: expiredCleaned, changed: expiryChanged } = expireRules(structuredRules);
+
+  // Backfill office_hours linkSlug/linkCode for any rule missing them
+  let linksChanged = false;
+  const cleanedRules = expiredCleaned.map((rule) => {
+    if (rule.action !== "office_hours" || !rule.officeHours) return rule;
+    const oh = rule.officeHours;
+    if (oh.linkCode && oh.linkSlug) return rule;
+    linksChanged = true;
+    return {
+      ...rule,
+      officeHours: {
+        ...oh,
+        linkSlug: oh.linkSlug || user.meetSlug || "",
+        linkCode: oh.linkCode || generateOfficeHoursLinkCode(),
+      },
+    };
+  });
+  const changed = expiryChanged || linksChanged;
 
   // Re-compile structured rules on read to pick up compiler fixes
   const activeRules = cleanedRules.filter((r: AvailabilityRule) => r.status === "active");

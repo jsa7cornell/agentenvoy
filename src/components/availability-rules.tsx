@@ -132,6 +132,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
   const [bizEditing, setBizEditing] = useState(false);
   const [bizEditStart, setBizEditStart] = useState<number | null>(null);
   const [bizEditEnd, setBizEditEnd] = useState<number | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const fetchPrefs = useCallback(async () => {
     try {
@@ -395,9 +396,13 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
                 </ul>
               </div>
             ) : (
-              <p className="text-[10px] text-muted mt-1.5">
-                Set business hours &middot; Block or protect time &middot; Limit days &middot; Set buffers &middot; Allow exceptions
-              </p>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(true)}
+                className="text-[10px] text-muted mt-1.5 text-left hover:text-secondary transition underline decoration-dotted decoration-muted underline-offset-2"
+              >
+                Set business hours &middot; Block or protect time &middot; Limit days &middot; Set buffers &middot; Create office hours &middot; Allow exceptions
+              </button>
             )}
             </>
           )}
@@ -558,6 +563,96 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
 
         </div>
       </div>
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+    </div>
+  );
+}
+
+// --- Help Modal ---
+
+function HelpModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface-secondary border border-DEFAULT rounded-xl max-w-lg w-full max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-DEFAULT">
+          <h3 className="text-sm font-semibold text-primary">How schedule rules work</h3>
+          <button onClick={onClose} className="text-muted hover:text-secondary transition">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-4 space-y-4 text-xs text-secondary leading-relaxed">
+          <p>
+            Type rules in plain English. Envoy parses them, shows you what it understood,
+            and lets you confirm before saving. Rules compose &mdash; add as many as you need.
+          </p>
+
+          <div>
+            <p className="text-primary font-medium mb-1">Business hours</p>
+            <p className="text-muted">&ldquo;Available 9am to 5pm weekdays&rdquo;</p>
+            <p className="text-muted">&ldquo;Work hours Monday to Thursday 10 to 4&rdquo;</p>
+          </div>
+
+          <div>
+            <p className="text-primary font-medium mb-1">Block or protect time</p>
+            <p className="text-muted">&ldquo;Block Friday afternoons&rdquo;</p>
+            <p className="text-muted">&ldquo;No meetings before 10am&rdquo;</p>
+            <p className="text-muted">&ldquo;Protect focus time Wednesdays 1&ndash;4pm&rdquo;</p>
+          </div>
+
+          <div>
+            <p className="text-primary font-medium mb-1">Buffers</p>
+            <p className="text-muted">&ldquo;30 min buffer after in-person meetings&rdquo;</p>
+            <p className="text-muted">&ldquo;15 min between video calls&rdquo;</p>
+          </div>
+
+          <div>
+            <p className="text-primary font-medium mb-1">Exceptions &amp; allowances</p>
+            <p className="text-muted">&ldquo;Allow calls Saturday before noon&rdquo;</p>
+            <p className="text-muted">&ldquo;Open for client meetings Tuesday evenings&rdquo;</p>
+          </div>
+
+          <div>
+            <p className="text-primary font-medium mb-1">Temporary &amp; dated rules</p>
+            <p className="text-muted">&ldquo;Out of office April 20&ndash;25&rdquo;</p>
+            <p className="text-muted">&ldquo;Working from Baja next week&rdquo;</p>
+          </div>
+
+          <div>
+            <p className="text-primary font-medium mb-1">Office hours (bookable link)</p>
+            <p className="text-muted">&ldquo;Office hours Tuesdays 2&ndash;4pm, 20-min video calls&rdquo;</p>
+            <p className="text-muted">&ldquo;Advising slots Fridays 10am&ndash;noon, 30-min phone&rdquo;</p>
+            <p className="mt-1 text-muted">
+              Office hours generate a shareable link. Anyone with the link can book an open
+              slot without needing a custom invite. They override your soft protections
+              inside the window &mdash; real calendar events and blackout days stay blocked.
+            </p>
+          </div>
+
+          <div className="pt-2 border-t border-DEFAULT">
+            <p className="text-primary font-medium mb-1">Tips</p>
+            <ul className="space-y-1 text-muted list-disc pl-4">
+              <li>Envoy shows you its interpretation before saving &mdash; you can edit any field.</li>
+              <li>Rules can overlap. Later rules don&rsquo;t replace earlier ones.</li>
+              <li>Pause a rule temporarily from its toggle; remove it to delete.</li>
+              <li>Set an end date for temporary rules; they auto-expire.</li>
+            </ul>
+          </div>
+        </div>
+        <div className="px-4 py-3 border-t border-DEFAULT flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white text-xs font-medium rounded-lg transition"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -598,7 +693,7 @@ function ConfirmationCard({
       {/* Ambiguity picker */}
       {rule.ambiguous && rule.interpretations && rule.interpretations.length > 1 ? (
         <div className="space-y-2">
-          <p className="text-xs text-amber-400 font-medium">Did you mean:</p>
+          <p className="text-xs text-muted font-medium">Did you mean:</p>
           {rule.interpretations.map((interp, i) => (
             <label
               key={i}
@@ -772,41 +867,86 @@ function ConfirmationCard({
                 </>
               )
             )}
-            {rule.effectiveDate && (
-              isEditing ? (
-                <>
-                  <span className="text-muted">{rule.expiryDate ? "From" : "Date"}</span>
-                  <input
-                    type="date"
-                    defaultValue={rule.effectiveDate}
-                    onChange={(e) => onUpdateRule({ effectiveDate: e.target.value })}
-                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
-                  />
-                </>
-              ) : (
-                <>
-                  <span className="text-muted">{rule.expiryDate ? "From" : "Date"}</span>
-                  <span className="text-primary">{formatDate(rule.effectiveDate)}</span>
-                </>
-              )
-            )}
-            {rule.expiryDate && (
-              isEditing ? (
-                <>
-                  <span className="text-muted">Until</span>
-                  <input
-                    type="date"
-                    defaultValue={rule.expiryDate}
-                    onChange={(e) => onUpdateRule({ expiryDate: e.target.value })}
-                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
-                  />
-                </>
-              ) : (
-                <>
-                  <span className="text-muted">Until</span>
-                  <span className="text-primary">{formatDate(rule.expiryDate)}</span>
-                </>
-              )
+            {/* Office hours: always-visible start/end date fields */}
+            {rule.action === "office_hours" ? (
+              <>
+                <span className="text-muted">Starts</span>
+                <input
+                  type="date"
+                  value={rule.effectiveDate ?? new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => onUpdateRule({ effectiveDate: e.target.value })}
+                  className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                />
+                <span className="text-muted">Ends</span>
+                {rule.expiryDate ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="date"
+                      value={rule.expiryDate}
+                      onChange={(e) => onUpdateRule({ expiryDate: e.target.value })}
+                      className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onUpdateRule({ expiryDate: undefined })}
+                      className="text-[10px] text-muted hover:text-secondary underline"
+                    >
+                      no end date
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setMonth(d.getMonth() + 3);
+                      onUpdateRule({ expiryDate: d.toISOString().slice(0, 10) });
+                    }}
+                    className="text-xs text-accent hover:underline text-left"
+                  >
+                    No end date &middot; add one
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                {rule.effectiveDate && (
+                  isEditing ? (
+                    <>
+                      <span className="text-muted">{rule.expiryDate ? "From" : "Date"}</span>
+                      <input
+                        type="date"
+                        defaultValue={rule.effectiveDate}
+                        onChange={(e) => onUpdateRule({ effectiveDate: e.target.value })}
+                        className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-muted">{rule.expiryDate ? "From" : "Date"}</span>
+                      <span className="text-primary">{formatDate(rule.effectiveDate)}</span>
+                    </>
+                  )
+                )}
+                {rule.expiryDate && (
+                  isEditing ? (
+                    <>
+                      <span className="text-muted">Until</span>
+                      <input
+                        type="date"
+                        defaultValue={rule.expiryDate}
+                        onChange={(e) => onUpdateRule({ expiryDate: e.target.value })}
+                        className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-muted">Until</span>
+                      <span className="text-primary">{formatDate(rule.expiryDate)}</span>
+                    </>
+                  )
+                )}
+              </>
             )}
 
             {/* Time */}
@@ -915,8 +1055,8 @@ function ConfirmationCard({
 
       {/* Office-hours override warning */}
       {rule.action === "office_hours" && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 text-[11px] text-amber-300 leading-relaxed">
-          Office hours override other soft blocks. Envoy will offer these slots even if your schedule shows them protected — real calendar events and blackout days stay blocked.
+        <div className="bg-surface border border-DEFAULT rounded-lg px-3 py-2 text-[11px] text-muted leading-relaxed">
+          Office hours override other soft blocks. Envoy will offer these slots even if your schedule shows them protected &mdash; real calendar events and blackout days stay blocked.
         </div>
       )}
 
@@ -1049,6 +1189,32 @@ function RuleCard({
           </button>
         )}
       </div>
+
+      {/* Office hours link — always visible (not gated on expand) */}
+      {rule.action === "office_hours" && rule.officeHours && !isExpired && (
+        <div className="px-3 pb-2 flex items-center gap-2 text-xs">
+          {rule.officeHours.linkSlug && rule.officeHours.linkCode ? (
+            <>
+              <code className="flex-1 min-w-0 truncate bg-surface border border-DEFAULT rounded px-2 py-1 text-secondary">
+                {`/meet/${rule.officeHours.linkSlug}/${rule.officeHours.linkCode}`}
+              </code>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const url = `${window.location.origin}/meet/${rule.officeHours!.linkSlug}/${rule.officeHours!.linkCode}`;
+                  navigator.clipboard.writeText(url);
+                }}
+                className="flex items-center gap-1 px-2 py-1 text-muted hover:text-secondary border border-DEFAULT rounded transition"
+                title="Copy link"
+              >
+                <Copy className="w-3 h-3" /> Copy
+              </button>
+            </>
+          ) : (
+            <span className="text-muted italic">Link will be generated on save</span>
+          )}
+        </div>
+      )}
 
       {/* Expanded view */}
       {expanded && (
@@ -1280,25 +1446,6 @@ function RuleCard({
                   {new Date(rule.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                 </span>
               </div>
-
-              {/* Office hours link */}
-              {rule.action === "office_hours" && rule.officeHours && rule.officeHours.linkSlug && rule.officeHours.linkCode && (
-                <div className="mt-2 flex items-center gap-2 text-xs">
-                  <code className="flex-1 min-w-0 truncate bg-surface border border-DEFAULT rounded px-2 py-1 text-secondary">
-                    {`/meet/${rule.officeHours.linkSlug}/${rule.officeHours.linkCode}`}
-                  </code>
-                  <button
-                    onClick={() => {
-                      const url = `${window.location.origin}/meet/${rule.officeHours!.linkSlug}/${rule.officeHours!.linkCode}`;
-                      navigator.clipboard.writeText(url);
-                    }}
-                    className="flex items-center gap-1 px-2 py-1 text-muted hover:text-secondary border border-DEFAULT rounded transition"
-                    title="Copy link"
-                  >
-                    <Copy className="w-3 h-3" /> Copy
-                  </button>
-                </div>
-              )}
 
               {!isExpired && (
                 <div className="flex items-center gap-2 pt-1">

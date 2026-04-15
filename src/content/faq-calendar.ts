@@ -15,7 +15,7 @@ export interface FaqSection {
   }>;
 }
 
-export const FAQ_LAST_UPDATED = "April 8, 2026";
+export const FAQ_LAST_UPDATED = "April 15, 2026";
 
 export const FAQ_HERO = {
   headline: "Scheduling that understands context",
@@ -114,10 +114,14 @@ export const FAQ_SECTIONS: FaqSection[] = [
     ],
   },
 
-  // ── Section 3: Two types of invites ─────────────────────────────
+  // ── Section 3: Three types of invites ───────────────────────────
   {
     id: "invite-types",
-    title: "Two Types of Invites",
+    title: "Three Types of Invites",
+    intro:
+      "There are three surfaces for getting on your calendar, from most open to most tightly " +
+      "scoped: your general link, office hours, and event-specific invites. Each solves a " +
+      "different scheduling problem.",
     items: [
       {
         question: "Your general link",
@@ -130,6 +134,24 @@ export const FAQ_SECTIONS: FaqSection[] = [
           "calendar in real-time.\n\n" +
           "When a guest opens it, Envoy asks their name, what the meeting is about, and " +
           "proposes times. It's a full scheduling conversation, not just a slot picker.",
+      },
+      {
+        question: "Office hours (new)",
+        answer:
+          "Office hours sit between your general link and event-specific invites. You declare " +
+          "a recurring window once — \"Office hours Tuesdays 2–4pm, 20-min video calls\" — and " +
+          "share a single URL. Anyone with the link can independently book an open slot without " +
+          "asking you first.\n\n" +
+          "Create one the same way as any other rule: type it in plain English on your " +
+          "Availability page. Envoy parses it, shows you the parsed fields (title, format, " +
+          "duration, window), and generates a shareable link on save. The link lives with the " +
+          "rule — pause it, edit it, or let it expire.\n\n" +
+          "Office hours override your soft protections inside the declared window. If you said " +
+          "\"office hours Tuesday 2–4,\" Envoy offers those slots even if the schedule normally " +
+          "shows focus time or weekend protection there. Real calendar events and blackout days " +
+          "still block them — office hours never double-book you.\n\n" +
+          "As guests book slots, already-confirmed times disappear for the next visitor. One " +
+          "link, many independent bookings, no polling.",
       },
       {
         question: "Event-specific links",
