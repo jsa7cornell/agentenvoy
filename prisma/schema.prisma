@@ -89,7 +89,7 @@ model ApiKey {
 model NegotiationLink {
   id           String   @id @default(cuid())
   userId       String
-  type         String   @default("generic") // generic | contextual
+  type         String   @default("generic") // generic | contextual | office_hours
   mode         String   @default("single")  // "single" | "group"
   slug         String   // same as user.meetSlug for generic
   code         String?  @unique // unique code for contextual links
@@ -97,6 +97,11 @@ model NegotiationLink {
   inviteeName  String?
   topic        String?
   rules        Json?    @default("{}")
+  /// When this link was spawned from an AvailabilityRule (e.g., office hours),
+  /// points at the rule ID. The session's offerable slots are filtered through
+  /// the rule's window. Null for normal generic/contextual links. The rule lives
+  /// in the user's preferences.explicit.structuredRules JSON, not a relation.
+  sourceRuleId String?
   expiresAt    DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

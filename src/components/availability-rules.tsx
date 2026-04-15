@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Clock, ChevronDown, ChevronRight,
   Plus, Check, X, Pencil, Trash2, Loader2, ToggleLeft, ToggleRight,
-  Ban, Lock, Timer, CheckCircle2, Star, MapPin,
+  Ban, Lock, Timer, CheckCircle2, Star, MapPin, Megaphone, Copy,
 } from "lucide-react";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 
@@ -13,7 +13,7 @@ import type { AvailabilityRule } from "@/lib/availability-rules";
 interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location" | "office_hours";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -26,6 +26,9 @@ interface ParsedRule {
   businessHoursStart?: number;
   businessHoursEnd?: number;
   locationLabel?: string;
+  officeHoursTitle?: string;
+  officeHoursFormat?: "video" | "phone" | "in-person";
+  officeHoursDurationMinutes?: number;
   priority: number;
   ambiguous?: boolean;
   interpretations?: string[];
@@ -96,6 +99,7 @@ const ACTION_LABELS: Record<string, string> = {
   limit: "Limit",
   business_hours: "Business Hours",
   location: "Location",
+  office_hours: "Office Hours",
 };
 
 const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -105,6 +109,7 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> 
   prefer: Star,
   limit: Lock,
   location: MapPin,
+  office_hours: Megaphone,
 };
 
 // --- Component ---
@@ -238,6 +243,13 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
       bufferMinutesAfter: pendingRule.bufferMinutesAfter,
       bufferAppliesTo: pendingRule.bufferAppliesTo,
       locationLabel: pendingRule.locationLabel,
+      officeHours: pendingRule.action === "office_hours" ? {
+        title: pendingRule.officeHoursTitle?.trim() || "Office Hours",
+        format: pendingRule.officeHoursFormat || "video",
+        durationMinutes: pendingRule.officeHoursDurationMinutes || 30,
+        linkSlug: "", // server hydrates from user.meetSlug
+        linkCode: "", // server hydrates via generateOfficeHoursLinkCode
+      } : undefined,
       status: "active",
       priority: pendingRule.priority,
       createdAt: new Date().toISOString(),
@@ -634,6 +646,57 @@ function ConfirmationCard({
                 </>
               ) : null
             )}
+            {/* Office hours — title / format / duration */}
+            {rule.action === "office_hours" && (
+              <>
+                <span className="text-muted">Title</span>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    defaultValue={rule.officeHoursTitle ?? "Office Hours"}
+                    onChange={(e) => onUpdateRule({ officeHoursTitle: e.target.value })}
+                    placeholder="Office Hours"
+                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                  />
+                ) : (
+                  <span className="text-primary">{rule.officeHoursTitle?.trim() || "Office Hours"}</span>
+                )}
+                <span className="text-muted">Format</span>
+                {isEditing || !rule.officeHoursFormat ? (
+                  <select
+                    value={rule.officeHoursFormat ?? ""}
+                    onChange={(e) => onUpdateRule({ officeHoursFormat: (e.target.value || undefined) as ParsedRule["officeHoursFormat"] })}
+                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                  >
+                    <option value="">Choose…</option>
+                    <option value="video">Video</option>
+                    <option value="phone">Phone</option>
+                    <option value="in-person">In-person</option>
+                  </select>
+                ) : (
+                  <span className="text-primary">
+                    {rule.officeHoursFormat === "video" ? "Video" : rule.officeHoursFormat === "phone" ? "Phone" : "In-person"}
+                  </span>
+                )}
+                <span className="text-muted">Duration</span>
+                {isEditing || !rule.officeHoursDurationMinutes ? (
+                  <select
+                    value={rule.officeHoursDurationMinutes ?? ""}
+                    onChange={(e) => onUpdateRule({ officeHoursDurationMinutes: e.target.value ? Number(e.target.value) : undefined })}
+                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                  >
+                    <option value="">Choose…</option>
+                    <option value="15">15 min</option>
+                    <option value="20">20 min</option>
+                    <option value="30">30 min</option>
+                    <option value="45">45 min</option>
+                    <option value="60">60 min</option>
+                  </select>
+                ) : (
+                  <span className="text-primary">{rule.officeHoursDurationMinutes} min</span>
+                )}
+              </>
+            )}
             {/* Business hours */}
             {rule.action === "business_hours" && rule.businessHoursStart != null && rule.businessHoursEnd != null && (
               isEditing ? (
@@ -850,11 +913,19 @@ function ConfirmationCard({
         </div>
       )}
 
+      {/* Office-hours override warning */}
+      {rule.action === "office_hours" && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 text-[11px] text-amber-300 leading-relaxed">
+          Office hours override other soft blocks. Envoy will offer these slots even if your schedule shows them protected — real calendar events and blackout days stay blocked.
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex items-center gap-2 pt-1">
         <button
           onClick={onConfirm}
-          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition"
+          disabled={rule.action === "office_hours" && (!rule.officeHoursFormat || !rule.officeHoursDurationMinutes)}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Check className="w-4 h-4" />
           Looks good
@@ -926,6 +997,12 @@ function RuleCard({
   } else if (rule.action === "location" && rule.locationLabel) {
     summary = `Currently in ${rule.locationLabel}`;
     if (rule.expiryDate) summary += ` until ${formatDate(rule.expiryDate)}`;
+  } else if (rule.action === "office_hours" && rule.officeHours) {
+    const days = rule.daysOfWeek && rule.daysOfWeek.length > 0 ? daysLabel(rule.daysOfWeek) : "Every day";
+    const window = rule.timeStart && rule.timeEnd
+      ? `${formatTime24to12(rule.timeStart)}\u2013${formatTime24to12(rule.timeEnd)}`
+      : "";
+    summary = `${rule.officeHours.title} · ${days} ${window} · ${rule.officeHours.durationMinutes}-min ${rule.officeHours.format}`.trim();
   } else {
     summary = rule.originalText;
   }
@@ -1184,12 +1261,44 @@ function RuleCard({
                     <span className="text-primary">{formatDate(rule.expiryDate)}</span>
                   </>
                 )}
+                {/* Office hours fields */}
+                {rule.action === "office_hours" && rule.officeHours && (
+                  <>
+                    <span className="text-muted">Title</span>
+                    <span className="text-primary">{rule.officeHours.title}</span>
+                    <span className="text-muted">Format</span>
+                    <span className="text-primary">
+                      {rule.officeHours.format === "video" ? "Video" : rule.officeHours.format === "phone" ? "Phone" : "In-person"}
+                    </span>
+                    <span className="text-muted">Duration</span>
+                    <span className="text-primary">{rule.officeHours.durationMinutes} min</span>
+                  </>
+                )}
                 {/* Added */}
                 <span className="text-muted">Added</span>
                 <span className="text-primary">
                   {new Date(rule.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                 </span>
               </div>
+
+              {/* Office hours link */}
+              {rule.action === "office_hours" && rule.officeHours && rule.officeHours.linkSlug && rule.officeHours.linkCode && (
+                <div className="mt-2 flex items-center gap-2 text-xs">
+                  <code className="flex-1 min-w-0 truncate bg-surface border border-DEFAULT rounded px-2 py-1 text-secondary">
+                    {`/meet/${rule.officeHours.linkSlug}/${rule.officeHours.linkCode}`}
+                  </code>
+                  <button
+                    onClick={() => {
+                      const url = `${window.location.origin}/meet/${rule.officeHours!.linkSlug}/${rule.officeHours!.linkCode}`;
+                      navigator.clipboard.writeText(url);
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 text-muted hover:text-secondary border border-DEFAULT rounded transition"
+                    title="Copy link"
+                  >
+                    <Copy className="w-3 h-3" /> Copy
+                  </button>
+                </div>
+              )}
 
               {!isExpired && (
                 <div className="flex items-center gap-2 pt-1">

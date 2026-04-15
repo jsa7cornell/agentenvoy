@@ -14,7 +14,7 @@ export interface AvailabilityRule {
   id: string;
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "location";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "location" | "office_hours";
   timeStart?: string;     // "HH:MM" 24h
   timeEnd?: string;       // "HH:MM" 24h
   allDay?: boolean;
@@ -25,9 +25,41 @@ export interface AvailabilityRule {
   bufferMinutesAfter?: number;
   bufferAppliesTo?: string;
   locationLabel?: string; // for action: "location" — e.g. "Baja", "NYC"
+  /**
+   * Office hours scoping — only present when action === "office_hours".
+   * Defines a public, shareable booking surface. The rule's time window +
+   * days define when bookings are offerable; format/duration/title lock
+   * the meeting type. linkCode is the public identifier used in the URL.
+   */
+  officeHours?: {
+    title: string;          // defaults to "Office Hours" on rule creation; host-editable
+    format: "video" | "phone" | "in-person";
+    durationMinutes: number;
+    linkSlug: string;       // denormalized copy of user.meetSlug for fast URL construction
+    linkCode: string;       // generated unique code — the /meet/{slug}/{code} identifier
+  };
   status: "active" | "paused" | "expired";
   priority: number;       // 1-5
   createdAt: string;      // ISO datetime
+}
+
+/**
+ * Compiled office-hours link entry — emitted from compileStructuredRules() alongside
+ * CompiledRules. Each active office_hours rule produces one entry. Consumed by the
+ * office-hours slot transform, not by the core scoring engine.
+ */
+export interface CompiledOfficeHoursLink {
+  ruleId: string;
+  linkCode: string;
+  linkSlug: string;
+  title: string;
+  format: "video" | "phone" | "in-person";
+  durationMinutes: number;
+  // Window: when bookings are offerable, in the host's local time
+  windowStart: string;    // "HH:MM"
+  windowEnd: string;      // "HH:MM"
+  daysOfWeek: number[];   // 0=Sun..6=Sat; empty = every day
+  expiryDate?: string;    // ISO date
 }
 
 /**
@@ -72,8 +104,48 @@ export function expireRules(rules: AvailabilityRule[]): { rules: AvailabilityRul
 // --- Deterministic Compiler ---
 
 /**
+ * Extract all active office-hours rules as compiled link entries.
+ * Separate from compileStructuredRules because office-hours rules do NOT
+ * affect the global scoring engine — they only apply to sessions spawned
+ * from their specific link, and are consumed by the office-hours slot
+ * transform at session time.
+ *
+ * Pure function — no LLM, no async, fully deterministic.
+ */
+export function compileOfficeHoursLinks(rules: AvailabilityRule[]): CompiledOfficeHoursLink[] {
+  const today = new Date().toISOString().slice(0, 10);
+  const out: CompiledOfficeHoursLink[] = [];
+
+  for (const rule of rules) {
+    if (rule.action !== "office_hours") continue;
+    if (rule.status !== "active") continue;
+    if (!rule.officeHours) continue;
+    if (rule.expiryDate && rule.expiryDate < today) continue;
+    if (rule.effectiveDate && rule.effectiveDate > today) continue;
+
+    out.push({
+      ruleId: rule.id,
+      linkCode: rule.officeHours.linkCode,
+      linkSlug: rule.officeHours.linkSlug,
+      title: rule.officeHours.title,
+      format: rule.officeHours.format,
+      durationMinutes: rule.officeHours.durationMinutes,
+      windowStart: rule.timeStart || "00:00",
+      windowEnd: rule.timeEnd || "23:59",
+      daysOfWeek: rule.daysOfWeek || [],
+      expiryDate: rule.expiryDate,
+    });
+  }
+
+  return out;
+}
+
+/**
  * Convert structured rules into the CompiledRules format consumed by the scoring engine.
  * Pure function — no LLM, no async, fully deterministic.
+ *
+ * Note: office_hours rules are NOT processed here — they're compiled separately via
+ * compileOfficeHoursLinks(). The scoring engine is global; office hours are per-link.
  */
 export function compileStructuredRules(
   rules: AvailabilityRule[],
@@ -192,6 +264,13 @@ export function compileStructuredRules(
         // No-op — location rules don't affect scoring.
         // They're surfaced separately via getActiveLocationRule() for the UI,
         // composer context, and widget display.
+        break;
+      }
+
+      case "office_hours": {
+        // No-op in the global compiler. Office hours don't affect the host's
+        // global scored schedule — they're per-link. Use compileOfficeHoursLinks()
+        // to extract them for the session-time slot transform.
         break;
       }
 

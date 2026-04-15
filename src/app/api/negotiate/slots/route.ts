@@ -5,7 +5,8 @@ import { applyEventOverrides, type LinkRules, type ScoredSlot } from "@/lib/scor
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserTimezone } from "@/lib/timezone";
-import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
+import { getActiveLocationRule, compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
+import { applyOfficeHoursWindow, type ConfirmedBooking } from "@/lib/office-hours";
 
 // GET /api/negotiate/slots?sessionId=xxx  (guest view — by session)
 // GET /api/negotiate/slots?self=true      (host view — authenticated user's own availability)
@@ -17,6 +18,7 @@ export async function GET(req: NextRequest) {
   let hostId: string;
   let prefs: Record<string, unknown>;
   let linkRules: LinkRules = {};
+  let sourceRuleId: string | null = null;
 
   if (selfMode) {
     const authSession = await getServerSession(authOptions);
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest) {
       select: {
         hostId: true,
         host: { select: { preferences: true } },
-        link: { select: { rules: true } },
+        link: { select: { rules: true, sourceRuleId: true } },
       },
     });
     if (!session) {
@@ -47,6 +49,7 @@ export async function GET(req: NextRequest) {
     hostId = session.hostId;
     prefs = (session.host.preferences as Record<string, unknown>) || {};
     linkRules = (session.link?.rules as LinkRules) || {};
+    sourceRuleId = session.link?.sourceRuleId ?? null;
   } else {
     return NextResponse.json(
       { error: "Missing sessionId or self param" },
@@ -93,6 +96,45 @@ export async function GET(req: NextRequest) {
 
     // Apply event-level overrides from link rules
     let slots: ScoredSlot[] = applyEventOverrides(schedule.slots, linkRules, timezone);
+
+    // Office-hours transform: if this session was spawned from an office_hours
+    // rule, filter slots through the rule's window + days, override soft
+    // protection, and subtract already-booked sibling sessions for the same rule.
+    if (sourceRuleId) {
+      const allRules = (explicit?.structuredRules as AvailabilityRule[] | undefined) ?? [];
+      const compiledLinks = compileOfficeHoursLinks(allRules);
+      const compiled = compiledLinks.find((l) => l.ruleId === sourceRuleId);
+      if (compiled) {
+        // Sibling confirmed bookings — any other session spawned from the same
+        // rule that has a confirmed agreedTime. These are the slots guest A already
+        // locked in that guest B should see disappear.
+        const siblings = await prisma.negotiationSession.findMany({
+          where: {
+            status: "agreed",
+            agreedTime: { not: null },
+            link: { sourceRuleId: sourceRuleId },
+            ...(sessionId ? { id: { not: sessionId } } : {}),
+          },
+          select: { agreedTime: true, duration: true },
+        });
+        const confirmedBookings: ConfirmedBooking[] = siblings
+          .filter((s) => s.agreedTime)
+          .map((s) => {
+            const start = s.agreedTime!;
+            const durationMin = s.duration || compiled.durationMinutes;
+            return {
+              start: start.toISOString(),
+              end: new Date(start.getTime() + durationMin * 60 * 1000).toISOString(),
+            };
+          });
+        slots = applyOfficeHoursWindow({
+          rule: compiled,
+          slots,
+          timezone,
+          confirmedBookings,
+        });
+      }
+    }
 
     // For guest view: filter based on mode
     // Exclusive mode (any slot has score -2): only show -2 and -1 slots

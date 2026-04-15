@@ -8,6 +8,9 @@ import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";
 import type { ScoredSlot, LinkRules } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
+import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
+import { applyOfficeHoursWindow } from "@/lib/office-hours";
+import type { Prisma } from "@prisma/client";
 import {
   formatAvailabilityWindows,
   humanTimezoneLabel,
@@ -38,10 +41,61 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
+  // Office-hours detection: if a code is provided and matches an active
+  // office_hours rule on this user, spawn a fresh child link + session for
+  // this visitor. Each visit creates a new session (generic-link semantics).
+  // Runs BEFORE the standard NegotiationLink lookup so office-hours codes
+  // don't collide with contextual link codes.
+  let officeHoursRule: AvailabilityRule | null = null;
+  if (code) {
+    const prefsRaw = (user.preferences as Record<string, unknown>) || {};
+    const explicit = (prefsRaw.explicit as Record<string, unknown>) || {};
+    const rules = (explicit.structuredRules as AvailabilityRule[] | undefined) || [];
+    const match = rules.find(
+      (r) => r.action === "office_hours" && r.officeHours?.linkCode === code,
+    );
+    if (match) {
+      const today = new Date().toISOString().slice(0, 10);
+      const isExpired =
+        match.status === "expired" ||
+        (match.expiryDate && match.expiryDate < today);
+      const isPaused = match.status === "paused";
+      if (match.status !== "active" || isExpired || isPaused) {
+        // Paused or expired — surface the same "unavailable" copy as archived sessions.
+        return NextResponse.json(
+          { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
+          { status: 410 },
+        );
+      }
+      officeHoursRule = match;
+    }
+  }
+
   // Find the link — contextual (with code) or generic
   let link;
   let reuseSessionId: string | null = null;
-  if (code) {
+  if (officeHoursRule) {
+    // Spawn a fresh child link for this visitor, keyed back to the rule via
+    // sourceRuleId. Generic-link semantics: each visit creates a new link +
+    // session, and the guest resumes via the sessionId URL, not the rule's
+    // public /meet/{slug}/{code}.
+    const oh = officeHoursRule.officeHours!;
+    const childCode = generateCode();
+    link = await prisma.negotiationLink.create({
+      data: {
+        userId: user.id,
+        type: "contextual",
+        slug: user.meetSlug!,
+        code: childCode,
+        topic: oh.title,
+        sourceRuleId: officeHoursRule.id,
+        rules: {
+          format: oh.format,
+          duration: oh.durationMinutes,
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+  } else if (code) {
     link = await prisma.negotiationLink.findFirst({
       where: { slug, code },
     });
@@ -375,11 +429,42 @@ export async function POST(req: NextRequest) {
   // BEFORE formatting so the greeting shows the same set of times the LLM will
   // see in `formatOfferableSlots` on follow-up turns. Without this, the greeting
   // and the LLM disagree about availability and the agent contradicts itself.
-  const filteredSlots = applyEventOverrides(
+  let filteredSlots = applyEventOverrides(
     scheduleSlots,
     linkRules as LinkRules,
     hostTimezone
   );
+
+  // Office-hours transform for the initial greeting. Uses the rule the session
+  // was spawned from (if any), so the greeting shows the same set of times the
+  // slots endpoint will later return for the widget.
+  if (officeHoursRule) {
+    const compiledLinks = compileOfficeHoursLinks([officeHoursRule]);
+    const compiled = compiledLinks[0];
+    if (compiled) {
+      const siblings = await prisma.negotiationSession.findMany({
+        where: {
+          status: "agreed",
+          agreedTime: { not: null },
+          link: { sourceRuleId: officeHoursRule.id },
+          id: { not: session.id },
+        },
+        select: { agreedTime: true, duration: true },
+      });
+      const confirmedBookings = siblings
+        .filter((s) => s.agreedTime)
+        .map((s) => ({
+          start: s.agreedTime!.toISOString(),
+          end: new Date(s.agreedTime!.getTime() + (s.duration || compiled.durationMinutes) * 60 * 1000).toISOString(),
+        }));
+      filteredSlots = applyOfficeHoursWindow({
+        rule: compiled,
+        slots: filteredSlots,
+        timezone: hostTimezone,
+        confirmedBookings,
+      });
+    }
+  }
 
   // Format availability. When the guest is in a different timezone, the
   // template shows times primary in guest-local with host-local in parens,
@@ -408,8 +493,13 @@ export async function POST(req: NextRequest) {
     const topic = link.topic || null;
 
     // 1. Intro — "Hi [name]! I'm coordinating a meeting with {host} [about {topic}]."
+    // Office hours use the generic phrasing — no "about {topic}" — since the
+    // topic is internal (the rule's title, e.g. "Office Hours"), not a subject
+    // the guest picked. Topic is still set internally so the closing doesn't
+    // ask for a meeting subject.
+    const isOfficeHours = Boolean(officeHoursRule);
     const hello = inviteeName ? `Hi ${inviteeName}!` : "Hi!";
-    const introCore = topic
+    const introCore = topic && !isOfficeHours
       ? `I'm coordinating a meeting with ${hostName} about ${topic}.`
       : `I'm coordinating a meeting with ${hostName}.`;
     const intro = `${hello} ${introCore}`;

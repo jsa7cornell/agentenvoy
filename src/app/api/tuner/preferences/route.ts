@@ -6,6 +6,7 @@ import { invalidateSchedule } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
 import { compileStructuredRules, expireRules } from "@/lib/availability-rules";
 import type { AvailabilityRule } from "@/lib/availability-rules";
+import { generateOfficeHoursLinkCode } from "@/lib/office-hours";
 import { getUserTimezone } from "@/lib/timezone";
 import type { Prisma } from "@prisma/client";
 
@@ -82,7 +83,7 @@ export async function PUT(req: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { email: session.user.email },
-    select: { id: true, preferences: true },
+    select: { id: true, preferences: true, meetSlug: true },
   });
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -111,7 +112,25 @@ export async function PUT(req: NextRequest) {
   if (businessHoursEnd !== undefined) newExplicit.businessHoursEnd = businessHoursEnd;
   if (blockedWindows !== undefined) newExplicit.blockedWindows = blockedWindows;
   if (blackoutDays !== undefined) newExplicit.blackoutDays = blackoutDays;
-  if (structuredRules !== undefined) newExplicit.structuredRules = structuredRules;
+  if (structuredRules !== undefined) {
+    // Hydrate office_hours rules with linkSlug + linkCode if missing (first save).
+    // The slug is denormalized from user.meetSlug; the code is generated once
+    // and frozen for the life of the rule.
+    const hydrated = (structuredRules as AvailabilityRule[]).map((rule) => {
+      if (rule.action !== "office_hours" || !rule.officeHours) return rule;
+      const oh = rule.officeHours;
+      if (oh.linkCode && oh.linkSlug) return rule;
+      return {
+        ...rule,
+        officeHours: {
+          ...oh,
+          linkSlug: oh.linkSlug || user.meetSlug || "",
+          linkCode: oh.linkCode || generateOfficeHoursLinkCode(),
+        },
+      };
+    });
+    newExplicit.structuredRules = hydrated;
+  }
 
   if (defaultLocation !== undefined) {
     const trimmed = typeof defaultLocation === "string" ? defaultLocation.trim() : "";

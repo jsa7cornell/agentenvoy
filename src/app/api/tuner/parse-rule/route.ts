@@ -9,7 +9,7 @@ import { getUserTimezone } from "@/lib/timezone";
 export interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location" | "office_hours";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -22,6 +22,10 @@ export interface ParsedRule {
   businessHoursStart?: number; // hour 0-23, set when action is "business_hours"
   businessHoursEnd?: number;   // hour 0-23, set when action is "business_hours"
   locationLabel?: string;      // set when action is "location" — e.g. "Baja", "NYC"
+  // Office hours fields — only set when action is "office_hours"
+  officeHoursTitle?: string;        // defaults to "Office Hours" if unspecified
+  officeHoursFormat?: "video" | "phone" | "in-person";
+  officeHoursDurationMinutes?: number;
   priority: number;
   ambiguous?: boolean;
   interpretations?: string[];
@@ -64,7 +68,7 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
 {
   "originalText": "the user's input verbatim",
   "type": "ongoing|recurring|temporary|one-time",
-  "action": "block|allow|buffer|prefer|limit|business_hours|location",
+  "action": "block|allow|buffer|prefer|limit|business_hours|location|office_hours",
   "timeStart": "HH:MM or null",
   "timeEnd": "HH:MM or null",
   "allDay": false,
@@ -77,6 +81,9 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
   "businessHoursStart": number or null,
   "businessHoursEnd": number or null,
   "locationLabel": "string or null",
+  "officeHoursTitle": "string or null",
+  "officeHoursFormat": "video|phone|in-person or null",
+  "officeHoursDurationMinutes": number or null,
   "priority": 1-5,
   "ambiguous": false,
   "interpretations": null,
@@ -110,6 +117,18 @@ Action rules:
   - "available 9am to 5pm" → action: "business_hours", businessHoursStart: 9, businessHoursEnd: 17
   - "standard hours 10 to 4" → action: "business_hours", businessHoursStart: 10, businessHoursEnd: 16
   - "only take meetings 11-6" → action: "business_hours", businessHoursStart: 11, businessHoursEnd: 18
+- "office_hours": create a public, shareable booking window with a fixed meeting format and duration. This is different from "limit" — limit narrows general availability, office_hours creates a specific surface anyone can book against (like a drop-in window for students, mentees, or sales intros). Extract these fields when present:
+  - timeStart / timeEnd: the window the host is making bookable
+  - daysOfWeek: which days the window is available
+  - officeHoursTitle: the name the host gives this (e.g. "Mentor calls", "Sales intros"). If unspecified, leave null — a default of "Office Hours" will be applied.
+  - officeHoursFormat: "video", "phone", or "in-person". If unspecified, leave null — the UI will ask.
+  - officeHoursDurationMinutes: slot length in minutes. If unspecified, leave null — the UI will ask.
+  Trigger phrases: "office hours", "drop-in hours", "open hours", "mentor hours", "booking window", "make bookable", "let people book", "set up office hours".
+  Examples:
+  - "office hours Tuesdays 2-4pm, 20 min video calls, mentor calls" → action: "office_hours", daysOfWeek: [2], timeStart: "14:00", timeEnd: "16:00", officeHoursTitle: "Mentor calls", officeHoursFormat: "video", officeHoursDurationMinutes: 20
+  - "set up office hours Fridays 10-12" → action: "office_hours", daysOfWeek: [5], timeStart: "10:00", timeEnd: "12:00" (title/format/duration omitted — UI will ask)
+  - "drop-in hours for students Wed 3-5, 15 min video" → action: "office_hours", daysOfWeek: [3], timeStart: "15:00", timeEnd: "17:00", officeHoursTitle: "Student drop-ins", officeHoursFormat: "video", officeHoursDurationMinutes: 15
+  - "sales intros, 15 minutes, Tue and Thu mornings 9-11, phone" → action: "office_hours", daysOfWeek: [2, 4], timeStart: "09:00", timeEnd: "11:00", officeHoursTitle: "Sales intros", officeHoursFormat: "phone", officeHoursDurationMinutes: 15
 
 Date conversion:
 - Convert ALL relative dates to absolute YYYY-MM-DD using today's date.
@@ -147,7 +166,9 @@ Summary should be a clean, unambiguous description like:
 - "Limit Monday to 12:00 PM - 3:00 PM only"
 - "Set business hours to 10:00 AM - 4:00 PM"
 - "Currently in Baja until Apr 20"
-- "Based in Lisbon (ongoing)"`,
+- "Based in Lisbon (ongoing)"
+- "Office hours: Mentor calls · Tuesdays 2:00–4:00 PM · 20-min video"
+- "Office hours: Tuesdays 2:00–4:00 PM (title, format, and duration needed)"`,
     prompt: text.trim(),
   });
 
@@ -156,10 +177,11 @@ Summary should be a clean, unambiguous description like:
     const parsed = JSON.parse(cleaned) as ParsedRule;
 
     // Validate and sanitize
+    const validFormats = ["video", "phone", "in-person"];
     const rule: ParsedRule = {
       originalText: text.trim(),
       type: (["ongoing", "recurring", "temporary", "one-time"].includes(parsed.type) ? parsed.type : "ongoing") as ParsedRule["type"],
-      action: (["block", "allow", "buffer", "prefer", "limit", "business_hours", "location"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
+      action: (["block", "allow", "buffer", "prefer", "limit", "business_hours", "location", "office_hours"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
       timeStart: parsed.timeStart || undefined,
       timeEnd: parsed.timeEnd || undefined,
       allDay: parsed.allDay || false,
@@ -172,6 +194,9 @@ Summary should be a clean, unambiguous description like:
       businessHoursStart: typeof parsed.businessHoursStart === "number" ? parsed.businessHoursStart : undefined,
       businessHoursEnd: typeof parsed.businessHoursEnd === "number" ? parsed.businessHoursEnd : undefined,
       locationLabel: typeof parsed.locationLabel === "string" && parsed.locationLabel.trim() ? parsed.locationLabel.trim() : undefined,
+      officeHoursTitle: typeof parsed.officeHoursTitle === "string" && parsed.officeHoursTitle.trim() ? parsed.officeHoursTitle.trim() : undefined,
+      officeHoursFormat: (typeof parsed.officeHoursFormat === "string" && validFormats.includes(parsed.officeHoursFormat)) ? parsed.officeHoursFormat as ParsedRule["officeHoursFormat"] : undefined,
+      officeHoursDurationMinutes: typeof parsed.officeHoursDurationMinutes === "number" && parsed.officeHoursDurationMinutes > 0 ? Math.round(parsed.officeHoursDurationMinutes) : undefined,
       priority: typeof parsed.priority === "number" ? Math.max(1, Math.min(5, parsed.priority)) : 3,
       ambiguous: parsed.ambiguous || false,
       interpretations: Array.isArray(parsed.interpretations) ? parsed.interpretations : undefined,
