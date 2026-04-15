@@ -477,6 +477,7 @@ export function formatCalendarContext(ctx: CalendarContext): string {
 // --- Computed Schedule Format (compact, scored) ---
 
 import type { ScoredSlot, LinkRules } from "@/lib/scoring";
+import { getPriorityConfig, isOfferable } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
 
 /**
@@ -631,11 +632,18 @@ export function formatOfferableSlots(
 
   // Check for exclusive mode
   const hasExclusive = finalSlots.some((s) => s.score === -2);
-  const maxScore = hasExclusive ? 0 : 3;
 
-  // Filter to offerable slots in the future
+  // Priority-aware offerability: normal → weekday biz only (today's behavior),
+  // high → + weekends + weekday just-outside-biz, vip → + deep off-hours
+  // + host's implicit blocked windows. Real events/blackouts are always hard.
+  // Exclusive mode overrides the priority filter — only -2/-1 host picks show.
+  const priorityConfig = getPriorityConfig(linkRules?.priority);
   const offerableSlots = finalSlots
-    .filter((s) => new Date(s.start) > now && s.score <= maxScore)
+    .filter((s) => {
+      if (new Date(s.start) <= now) return false;
+      if (hasExclusive) return s.score <= 0; // host-explicit picks only
+      return isOfferable(s, priorityConfig);
+    })
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
   if (offerableSlots.length === 0) {
@@ -680,9 +688,16 @@ export function formatOfferableSlots(
     dateMappingLines.push(`  ${dayFmt.format(d)}`);
   }
 
-  function tierLabel(score: number): string {
-    if (score <= 0) return "preferred";
-    if (score <= 1) return "open";
+  function tierLabel(slot: ScoredSlot): string {
+    if (slot.score <= 0) return "preferred";
+    if (slot.score <= 1) return "open";
+    // Surface the protection kind in the label so the LLM can frame it
+    // correctly — "weekend" and "off-hours" read very differently from
+    // generic "flexible".
+    const kind = slot.kind ?? "open";
+    if (kind === "weekend") return "weekend (host making room)";
+    if (kind === "off_hours") return "off-hours (host making room)";
+    if (kind === "blocked_window") return "host override (VIP)";
     return "flexible";
   }
 
@@ -704,6 +719,19 @@ export function formatOfferableSlots(
     lines.push(``);
   }
 
+  // Priority framing — tells the LLM how warmly to present expansion slots.
+  if (linkRules?.priority === "high") {
+    lines.push(
+      `HIGH PRIORITY LINK: John has opened weekend daytime and early/late weekday windows for this guest. Frame expanded slots with genuine warmth — "John has made room for this one" — not as a favor.`
+    );
+    lines.push(``);
+  } else if (linkRules?.priority === "vip") {
+    lines.push(
+      `VIP LINK: John has cleared his entire envelope for this guest, including weekend early/late hours and windows he normally protects (like morning routines). Present the full offer confidently — this is a priority meeting.`
+    );
+    lines.push(``);
+  }
+
   // Build blocks per day — merge contiguous same-tier slots
   for (const [day, daySlots] of Array.from(dayMap)) {
     interface OfferBlock { start: Date; end: Date; tier: string; hasPreferred: boolean }
@@ -713,7 +741,7 @@ export function formatOfferableSlots(
     for (const slot of daySlots) {
       const start = new Date(slot.start);
       const end = new Date(slot.end);
-      const tier = tierLabel(slot.score);
+      const tier = tierLabel(slot);
       const isPreferred = slot.score <= 0;
 
       if (current && current.tier === tier && start.getTime() === current.end.getTime()) {

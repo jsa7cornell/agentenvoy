@@ -16,6 +16,25 @@ import { safeTimezone } from "./timezone";
 
 // --- Types ---
 
+/**
+ * Protection category for a slot. Score tells you how protected the slot is;
+ * kind tells you WHY, which determines whether a high-priority link may
+ * navigate around it.
+ *
+ * Hard kinds ("event", "blackout") are NEVER offerable regardless of link
+ * priority — a real calendar conflict trumps any VIP. Soft kinds
+ * ("blocked_window", "off_hours", "weekend") are implicit protections the
+ * host set via preferences or default hours, and higher-priority links can
+ * pierce them.
+ */
+export type SlotKind =
+  | "open" // no conflict, within business hours, weekday
+  | "event" // real calendar event (confirmed, tentative, OOO) — HARD
+  | "blackout" // user-declared blackout day (e.g. vacation) — HARD
+  | "blocked_window" // user preference block (e.g. "surfing 6-9am") — SOFT, VIP can navigate
+  | "off_hours" // weekday outside business hours — SOFT
+  | "weekend"; // Saturday or Sunday — SOFT
+
 export interface ScoredSlot {
   start: string; // ISO datetime
   end: string; // ISO datetime
@@ -23,6 +42,12 @@ export interface ScoredSlot {
   confidence: "high" | "low";
   reason: string; // e.g. "declined invite", "Focus Time", "blocked: surfing"
   eventSummary?: string; // what's in this slot (if score > 1)
+  /**
+   * Protection category. Optional for backward compat with cached slots from
+   * before this field existed — consumers should treat missing kind as "open"
+   * and fall through to today's score-based filtering.
+   */
+  kind?: SlotKind;
 }
 
 export interface BlockedWindow {
@@ -322,10 +347,8 @@ function scoreSlot(
   buffers: CompiledBuffer[] = [],
   priorityBuckets: CompiledPriorityBucket[] = [],
 ): ScoredSlot {
-  const { hour, minute, dayName, isWeekend } = getLocalParts(slotStart, tz);
+  const { hour, minute, dayName } = getLocalParts(slotStart, tz);
   const todayStr = getLocalDateStr(new Date(), tz);
-  const bizStart = prefs.explicit?.businessHoursStart ?? 9;
-  const bizEnd = prefs.explicit?.businessHoursEnd ?? 18;
 
   const base: ScoredSlot = {
     start: slotStart.toISOString(),
@@ -333,19 +356,17 @@ function scoreSlot(
     score: 0,
     confidence: "high",
     reason: "open",
+    kind: "open",
   };
 
-  // Weekends = score 4
-  if (isWeekend) {
-    return { ...base, score: 4, reason: "weekend" };
-  }
+  // NOTE: weekend and off-hours checks used to short-circuit here. They've
+  // been lifted out of scoreSlot entirely — computeSchedule applies the hours
+  // protection layer AFTER scoring, and only to otherwise-open slots. This
+  // lets a real event on Saturday or at 7am still be scored as an event
+  // (hard protection) rather than collapsing into generic weekend/off-hours
+  // protection (soft, pierceable by high-priority links).
 
-  // Outside business hours = score 4
-  if (hour < bizStart || hour >= bizEnd) {
-    return { ...base, score: 4, reason: "outside business hours" };
-  }
-
-  // Blocked windows = score 4
+  // Blocked windows = score 4, kind: blocked_window (SOFT — VIP can navigate)
   const blockedMatch = isInBlockedWindow(hour, minute, dayName, blockedWindows, todayStr);
   if (blockedMatch) {
     return {
@@ -353,19 +374,20 @@ function scoreSlot(
       score: 4,
       reason: `blocked: ${blockedMatch.label || "blocked window"}`,
       eventSummary: blockedMatch.label || undefined,
+      kind: "blocked_window",
     };
   }
 
-  // Check blackout days (ISO date strings like "2026-04-14")
+  // Check blackout days (ISO date strings like "2026-04-14") — HARD
   const blackoutDays = prefs.explicit?.blackoutDays;
   if (blackoutDays && blackoutDays.length > 0) {
     const slotDateStr = getLocalDateStr(slotStart, tz);
     if (blackoutDays.includes(slotDateStr)) {
-      return { ...base, score: 4, reason: `blackout day: ${slotDateStr}` };
+      return { ...base, score: 5, reason: `blackout day: ${slotDateStr}`, kind: "blackout" };
     }
   }
 
-  // Check all-day blocking events (OOO, etc.) — these should block the entire day
+  // Check all-day blocking events (OOO, etc.) — real calendar items, HARD
   const allDayBlocking = events.filter((ev) =>
     ev.isAllDay &&
     !ev.isTransparent &&
@@ -377,12 +399,12 @@ function scoreSlot(
   if (allDayBlocking.length > 0) {
     const ooo = allDayBlocking.find((ev) => ev.eventType === "outOfOffice");
     if (ooo) {
-      return { ...base, score: 4, reason: "out of office", eventSummary: ooo.summary };
+      return { ...base, score: 5, reason: "out of office", eventSummary: ooo.summary, kind: "event" };
     }
     // Non-OOO all-day accepted events (vacations, conferences, etc.)
     const accepted = allDayBlocking.find((ev) => ev.responseStatus === "accepted");
     if (accepted) {
-      return { ...base, score: 4, reason: `all-day event: ${accepted.summary}`, eventSummary: accepted.summary };
+      return { ...base, score: 5, reason: `all-day event: ${accepted.summary}`, eventSummary: accepted.summary, kind: "event" };
     }
   }
 
@@ -422,6 +444,7 @@ function scoreSlot(
             confidence: "high",
             reason: `buffer: ${buf.beforeMinutes}m before / ${buf.afterMinutes}m after`,
             eventSummary: bufferedEvent.summary,
+            kind: "event",
           };
         }
       }
@@ -543,7 +566,121 @@ function scoreSlot(
     confidence: bestConfidence,
     reason: bestReason,
     eventSummary: bestSummary,
+    kind: bestScore === 0 && bestReason === "declined invite" ? "open" : "event",
   };
+}
+
+/**
+ * Hours-protection layer — applied after scoreSlot(), ONLY to slots that
+ * come back as kind: "open". A weekday slot at 7 AM with nothing on the
+ * calendar gets bumped to off_hours/2; a Saturday afternoon slot with
+ * nothing scheduled gets bumped to weekend/3. Real events on those same
+ * slots stay classified as events and are unaffected.
+ *
+ * Per user direction: weekend daytime is slightly MORE protected than
+ * weekday off-hours near the business window, so weekend daytime scores 3
+ * (medium friction) while weekday 1–2h outside biz hours scores 2 (soft).
+ * Weekend early/late and weekday deep off-hours (3h+ from biz window) score 4.
+ */
+function hoursProtectionLayer(
+  hour: number,
+  isWeekend: boolean,
+  bizStart: number,
+  bizEnd: number
+): { score: number; reason: string; kind: SlotKind } | null {
+  if (isWeekend) {
+    // Weekend daytime: aligned with typical biz hours gets score 3.
+    // Weekend early/late: score 4.
+    if (hour >= bizStart && hour < bizEnd) {
+      return { score: 3, reason: "weekend", kind: "weekend" };
+    }
+    return { score: 4, reason: "weekend (off-hours)", kind: "weekend" };
+  }
+  // Weekday within biz hours → no bump.
+  if (hour >= bizStart && hour < bizEnd) return null;
+  // Weekday outside biz hours. Distance from the nearest biz-hour edge
+  // in whole hours; 0 means immediately adjacent, 3+ means deep off-hours.
+  const distance = hour < bizStart ? bizStart - hour - 1 : hour - bizEnd;
+  if (distance <= 0) {
+    return { score: 2, reason: "just outside business hours", kind: "off_hours" };
+  }
+  if (distance <= 2) {
+    return { score: 3, reason: "off hours", kind: "off_hours" };
+  }
+  return { score: 4, reason: "early morning / late evening", kind: "off_hours" };
+}
+
+// --- Link priority (per-link protection ceiling) ---
+
+/**
+ * Priority tier for a negotiation link. Governs which protection layers the
+ * link can navigate around. Unset defaults to "normal" — identical to
+ * today's behavior for existing generic links.
+ */
+export type LinkPriority = "normal" | "high" | "vip";
+
+/**
+ * Offerability configuration per priority tier. This is the single source of
+ * truth for "what can a VIP guest see that a normal guest can't." Keep the
+ * mapping deterministic and unit-testable.
+ */
+export interface PriorityConfig {
+  maxScore: number; // max slot score that's offerable (inclusive)
+  allowWeekends: boolean;
+  allowOffHours: boolean;
+  allowBlockedWindows: boolean;
+}
+
+const PRIORITY_CONFIGS: Record<LinkPriority, PriorityConfig> = {
+  normal: {
+    maxScore: 3, // today's default — weekday biz + friction meetings
+    allowWeekends: false,
+    allowOffHours: false,
+    allowBlockedWindows: false,
+  },
+  high: {
+    // Weekend daytime (score 3) and weekday just-outside-biz (score 2) open up.
+    // Deep off-hours (score 4) and blocked windows stay protected.
+    maxScore: 3,
+    allowWeekends: true,
+    allowOffHours: true,
+    allowBlockedWindows: false,
+  },
+  vip: {
+    // Full envelope: weekend early/late, weekday deep off-hours, AND the
+    // host's own implicit blocked windows all become navigable. Real
+    // calendar events stay hard (event + blackout are never offerable).
+    maxScore: 4,
+    allowWeekends: true,
+    allowOffHours: true,
+    allowBlockedWindows: true,
+  },
+};
+
+export function getPriorityConfig(priority: LinkPriority | undefined | null): PriorityConfig {
+  if (!priority) return PRIORITY_CONFIGS.normal;
+  return PRIORITY_CONFIGS[priority] ?? PRIORITY_CONFIGS.normal;
+}
+
+const HARD_KINDS: ReadonlySet<SlotKind> = new Set<SlotKind>(["event", "blackout"]);
+
+/**
+ * Decide whether a single slot is offerable to the guest given the link's
+ * priority config. Hard kinds (real events, blackouts) are ALWAYS off-limits,
+ * regardless of priority. Soft kinds check a per-kind allow flag. Final
+ * score ceiling is applied last. Slots with score -1 or -2 (host exclusive
+ * / preferred overrides) are always offerable — the host explicitly chose
+ * them and the normal filter doesn't apply.
+ */
+export function isOfferable(slot: ScoredSlot, config: PriorityConfig): boolean {
+  // Host-explicit overrides win regardless of kind/score.
+  if (slot.score < 0) return true;
+  const kind: SlotKind = slot.kind ?? "open";
+  if (HARD_KINDS.has(kind)) return false;
+  if (kind === "weekend" && !config.allowWeekends) return false;
+  if (kind === "off_hours" && !config.allowOffHours) return false;
+  if (kind === "blocked_window" && !config.allowBlockedWindows) return false;
+  return slot.score <= config.maxScore;
 }
 
 // --- Temporal Extraction from Knowledge Base ---
@@ -686,19 +823,47 @@ export function computeSchedule(
     current.setSeconds(0, 0);
   }
 
+  // Generation envelope. We now compute the full outer window and classify
+  // each slot with a `kind` so the composer can decide at query time whether
+  // to surface it based on link priority. GEN_START/GEN_END cap the outer
+  // edge — nothing earlier or later is ever scored, even for VIP links.
+  const GEN_START = 6;
+  const GEN_END = 23; // 6 AM through 11 PM (last slot starts at 22:30)
+
   while (current < horizon) {
     const { hour, isWeekend } = getLocalParts(current, tz);
 
-    // Skip weekends and outside business hours entirely — don't include in output
-    if (isWeekend || hour < bizStart || hour >= bizEnd) {
+    // Hard gate — outside the generation envelope, no slot exists.
+    if (hour < GEN_START || hour >= GEN_END) {
       current.setMinutes(current.getMinutes() + 30);
       continue;
     }
 
     const slotEnd = new Date(current.getTime() + 30 * 60 * 1000);
-    const scored = scoreSlot(current, slotEnd, events, blockedWindows, preferences, tz, buffers, priorityBuckets);
-    slots.push(scored);
+    const scored = scoreSlot(
+      current,
+      slotEnd,
+      events,
+      blockedWindows,
+      preferences,
+      tz,
+      buffers,
+      priorityBuckets
+    );
 
+    // Apply the hours-protection layer AFTER scoreSlot, ONLY to otherwise-open
+    // slots. Real events, blackouts, and blocked windows keep their existing
+    // classification — they're more specific than "it's a weekend".
+    if (scored.kind === "open") {
+      const layer = hoursProtectionLayer(hour, isWeekend, bizStart, bizEnd);
+      if (layer) {
+        scored.score = layer.score;
+        scored.reason = layer.reason;
+        scored.kind = layer.kind;
+      }
+    }
+
+    slots.push(scored);
     current.setMinutes(current.getMinutes() + 30);
   }
 
@@ -718,6 +883,11 @@ export function computeInputHash(
   upcomingSchedulePreferences?: string | null
 ): string {
   const data = JSON.stringify({
+    // Bump this version whenever the slot shape or scoring model changes in
+    // a way that invalidates cached ComputedSchedule rows. Hashing it in
+    // forces recomputation on the next session without a manual migration.
+    // v2: added SlotKind + hours-protection layer + full envelope generation.
+    scheduleVersion: "v2",
     events: events.map((e) => ({
       id: e.id,
       start: e.start,
@@ -765,6 +935,12 @@ export interface LinkRules {
   slotOverrides?: SlotOverride[];
   /** @deprecated Use score -2 in slotOverrides instead. Kept for backward compat. */
   exclusiveSlots?: boolean;
+  /**
+   * Link priority tier — governs which protection layers this link can
+   * navigate around. Unset defaults to "normal" (today's behavior). See
+   * {@link LinkPriority} and {@link getPriorityConfig}.
+   */
+  priority?: LinkPriority;
 }
 
 // Canonical short day-name table. All persisted `preferredDays` / `lastResort` /
@@ -812,6 +988,15 @@ export function normalizeLinkRules(
   const lr = normalizeDayArray(input.lastResort);
   if (lr !== undefined) out.lastResort = lr;
 
+  // priority: drop anything that isn't one of the three canonical values.
+  // Undefined/missing is valid — it maps to "normal" at read time.
+  const pr = input.priority;
+  if (pr === "normal" || pr === "high" || pr === "vip") {
+    out.priority = pr;
+  } else if (pr !== undefined) {
+    delete out.priority;
+  }
+
   // dateRange: keep only if it's an object with at least one valid ISO date.
   const dr = input.dateRange;
   if (dr && typeof dr === "object") {
@@ -858,7 +1043,10 @@ export function applyEventOverrides(
         return sStart >= oStart && sEnd <= oEnd;
       })
     );
-    // Apply override scores: -2 for exclusive, -1 for preferred
+    // Apply override scores: -2 for exclusive, -1 for preferred.
+    // Reset kind to "open" so the priority filter treats host-explicit picks
+    // as always-offerable (isOfferable also short-circuits on score < 0, but
+    // keeping kind coherent helps downstream UI/logging).
     return slots.map((s) => {
       const match = exclusiveOverrides.find((o) => {
         const oStart = new Date(o.start).getTime();
@@ -874,6 +1062,7 @@ export function applyEventOverrides(
         score,
         reason: match?.label || (score === -2 ? "host exclusive" : "host preferred"),
         confidence: "high" as const,
+        kind: "open" as const,
       };
     });
   }
