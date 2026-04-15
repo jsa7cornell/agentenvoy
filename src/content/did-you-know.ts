@@ -49,6 +49,6 @@ export const DID_YOU_KNOW_TIPS: DidYouKnowTip[] = [
     id: "manage-calendars",
     title: "Select which Google calendars Envoy uses",
     body: "If you have multiple Google calendars — personal, work, family, a shared team calendar — you can choose which ones count toward your availability. Unchecked calendars are ignored completely: their events won't block your schedule and Envoy won't read them. Flip calendars on and off anytime; your availability updates the moment you save.",
-    cta: { label: "Manage calendars", href: "/dashboard/account" },
+    cta: { label: "Manage calendars", href: "/dashboard/availability?manageCalendars=1" },
   },
 ];

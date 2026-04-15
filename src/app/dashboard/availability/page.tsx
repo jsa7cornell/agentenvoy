@@ -41,6 +41,8 @@ export default function AvailabilityPage() {
   const [googleCalendars, setGoogleCalendars] = useState<Array<{ id: string; name: string; primary: boolean; backgroundColor: string | null }>>([]);
   const [modalSelectedIds, setModalSelectedIds] = useState<string[]>([]);
   const [activeCalendarIds, setActiveCalendarIds] = useState<string[]>([]);
+  const [activeCalendarIdsLoaded, setActiveCalendarIdsLoaded] = useState(false);
+  const [pendingCalendarFilter, setPendingCalendarFilter] = useState(false);
   const [savingCalendarFilter, setSavingCalendarFilter] = useState(false);
   const [calendarsLoading, setCalendarsLoading] = useState(false);
   const [calendarsError, setCalendarsError] = useState<
@@ -106,8 +108,39 @@ export default function AvailabilityPage() {
       .then((data) => {
         if (data?.activeCalendarIds) setActiveCalendarIds(data.activeCalendarIds);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setActiveCalendarIdsLoaded(true));
   }, []);
+
+  // Deep-link: `?manageCalendars=1` opens the calendar filter modal on mount.
+  // Used by the Did You Know card's "Manage calendars" CTA. We clean the URL
+  // immediately so a reload doesn't re-trigger the modal.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("manageCalendars") === "1") {
+      setPendingCalendarFilter(true);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("manageCalendars");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, []);
+
+  // When the deep-link is pending and `activeCalendarIds` has loaded,
+  // open the modal. Waiting for the knowledge fetch ensures the modal
+  // opens with the user's actual saved selection, not "all checked".
+  useEffect(() => {
+    if (!pendingCalendarFilter || !activeCalendarIdsLoaded) return;
+    setPendingCalendarFilter(false);
+    setCalendarFilterModal(true);
+    if (googleCalendars.length === 0) {
+      loadGoogleCalendars();
+    } else {
+      setModalSelectedIds(
+        activeCalendarIds.length > 0 ? activeCalendarIds : googleCalendars.map((c) => c.id),
+      );
+    }
+  }, [pendingCalendarFilter, activeCalendarIdsLoaded, loadGoogleCalendars, googleCalendars, activeCalendarIds]);
 
   const fetchSchedule = useCallback(async () => {
     try {
