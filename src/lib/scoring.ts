@@ -17,37 +17,61 @@ import { safeTimezone } from "./timezone";
 // --- Types ---
 
 /**
- * Protection category for a slot. Score tells you how protected the slot is;
- * kind tells you WHY, which determines whether a high-priority link may
- * navigate around it.
- *
- * Hard kinds ("event", "blackout") are NEVER offerable regardless of link
- * priority — a real calendar conflict trumps any VIP. Soft kinds
- * ("blocked_window", "off_hours", "weekend") are implicit protections the
- * host set via preferences or default hours, and higher-priority links can
- * pierce them.
+ * Factual category for a slot — what IS it. Useful for UI labels and debug
+ * output. The two-function offerability logic below reads `blockCost` and
+ * `firmness` instead; kind is kept for human-readable reasons and the
+ * dashboard availability heatmap.
  */
 export type SlotKind =
-  | "open" // no conflict, within business hours, weekday
-  | "event" // real calendar event (confirmed, tentative, OOO) — HARD
-  | "blackout" // user-declared blackout day (e.g. vacation) — HARD
-  | "blocked_window" // user preference block (e.g. "surfing 6-9am") — SOFT, VIP can navigate
-  | "off_hours" // weekday outside business hours — SOFT
-  | "weekend"; // Saturday or Sunday — SOFT
+  | "open" // within biz hours, no conflict
+  | "event" // real calendar event (confirmed, tentative, recurring, OOO)
+  | "blackout" // user-declared vacation day
+  | "blocked_window" // user preference block (surfing, focus time, etc.)
+  | "off_hours" // weekday outside business hours, no other block
+  | "weekend"; // Saturday or Sunday, no other block
+
+/**
+ * INTRINSIC nature of a slot's protection — the primary signal the VIP
+ * offerability logic keys off. Models the question "who bears the cost if
+ * we break this slot?"
+ *
+ * - `none` — nothing to break. Slot is open.
+ * - `preference` — the host alone pays the cost. Surfing, focus time,
+ *   weekend off, early-morning routine. VIP can navigate preferences with
+ *   host consent, because no third party is owed a renegotiation.
+ * - `commitment` — a third party is expecting this slot. Tentative
+ *   meetings, confirmed meetings, recurring 1:1s, family dinners, flights.
+ *   Breaking a commitment always costs someone else, so VIP treats these
+ *   far more conservatively (weak commitments can be proposed-with-bump,
+ *   strong commitments are never touched).
+ */
+export type BlockCost = "none" | "preference" | "commitment";
+
+/**
+ * Within a given BlockCost, how hard the slot is to break. Set by the
+ * preference compiler for blocked windows, derived from distance-from-biz
+ * for off-hours slots, and read from event metadata for calendar events.
+ *
+ * `weak` + `preference` → score 2 (first offer, soft framing)
+ * `strong` + `preference` → score 3 or 4 (stretch band depending on context)
+ * `weak` + `commitment` → score 3 (stretch, propose with bump language)
+ * `strong` + `commitment` → score 5 (host must resolve externally)
+ */
+export type BlockFirmness = "weak" | "strong";
 
 export interface ScoredSlot {
   start: string; // ISO datetime
   end: string; // ISO datetime
-  score: number; // -2 to 5 (-2=exclusive, -1=preferred, 0=available, 1=open+context, 2=soft, 3=friction, 4=protected, 5=immovable)
+  score: number; // 0-5 (negatives -2/-1 reserved for host explicit overrides)
   confidence: "high" | "low";
-  reason: string; // e.g. "declined invite", "Focus Time", "blocked: surfing"
-  eventSummary?: string; // what's in this slot (if score > 1)
-  /**
-   * Protection category. Optional for backward compat with cached slots from
-   * before this field existed — consumers should treat missing kind as "open"
-   * and fall through to today's score-based filtering.
-   */
+  reason: string; // e.g. "tentative with Bob", "Focus Time", "6 AM - 3h before biz"
+  eventSummary?: string; // what's in this slot (if a real event)
+  /** Factual label — shown in the dashboard heatmap. */
   kind?: SlotKind;
+  /** Intrinsic nature — who pays if this slot is broken. Primary offerability signal. */
+  blockCost?: BlockCost;
+  /** Firmness within the block cost — how hard to break. */
+  firmness?: BlockFirmness;
 }
 
 export interface BlockedWindow {
@@ -56,6 +80,22 @@ export interface BlockedWindow {
   days?: string[]; // short day names: "Mon", "Tue", etc.
   label?: string;
   expires?: string; // ISO date "YYYY-MM-DD"
+  /**
+   * Intrinsic nature of this block. Defaults to "preference" when unset —
+   * most user-tagged blocks are self-imposed (surfing, focus time, gym).
+   * Set to "commitment" when the label references a specific other party
+   * (family dinner, Mia's pickup, Dad's birthday) so the scoring engine
+   * knows a third party is owed this slot.
+   */
+  blockCost?: BlockCost;
+  /**
+   * How firm this block is. Defaults to "strong" when unset — user-tagged
+   * blocks exist because the host wanted them, so the conservative default
+   * is to treat them as firm. The preference compiler downgrades to "weak"
+   * only for labels the host explicitly marked flexible (focus time, prep,
+   * buffer).
+   */
+  firmness?: BlockFirmness;
 }
 
 export interface UserPreferences {
@@ -350,6 +390,7 @@ function scoreSlot(
   const { hour, minute, dayName } = getLocalParts(slotStart, tz);
   const todayStr = getLocalDateStr(new Date(), tz);
 
+  // Open-slot base. blockCost / firmness are filled in per return path.
   const base: ScoredSlot = {
     start: slotStart.toISOString(),
     end: slotEnd.toISOString(),
@@ -357,37 +398,67 @@ function scoreSlot(
     confidence: "high",
     reason: "open",
     kind: "open",
+    blockCost: "none",
   };
 
   // NOTE: weekend and off-hours checks used to short-circuit here. They've
-  // been lifted out of scoreSlot entirely — computeSchedule applies the hours
-  // protection layer AFTER scoring, and only to otherwise-open slots. This
-  // lets a real event on Saturday or at 7am still be scored as an event
-  // (hard protection) rather than collapsing into generic weekend/off-hours
-  // protection (soft, pierceable by high-priority links).
+  // been lifted out of scoreSlot entirely — computeSchedule applies the
+  // hours-protection layer AFTER scoring, and only to otherwise-open slots.
+  // Real events at 7am or on Saturday still get scored as events (hard
+  // protection) rather than collapsing into generic weekend/off-hours
+  // protection (softer, reachable by VIP stretch).
 
-  // Blocked windows = score 4, kind: blocked_window (SOFT — VIP can navigate)
+  // Blocked windows — user-declared personal blocks like surfing, focus
+  // time, family dinner. The preference compiler tags each block with
+  // `blockCost` (preference vs commitment) and `firmness` (weak vs strong)
+  // based on the host's natural-language description. Scoring reads those
+  // tags directly, defaulting to preference:strong when unset.
   const blockedMatch = isInBlockedWindow(hour, minute, dayName, blockedWindows, todayStr);
   if (blockedMatch) {
+    const blockCost: BlockCost = blockedMatch.blockCost ?? "preference";
+    const firmness: BlockFirmness = blockedMatch.firmness ?? "strong";
+    let score: number;
+    if (blockCost === "commitment") {
+      // Commitment: someone else is expecting this. Firm commitments are
+      // hard (family dinner, Mia's pickup); weak commitments (rare for
+      // blocked windows) land in the stretch band with bump-approval.
+      score = firmness === "strong" ? 5 : 3;
+    } else {
+      // Preference: host-only cost. Firm preferences (surf, gym) are
+      // deep-stretch; weak preferences (focus time, buffer) are first-offer.
+      score = firmness === "strong" ? 4 : 2;
+    }
     return {
       ...base,
-      score: 4,
+      score,
       reason: `blocked: ${blockedMatch.label || "blocked window"}`,
       eventSummary: blockedMatch.label || undefined,
       kind: "blocked_window",
+      blockCost,
+      firmness,
     };
   }
 
-  // Check blackout days (ISO date strings like "2026-04-14") — HARD
+  // Blackout days (user-declared vacation) — treat as commitment:strong
+  // even though they're technically self-imposed, because the host has
+  // explicitly marked the whole day off and a VIP reaching in would violate
+  // the explicit boundary rather than a soft preference.
   const blackoutDays = prefs.explicit?.blackoutDays;
   if (blackoutDays && blackoutDays.length > 0) {
     const slotDateStr = getLocalDateStr(slotStart, tz);
     if (blackoutDays.includes(slotDateStr)) {
-      return { ...base, score: 5, reason: `blackout day: ${slotDateStr}`, kind: "blackout" };
+      return {
+        ...base,
+        score: 5,
+        reason: `blackout day: ${slotDateStr}`,
+        kind: "blackout",
+        blockCost: "commitment",
+        firmness: "strong",
+      };
     }
   }
 
-  // Check all-day blocking events (OOO, etc.) — real calendar items, HARD
+  // All-day blocking events (OOO, travel) — commitment:strong.
   const allDayBlocking = events.filter((ev) =>
     ev.isAllDay &&
     !ev.isTransparent &&
@@ -399,12 +470,27 @@ function scoreSlot(
   if (allDayBlocking.length > 0) {
     const ooo = allDayBlocking.find((ev) => ev.eventType === "outOfOffice");
     if (ooo) {
-      return { ...base, score: 5, reason: "out of office", eventSummary: ooo.summary, kind: "event" };
+      return {
+        ...base,
+        score: 5,
+        reason: "out of office",
+        eventSummary: ooo.summary,
+        kind: "event",
+        blockCost: "commitment",
+        firmness: "strong",
+      };
     }
-    // Non-OOO all-day accepted events (vacations, conferences, etc.)
     const accepted = allDayBlocking.find((ev) => ev.responseStatus === "accepted");
     if (accepted) {
-      return { ...base, score: 5, reason: `all-day event: ${accepted.summary}`, eventSummary: accepted.summary, kind: "event" };
+      return {
+        ...base,
+        score: 5,
+        reason: `all-day event: ${accepted.summary}`,
+        eventSummary: accepted.summary,
+        kind: "event",
+        blockCost: "commitment",
+        firmness: "strong",
+      };
     }
   }
 
@@ -438,249 +524,302 @@ function scoreSlot(
         });
 
         if (bufferedEvent) {
+          // Buffer zone = preference:weak (your own convenience — you'd
+          // rather not be rushed to an in-person meeting). First-offer
+          // tier; guest gets it without explanation.
           return {
             ...base,
-            score: 3,
+            score: 2,
             confidence: "high",
             reason: `buffer: ${buf.beforeMinutes}m before / ${buf.afterMinutes}m after`,
             eventSummary: bufferedEvent.summary,
             kind: "event",
+            blockCost: "preference",
+            firmness: "weak",
           };
         }
       }
     }
-    // No events, no buffers — clean open slot, score 0
+    // No events, no buffers — clean open slot, score 0.
     return base;
   }
 
-  // Score based on event characteristics
-  // Priority: highest score wins (most protective)
-  let bestScore = 0;
-  let bestReason = "open";
-  let bestConfidence: "high" | "low" = "high";
-  let bestSummary: string | undefined;
+  // Score based on event characteristics.
+  // Highest score wins (most protective). Each event contributes a
+  // {score, blockCost, firmness} tuple; the slot inherits the highest.
+  interface EventScore {
+    score: number;
+    reason: string;
+    confidence: "high" | "low";
+    summary?: string;
+    blockCost: BlockCost;
+    firmness?: BlockFirmness;
+  }
+  let best: EventScore = {
+    score: 0,
+    reason: "open",
+    confidence: "high",
+    blockCost: "none",
+  };
 
   for (const ev of overlapping) {
-    let evScore = 1;
-    let evReason = "open";
-    let evConfidence: "high" | "low" = "high";
+    let ev_: EventScore;
 
-    // Declined = explicitly free (score 0)
+    // Declined = explicitly free. Doesn't promote the slot's protection.
     if (ev.responseStatus === "declined") {
-      evScore = 0;
-      evReason = "declined invite";
-      // Don't override higher scores from other overlapping events
-      if (evScore > bestScore) continue;
-      bestScore = evScore;
-      bestReason = evReason;
-      bestConfidence = evConfidence;
-      bestSummary = ev.summary;
-      continue;
+      ev_ = { score: 0, reason: "declined invite", confidence: "high", summary: ev.summary, blockCost: "none" };
     }
-
-    // Transparent/FYI = doesn't block (score 1, context only)
-    if (ev.isTransparent) {
-      continue; // Don't affect score
+    // Transparent FYI = context only. Doesn't affect score or offerability.
+    // Surfaced in the host's dashboard heatmap via the `reason` field, but
+    // hidden from the guest prompt per the "don't leak host context" rule.
+    else if (ev.isTransparent) {
+      ev_ = { score: 1, reason: `FYI: ${ev.summary}`, confidence: "high", summary: ev.summary, blockCost: "none" };
     }
-
-    // Flight detection (score 5)
-    if (titleMatches(ev.summary, FLIGHT_KEYWORDS)) {
-      evScore = 5;
-      evReason = "flight";
-      evConfidence = "high";
+    // Flight = commitment:strong. Immovable for everyone.
+    else if (titleMatches(ev.summary, FLIGHT_KEYWORDS)) {
+      ev_ = { score: 5, reason: "flight", confidence: "high", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
     }
-    // Sacred/immovable (score 5)
+    // Sacred/immovable keywords = commitment:strong.
     else if (titleMatches(ev.summary, SACRED_KEYWORDS)) {
-      evScore = 5;
-      evReason = "immovable";
-      evConfidence = "high";
+      ev_ = { score: 5, reason: "immovable", confidence: "high", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
     }
-    // Soft holds (score 2)
+    // Soft-hold events ("Focus Time", "Hold", "Buffer") = preference:weak.
+    // First-offer tier — these are reschedulable at the host's whim.
     else if (titleMatches(ev.summary, SOFT_HOLD_KEYWORDS)) {
-      evScore = 2;
-      evReason = "soft hold";
-      evConfidence = "low";
+      ev_ = { score: 2, reason: "soft hold", confidence: "low", summary: ev.summary, blockCost: "preference", firmness: "weak" };
     }
-    // Tentative meeting (score 3)
+    // Tentative meeting = commitment:weak. Size determines firmness: a
+    // tentative 1:1 is relatively easy to bump (one person to renegotiate
+    // with); a tentative group meeting involves 4+ people's calendars.
     else if (ev.responseStatus === "tentative") {
-      if ((ev.attendeeCount ?? 0) <= 2) {
-        evScore = 2;
-        evReason = "tentative, small meeting";
-        evConfidence = "low";
+      if ((ev.attendeeCount ?? 0) >= 3) {
+        // Commitment:weak but hard enough that we push it into the
+        // deep-stretch band — don't propose bumping 4+ people casually.
+        ev_ = { score: 4, reason: "tentative group meeting", confidence: "low", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
       } else {
-        evScore = 3;
-        evReason = "tentative meeting";
-        evConfidence = "low";
+        ev_ = { score: 3, reason: "tentative meeting", confidence: "low", summary: ev.summary, blockCost: "commitment", firmness: "weak" };
       }
     }
-    // Recurring 1:1 (score 3, low confidence — reschedulable)
+    // Recurring 1:1 = commitment:weak. The counterpart is someone the host
+    // sees often; a one-off reschedule is a small ask.
     else if (ev.isRecurring && (ev.attendeeCount ?? 0) <= 2) {
-      evScore = 3;
-      evReason = "recurring 1:1";
-      evConfidence = "low";
+      ev_ = { score: 3, reason: "recurring 1:1", confidence: "low", summary: ev.summary, blockCost: "commitment", firmness: "weak" };
     }
-    // Confirmed meeting with 3+ attendees or external (score 4)
+    // Confirmed group meeting (3+ attendees) = commitment:strong.
     else if ((ev.attendeeCount ?? 0) >= 3) {
-      evScore = 4;
-      evReason = "confirmed group meeting";
-      evConfidence = "high";
+      ev_ = { score: 5, reason: "confirmed group meeting", confidence: "high", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
     }
-    // Default confirmed meeting (score 4)
+    // Default confirmed meeting = commitment:strong. The host has to
+    // renegotiate with the other party manually; Envoy never proposes it.
     else {
-      evScore = 4;
-      evReason = "confirmed meeting";
-      evConfidence = "high";
+      ev_ = { score: 5, reason: "confirmed meeting", confidence: "high", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
     }
 
-    // Priority bucket overrides — check if event matches high/low priority keywords
+    // Compiled priority bucket overrides — keyword-tagged events can be
+    // bumped up to immovable, or softened if marked low-priority.
     for (const bucket of priorityBuckets) {
       const matches = bucket.keywords.some((kw) =>
         ev.summary.toLowerCase().includes(kw.toLowerCase())
       );
       if (matches) {
         if (bucket.level === "high") {
-          evScore = 5;
-          evReason = "high priority";
-          evConfidence = "high";
-        } else if (bucket.level === "low" && evScore >= 3) {
-          // Only downgrade if currently protected — don't downgrade already-low scores
-          evScore = 2;
-          evReason = "low priority (flexible)";
-          evConfidence = "low";
+          ev_ = { score: 5, reason: "high priority", confidence: "high", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
+        } else if (bucket.level === "low" && ev_.score >= 3) {
+          // Downgrade a protected slot to preference:weak (first-offer
+          // tier). "This is flexible — you can schedule over it."
+          ev_ = { score: 2, reason: "low priority (flexible)", confidence: "low", summary: ev.summary, blockCost: "preference", firmness: "weak" };
         }
-        break; // First matching bucket wins
+        break;
       }
     }
 
-    if (evScore > bestScore) {
-      bestScore = evScore;
-      bestReason = evReason;
-      bestConfidence = evConfidence;
-      bestSummary = ev.summary;
+    if (ev_.score > best.score) {
+      best = ev_;
     }
   }
 
+  // Determine kind: transparent context stays "open", everything else is "event".
+  const kind: SlotKind = best.score <= 1 && best.reason !== "open" ? "open" : (best.score === 0 ? "open" : "event");
+
   return {
     ...base,
-    score: bestScore,
-    confidence: bestConfidence,
-    reason: bestReason,
-    eventSummary: bestSummary,
-    kind: bestScore === 0 && bestReason === "declined invite" ? "open" : "event",
+    score: best.score,
+    confidence: best.confidence,
+    reason: best.reason,
+    eventSummary: best.summary,
+    kind,
+    blockCost: best.blockCost,
+    firmness: best.firmness,
   };
 }
 
 /**
  * Hours-protection layer — applied after scoreSlot(), ONLY to slots that
- * come back as kind: "open". A weekday slot at 7 AM with nothing on the
- * calendar gets bumped to off_hours/2; a Saturday afternoon slot with
- * nothing scheduled gets bumped to weekend/3. Real events on those same
- * slots stay classified as events and are unaffected.
+ * come back open. Uses the intrinsic 2×2 model:
  *
- * Per user direction: weekend daytime is slightly MORE protected than
- * weekday off-hours near the business window, so weekend daytime scores 3
- * (medium friction) while weekday 1–2h outside biz hours scores 2 (soft).
- * Weekend early/late and weekday deep off-hours (3h+ from biz window) score 4.
+ * Weekday off-hours = preference (host's own time), firmness graded by
+ * distance from biz-hour edge:
+ *   - 1h edge         → score 2, preference:weak  (first-offer)
+ *   - 2-3h edge       → score 3, preference:strong (stretch 1)
+ *   - 4h edge         → score 4, preference:strong (stretch 2)
+ *   - 5+h edge        → score 5, preference:strong (sleep hours, never)
+ *
+ * Weekend = preference:strong, firmness graded by biz-equivalent vs edge:
+ *   - biz-equivalent  → score 3 (stretch 1)
+ *   - 1-2h edge       → score 4 (stretch 2)
+ *   - 3+h edge        → score 5 (never)
+ *
+ * Real events sitting on top of these slots keep their own classification
+ * (scoreSlot returned first, this layer doesn't touch events).
  */
 function hoursProtectionLayer(
   hour: number,
   isWeekend: boolean,
   bizStart: number,
   bizEnd: number
-): { score: number; reason: string; kind: SlotKind } | null {
+): {
+  score: number;
+  reason: string;
+  kind: SlotKind;
+  blockCost: BlockCost;
+  firmness: BlockFirmness;
+} | null {
   if (isWeekend) {
-    // Weekend daytime: aligned with typical biz hours gets score 3.
-    // Weekend early/late: score 4.
-    if (hour >= bizStart && hour < bizEnd) {
-      return { score: 3, reason: "weekend", kind: "weekend" };
+    const inBizEquivalent = hour >= bizStart && hour < bizEnd;
+    if (inBizEquivalent) {
+      return { score: 3, reason: "weekend daytime", kind: "weekend", blockCost: "preference", firmness: "strong" };
     }
-    return { score: 4, reason: "weekend (off-hours)", kind: "weekend" };
+    // Weekend edge calculation: distance from nearest biz-equivalent edge.
+    const edgeDistance = hour < bizStart ? bizStart - hour : hour - bizEnd + 1;
+    if (edgeDistance <= 2) {
+      return { score: 4, reason: "weekend edge", kind: "weekend", blockCost: "preference", firmness: "strong" };
+    }
+    return { score: 5, reason: "weekend off-hours (sleep)", kind: "weekend", blockCost: "preference", firmness: "strong" };
   }
+
   // Weekday within biz hours → no bump.
   if (hour >= bizStart && hour < bizEnd) return null;
+
   // Weekday outside biz hours. Distance from the nearest biz-hour edge
-  // in whole hours; 0 means immediately adjacent, 3+ means deep off-hours.
+  // in whole hours; 0 means immediately adjacent (the 1h edge slot).
   const distance = hour < bizStart ? bizStart - hour - 1 : hour - bizEnd;
   if (distance <= 0) {
-    return { score: 2, reason: "just outside business hours", kind: "off_hours" };
+    // 1h edge — near-trivial accommodation.
+    return { score: 2, reason: "just outside business hours", kind: "off_hours", blockCost: "preference", firmness: "weak" };
   }
   if (distance <= 2) {
-    return { score: 3, reason: "off hours", kind: "off_hours" };
+    // 2-3h edge — meaningful ask.
+    return { score: 3, reason: "off hours", kind: "off_hours", blockCost: "preference", firmness: "strong" };
   }
-  return { score: 4, reason: "early morning / late evening", kind: "off_hours" };
+  if (distance <= 3) {
+    // 4h edge — significant ask, deep stretch only.
+    return { score: 4, reason: "early morning / late evening", kind: "off_hours", blockCost: "preference", firmness: "strong" };
+  }
+  // 5+h edge — sleep hours, never offered.
+  return { score: 5, reason: "sleep hours", kind: "off_hours", blockCost: "preference", firmness: "strong" };
 }
 
-// --- Link priority (per-link protection ceiling) ---
+// --- Progressive offerability tiers (first-offer → stretch 1 → stretch 2) ---
 
 /**
- * Priority tier for a negotiation link. Governs which protection layers the
- * link can navigate around. Unset defaults to "normal" — identical to
- * today's behavior for existing generic links.
+ * Which tier a slot falls into for a given link. The composer uses this to
+ * emit separate prompt blocks (OFFERABLE SLOTS, STRETCH OPTIONS, DEEP STRETCH
+ * OPTIONS) with different guardrails about when the LLM may reach into each.
+ *
+ * Rules:
+ *   - `first-offer`: score ≤ 2 (preference:weak and open), OR score 3-4
+ *     slots that fall within the host's explicit expansion window
+ *     (preferredTimeStart/End + allowWeekends). These are shown in the
+ *     widget and in the initial greeting.
+ *   - `stretch1`: score 3 slots NOT in first-offer. VIP-only. Surfaced in
+ *     conversation after the first round of guest pushback. Requires the
+ *     LLM to offer with soft framing; holds are placed via [HOLD_SLOT].
+ *   - `stretch2`: score 4 slots NOT in first-offer. VIP-only. Surfaced
+ *     after a second round of guest pushback.
+ *   - `null`: score 5, commitment:strong events, or a non-VIP link
+ *     reaching score ≥ 3. Never offered.
  */
-export type LinkPriority = "normal" | "high" | "vip";
+export type OfferTier = "first-offer" | "stretch1" | "stretch2" | null;
 
 /**
- * Offerability configuration per priority tier. This is the single source of
- * truth for "what can a VIP guest see that a normal guest can't." Keep the
- * mapping deterministic and unit-testable.
+ * Is this slot within the host's explicit preferredTimeStart/preferredTimeEnd
+ * window on a weekday? Used by isFirstOffer to promote off-hours slots the
+ * host has personally authorized ("I said 6 AM is fine for this link").
  */
-export interface PriorityConfig {
-  maxScore: number; // max slot score that's offerable (inclusive)
-  allowWeekends: boolean;
-  allowOffHours: boolean;
-  allowBlockedWindows: boolean;
+function inExplicitWindow(slot: ScoredSlot, rules: LinkRules, tz: string): boolean {
+  if (!rules.preferredTimeStart && !rules.preferredTimeEnd) return false;
+  const { hour, minute } = getLocalParts(new Date(slot.start), tz);
+  const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  if (rules.preferredTimeStart && timeStr < rules.preferredTimeStart) return false;
+  if (rules.preferredTimeEnd && timeStr >= rules.preferredTimeEnd) return false;
+  return true;
 }
 
-const PRIORITY_CONFIGS: Record<LinkPriority, PriorityConfig> = {
-  normal: {
-    maxScore: 3, // today's default — weekday biz + friction meetings
-    allowWeekends: false,
-    allowOffHours: false,
-    allowBlockedWindows: false,
-  },
-  high: {
-    // Weekend daytime (score 3) and weekday just-outside-biz (score 2) open up.
-    // Deep off-hours (score 4) and blocked windows stay protected.
-    maxScore: 3,
-    allowWeekends: true,
-    allowOffHours: true,
-    allowBlockedWindows: false,
-  },
-  vip: {
-    // Full envelope: weekend early/late, weekday deep off-hours, AND the
-    // host's own implicit blocked windows all become navigable. Real
-    // calendar events stay hard (event + blackout are never offerable).
-    maxScore: 4,
-    allowWeekends: true,
-    allowOffHours: true,
-    allowBlockedWindows: true,
-  },
-};
+/**
+ * Classify a slot into an offerability tier for a given link. This is the
+ * single source of truth the composer uses to build the three prompt blocks.
+ *
+ * Never returns a tier for:
+ *   - score 5 (immovable — real events, flights, blackouts, sleep hours)
+ *   - commitment:strong slots (hard by definition)
+ *   - stretches on a non-VIP link
+ *
+ * First-offer promotion via explicit expansion:
+ *   - If the host set preferredTimeStart/End, score 3-4 off-hours slots
+ *     inside that window become first-offer (the host pre-authorized).
+ *   - If allowWeekends, weekend daytime (score 3) becomes first-offer.
+ *   - The original slot score and blockCost are unchanged — only tier
+ *     classification is affected.
+ */
+export function getTier(slot: ScoredSlot, rules: LinkRules, tz: string): OfferTier {
+  // Host-explicit slot overrides (-1 preferred, -2 exclusive) are always
+  // first-offer regardless of tier logic.
+  if (slot.score < 0) return "first-offer";
 
-export function getPriorityConfig(priority: LinkPriority | undefined | null): PriorityConfig {
-  if (!priority) return PRIORITY_CONFIGS.normal;
-  return PRIORITY_CONFIGS[priority] ?? PRIORITY_CONFIGS.normal;
+  // Score 5: never offered.
+  if (slot.score >= 5) return null;
+
+  // Commitment:strong events are hard — even at score 4 they're not
+  // reachable. The host must break them externally.
+  if (slot.blockCost === "commitment" && slot.firmness === "strong") return null;
+
+  // First-offer: the default safe tier.
+  //   - Score ≤ 2: always first-offer (open, preference:weak, buffers,
+  //     soft holds, 1h edge, tagged-soft blocked windows).
+  //   - Score 3 within explicit preferredTime window: host authorized.
+  //   - Score 3 weekend when allowWeekends: host authorized.
+  //   - Score 4 within explicit preferredTime window: deeper pre-auth.
+  if (slot.score <= 2) return "first-offer";
+  if (slot.score <= 4 && inExplicitWindow(slot, rules, tz) && slot.kind === "off_hours") {
+    return "first-offer";
+  }
+  if (slot.score <= 4 && slot.kind === "weekend" && rules.allowWeekends) {
+    return "first-offer";
+  }
+
+  // Stretch bands exist only for VIP links.
+  if (!rules.isVip) return null;
+
+  // Stretch 1: score-3 slots not in first-offer. LLM-reachable after the
+  // first round of guest pushback.
+  if (slot.score === 3) return "stretch1";
+
+  // Stretch 2: score-4 slots not in first-offer. LLM-reachable only after
+  // a second round of guest pushback, and only on VIP links.
+  if (slot.score === 4) return "stretch2";
+
+  return null;
 }
 
-const HARD_KINDS: ReadonlySet<SlotKind> = new Set<SlotKind>(["event", "blackout"]);
-
-/**
- * Decide whether a single slot is offerable to the guest given the link's
- * priority config. Hard kinds (real events, blackouts) are ALWAYS off-limits,
- * regardless of priority. Soft kinds check a per-kind allow flag. Final
- * score ceiling is applied last. Slots with score -1 or -2 (host exclusive
- * / preferred overrides) are always offerable — the host explicitly chose
- * them and the normal filter doesn't apply.
- */
-export function isOfferable(slot: ScoredSlot, config: PriorityConfig): boolean {
-  // Host-explicit overrides win regardless of kind/score.
-  if (slot.score < 0) return true;
-  const kind: SlotKind = slot.kind ?? "open";
-  if (HARD_KINDS.has(kind)) return false;
-  if (kind === "weekend" && !config.allowWeekends) return false;
-  if (kind === "off_hours" && !config.allowOffHours) return false;
-  if (kind === "blocked_window" && !config.allowBlockedWindows) return false;
-  return slot.score <= config.maxScore;
+/** Convenience wrappers used throughout the composer + session route. */
+export function isFirstOffer(slot: ScoredSlot, rules: LinkRules, tz: string): boolean {
+  return getTier(slot, rules, tz) === "first-offer";
+}
+export function isStretch1(slot: ScoredSlot, rules: LinkRules, tz: string): boolean {
+  return getTier(slot, rules, tz) === "stretch1";
+}
+export function isStretch2(slot: ScoredSlot, rules: LinkRules, tz: string): boolean {
+  return getTier(slot, rules, tz) === "stretch2";
 }
 
 // --- Temporal Extraction from Knowledge Base ---
@@ -823,12 +962,15 @@ export function computeSchedule(
     current.setSeconds(0, 0);
   }
 
-  // Generation envelope. We now compute the full outer window and classify
-  // each slot with a `kind` so the composer can decide at query time whether
-  // to surface it based on link priority. GEN_START/GEN_END cap the outer
-  // edge — nothing earlier or later is ever scored, even for VIP links.
-  const GEN_START = 6;
-  const GEN_END = 23; // 6 AM through 11 PM (last slot starts at 22:30)
+  // Generation envelope. Full outer window, all days. Each slot gets a
+  // blockCost/firmness tag via scoreSlot + hoursProtectionLayer; the
+  // composer reads those tags (not raw scores) via isFirstOffer/isStretch
+  // to decide what to surface for each link. GEN_START/GEN_END cap the
+  // outer edge — nothing earlier or later is ever scored, even for VIP
+  // with explicit unlock. 5 AM is the absolute floor; before that is
+  // sleep hours we never even generate.
+  const GEN_START = 5;
+  const GEN_END = 23; // 5 AM through 11 PM (last slot starts at 22:30)
 
   while (current < horizon) {
     const { hour, isWeekend } = getLocalParts(current, tz);
@@ -851,15 +993,17 @@ export function computeSchedule(
       priorityBuckets
     );
 
-    // Apply the hours-protection layer AFTER scoreSlot, ONLY to otherwise-open
-    // slots. Real events, blackouts, and blocked windows keep their existing
-    // classification — they're more specific than "it's a weekend".
-    if (scored.kind === "open") {
+    // Apply the hours-protection layer AFTER scoreSlot, ONLY to otherwise-
+    // open slots. Real events, blackouts, and blocked windows keep their
+    // existing classification — they're more specific than "it's a weekend".
+    if (scored.kind === "open" && scored.blockCost === "none") {
       const layer = hoursProtectionLayer(hour, isWeekend, bizStart, bizEnd);
       if (layer) {
         scored.score = layer.score;
         scored.reason = layer.reason;
         scored.kind = layer.kind;
+        scored.blockCost = layer.blockCost;
+        scored.firmness = layer.firmness;
       }
     }
 
@@ -887,7 +1031,11 @@ export function computeInputHash(
     // a way that invalidates cached ComputedSchedule rows. Hashing it in
     // forces recomputation on the next session without a manual migration.
     // v2: added SlotKind + hours-protection layer + full envelope generation.
-    scheduleVersion: "v2",
+    // v3: intrinsic block-type scoring (blockCost + firmness), envelope
+    //     extended to 5 AM, tentative groups bumped to score 4, buffers
+    //     dropped to score 2, soft-tagged blocks at score 2, priority
+    //     tiers collapsed to binary isVip.
+    scheduleVersion: "v3",
     events: events.map((e) => ({
       id: e.id,
       start: e.start,
@@ -928,7 +1076,7 @@ export interface LinkRules {
   preferredDays?: string[];
   /** Short day names: "Mon", "Tue", etc. */
   lastResort?: string[];
-  preferredTimeStart?: string; // "09:00"
+  preferredTimeStart?: string; // "09:00" — widens the daily offering window
   preferredTimeEnd?: string; // "12:00"
   /** Inclusive date window in host's local calendar. "YYYY-MM-DD". */
   dateRange?: { start?: string; end?: string };
@@ -936,11 +1084,25 @@ export interface LinkRules {
   /** @deprecated Use score -2 in slotOverrides instead. Kept for backward compat. */
   exclusiveSlots?: boolean;
   /**
-   * Link priority tier — governs which protection layers this link can
-   * navigate around. Unset defaults to "normal" (today's behavior). See
-   * {@link LinkPriority} and {@link getPriorityConfig}.
+   * VIP flag — binary. When true, Envoy runs the accommodative flows:
+   * proactive expansion question at creation, progressive stretch tiers
+   * during guest conversation, tentative-hold protection via the
+   * [HOLD_SLOT] action. When false/unset, the link behaves normally —
+   * first-offer only, no creative reach, no stretch.
+   *
+   * `isVip` alone does NOT auto-unlock any protected slots — it unlocks
+   * Envoy's *access* to the stretch (score 3) and deep-stretch (score 4)
+   * bands in her LLM prompt, but the actual opening of weekend / off-hours
+   * slots for guest-facing offerings requires the explicit fields below.
    */
-  priority?: LinkPriority;
+  isVip?: boolean;
+  /**
+   * Explicit host authorization to offer weekend slots for this link.
+   * When true, weekend `preference:strong` slots within the weekend
+   * biz-equivalent window become first-offer. When false/unset, weekends
+   * are at most a VIP stretch option.
+   */
+  allowWeekends?: boolean;
 }
 
 // Canonical short day-name table. All persisted `preferredDays` / `lastResort` /
@@ -988,13 +1150,30 @@ export function normalizeLinkRules(
   const lr = normalizeDayArray(input.lastResort);
   if (lr !== undefined) out.lastResort = lr;
 
-  // priority: drop anything that isn't one of the three canonical values.
-  // Undefined/missing is valid — it maps to "normal" at read time.
-  const pr = input.priority;
-  if (pr === "normal" || pr === "high" || pr === "vip") {
-    out.priority = pr;
-  } else if (pr !== undefined) {
-    delete out.priority;
+  // isVip: coerce to strict boolean. Strings ("true"/"false") and other
+  // truthy/falsy values are rejected to avoid parser LLMs emitting strings
+  // by accident. Legacy `priority: "high"|"vip"` values are migrated to
+  // isVip: true, and `priority: "normal"` (or anything else) is dropped.
+  // NOTE: we explicitly DELETE non-boolean isVip to counter the spread
+  // at the top of this function, which otherwise copies garbage through.
+  if (typeof input.isVip === "boolean") {
+    out.isVip = input.isVip;
+  } else {
+    delete out.isVip;
+    if (input.priority === "vip" || input.priority === "high") {
+      out.isVip = true;
+    }
+  }
+  // priority is always dropped after possible migration — it's the legacy
+  // field and shouldn't persist alongside isVip.
+  delete out.priority;
+
+  // allowWeekends: strict boolean. Non-boolean values get dropped even
+  // though the top-level spread copied them through.
+  if (typeof input.allowWeekends === "boolean") {
+    out.allowWeekends = input.allowWeekends;
+  } else {
+    delete out.allowWeekends;
   }
 
   // dateRange: keep only if it's an object with at least one valid ISO date.
@@ -1044,9 +1223,10 @@ export function applyEventOverrides(
       })
     );
     // Apply override scores: -2 for exclusive, -1 for preferred.
-    // Reset kind to "open" so the priority filter treats host-explicit picks
-    // as always-offerable (isOfferable also short-circuits on score < 0, but
-    // keeping kind coherent helps downstream UI/logging).
+    // Reset kind, blockCost, and firmness to open/none so the tier filter
+    // treats host-explicit picks as always-offerable (getTier also
+    // short-circuits on score < 0, but keeping the shape coherent helps
+    // downstream UI and the dashboard heatmap).
     return slots.map((s) => {
       const match = exclusiveOverrides.find((o) => {
         const oStart = new Date(o.start).getTime();
@@ -1063,6 +1243,8 @@ export function applyEventOverrides(
         reason: match?.label || (score === -2 ? "host exclusive" : "host preferred"),
         confidence: "high" as const,
         kind: "open" as const,
+        blockCost: "none" as const,
+        firmness: undefined,
       };
     });
   }

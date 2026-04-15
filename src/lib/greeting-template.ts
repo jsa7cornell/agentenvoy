@@ -175,11 +175,40 @@ export function formatAvailabilityWindows(
   }
 
   // Step 3: score each day and keep the best MAX_DAYS.
+  // When the guest is in a different timezone, rank by guest-convenience
+  // first: how much of the offered time lands inside the guest-local
+  // working window (08:00–19:00 local). That way a Paris guest sees
+  // afternoon CET slots (morning PT) first, not the host's "preferred"
+  // 10 AM PT slots that fall at 7 PM CET for them.
+  const GUEST_WORK_START = 8;
+  const GUEST_WORK_END = 19;
+
+  /** Minutes of a block that land inside [workStart, workEnd) in a given tz. */
+  function minutesInWorkingWindow(block: Block, rankTz: string): number {
+    const startMs = block.start.getTime();
+    const endMs = block.end.getTime();
+    let total = 0;
+    for (let t = startMs; t < endMs; t += SLOT_MS) {
+      const slotHour = Number(
+        new Intl.DateTimeFormat("en-US", {
+          hour: "numeric",
+          hour12: false,
+          timeZone: rankTz,
+        }).format(new Date(t))
+      );
+      if (slotHour >= GUEST_WORK_START && slotHour < GUEST_WORK_END) {
+        total += 30;
+      }
+    }
+    return total;
+  }
+
   interface DayEntry {
     day: string;
     firstStart: Date;
     preferredCount: number;
     totalSlots: number;
+    guestWorkingMinutes: number;
     blocks: Block[];
   }
   const days: DayEntry[] = [];
@@ -190,17 +219,34 @@ export function formatAvailabilityWindows(
       (n: number, b: Block) => n + Math.round((b.end.getTime() - b.start.getTime()) / SLOT_MS),
       0
     );
+    const guestWorkingMinutes = hasGuestTz
+      ? blocks.reduce((n: number, b: Block) => n + minutesInWorkingWindow(b, guestTimezone!), 0)
+      : 0;
     days.push({
       day,
       firstStart: blocks[0].start,
       preferredCount,
       totalSlots,
+      guestWorkingMinutes,
       blocks,
     });
   }
 
-  // Prefer days with preferred slots; tiebreak by chronological order.
+  // Ranking:
+  //   - With guest TZ: lead with days that have the most time inside
+  //     08–19 guest-local. Break ties by total offered time, then host
+  //     preferred count, then chronological.
+  //   - Without guest TZ: today's behavior — prefer days with host-
+  //     preferred slots, then chronological.
   days.sort((a, b) => {
+    if (hasGuestTz) {
+      if (a.guestWorkingMinutes !== b.guestWorkingMinutes) {
+        return b.guestWorkingMinutes - a.guestWorkingMinutes;
+      }
+      if (a.totalSlots !== b.totalSlots) {
+        return b.totalSlots - a.totalSlots;
+      }
+    }
     if (a.preferredCount !== b.preferredCount) {
       return b.preferredCount - a.preferredCount;
     }

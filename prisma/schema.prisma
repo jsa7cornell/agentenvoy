@@ -148,6 +148,7 @@ model NegotiationSession {
   channelMessages ChannelMessage[]
   outcome         NegotiationOutcome?
   participant     SessionParticipant?
+  holds           Hold[]
 }
 
 model Message {
@@ -297,4 +298,32 @@ model NegotiatorResult {
   transcript         String   @db.Text
   usageRows          Json     @default("[]") // UsageRow[] — per-step token/cost/time breakdown
   createdAt          DateTime @default(now())
+}
+
+/// Tentative protective hold placed on a specific stretch slot by an explicit
+/// host decision in the dashboard thread. The hold creates a real tentative
+/// event on the host calendar so concurrent bookings can't grab the slot
+/// while the guest decides. Host-initiated only; never automatic. Expires
+/// after 48h or when the associated session's meeting gets confirmed.
+model Hold {
+  id              String   @id @default(cuid())
+  sessionId       String
+  hostId          String
+  slotStart       DateTime
+  slotEnd         DateTime
+  /// Google Calendar event ID of the tentative event backing this hold.
+  /// Null if calendar is read-only (hold is "best-effort" in that case).
+  calendarEventId String?
+  /// Hold state: active (live), released (host cancelled), satisfied
+  /// (meeting confirmed and promoted to a real event), expired (48h elapsed).
+  status          String   @default("active") // active | released | satisfied | expired
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([hostId])
+  @@index([status, expiresAt]) // for the expiry sweeper
 }

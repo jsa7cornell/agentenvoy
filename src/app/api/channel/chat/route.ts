@@ -34,10 +34,10 @@ CREATING THREADS:
 When the user wants to schedule something, extract what you can: who (name), what (topic), when (preferences), format (phone/video/in-person), duration, urgency.
 Then emit an action block:
 \`\`\`agentenvoy-action
-{"action":"create_thread","inviteeName":"Sarah Chen","topic":"Q2 Roadmap","format":"phone","duration":30,"urgency":"asap","rules":{"preferredDays":["Tue"],"lastResort":["Fri"],"priority":"high"}}
+{"action":"create_thread","inviteeName":"Sarah Chen","topic":"Q2 Roadmap","format":"phone","duration":30,"urgency":"asap","rules":{"preferredDays":["Tue"],"lastResort":["Fri"],"isVip":true}}
 \`\`\`
 - "urgency" is optional. Use "asap" if the user says soon/asap/urgent/high-pri. Use "this-week" or "next-week" if they give a timeframe. Omit if no urgency specified.
-- "priority" is a first-class rule that expands which slots the guest sees. Values: "normal" (default), "high", "vip". Use "high" whenever the host signals importance ("important client", "investor", "make room for X") OR when there's international context ("she's in Europe", "he's in Tokyo") — international ALONE is enough because it means off-hours in John's timezone need to open up. Use "vip" for CEO, board, "clear my calendar for him", "anything that works". Never use "low" — it's not a valid value.
+- "isVip" is a binary flag. Set isVip: true when the host signals importance ("important client", "investor", "CEO", "board", "make room for X", "clear my calendar") OR when there's international context ("she's in Europe", "he's in Tokyo") — international ALONE is enough. Default is NOT VIP; omit the field for routine meetings. VIP does NOT auto-unlock protected hours; it signals Envoy to proactively ask the host about opening up stretch hours and to reach into stretch options on guest pushback. Never emit "priority" or priority tier strings.
 
 IMPORTANT — email is OPTIONAL. The inviteeName is the only required field. Do NOT ask for email unless the user wants Envoy to send the invite directly. If the user just says "set up a meeting with Bryan", create the thread with just the name — they can share the link themselves.
 If the user provides an email, include "inviteeEmail" in the action block. If not, omit it.
@@ -73,8 +73,10 @@ Available actions:
 - update_format: Change format → {"action":"update_format","params":{"sessionId":"...","format":"video"}}
 - update_time: Propose new time → {"action":"update_time","params":{"sessionId":"...","dateTime":"...","timezone":"..."}}
 - update_location: Change location → {"action":"update_location","params":{"sessionId":"...","location":"..."}}
-- create_link: Create a new invite → {"action":"create_link","params":{"inviteeName":"...","topic":"...","format":"...","duration":30,"priority":"high"}}
-- expand_link: Expand or downgrade an EXISTING link's priority or time window → {"action":"expand_link","params":{"code":"hhkkkw","priority":"vip"}} or {"action":"expand_link","params":{"code":"hhkkkw","priority":"high","preferredTimeEnd":"10:00"}}. Use this when the host says "open up Katherine's link more" or "make Jack's link VIP" — do NOT create a duplicate.
+- create_link: Create a new invite → {"action":"create_link","params":{"inviteeName":"...","topic":"...","format":"...","duration":30,"isVip":true}}
+- expand_link: Widen an EXISTING link's offering window AFTER the host has confirmed specific hours → {"action":"expand_link","params":{"code":"hhkkkw","preferredTimeStart":"06:00"}} or {"action":"expand_link","params":{"code":"hhkkkw","allowWeekends":true}}. Use this when the host says "open up Katherine's link to 6am" or "let's include weekends for Jack". Never infer hours the host didn't name.
+- hold_slot: Place a 48h tentative hold on a specific stretch slot. VIP + specific-request only → {"action":"hold_slot","params":{"sessionId":"cmxxxx","slotStart":"2026-04-21T14:00:00Z","slotEnd":"2026-04-21T14:30:00Z"}}
+- release_hold: Release an active hold → {"action":"release_hold","params":{"sessionId":"cmxxxx"}}
 - update_knowledge: Save to knowledge base → {"action":"update_knowledge","params":{"persistent":"...","situational":"...","currentLocation":{"label":"Baja","until":"2026-04-14"}}}
 
 Rules:

@@ -26,8 +26,9 @@ interface ChannelMsg {
     agreedTime?: string;
     isGroupEvent?: boolean;
     participants?: Array<{ name: string | null; status: string; role: string }>;
-    /** Link priority derived server-side from rules.priority. */
-    priority?: "normal" | "high" | "vip";
+    /** VIP flag extracted server-side from rules.isVip (with legacy
+     *  priority string fallback). Renders a single badge on the card. */
+    isVip?: boolean;
     /** Short TZ label (e.g. "CEST") resolved server-side from NegotiationSession.guestTimezone. */
     guestTimezoneLabel?: string | null;
     link: {
@@ -560,7 +561,7 @@ export default function Feed() {
                   onClick={() => navigateToThread(msg.thread!)}
                   isGroupEvent={isGroup}
                   participants={msg.thread.participants || undefined}
-                  priority={msg.thread.priority || undefined}
+                  isVip={msg.thread.isVip ?? false}
                   guestTimezoneLabel={msg.thread.guestTimezoneLabel || undefined}
                 />
               </div>

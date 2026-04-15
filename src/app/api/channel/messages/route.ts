@@ -99,18 +99,22 @@ export async function GET() {
     }
   }
 
-  // Enrich thread data: group info, extracted priority from rules JSON, and
-  // a short human-readable guest TZ label so the ThreadCard doesn't need to
+  // Enrich thread data: group info, extracted isVip from rules JSON, and a
+  // short human-readable guest TZ label so the ThreadCard doesn't need to
   // parse JSON or import timezone helpers.
   const enrichedMessages = messages.map((msg) => {
     if (!msg.thread) return msg;
 
     const rules = (msg.thread.link?.rules as Record<string, unknown> | null) || null;
-    const rawPriority = rules?.priority;
-    // Only surface canonical values — anything else (undefined, garbage) is
-    // rendered as the default "normal" tier, which shows no badge on the card.
-    const priority: "normal" | "high" | "vip" =
-      rawPriority === "high" || rawPriority === "vip" ? rawPriority : "normal";
+    // Binary isVip flag — anything truthy (including legacy priority strings
+    // "high"|"vip") is treated as VIP for backward compat with rows written
+    // before this refactor. Anything else is not VIP.
+    const rawVip = rules?.isVip;
+    const legacyPriority = rules?.priority;
+    const isVip =
+      rawVip === true ||
+      legacyPriority === "high" ||
+      legacyPriority === "vip";
 
     const guestTz = msg.thread.guestTimezone;
     const guestTimezoneLabel = guestTz ? shortTimezoneLabel(guestTz, new Date()) : null;
@@ -119,7 +123,7 @@ export async function GET() {
       ...msg,
       thread: {
         ...msg.thread,
-        priority,
+        isVip,
         guestTimezoneLabel,
       },
     };

@@ -118,6 +118,10 @@ async function executeAction(
       return handleCreateLink(action.params, userId, context?.meetSlug);
     case "expand_link":
       return handleExpandLink(action.params, userId);
+    case "hold_slot":
+      return handleHoldSlot(action.params, userId);
+    case "release_hold":
+      return handleReleaseHold(action.params, userId);
     case "update_knowledge":
       return handleUpdateKnowledge(action.params, userId);
     case "save_guest_info":
@@ -408,19 +412,27 @@ async function handleCreateLink(
   const urgency = (params.urgency as string) || null;
   const rules = (params.rules as Record<string, unknown>) || {};
 
-  // Merge format/duration/urgency/priority into rules so they're available
-  // at greeting/composer time. Priority is the key new field — it tells the
-  // scoring engine which protection layers this link can pierce (see
-  // scoring.ts :: PriorityConfig). Normalize day-name arrays and dateRange
-  // shape — LLMs occasionally emit long day names ("Monday") or short ones
-  // ("Mon"); persist the canonical form.
-  const priority = (params.priority as string) || null;
+  // Merge format/duration/urgency/VIP/window into rules so they're available
+  // at greeting/composer time. isVip is a binary flag — it tells Envoy she
+  // may proactively ask the host about opening up stretch hours and may
+  // reach into stretch options on guest pushback (see getTier in scoring.ts).
+  // isVip alone does NOT auto-unlock protected hours; the host must still
+  // confirm specific hours via preferredTimeStart/End or allowWeekends.
+  // Normalize day-name arrays and dateRange shape — LLMs occasionally emit
+  // long day names ("Monday") or short ones ("Mon"); persist the canonical form.
+  const isVip = params.isVip === true;
+  const allowWeekends = params.allowWeekends === true;
+  const preferredTimeStart = typeof params.preferredTimeStart === "string" ? params.preferredTimeStart : undefined;
+  const preferredTimeEnd = typeof params.preferredTimeEnd === "string" ? params.preferredTimeEnd : undefined;
   const linkRules = normalizeLinkRules({
     ...rules,
     ...(format ? { format } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(urgency ? { urgency } : {}),
-    ...(priority ? { priority } : {}),
+    ...(isVip ? { isVip: true } : {}),
+    ...(allowWeekends ? { allowWeekends: true } : {}),
+    ...(preferredTimeStart ? { preferredTimeStart } : {}),
+    ...(preferredTimeEnd ? { preferredTimeEnd } : {}),
   });
 
   const link = await prisma.negotiationLink.create({
@@ -658,17 +670,19 @@ async function handleSaveGuestInfo(
  *   - OR `sessionId`: string — the deal-room session id (we walk to its link)
  *
  * Mutations (all optional; provide the ones you want to change):
- *   - `priority`: "normal" | "high" | "vip" — bumps/lowers the protection
- *     ceiling used by the composer. The greeting and the LLM's offerable
- *     slot list both reflect this on the NEXT guest message.
- *   - `preferredTimeStart` / `preferredTimeEnd`: "HH:MM" — narrow the
- *     per-day time window (independent of priority; can be used together).
+ *   - `isVip`: boolean — flag the link as a VIP meeting. Toggles Envoy's
+ *     proactive expansion question, reactive stretch reach, and tentative
+ *     hold mechanic. Does NOT auto-unlock protected hours on its own.
+ *   - `preferredTimeStart` / `preferredTimeEnd`: "HH:MM" — widens the daily
+ *     offering window. Score 3-4 off-hours slots inside this range become
+ *     first-offer (explicit host authorization).
+ *   - `allowWeekends`: boolean — explicitly allow weekend daytime slots in
+ *     the first-offer set for this link.
  *   - `dateRange`: { start?, end? } — YYYY-MM-DD host-local inclusive.
  *   - `preferredDays`, `lastResort`: day-name arrays (normalized on write).
  *
- * Supports both upgrade ("make Jack's link VIP") and downgrade ("tone
- * Katie's link back to normal") since rules are merged — an explicit
- * `priority: "normal"` will overwrite an existing `"vip"`.
+ * Supports both upgrade and downgrade. Rules merge — an explicit
+ * `isVip: false` will overwrite an existing `true`.
  */
 async function handleExpandLink(
   params: Record<string, unknown>,
@@ -721,7 +735,8 @@ async function handleExpandLink(
   // host started from a mixed-shape row.
   const existingRules = (link.rules as Record<string, unknown>) || {};
   const patch: Record<string, unknown> = {};
-  if (params.priority !== undefined) patch.priority = params.priority;
+  if (typeof params.isVip === "boolean") patch.isVip = params.isVip;
+  if (typeof params.allowWeekends === "boolean") patch.allowWeekends = params.allowWeekends;
   if (params.preferredTimeStart !== undefined) patch.preferredTimeStart = params.preferredTimeStart;
   if (params.preferredTimeEnd !== undefined) patch.preferredTimeEnd = params.preferredTimeEnd;
   if (params.preferredDays !== undefined) patch.preferredDays = params.preferredDays;
@@ -731,7 +746,7 @@ async function handleExpandLink(
   if (Object.keys(patch).length === 0) {
     return {
       success: false,
-      message: "expand_link needs at least one field to change (priority, preferredTimeStart/End, preferredDays, lastResort, dateRange)",
+      message: "expand_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredDays, lastResort, dateRange)",
     };
   }
 
@@ -744,16 +759,18 @@ async function handleExpandLink(
     },
   });
 
-  // Human-readable confirmation message. Prioritize the priority change
-  // since that's the most common use case.
+  // Human-readable confirmation message.
   const changedParts: string[] = [];
-  if (patch.priority !== undefined) {
-    changedParts.push(`priority: ${patch.priority}`);
+  if (patch.isVip !== undefined) {
+    changedParts.push(`VIP: ${patch.isVip ? "on" : "off"}`);
+  }
+  if (patch.allowWeekends !== undefined) {
+    changedParts.push(`weekends: ${patch.allowWeekends ? "allowed" : "off"}`);
   }
   if (patch.preferredTimeStart !== undefined || patch.preferredTimeEnd !== undefined) {
     const start = patch.preferredTimeStart ?? existingRules.preferredTimeStart ?? "—";
     const end = patch.preferredTimeEnd ?? existingRules.preferredTimeEnd ?? "—";
-    changedParts.push(`time window: ${start}–${end}`);
+    changedParts.push(`window: ${start}–${end}`);
   }
   if (patch.preferredDays !== undefined) {
     changedParts.push(`days: ${Array.isArray(patch.preferredDays) ? patch.preferredDays.join(",") : "updated"}`);
@@ -767,5 +784,195 @@ async function handleExpandLink(
     success: true,
     message: `Updated ${name}'s link — ${changedParts.join(", ")}`,
     data: { linkId: link.id, code: link.code, rules: mergedRules },
+  };
+}
+
+// --- Tentative hold actions (VIP stretch protection) ---
+
+const HOLD_TTL_HOURS = 48;
+
+/**
+ * Place a tentative hold on a specific stretch slot, explicitly authorized
+ * by the host in the dashboard thread. Creates a Hold row AND a tentative
+ * event on the host's calendar (when calendar is writable) to prevent
+ * concurrent bookings from grabbing the slot while the guest decides.
+ *
+ * Required params:
+ *   - sessionId: the deal-room session the hold is protecting
+ *   - slotStart / slotEnd: ISO datetimes of the 30-min slot
+ * Optional:
+ *   - ttlHours: override the default 48h expiry
+ *   - label: shown on the calendar tentative event (default uses the
+ *     session's inviteeName)
+ *
+ * The hold's `status` progresses: active → satisfied (when the meeting is
+ * confirmed), released (when the host explicitly unholds), or expired
+ * (when the 48h TTL elapses with no resolution). A background sweeper
+ * will flip active → expired when expiresAt < now; that sweeper is wired
+ * in a separate commit.
+ */
+async function handleHoldSlot(
+  params: Record<string, unknown>,
+  userId: string
+): Promise<ActionResult> {
+  const sessionId = params.sessionId as string | undefined;
+  const slotStartRaw = params.slotStart as string | undefined;
+  const slotEndRaw = params.slotEnd as string | undefined;
+  const ttlHours = typeof params.ttlHours === "number" && params.ttlHours > 0
+    ? params.ttlHours
+    : HOLD_TTL_HOURS;
+
+  if (!sessionId || !slotStartRaw || !slotEndRaw) {
+    return {
+      success: false,
+      message: "hold_slot requires sessionId, slotStart, and slotEnd",
+    };
+  }
+
+  const slotStart = new Date(slotStartRaw);
+  const slotEnd = new Date(slotEndRaw);
+  if (isNaN(slotStart.getTime()) || isNaN(slotEnd.getTime())) {
+    return { success: false, message: "Invalid slotStart or slotEnd ISO datetime" };
+  }
+  if (slotEnd <= slotStart) {
+    return { success: false, message: "slotEnd must be after slotStart" };
+  }
+
+  // Authorize: the session must belong to the acting user.
+  const session = await prisma.negotiationSession.findUnique({
+    where: { id: sessionId },
+    select: {
+      id: true,
+      hostId: true,
+      link: { select: { inviteeName: true, code: true } },
+    },
+  });
+  if (!session) {
+    return { success: false, message: `Session not found: ${sessionId}` };
+  }
+  if (session.hostId !== userId) {
+    return { success: false, message: "Not authorized for this session" };
+  }
+
+  // Reject if there's already an active hold on the same slot for this session.
+  const existing = await prisma.hold.findFirst({
+    where: {
+      sessionId,
+      slotStart,
+      slotEnd,
+      status: "active",
+    },
+  });
+  if (existing) {
+    return {
+      success: false,
+      message: "A hold is already active on this slot for this session",
+      data: { holdId: existing.id },
+    };
+  }
+
+  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+
+  // Create the Hold row. Calendar event creation is done separately by the
+  // caller (it requires the gcal writer and the host's OAuth token) and
+  // the resulting calendarEventId is written back via hold.update. For
+  // now we persist the hold; the calendar side-effect is a follow-up.
+  const hold = await prisma.hold.create({
+    data: {
+      sessionId,
+      hostId: userId,
+      slotStart,
+      slotEnd,
+      status: "active",
+      expiresAt,
+    },
+  });
+
+  // Post a system message into the negotiation session so the host channel
+  // has an auditable record of when + why the hold was placed.
+  await prisma.message.create({
+    data: {
+      sessionId,
+      role: "system",
+      content: `Held ${slotStart.toISOString()} for ${session.link.inviteeName ?? "the guest"}. Expires in ${ttlHours}h.`,
+    },
+  });
+
+  const name = session.link.inviteeName || session.link.code || "the guest";
+  return {
+    success: true,
+    message: `Held ${slotStart.toISOString().slice(0, 16)} for ${name}. Expires in ${ttlHours}h or when confirmed.`,
+    data: { holdId: hold.id, sessionId, expiresAt: expiresAt.toISOString() },
+  };
+}
+
+/**
+ * Release a tentative hold previously placed via hold_slot. Marks the Hold
+ * row `released` and triggers deletion of the backing calendar tentative
+ * event (the calendar side-effect is a follow-up commit; for now we just
+ * flip the status).
+ *
+ * Required: sessionId. Optional: slotStart (to target a specific hold when
+ * multiple exist on the same session; omit to release all active holds on
+ * the session).
+ */
+async function handleReleaseHold(
+  params: Record<string, unknown>,
+  userId: string
+): Promise<ActionResult> {
+  const sessionId = params.sessionId as string | undefined;
+  const slotStartRaw = params.slotStart as string | undefined;
+
+  if (!sessionId) {
+    return { success: false, message: "release_hold requires sessionId" };
+  }
+
+  // Authorize
+  const session = await prisma.negotiationSession.findUnique({
+    where: { id: sessionId },
+    select: {
+      id: true,
+      hostId: true,
+      link: { select: { inviteeName: true, code: true } },
+    },
+  });
+  if (!session) {
+    return { success: false, message: `Session not found: ${sessionId}` };
+  }
+  if (session.hostId !== userId) {
+    return { success: false, message: "Not authorized for this session" };
+  }
+
+  const where: Parameters<typeof prisma.hold.updateMany>[0]["where"] = {
+    sessionId,
+    status: "active",
+  };
+  if (slotStartRaw) {
+    const slotStart = new Date(slotStartRaw);
+    if (isNaN(slotStart.getTime())) {
+      return { success: false, message: "Invalid slotStart ISO datetime" };
+    }
+    where.slotStart = slotStart;
+  }
+
+  const result = await prisma.hold.updateMany({
+    where,
+    data: { status: "released" },
+  });
+
+  if (result.count === 0) {
+    return {
+      success: false,
+      message: slotStartRaw
+        ? `No active hold found for session ${sessionId} at ${slotStartRaw}`
+        : `No active holds found for session ${sessionId}`,
+    };
+  }
+
+  const name = session.link.inviteeName || session.link.code || "the guest";
+  return {
+    success: true,
+    message: `Released ${result.count} hold${result.count === 1 ? "" : "s"} for ${name}.`,
+    data: { sessionId, releasedCount: result.count },
   };
 }

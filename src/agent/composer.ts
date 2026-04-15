@@ -477,7 +477,7 @@ export function formatCalendarContext(ctx: CalendarContext): string {
 // --- Computed Schedule Format (compact, scored) ---
 
 import type { ScoredSlot, LinkRules } from "@/lib/scoring";
-import { getPriorityConfig, isOfferable } from "@/lib/scoring";
+import { getTier } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
 
 /**
@@ -629,24 +629,37 @@ export function formatOfferableSlots(
   const finalSlots = linkRules ? applyEventOverrides(slots, linkRules, tz) : slots;
 
   const now = new Date();
+  const rules = linkRules ?? {};
 
   // Check for exclusive mode
   const hasExclusive = finalSlots.some((s) => s.score === -2);
 
-  // Priority-aware offerability: normal → weekday biz only (today's behavior),
-  // high → + weekends + weekday just-outside-biz, vip → + deep off-hours
-  // + host's implicit blocked windows. Real events/blackouts are always hard.
-  // Exclusive mode overrides the priority filter — only -2/-1 host picks show.
-  const priorityConfig = getPriorityConfig(linkRules?.priority);
-  const offerableSlots = finalSlots
-    .filter((s) => {
-      if (new Date(s.start) <= now) return false;
-      if (hasExclusive) return s.score <= 0; // host-explicit picks only
-      return isOfferable(s, priorityConfig);
-    })
-    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  // Bucket every slot by its tier using the new intrinsic scoring. First-
+  // offer is the only tier any guest sees in the widget or in the initial
+  // greeting; stretch1 and stretch2 are VIP-only and the LLM may reach
+  // into them ONLY after guest pushback (see guardrails below).
+  const firstOfferSlots: ScoredSlot[] = [];
+  const stretch1Slots: ScoredSlot[] = [];
+  const stretch2Slots: ScoredSlot[] = [];
+  for (const s of finalSlots) {
+    if (new Date(s.start) <= now) continue;
+    // Exclusive mode: only -2/-1 host picks count, regardless of VIP.
+    if (hasExclusive) {
+      if (s.score <= 0) firstOfferSlots.push(s);
+      continue;
+    }
+    const tier = getTier(s, rules, tz);
+    if (tier === "first-offer") firstOfferSlots.push(s);
+    else if (tier === "stretch1") stretch1Slots.push(s);
+    else if (tier === "stretch2") stretch2Slots.push(s);
+  }
+  const chrono = (a: ScoredSlot, b: ScoredSlot) =>
+    new Date(a.start).getTime() - new Date(b.start).getTime();
+  firstOfferSlots.sort(chrono);
+  stretch1Slots.sort(chrono);
+  stretch2Slots.sort(chrono);
 
-  if (offerableSlots.length === 0) {
+  if (firstOfferSlots.length === 0 && stretch1Slots.length === 0 && stretch2Slots.length === 0) {
     return [
       `[GROUND TRUTH] OFFERABLE SLOTS (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz})`,
       `No offerable times in the current window. Ask the guest what times work for them and escalate to the host.`,
@@ -672,39 +685,58 @@ export function formatOfferableSlots(
     return raw.replace(/:00/g, "");
   };
 
-  // Group by day
-  const dayMap = new Map<string, ScoredSlot[]>();
-  for (const slot of offerableSlots) {
-    const dayKey = dayFmt.format(new Date(slot.start));
-    if (!dayMap.has(dayKey)) dayMap.set(dayKey, []);
-    dayMap.get(dayKey)!.push(slot);
+  // Build day-grouped, contiguous-merged blocks for a given slot list.
+  // All slots in a tier are presented uniformly — no per-slot "weekend" /
+  // "off-hours" labels. The tier IS the framing; within a tier, slots
+  // collapse into ranges the guest reads like any other availability.
+  function renderTier(slots: ScoredSlot[]): string[] {
+    if (slots.length === 0) return [];
+    const dayMap = new Map<string, ScoredSlot[]>();
+    for (const slot of slots) {
+      const dayKey = dayFmt.format(new Date(slot.start));
+      if (!dayMap.has(dayKey)) dayMap.set(dayKey, []);
+      dayMap.get(dayKey)!.push(slot);
+    }
+    const out: string[] = [];
+    for (const [day, daySlots] of Array.from(dayMap)) {
+      interface OfferBlock { start: Date; end: Date; hasPreferred: boolean }
+      const blocks: OfferBlock[] = [];
+      let current: OfferBlock | null = null;
+      for (const slot of daySlots) {
+        const start = new Date(slot.start);
+        const end = new Date(slot.end);
+        const isPreferred = slot.score <= 0;
+        if (current && start.getTime() === current.end.getTime()) {
+          current.end = end;
+          if (isPreferred) current.hasPreferred = true;
+        } else {
+          if (current) blocks.push(current);
+          current = { start, end, hasPreferred: isPreferred };
+        }
+      }
+      if (current) blocks.push(current);
+      out.push(`${day}:`);
+      for (const b of blocks) {
+        const star = b.hasPreferred ? "★ " : "";
+        out.push(`  ${star}${timeFmt(b.start)}–${timeFmt(b.end)}`);
+      }
+    }
+    return out;
   }
 
-  // Date reference (21-day window)
+  // Date reference (21-day window) — computed from the earliest slot across
+  // all tiers so stretch-only days still resolve correctly.
+  const allSlots = [...firstOfferSlots, ...stretch1Slots, ...stretch2Slots].sort(chrono);
   const dateMappingLines: string[] = [];
-  const firstSlotDate = new Date(offerableSlots[0].start);
+  const firstSlotDate = new Date(allSlots[0].start);
   for (let i = 0; i < 21; i++) {
     const d = new Date(firstSlotDate.getTime() + i * 24 * 60 * 60 * 1000);
     dateMappingLines.push(`  ${dayFmt.format(d)}`);
   }
 
-  function tierLabel(slot: ScoredSlot): string {
-    if (slot.score <= 0) return "preferred";
-    if (slot.score <= 1) return "open";
-    // Surface the protection kind in the label so the LLM can frame it
-    // correctly — "weekend" and "off-hours" read very differently from
-    // generic "flexible".
-    const kind = slot.kind ?? "open";
-    if (kind === "weekend") return "weekend (host making room)";
-    if (kind === "off_hours") return "off-hours (host making room)";
-    if (kind === "blocked_window") return "host override (VIP)";
-    return "flexible";
-  }
-
   const lines: string[] = [
     `[GROUND TRUTH] OFFERABLE SLOTS (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz})`,
-    `These are the ONLY times you may suggest to the guest. Do NOT invent or calculate other times.`,
-    `If the guest requests a time not on this list, say it's not available and suggest the nearest options from this list.`,
+    `These are the times you may suggest to the guest. Do NOT invent or calculate other times.`,
     ``,
     `[GROUND TRUTH] DATE REFERENCE (system-computed, ALWAYS correct):`,
     ...dateMappingLines,
@@ -719,50 +751,37 @@ export function formatOfferableSlots(
     lines.push(``);
   }
 
-  // Priority framing — tells the LLM how warmly to present expansion slots.
-  if (linkRules?.priority === "high") {
-    lines.push(
-      `HIGH PRIORITY LINK: John has opened weekend daytime and early/late weekday windows for this guest. Frame expanded slots with genuine warmth — "John has made room for this one" — not as a favor.`
-    );
-    lines.push(``);
-  } else if (linkRules?.priority === "vip") {
-    lines.push(
-      `VIP LINK: John has cleared his entire envelope for this guest, including weekend early/late hours and windows he normally protects (like morning routines). Present the full offer confidently — this is a priority meeting.`
-    );
-    lines.push(``);
+  // Tier 1: first-offer — the widget's offering, always shown first.
+  lines.push(`FIRST OFFER (widget + default availability):`);
+  const firstOfferLines = renderTier(firstOfferSlots);
+  if (firstOfferLines.length > 0) {
+    lines.push(...firstOfferLines);
+  } else {
+    lines.push(`  (none — default window has no offerable times)`);
   }
-
-  // Build blocks per day — merge contiguous same-tier slots
-  for (const [day, daySlots] of Array.from(dayMap)) {
-    interface OfferBlock { start: Date; end: Date; tier: string; hasPreferred: boolean }
-    const blocks: OfferBlock[] = [];
-    let current: OfferBlock | null = null;
-
-    for (const slot of daySlots) {
-      const start = new Date(slot.start);
-      const end = new Date(slot.end);
-      const tier = tierLabel(slot);
-      const isPreferred = slot.score <= 0;
-
-      if (current && current.tier === tier && start.getTime() === current.end.getTime()) {
-        current.end = end;
-        if (isPreferred) current.hasPreferred = true;
-      } else {
-        if (current) blocks.push(current);
-        current = { start, end, tier, hasPreferred: isPreferred };
-      }
-    }
-    if (current) blocks.push(current);
-
-    lines.push(`${day}:`);
-    for (const b of blocks) {
-      const star = b.hasPreferred ? "★ " : "";
-      lines.push(`  ${star}${timeFmt(b.start)}–${timeFmt(b.end)} — ${b.tier}`);
-    }
-  }
-
   lines.push(``);
-  lines.push(`Legend: preferred = host's best times (★), open = no conflicts, flexible = soft hold (may need host OK for high-friction slots).`);
+
+  // Tier 2: stretch 1 — VIP-only, surfaced on first round of guest pushback.
+  if (rules.isVip && stretch1Slots.length > 0) {
+    lines.push(`STRETCH OPTIONS (VIP — reach ONLY after first guest pushback):`);
+    lines.push(
+      `Present these as regular times. NEVER explain why they're "extra" — no references to weekends, focus time, early mornings, "making room", or any host context. Just offer the slot. If the guest accepts a specific stretch slot, you may propose a 48h tentative hold via [HOLD_SLOT] so it's protected from concurrent bookings.`
+    );
+    lines.push(...renderTier(stretch1Slots));
+    lines.push(``);
+  }
+
+  // Tier 3: stretch 2 — VIP-only, surfaced on second round of pushback.
+  if (rules.isVip && stretch2Slots.length > 0) {
+    lines.push(`DEEP STRETCH OPTIONS (VIP — reach ONLY after a second round of guest pushback):`);
+    lines.push(
+      `These stretch further into the host's protected time. Present neutrally — no "host has made room" framing. Only reach here if STRETCH OPTIONS above have been exhausted. Hold mechanics same as stretch 1.`
+    );
+    lines.push(...renderTier(stretch2Slots));
+    lines.push(``);
+  }
+
+  lines.push(`Legend: ★ = host's preferred times. All listed times are safe to propose within their tier — do not combine or promote between tiers without guest pushback.`);
 
   if (!canWrite) {
     lines.push(`Calendar is read-only. Confirmation sends .ics email instead of creating event directly.`);

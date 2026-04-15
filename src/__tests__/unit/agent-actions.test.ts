@@ -256,6 +256,11 @@ const mockPrisma = vi.hoisted(() => ({
   user: {
     findUnique: vi.fn(),
   },
+  hold: {
+    create: vi.fn(),
+    findFirst: vi.fn(),
+    updateMany: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: mockPrisma }));
@@ -768,7 +773,7 @@ describe("executeActions", () => {
       expect(results[0].message).toContain("No meet slug");
     });
 
-    it("persists priority onto link rules when provided", async () => {
+    it("persists isVip onto link rules when provided", async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john" });
       mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
       mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
@@ -781,7 +786,7 @@ describe("executeActions", () => {
               inviteeName: "Katherine",
               topic: "Roadmap",
               format: "video",
-              priority: "high",
+              isVip: true,
             },
           },
         ],
@@ -789,26 +794,52 @@ describe("executeActions", () => {
       );
 
       const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
-      expect(call.data.rules).toMatchObject({ priority: "high", format: "video" });
+      expect(call.data.rules).toMatchObject({ isVip: true, format: "video" });
     });
 
-    it("drops invalid priority values via normalizeLinkRules", async () => {
+    it("migrates legacy priority strings to isVip on create", async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john" });
       mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
       mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
 
+      // Old-shape input still lands in params.rules.priority if the
+      // parser emits it. normalizeLinkRules should migrate to isVip.
       await executeActions(
         [
           {
             action: "create_link",
-            params: { inviteeName: "Noah", priority: "urgent" }, // not a canonical value
+            params: {
+              inviteeName: "Jack",
+              rules: { priority: "vip" },
+            },
           },
         ],
         HOST_USER_ID
       );
 
       const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+      expect(call.data.rules.isVip).toBe(true);
       expect(call.data.rules.priority).toBeUndefined();
+    });
+
+    it("does not set isVip when params.isVip is non-boolean garbage", async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john" });
+      mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
+      mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
+
+      // params.isVip === "true" (string) should be rejected as non-boolean.
+      await executeActions(
+        [
+          {
+            action: "create_link",
+            params: { inviteeName: "Noah", isVip: "true" as unknown as boolean },
+          },
+        ],
+        HOST_USER_ID
+      );
+
+      const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+      expect(call.data.rules.isVip).toBeUndefined();
     });
 
     it("handles missing optional fields gracefully", async () => {
@@ -843,47 +874,47 @@ describe("executeActions", () => {
       rules: { format: "video", duration: 30, preferredDays: ["Mon", "Tue"] },
     };
 
-    it("upgrades priority by code", async () => {
+    it("flags as VIP by code", async () => {
       mockPrisma.negotiationLink.findFirst.mockResolvedValue(existingLink);
       mockPrisma.negotiationLink.update.mockResolvedValue({ id: "link-1" });
 
       const results = await executeActions(
-        [{ action: "expand_link", params: { code: "hhkkkw", priority: "vip" } }],
+        [{ action: "expand_link", params: { code: "hhkkkw", isVip: true } }],
         HOST_USER_ID
       );
 
       expect(results[0].success).toBe(true);
       expect(results[0].message).toContain("Katherine");
-      expect(results[0].message).toContain("vip");
-      // Merged rules should preserve existing fields AND have new priority
+      expect(results[0].message.toLowerCase()).toContain("vip");
+      // Merged rules should preserve existing fields AND have new isVip
       const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
       expect(call.data.rules).toMatchObject({
         format: "video",
         duration: 30,
         preferredDays: ["Mon", "Tue"],
-        priority: "vip",
+        isVip: true,
       });
     });
 
-    it("downgrades priority (merge, not replace)", async () => {
+    it("downgrades isVip (merge, not replace)", async () => {
       mockPrisma.negotiationLink.findFirst.mockResolvedValue({
         ...existingLink,
-        rules: { ...existingLink.rules, priority: "vip" },
+        rules: { ...existingLink.rules, isVip: true },
       });
       mockPrisma.negotiationLink.update.mockResolvedValue({ id: "link-1" });
 
       await executeActions(
-        [{ action: "expand_link", params: { code: "hhkkkw", priority: "normal" } }],
+        [{ action: "expand_link", params: { code: "hhkkkw", isVip: false } }],
         HOST_USER_ID
       );
 
       const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
-      expect(call.data.rules.priority).toBe("normal");
+      expect(call.data.rules.isVip).toBe(false);
       // Other fields preserved
       expect(call.data.rules.preferredDays).toEqual(["Mon", "Tue"]);
     });
 
-    it("narrows the daily time window via preferredTimeEnd", async () => {
+    it("unlocks weekends with explicit allowWeekends", async () => {
       mockPrisma.negotiationLink.findFirst.mockResolvedValue(existingLink);
       mockPrisma.negotiationLink.update.mockResolvedValue({ id: "link-1" });
 
@@ -891,20 +922,20 @@ describe("executeActions", () => {
         [
           {
             action: "expand_link",
-            params: { code: "hhkkkw", priority: "high", preferredTimeEnd: "10:00" },
+            params: { code: "hhkkkw", allowWeekends: true, preferredTimeStart: "06:00" },
           },
         ],
         HOST_USER_ID
       );
 
       const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
-      expect(call.data.rules.priority).toBe("high");
-      expect(call.data.rules.preferredTimeEnd).toBe("10:00");
+      expect(call.data.rules.allowWeekends).toBe(true);
+      expect(call.data.rules.preferredTimeStart).toBe("06:00");
     });
 
     it("rejects when no identifying code or sessionId provided", async () => {
       const results = await executeActions(
-        [{ action: "expand_link", params: { priority: "high" } }],
+        [{ action: "expand_link", params: { isVip: true } }],
         HOST_USER_ID
       );
       expect(results[0].success).toBe(false);
@@ -924,7 +955,7 @@ describe("executeActions", () => {
     it("rejects when link not found", async () => {
       mockPrisma.negotiationLink.findFirst.mockResolvedValue(null);
       const results = await executeActions(
-        [{ action: "expand_link", params: { code: "nope", priority: "vip" } }],
+        [{ action: "expand_link", params: { code: "nope", isVip: true } }],
         HOST_USER_ID
       );
       expect(results[0].success).toBe(false);
@@ -938,9 +969,214 @@ describe("executeActions", () => {
         link: { ...existingLink, userId: OTHER_USER_ID },
       });
       const results = await executeActions(
-        [{ action: "expand_link", params: { sessionId: "session-1", priority: "vip" } }],
+        [{ action: "expand_link", params: { sessionId: "session-1", isVip: true } }],
         HOST_USER_ID
       );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("Not authorized");
+    });
+  });
+
+  // --- Hold / Release Hold ---
+
+  describe("hold_slot", () => {
+    const SESSION_ID = "session-hold-1";
+    const sessionWithLink = {
+      id: SESSION_ID,
+      hostId: HOST_USER_ID,
+      link: { inviteeName: "Katherine", code: "hhkkkw" },
+    };
+
+    beforeEach(() => {
+      mockPrisma.hold.findFirst.mockResolvedValue(null);
+      mockPrisma.hold.create.mockResolvedValue({ id: "hold-1" });
+    });
+
+    it("creates a Hold row and returns success", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(sessionWithLink);
+
+      const results = await executeActions(
+        [
+          {
+            action: "hold_slot",
+            params: {
+              sessionId: SESSION_ID,
+              slotStart: "2026-04-21T14:00:00Z",
+              slotEnd: "2026-04-21T14:30:00Z",
+            },
+          },
+        ],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(results[0].message).toContain("Katherine");
+      expect(mockPrisma.hold.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          sessionId: SESSION_ID,
+          hostId: HOST_USER_ID,
+          status: "active",
+        }),
+      });
+      // A system message should be written to the session so the host
+      // channel has an auditable record.
+      expect(mockPrisma.message.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          sessionId: SESSION_ID,
+          role: "system",
+        }),
+      });
+    });
+
+    it("rejects duplicate active holds on the same slot", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(sessionWithLink);
+      mockPrisma.hold.findFirst.mockResolvedValue({ id: "existing-hold-1" });
+
+      const results = await executeActions(
+        [
+          {
+            action: "hold_slot",
+            params: {
+              sessionId: SESSION_ID,
+              slotStart: "2026-04-21T14:00:00Z",
+              slotEnd: "2026-04-21T14:30:00Z",
+            },
+          },
+        ],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("already active");
+      expect(mockPrisma.hold.create).not.toHaveBeenCalled();
+    });
+
+    it("rejects when session belongs to another user", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue({
+        ...sessionWithLink,
+        hostId: OTHER_USER_ID,
+      });
+
+      const results = await executeActions(
+        [
+          {
+            action: "hold_slot",
+            params: {
+              sessionId: SESSION_ID,
+              slotStart: "2026-04-21T14:00:00Z",
+              slotEnd: "2026-04-21T14:30:00Z",
+            },
+          },
+        ],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("Not authorized");
+    });
+
+    it("rejects when required params are missing", async () => {
+      const results = await executeActions(
+        [
+          { action: "hold_slot", params: { sessionId: SESSION_ID } },
+        ],
+        HOST_USER_ID
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("slotStart");
+    });
+
+    it("rejects when slotEnd is before slotStart", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(sessionWithLink);
+
+      const results = await executeActions(
+        [
+          {
+            action: "hold_slot",
+            params: {
+              sessionId: SESSION_ID,
+              slotStart: "2026-04-21T15:00:00Z",
+              slotEnd: "2026-04-21T14:30:00Z",
+            },
+          },
+        ],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("after");
+    });
+  });
+
+  describe("release_hold", () => {
+    const SESSION_ID = "session-hold-1";
+    const sessionWithLink = {
+      id: SESSION_ID,
+      hostId: HOST_USER_ID,
+      link: { inviteeName: "Katherine", code: "hhkkkw" },
+    };
+
+    it("releases all active holds on a session when no slotStart is given", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(sessionWithLink);
+      mockPrisma.hold.updateMany.mockResolvedValue({ count: 2 });
+
+      const results = await executeActions(
+        [{ action: "release_hold", params: { sessionId: SESSION_ID } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(results[0].message).toContain("2 holds");
+      expect(mockPrisma.hold.updateMany).toHaveBeenCalledWith({
+        where: { sessionId: SESSION_ID, status: "active" },
+        data: { status: "released" },
+      });
+    });
+
+    it("targets a specific slot when slotStart is provided", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(sessionWithLink);
+      mockPrisma.hold.updateMany.mockResolvedValue({ count: 1 });
+
+      await executeActions(
+        [
+          {
+            action: "release_hold",
+            params: { sessionId: SESSION_ID, slotStart: "2026-04-21T14:00:00Z" },
+          },
+        ],
+        HOST_USER_ID
+      );
+
+      const call = mockPrisma.hold.updateMany.mock.calls[0][0];
+      expect(call.where.sessionId).toBe(SESSION_ID);
+      expect(call.where.status).toBe("active");
+      expect(call.where.slotStart).toBeInstanceOf(Date);
+    });
+
+    it("returns failure when no active holds match", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(sessionWithLink);
+      mockPrisma.hold.updateMany.mockResolvedValue({ count: 0 });
+
+      const results = await executeActions(
+        [{ action: "release_hold", params: { sessionId: SESSION_ID } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("No active holds");
+    });
+
+    it("rejects when session belongs to another user", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue({
+        ...sessionWithLink,
+        hostId: OTHER_USER_ID,
+      });
+
+      const results = await executeActions(
+        [{ action: "release_hold", params: { sessionId: SESSION_ID } }],
+        HOST_USER_ID
+      );
+
       expect(results[0].success).toBe(false);
       expect(results[0].message).toContain("Not authorized");
     });

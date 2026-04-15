@@ -25,8 +25,9 @@ interface ThreadCardProps {
   onClick?: () => void;
   isGroupEvent?: boolean;
   participants?: Participant[];
-  /** Link priority — shows a badge on the card when "high" or "vip". */
-  priority?: "normal" | "high" | "vip";
+  /** True when the link has been flagged as a VIP meeting. Renders a single
+   *  purple VIP badge in the title row. No tier ladder — VIP is binary. */
+  isVip?: boolean;
   /** Short TZ label (e.g. "CEST", "JST") detected from the guest's browser on
    *  first visit. When set, shows as a small "guest in X" chip so the host can
    *  see the timezone context at a glance. */
@@ -66,7 +67,7 @@ export default function ThreadCard({
   onClick,
   isGroupEvent,
   participants,
-  priority = "normal",
+  isVip = false,
   guestTimezoneLabel,
 }: ThreadCardProps) {
   const style = STATUS_STYLES[statusColor] || STATUS_STYLES.gray;
@@ -107,21 +108,13 @@ export default function ThreadCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
             <div className="text-sm font-semibold text-primary truncate flex-1">{title}</div>
-            {/* Priority badge — only rendered for high/vip so the default
-                "normal" case stays visually quiet. Colors track the tier:
-                amber for "making room" (high), purple for "cleared space" (vip). */}
-            {priority === "high" && (
-              <span
-                className="flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-amber-500/15 text-amber-400"
-                title="High priority — host has opened weekend daytime and just-outside-biz hours for this guest"
-              >
-                High
-              </span>
-            )}
-            {priority === "vip" && (
+            {/* VIP badge — only rendered when the link is flagged VIP.
+                Binary flag; no tier ladder. Default non-VIP case stays
+                visually quiet. */}
+            {isVip && (
               <span
                 className="flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-purple-500/15 text-purple-400"
-                title="VIP — host has cleared early-morning, late-evening, and weekend off-hours for this guest"
+                title="VIP meeting — Envoy proactively asks about opening extra hours and can reach into stretch options on guest pushback"
               >
                 VIP
               </span>

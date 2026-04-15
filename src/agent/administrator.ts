@@ -100,25 +100,28 @@ export async function parsePreferences(
     system: `You parse natural language scheduling preferences into structured JSON for a meeting negotiation link. Extract ONLY these fields (never invent new ones — the downstream engine ignores unknown keys):
 
 - preferredDays: array of short day names (["Mon","Tue","Wed","Thu","Fri"]) or omit for "any"
-- preferredTimeStart: "HH:MM" 24-hour, earliest time in each day to offer (e.g. "09:00"). Omit if no constraint.
-- preferredTimeEnd: "HH:MM" 24-hour, latest time in each day to offer (e.g. "17:00"). Omit if no constraint.
+- preferredTimeStart: "HH:MM" 24-hour, earliest time in each day to offer (e.g. "09:00"). Omit unless the host names a concrete clock time.
+- preferredTimeEnd: "HH:MM" 24-hour, latest time in each day to offer. Omit unless the host names a concrete clock time.
 - dateRange: { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } — inclusive host-local window. Omit if open-ended.
 - format: "phone" | "video" | "in-person" | "any". Aliases: "vc","video conference","videoconference","zoom","meet" → "video"; bare "call" → "phone"; "coffee","lunch","drinks" → "in-person".
 - duration: number in minutes (default 30)
-- priority: "normal" | "high" | "vip" — see PRIORITY RULES below
+- isVip: boolean — see VIP RULES below. Omit entirely if not VIP.
 - inviteeEmail: string or null
 - inviteeName: string or null
 - topic: string or null
 - notes: string or null
 
-PRIORITY RULES (critical — governs which protection layers the link pierces):
-- "normal" is the default. Use for anything routine with no urgency signal.
-- "high" when the host signals this is important: "important client", "high priority", "urgent", "make room", "open it up for her", "investor", "she's stuck in another timezone", "he's in Europe and can only meet early PT", "he can only meet late". A high link auto-opens weekend daytime and weekday hours just outside the host's normal window.
-- "vip" for the strongest signals: "VIP", "CEO", "board member", "clear my calendar for him", "any time at all", "drop everything", "most important meeting of the month". A vip link additionally opens early-morning, late-evening, weekend off-hours, AND pierces the host's own soft blocks like morning routines.
-- International context ALONE is a "high" signal even without urgency language. If the host says "she's in Europe" or "he's in Tokyo", set priority to "high" so off-hours in the host's timezone become available.
-- Never use "low" — it's not a valid value. Downgrade to "normal" for low-priority language.
+VIP RULES (critical — isVip is a single binary flag, not a tier ladder):
+- Default is NOT VIP. Emit isVip only when the host gives a clear signal.
+- Set isVip: true when the host says: "VIP", "important client", "high priority", "priority meeting", "make room for X", "clear my calendar", "drop everything", "CEO", "board member", "key account", "investor", "biggest deal", "most important meeting", or any equivalent.
+- International context ALONE ("she's in Europe", "he's in Tokyo") is ALSO a VIP signal — set isVip: true so Envoy will proactively ask the host about opening up stretch hours during the deal room conversation.
+- Never emit priority, high, low, vip as strings — isVip is always a boolean.
+- VIP does NOT automatically unlock any protected slots on its own. It signals Envoy that she may proactively ask the host about expansion, may reach into stretch options on guest pushback, and may propose tentative holds for specific stretch slots. The host still decides the actual expansion via preferredTimeStart/End or allowWeekends in a follow-up turn.
 
-IMPORTANT: If the host says "open up mornings" or "even early is fine" without naming a time, that's still a priority signal — emit priority: "high" rather than trying to pick a specific preferredTimeStart. Only emit preferredTimeStart when the host names a concrete clock time.
+IMPORTANT — separate the TWO kinds of signals:
+- "VIP" / urgency / international context → isVip: true
+- Concrete clock time the host said ("6 AM works", "offer until 9 PM") → preferredTimeStart / preferredTimeEnd
+- A vague "open it up" without a clock time → isVip: true ONLY. Do NOT guess a preferredTimeStart.
 
 Return ONLY valid JSON, no markdown or explanation.`,
     prompt: userPrompt,
