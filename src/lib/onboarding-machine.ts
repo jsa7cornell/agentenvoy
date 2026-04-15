@@ -72,21 +72,34 @@ export function getIntroMessages(ctx: OnboardingContext): PhaseResult {
   const tz = ctx.detectedTimezone || "America/Los_Angeles";
   // Prefer the curated long label from the table; fall back to Intl-derived text.
   const tzLabel = `${longTimezoneLabel(tz)} (${shortTimezoneLabel(tz)})`;
-  const messages: EnvoyMessage[] = [];
-  // Optional wow-factor calendar read — generated in the route and passed
-  // in via ctx. Rendered as its own message (no options) so the quick-reply
-  // row still attaches to the tz-confirm message below.
-  if (ctx.calendarReadParagraph) {
-    messages.push({ content: ctx.calendarReadParagraph });
-  }
-  messages.push({
-    content: `Hey ${name}! I'm Envoy — I negotiate your schedule so you don't have to. When you need to meet with someone, tell me and I handle the back-and-forth: I talk to them, find a time that works, and put it on both your calendars.\n\nLet's get you set up. Takes about a minute — mostly quick choices.\n\nI detected your timezone as **${tzLabel}**. Correct?`,
-    options: [
-      { number: 1, label: `Yes, ${tzLabel}`, value: tz },
-      { number: 2, label: "No, let me change it", value: "change_tz" },
+
+  // The "for instance" wow snippet: a single calendar-grounded sentence
+  // generated in the route handler and passed in via ctx. Embedded inline
+  // in the greeting so it reads naturally, not as a standalone message.
+  const forInstance = ctx.calendarReadParagraph
+    ? ` For instance, ${ctx.calendarReadParagraph.replace(/^\s*for instance,?\s*/i, "").replace(/^[A-Z]/, (c) => c.toLowerCase())}`
+    : "";
+
+  const content =
+    `Hey ${name}! I'm Envoy — I negotiate your schedule so you don't have to. ` +
+    `When you need to meet with someone, I handle the back-and-forth. ` +
+    `I thrive in the context of your calendar and use that to find the best time for the most important people — ` +
+    `I'm personalized and context-aware.${forInstance}` +
+    `\n\nLet's get you set up. Takes about a minute — mostly quick choices.` +
+    `\n\nI detected your timezone as **${tzLabel}**. Correct?`;
+
+  return {
+    phase: "intro",
+    messages: [
+      {
+        content,
+        options: [
+          { number: 1, label: `Yes, ${tzLabel}`, value: tz },
+          { number: 2, label: "No, let me change it", value: "change_tz" },
+        ],
+      },
     ],
-  });
-  return { phase: "intro", messages };
+  };
 }
 
 // Phase 1b: Timezone picker (shown only if user wants to change).
