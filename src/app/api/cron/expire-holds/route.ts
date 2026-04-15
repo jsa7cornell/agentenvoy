@@ -6,7 +6,9 @@ import { deleteCalendarEvent } from "@/lib/calendar";
  * GET /api/cron/expire-holds
  *
  * Sweeps expired tentative holds and cleans up their backing Google Calendar
- * tentative events. Runs on a Vercel cron schedule (see vercel.json).
+ * tentative events. Runs on a daily Vercel cron schedule (see vercel.json —
+ * Vercel Hobby plan caps crons at once/day, so we pick an off-peak UTC time
+ * and rely on the 48h hold TTL to absorb the up-to-24h catch-up window).
  *
  * Flow per expired hold:
  *   1. Flip Hold.status from "active" to "expired"
