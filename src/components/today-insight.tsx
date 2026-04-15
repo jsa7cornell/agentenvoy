@@ -14,6 +14,7 @@ import { Sparkles } from "lucide-react";
 export function TodayInsight() {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +34,22 @@ export function TodayInsight() {
       cancelled = true;
     };
   }, []);
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const r = await fetch("/api/dashboard/insight?refresh=1");
+      if (r.ok) {
+        const data = await r.json();
+        if (data?.content) setContent(data.content);
+      }
+    } catch {
+      /* silent — best effort */
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -54,7 +71,17 @@ export function TodayInsight() {
           Today&apos;s Insight
         </h4>
       </div>
-      <p className="text-xs leading-relaxed text-secondary">{content}</p>
+      <p className={`text-xs leading-relaxed text-secondary transition-opacity ${refreshing ? "opacity-40" : ""}`}>
+        {content}
+      </p>
+      <button
+        type="button"
+        onClick={handleRefresh}
+        disabled={refreshing}
+        className="mt-1.5 text-[10px] text-muted hover:text-secondary underline disabled:no-underline disabled:opacity-50"
+      >
+        {refreshing ? "thinking…" : "another one"}
+      </button>
     </div>
   );
 }

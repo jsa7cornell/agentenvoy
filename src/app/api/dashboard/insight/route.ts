@@ -44,7 +44,7 @@ function todayKey(tz: string): string {
   return `${y}-${m}-${d}`;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -61,9 +61,14 @@ export async function GET() {
   const tz = getUserTimezone(prefs as unknown as Record<string, unknown>);
   const today = todayKey(tz);
 
+  // `?refresh=1` bypasses the cache — used by the "another one" link in the
+  // Today's Insight card so a curious user can roll the dice again.
+  const url = new URL(req.url);
+  const forceRefresh = url.searchParams.get("refresh") === "1";
+
   // Cache hit: same day, return cached content without touching the calendar.
   const cached = explicit.dailyInsight;
-  if (cached && cached.date === today && cached.content) {
+  if (!forceRefresh && cached && cached.date === today && cached.content) {
     return NextResponse.json({ content: cached.content, date: today, cached: true });
   }
 
