@@ -275,7 +275,7 @@ export function getCompleteMessages(ctx: OnboardingContext): PhaseResult {
     phase: "complete",
     messages: [
       {
-        content: `You're all set! Here are some things for you to do:\n\n**1.** [Fine-tune your availability](/dashboard/availability) using natural language rules like "block Friday afternoons" or "no meetings before 10am." Definitely go do that.\n\n**2. General link:** agentenvoy.ai/meet/${slug} — share it in your email signature. It offers up general times for a meeting using the availability you set up.\n\n**3.** The most powerful thing is **custom invite links**. When you need to meet with somebody, tell me and I'll create a link in real time with your rules baked in — time window, format, duration, everything.\n\nWant to try? Type something like "Create a meeting with Joe via VC next week"`,
+        content: `You're all set! Your link is **agentenvoy.ai/meet/${slug}** — put it in your email signature and anyone can schedule with you.\n\nNow let me show you how this works. I'm setting up a quick test meeting for you — a 5-minute meet & greet with John, the founder of AgentEnvoy. Don't worry, it's just a demo! Watch what happens...`,
       },
     ],
     save: { complete: true },

@@ -99,6 +99,7 @@ export default function Feed() {
   const [activeOptions, setActiveOptions] = useState<QuickReplyOption[] | null>(null);
   const [optionsLocked, setOptionsLocked] = useState(false);
   const [inputPlaceholder, setInputPlaceholder] = useState<string | null>(null);
+  const pendingSendRef = useRef<string | null>(null);
   const onboardingInitRef = useRef(false);
 
   const isOnboarding = !isCalibrated && onboardingPhase !== null && onboardingPhase !== "complete";
@@ -165,9 +166,17 @@ export default function Feed() {
           addEnvoyMessage(msg.content);
         }
         setOnboardingPhase(null);
-        setActiveOptions(null);
         setInputPlaceholder(null);
+        setActiveOptions(null);
         setIsCalibrated(true);
+
+        // Auto-fire a test meeting after a short pause so the user sees the
+        // "watch what happens..." message first, then Envoy creates the demo
+        // invite in front of their eyes.
+        setTimeout(() => {
+          pendingSendRef.current = "Schedule a 5-minute introductory video call with John Abramson, founder of AgentEnvoy, at my next available time. Make the topic a quick meet & greet.";
+          setInput(pendingSendRef.current);
+        }, 2500);
         return;
       }
 
@@ -256,6 +265,15 @@ export default function Feed() {
     setActiveOptions(null);
     advanceOnboarding(onboardingPhase, value);
   }
+
+  // Auto-send after post-onboarding quick reply sets the input
+  useEffect(() => {
+    if (pendingSendRef.current && input === pendingSendRef.current) {
+      pendingSendRef.current = null;
+      handleSend();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input]);
 
   // Scroll feed container to bottom
   const prevMessageCount = useRef(0);
