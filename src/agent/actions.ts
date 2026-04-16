@@ -456,11 +456,8 @@ async function handleCreateLink(
 
   // Session display title. When no topic was specified, use "HostFirst + GuestName"
   // so the dashboard shows something meaningful instead of a generic "Catch up".
-  // We look up the host name here (already have userId) rather than threading it
-  // through from the caller. topic stays null on the link — it should only be set
-  // when the host actually named a subject, not auto-generated.
-  const hostRow = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
-  const hostFirstName = hostRow?.name?.split(/\s+/)[0] || "Host";
+  // hostName was fetched above in the combined slug+name lookup.
+  const hostFirstName = hostName?.split(/\s+/)[0] || "Host";
   const title = topic
     ? `${topic} — ${inviteeName || "Invitee"}`
     : inviteeName
