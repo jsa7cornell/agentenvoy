@@ -480,11 +480,38 @@ export default function AvailabilityPage() {
                   How should this affect scheduling?
                 </p>
                 {(() => {
+                  // Compute the engine's auto score from overlapping slots.
+                  // Only valid when no override is active — when an override exists
+                  // the slots already reflect that score, not the original auto value.
+                  const noOverride = clickedEvent.protectionOverride === undefined;
+                  const overlappingSlots = noOverride
+                    ? slots.filter(
+                        (s) =>
+                          new Date(s.start) < new Date(clickedEvent.end) &&
+                          new Date(s.end) > new Date(clickedEvent.start)
+                      )
+                    : [];
+                  const autoScore =
+                    overlappingSlots.length > 0
+                      ? Math.max(...overlappingSlots.map((s) => s.score))
+                      : null;
+
+                  // Score → color for the auto badge
+                  const scoreBadgeColor =
+                    autoScore === null ? "text-zinc-500" :
+                    autoScore <= 1 ? "text-emerald-400" :
+                    autoScore <= 2 ? "text-yellow-400" :
+                    autoScore <= 3 ? "text-amber-400" :
+                    autoScore <= 4 ? "text-orange-400" :
+                    "text-red-400";
+
                   const options = [
                     {
                       label: "Auto",
                       score: null as null,
-                      desc: "Engine reads the event — confirmed meetings block, tentative events stretch, declined events are ignored.",
+                      desc: noOverride && autoScore !== null
+                        ? `Engine assigned this a ${autoScore} — confirmed meetings block, tentative events stretch, declined events are ignored.`
+                        : "Engine reads the event — confirmed meetings block, tentative events stretch, declined events are ignored.",
                       color: "text-zinc-400 border-zinc-700 hover:border-zinc-500",
                     },
                     {
@@ -515,6 +542,7 @@ export default function AvailabilityPage() {
                         {options.map(({ label, score, color }) => {
                           const isActive =
                             score === null ? localProtection === null : localProtection === score;
+                          const isAutoBtn = score === null;
                           return (
                             <button
                               key={label}
@@ -525,6 +553,12 @@ export default function AvailabilityPage() {
                               }`}
                             >
                               {label}
+                              {/* Show engine-computed score badge on the Auto button when no override is active */}
+                              {isAutoBtn && autoScore !== null && (
+                                <span className={`text-[9px] font-bold tabular-nums leading-none ${scoreBadgeColor}`}>
+                                  {autoScore}
+                                </span>
+                              )}
                             </button>
                           );
                         })}
