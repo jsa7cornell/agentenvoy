@@ -1035,7 +1035,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             data-lpignore="true"
             data-1p-ignore="true"
             data-form-type="other"
-            className="flex-1 min-w-0 resize-none bg-surface-secondary border border-DEFAULT rounded-xl px-4 py-3 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
+            className="flex-1 min-w-0 resize-none bg-surface-secondary border border-DEFAULT rounded-xl px-4 py-3 text-base md:text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
           />
           <button
             type="submit"
