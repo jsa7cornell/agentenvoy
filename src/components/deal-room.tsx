@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LogoFull } from "./logo";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
+import { TimeChipList, type TimeChipData } from "./time-chip-list";
 
 interface Message {
   id: string;
@@ -71,6 +72,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [slotDuration, setSlotDuration] = useState<number | undefined>(undefined);
   const [slotMinDuration, setSlotMinDuration] = useState<number | undefined>(undefined);
   const [isVip, setIsVip] = useState(false);
+  // Bilateral chip data — populated only when the session has a logged-in
+  // guest whose calendar is connected. When absent, no chips render and the
+  // existing host-only availability widget carries the interaction load.
+  const [bilateralByDay, setBilateralByDay] = useState<Record<string, TimeChipData[]> | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -112,6 +117,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           if (data.duration) setSlotDuration(data.duration);
           if (data.minDuration) setSlotMinDuration(data.minDuration);
           if (data.isVip) setIsVip(true);
+          // Bilateral chips are optional — server omits the key when the
+          // guest isn't logged-in or hasn't connected a calendar.
+          if (data.bilateralByDay && typeof data.bilateralByDay === "object") {
+            setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
+          }
         }
       })
       .catch(() => {});
@@ -1134,6 +1144,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                     ? guestEnvoyLabelColor
                     : "text-emerald-400";
 
+            // Bilateral time chips render inline below the guest_envoy's
+            // message — the greeting names a top pick and the chips let the
+            // guest (or host watching) tap an alternative. Only surfaces when
+            // server returned bilateralByDay data (guest is logged in + has
+            // calendar connected). Show on the guest_envoy message that
+            // immediately follows the host's greeting — i.e. the one with no
+            // earlier guest_envoy message in the thread.
+            const isFirstGuestEnvoy =
+              msg.role === "guest_envoy" &&
+              !messages.slice(0, idx).some((m) => m.role === "guest_envoy");
+            const showChipsHere =
+              isFirstGuestEnvoy && bilateralByDay && Object.keys(bilateralByDay).length > 0;
+
             return (
               <div key={msg.id}>
                 {dateSeparator}
@@ -1145,6 +1168,34 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       </div>
                     )}
                     <div className="whitespace-pre-wrap break-words">{text}</div>
+                    {showChipsHere && bilateralByDay && (
+                      <TimeChipList
+                        bilateralByDay={bilateralByDay}
+                        primaryTimezone={slotTimezone}
+                        counterpartyTimezone={slotTimezone === "America/Los_Angeles" ? undefined : "America/Los_Angeles"}
+                        onSelectSlot={({ start, color }) => {
+                          const d = new Date(start);
+                          const day = d.toLocaleDateString("en-US", {
+                            weekday: "long",
+                            month: "short",
+                            day: "numeric",
+                            timeZone: slotTimezone,
+                          });
+                          const time = d.toLocaleTimeString("en-US", {
+                            hour: "numeric",
+                            minute: "2-digit",
+                            timeZone: slotTimezone,
+                          });
+                          const hostFirst = hostName ? hostName.split(" ")[0] : "you";
+                          const template =
+                            color === "both"
+                              ? `Let's go with ${day} at ${time}.`
+                              : `Any chance ${day} at ${time} could work for ${hostFirst}? It's close — let me know if we can make it happen.`;
+                          setInput(template);
+                          document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                        }}
+                      />
+                    )}
                   </div>
                 </div>
 
