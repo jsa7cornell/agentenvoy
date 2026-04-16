@@ -631,14 +631,16 @@ export function formatOfferableSlots(
   // Apply event-level overrides if provided
   const overriddenSlots = linkRules ? applyEventOverrides(slots, linkRules, tz) : slots;
 
-  // Filter to valid start positions for the meeting duration. A lone 30-min
-  // slot can't host a 60-min meeting — the agent would propose a time that
-  // bleeds into a blocked window. filterByDuration is a no-op for ≤ 30 min.
-  // LinkRules doesn't type `duration` (it lives in the rules JSON blob) so we
-  // cast through unknown to read it safely.
+  // Pre-filter to offerable scores before duration chaining. Without this,
+  // filterByDuration sees all slots (including blocked/off-hours ones) and
+  // may keep a 3:30 PM start for a 3-hour meeting because 4:00–6:00 PM exist
+  // in the full set — even though those slots won't actually be offered.
+  // We pre-filter to score ≤ 3 (VIP ceiling) which is conservative — tier
+  // bucketing below further restricts to first-offer / stretch1 / stretch2.
   const meetingDuration = ((linkRules as unknown as Record<string, unknown>)?.duration as number | undefined);
   const meetingMinDuration = ((linkRules as unknown as Record<string, unknown>)?.minDuration as number | undefined);
-  const finalSlots = meetingDuration ? filterByDuration(overriddenSlots, meetingDuration, meetingMinDuration) : overriddenSlots;
+  const offerableSlots = overriddenSlots.filter((s) => s.score <= 3);
+  const finalSlots = meetingDuration ? filterByDuration(offerableSlots, meetingDuration, meetingMinDuration) : offerableSlots;
 
   const now = new Date();
   const rules = linkRules ?? {};
