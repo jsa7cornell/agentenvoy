@@ -729,13 +729,7 @@ export function formatOfferableSlots(
       out.push(`${day}:`);
       for (const b of blocks) {
         const star = b.hasPreferred ? "★ " : "";
-        const durationMin = Math.round((b.end.getTime() - b.start.getTime()) / 60000);
-        const durationLabel = durationMin % 60 === 0
-          ? `${durationMin / 60}h`
-          : durationMin >= 60
-          ? `${Math.floor(durationMin / 60)}h ${durationMin % 60}m`
-          : `${durationMin}m`;
-        out.push(`  ${star}${timeFmt(b.start)}–${timeFmt(b.end)} (${durationLabel})`);
+        out.push(`  ${star}${timeFmt(b.start)}–${timeFmt(b.end)}`);
       }
     }
     return out;
