@@ -610,8 +610,19 @@ function scoreSlot(
   // shouldn't block availability" or "allow meetings during Focus Time".
   const allowMatch = isInAllowWindow(hour, minute, dayName, allowWindows, todayStr);
 
-  // Find overlapping calendar events (timed, not all-day)
-  const overlapping = events.filter((ev) => !ev.isAllDay && slotStart < ev.end && slotEnd > ev.start);
+  // Find overlapping calendar events (timed, not all-day).
+  // Zero-duration events (start === end, e.g. Google Calendar reminders) use a
+  // point-in-slot check instead of the standard interval overlap — the normal
+  // test `slotStart < ev.end && slotEnd > ev.start` always returns false when
+  // ev.start === ev.end because both sides of the AND collapse to one boundary.
+  const overlapping = events.filter((ev) => {
+    if (ev.isAllDay) return false;
+    if (ev.start.getTime() === ev.end.getTime()) {
+      // Zero-duration: matches the slot it starts in
+      return ev.start >= slotStart && ev.start < slotEnd;
+    }
+    return slotStart < ev.end && slotEnd > ev.start;
+  });
 
   // If this slot is inside an allow window, treat all timed event overlaps
   // as transparent — return score 0 (open). The host explicitly said "this
@@ -1158,12 +1169,14 @@ export function computeSchedule(
     // over all other scoring — the host explicitly said "treat this event's
     // time as X". Only applies when an overridden event overlaps this slot.
     if (eventOverrideMap.size > 0) {
-      const overriddenEvent = events.find(
-        (e) =>
-          eventOverrideMap.has(e.id) &&
-          new Date(e.start) < slotEnd &&
-          new Date(e.end) > current
-      );
+      const overriddenEvent = events.find((e) => {
+        if (!eventOverrideMap.has(e.id)) return false;
+        const eStart = new Date(e.start);
+        const eEnd = new Date(e.end);
+        // Zero-duration events (reminders): match the slot they start in
+        if (eStart.getTime() === eEnd.getTime()) return eStart >= current && eStart < slotEnd;
+        return eStart < slotEnd && eEnd > current;
+      });
       if (overriddenEvent) {
         const overrideScore = eventOverrideMap.get(overriddenEvent.id)!;
         scored.score = overrideScore;
