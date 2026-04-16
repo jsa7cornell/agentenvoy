@@ -17,6 +17,10 @@ import {
   humanTimezoneLabel,
   formatLabel,
 } from "@/lib/greeting-template";
+import {
+  buildGuestGreeting,
+  extractGuestPreferencesSummary,
+} from "@/lib/guest-greeting-template";
 
 const GENERIC_TOPICS = new Set([
   "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
@@ -126,6 +130,16 @@ export async function POST(req: NextRequest) {
     }
 
     const isHost = authSession?.user?.id === user.id;
+    // Bilateral: detect a logged-in guest (authenticated User who is NOT the host).
+    // Anonymous guests leave authSession null → isGuest false.
+    const isGuest = !isHost && !!authSession?.user?.id;
+    const guestUserPayload = isGuest && authSession?.user
+      ? {
+          id: authSession.user.id,
+          name: authSession.user.name || null,
+          email: authSession.user.email || null,
+        }
+      : undefined;
     const linkPayload = {
       type: link.type,
       topic: link.topic,
@@ -171,6 +185,16 @@ export async function POST(req: NextRequest) {
           );
         }
 
+        // Backfill guestId for logged-in guests whose session predates bilateral
+        // recognition (or who opened it anonymously and later signed in). Only
+        // write if unset so we don't overwrite a different guest's claim.
+        if (isGuest && !existingSession.guestId && authSession?.user?.id) {
+          await prisma.negotiationSession.update({
+            where: { id: existingSession.id },
+            data: { guestId: authSession.user.id },
+          });
+        }
+
         if (existingSession.status === "agreed") {
           return NextResponse.json({
             sessionId: existingSession.id,
@@ -187,6 +211,8 @@ export async function POST(req: NextRequest) {
             host: { name: user.name },
             link: linkPayload,
             isHost,
+            isGuest,
+            guestUser: guestUserPayload,
             isGroupEvent: true,
             participants: participantSummary,
             hostName: user.name,
@@ -206,6 +232,8 @@ export async function POST(req: NextRequest) {
             host: { name: user.name },
             link: linkPayload,
             isHost,
+            isGuest,
+            guestUser: guestUserPayload,
             isGroupEvent: true,
             participants: participantSummary,
             hostName: user.name,
@@ -233,6 +261,15 @@ export async function POST(req: NextRequest) {
           );
         }
 
+        // Backfill guestId for logged-in guests (single-mode) — same rule as group mode:
+        // only write if unset, never overwrite another guest's claim.
+        if (isGuest && !existingSession.guestId && authSession?.user?.id) {
+          await prisma.negotiationSession.update({
+            where: { id: existingSession.id },
+            data: { guestId: authSession.user.id },
+          });
+        }
+
         if (existingSession.status === "agreed") {
           return NextResponse.json({
             sessionId: existingSession.id,
@@ -249,6 +286,8 @@ export async function POST(req: NextRequest) {
             host: { name: user.name },
             link: linkPayload,
             isHost,
+            isGuest,
+            guestUser: guestUserPayload,
             hostName: user.name,
           });
         }
@@ -266,6 +305,8 @@ export async function POST(req: NextRequest) {
             host: { name: user.name },
             link: linkPayload,
             isHost,
+            isGuest,
+            guestUser: guestUserPayload,
             hostName: user.name,
           });
         }
@@ -299,6 +340,17 @@ export async function POST(req: NextRequest) {
 
   const isGroupEvent = link.mode === "group";
   const isHost = authSession?.user?.id === user.id;
+  // Bilateral: logged-in guest = authenticated User who is NOT the host.
+  // Anonymous guests leave authSession null → isGuest false.
+  const isGuest = !isHost && !!authSession?.user?.id;
+  const guestUserPayload = isGuest && authSession?.user
+    ? {
+        id: authSession.user.id,
+        name: authSession.user.name || null,
+        email: authSession.user.email || null,
+      }
+    : undefined;
+  const guestIdForCreate = isGuest && authSession?.user?.id ? authSession.user.id : null;
 
   // Create the session (or reuse an existing empty one).
   // guestTimezone (from browser) is persisted on first write and never
@@ -310,12 +362,19 @@ export async function POST(req: NextRequest) {
     session = await prisma.negotiationSession.findUnique({
       where: { id: reuseSessionId },
     });
-    // First-write-wins: if the existing row has no guestTimezone and the
-    // current request provided one, backfill it now.
+    // First-write-wins backfills: guestTimezone and guestId both follow the
+    // same rule — only write if unset so we never overwrite an earlier claim.
+    const backfillData: Prisma.NegotiationSessionUpdateInput = {};
     if (session && !session.guestTimezone && guestTimezone) {
+      backfillData.guestTimezone = guestTimezone;
+    }
+    if (session && !session.guestId && guestIdForCreate) {
+      backfillData.guest = { connect: { id: guestIdForCreate } };
+    }
+    if (session && Object.keys(backfillData).length > 0) {
       session = await prisma.negotiationSession.update({
         where: { id: session.id },
-        data: { guestTimezone },
+        data: backfillData,
       });
     }
     if (!session) {
@@ -326,6 +385,7 @@ export async function POST(req: NextRequest) {
         data: {
           linkId: link.id,
           hostId: user.id,
+          guestId: guestIdForCreate,
           type: "calendar",
           status: "active",
           title: buildSessionTitle(link.topic, link.inviteeName, hostFirstName),
@@ -343,6 +403,7 @@ export async function POST(req: NextRequest) {
       data: {
         linkId: link.id,
         hostId: user.id,
+        guestId: guestIdForCreate,
         type: "calendar",
         status: "active",
         title: buildSessionTitle(link.topic, link.inviteeName, hostFirstName),
@@ -613,6 +674,48 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Bilateral: if the visitor is a logged-in guest, fire a deterministic
+  // greeting from *their* Envoy right after the host's. Template-driven, no
+  // LLM — matches the host-side pattern per SPEC. Skipped for anonymous
+  // guests (isGuest false) and for group events (the group flow handles its
+  // own greeting shape).
+  if (isGuest && !isGroupEvent && authSession?.user?.id) {
+    try {
+      const guestUser = await prisma.user.findUnique({
+        where: { id: authSession.user.id },
+        select: { name: true, preferences: true },
+      });
+      if (guestUser) {
+        const guestPrefsSummary = extractGuestPreferencesSummary(guestUser.preferences);
+        const guestFirstName = guestUser.name ? guestUser.name.split(/\s+/)[0] : null;
+        const hostFirst = (user.name || "the organizer").split(/\s+/)[0];
+        const guestGreeting = buildGuestGreeting({
+          guestFirstName,
+          hostFirstName: hostFirst,
+          offerableSlots: filteredSlots,
+          guestPreferences: guestPrefsSummary,
+          guestTimezone: effectiveGuestTz ?? null,
+          hostTimezone,
+        });
+        if (guestGreeting) {
+          await prisma.message.create({
+            data: {
+              sessionId: session.id,
+              // Distinct role so the client can render this in the guest-team
+              // color (blue for the guest viewer, violet for the host viewer).
+              role: "guest_envoy",
+              content: guestGreeting,
+            },
+          });
+        }
+      }
+    } catch (e) {
+      // Never block the host greeting — bilateral intelligence is strictly
+      // additive. Log and move on.
+      console.error("[negotiate/session] guest-envoy greeting failed", e);
+    }
+  }
+
   const participantSummary = eventParticipants?.map((p) => ({
     name: p.name,
     status: p.status,
@@ -635,6 +738,8 @@ export async function POST(req: NextRequest) {
       duration: (link.rules as Record<string, unknown>)?.duration ?? null,
     },
     isHost,
+    isGuest,
+    guestUser: guestUserPayload,
     isGroupEvent: isGroupEvent || undefined,
     participants: participantSummary,
     hostName: user.name,

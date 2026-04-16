@@ -7,6 +7,10 @@ import { authOptions } from "@/lib/auth";
 import { getUserTimezone } from "@/lib/timezone";
 import { getActiveLocationRule, compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
 import { applyOfficeHoursWindow, type ConfirmedBooking } from "@/lib/office-hours";
+import {
+  computeBilateralAvailability,
+  type BilateralSlot,
+} from "@/lib/bilateral-availability";
 
 // GET /api/negotiate/slots?sessionId=xxx  (guest view — by session)
 // GET /api/negotiate/slots?self=true      (host view — authenticated user's own availability)
@@ -19,6 +23,10 @@ export async function GET(req: NextRequest) {
   let prefs: Record<string, unknown>;
   let linkRules: LinkRules = {};
   let sourceRuleId: string | null = null;
+  // guestId is set only when the session has a logged-in guest (bilateral path).
+  // Anonymous guests stay null → bilateral compute is skipped and the response
+  // falls back to today's host-only shape.
+  let guestId: string | null = null;
 
   if (selfMode) {
     const authSession = await getServerSession(authOptions);
@@ -39,6 +47,7 @@ export async function GET(req: NextRequest) {
       where: { id: sessionId },
       select: {
         hostId: true,
+        guestId: true,
         host: { select: { preferences: true } },
         link: { select: { rules: true, sourceRuleId: true } },
       },
@@ -47,6 +56,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
     hostId = session.hostId;
+    guestId = session.guestId;
     prefs = (session.host.preferences as Record<string, unknown>) || {};
     linkRules = (session.link?.rules as LinkRules) || {};
     sourceRuleId = session.link?.sourceRuleId ?? null;
@@ -66,6 +76,11 @@ export async function GET(req: NextRequest) {
   > = {};
 
   let currentLocation: { label: string; until?: string } | null = null;
+  // Bilateral chips (green/orange) grouped by day-key (same format as slotsByDay).
+  // Populated only when the session has a logged-in guest with a connected
+  // calendar. Undefined in the response when there is no bilateral signal —
+  // client falls back to the existing host-only widget.
+  let bilateralByDay: Record<string, BilateralSlot[]> | undefined;
 
   try {
     const schedule = await getOrComputeSchedule(hostId);
@@ -141,8 +156,8 @@ export async function GET(req: NextRequest) {
     // Score filter FIRST — so the duration chain-check below only considers
     // slots that would actually be offered to the guest. Without this ordering,
     // filterByDuration builds its consecutive-slot set from ALL slots (including
-    // blocked/off-hours ones), producing false valid windows like "3:30 PM for
-    // a 3-hour meeting" when the subsequent slots are blocked.
+    // blocked/off-hours ones with score > 1), producing false valid windows like
+    // "3:30 PM for a 3-hour meeting" when the subsequent slots are blocked.
     if (!selfMode) {
       const hasExclusive = slots.some((s) => s.score === -2);
       if (hasExclusive) {
@@ -155,7 +170,8 @@ export async function GET(req: NextRequest) {
     }
 
     // Duration filtering AFTER score filter. Now the consecutive-slot chain
-    // only walks through offerable slots.
+    // only walks through offerable slots — a 3:30 PM start for a 3-hour meeting
+    // is correctly rejected if 4:00–6:00 PM slots aren't also offered.
     if (!selfMode) {
       const duration = (linkRules as Record<string, unknown>).duration as number | undefined;
       const minDuration = (linkRules as Record<string, unknown>).minDuration as number | undefined;
@@ -185,6 +201,35 @@ export async function GET(req: NextRequest) {
         isStretch: isVip && (slot.score ?? 0) >= 2,
       });
     }
+
+    // ── Bilateral compute (read-only consumer of guest's pre-configured
+    // calendar + rules). Runs only when the session has a logged-in guest
+    // who isn't the host. If the guest hasn't connected a calendar, this
+    // gracefully produces nothing and we fall back to the host-only shape.
+    // No setup UI in the deal room; the push to configure lives on the
+    // guest's own dashboard.
+    if (guestId && guestId !== hostId && !selfMode) {
+      try {
+        const guestSchedule = await getOrComputeSchedule(guestId);
+        const bilateralSlots = computeBilateralAvailability({
+          hostSlots: slots,
+          guestSlots: guestSchedule.connected ? guestSchedule.slots : [],
+          guestScheduleAvailable: guestSchedule.connected,
+        });
+        if (bilateralSlots.length > 0) {
+          const grouped: Record<string, BilateralSlot[]> = {};
+          for (const bs of bilateralSlots) {
+            const dateKey = dateFmt.format(new Date(bs.start));
+            if (!grouped[dateKey]) grouped[dateKey] = [];
+            grouped[dateKey].push(bs);
+          }
+          bilateralByDay = grouped;
+        }
+      } catch (e) {
+        // Never block the widget on a bilateral failure — log and continue.
+        console.log("Bilateral compute failed for guestId=", guestId, e);
+      }
+    }
   } catch (e) {
     console.log("Slots endpoint error:", e);
   }
@@ -194,5 +239,13 @@ export async function GET(req: NextRequest) {
   const duration = (!selfMode && (linkRules as Record<string, unknown>).duration as number | undefined) || undefined;
   const minDuration = (!selfMode && (linkRules as Record<string, unknown>).minDuration as number | undefined) || undefined;
 
-  return NextResponse.json({ slotsByDay, timezone, currentLocation, duration, minDuration, isVip: isVipLink || undefined });
+  return NextResponse.json({
+    slotsByDay,
+    timezone,
+    currentLocation,
+    duration,
+    minDuration,
+    isVip: isVipLink || undefined,
+    bilateralByDay,
+  });
 }

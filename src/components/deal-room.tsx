@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LogoFull } from "./logo";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
+import { TimeChipList, type TimeChipData } from "./time-chip-list";
 
 interface Message {
   id: string;
@@ -27,6 +28,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isSending, setIsSending] = useState(false);
   const [hostName, setHostName] = useState("");
   const [isHost, setIsHost] = useState(false);
+  // Bilateral: logged-in guest (authenticated User, not the host).
+  // Anonymous guests leave this false.
+  const [isGuest, setIsGuest] = useState(false);
+  const [guestUser, setGuestUser] = useState<{
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null>(null);
   const [topic, setTopic] = useState("");
   const [linkFormat, setLinkFormat] = useState("");
   const [inviteeName, setInviteeName] = useState("");
@@ -63,6 +72,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [slotDuration, setSlotDuration] = useState<number | undefined>(undefined);
   const [slotMinDuration, setSlotMinDuration] = useState<number | undefined>(undefined);
   const [isVip, setIsVip] = useState(false);
+  // Bilateral chip data — populated only when the session has a logged-in
+  // guest whose calendar is connected. When absent, no chips render and the
+  // existing host-only availability widget carries the interaction load.
+  const [bilateralByDay, setBilateralByDay] = useState<Record<string, TimeChipData[]> | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -104,6 +117,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           if (data.duration) setSlotDuration(data.duration);
           if (data.minDuration) setSlotMinDuration(data.minDuration);
           if (data.isVip) setIsVip(true);
+          // Bilateral chips are optional — server omits the key when the
+          // guest isn't logged-in or hasn't connected a calendar.
+          if (data.bilateralByDay && typeof data.bilateralByDay === "object") {
+            setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
+          }
         }
       })
       .catch(() => {});
@@ -314,6 +332,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setSessionId(data.sessionId);
         setHostName(data.host?.name || data.hostName || "");
         setIsHost(data.isHost || false);
+        setIsGuest(data.isGuest || false);
+        setGuestUser(data.guestUser || null);
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
         setInviteeName(data.link?.inviteeName || "");
@@ -807,12 +827,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         )}
 
-        {/* Signup CTA — guests only, after confirmation */}
-        {confirmed && !isHost && (
+        {/* Signup CTA — only for anonymous guests after confirmation.
+            Logged-in guests already have an account; don't re-pitch them. */}
+        {confirmed && !isHost && !isGuest && (
           <div className="ml-5 mt-3 p-3 rounded-xl bg-purple-500/8 border border-purple-500/20">
             <p className="text-xs text-primary">
               Want your own AI negotiator?{" "}
-              <a href="/api/auth/signin" className="text-purple-400 hover:text-purple-300 font-semibold transition">
+              <a
+                href={`/api/auth/signin?callbackUrl=${encodeURIComponent(
+                  typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"
+                )}`}
+                className="text-purple-400 hover:text-purple-300 font-semibold transition"
+              >
                 Create a free AgentEnvoy account
               </a>{" "}
               — Envoy handles scheduling so you don&apos;t have to.
@@ -1059,10 +1085,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   .trim()
               : parsed.text;
 
-            // 3-party model: Envoy (AI) + system notices always left;
-            // humans (host + guest) always right. Color distinguishes which
-            // human spoke — purple = host, indigo = guest.
+            // 3-party model + guest Envoy advocate:
+            //   host / guest (human) → right-aligned, filled color
+            //   administrator (host-side facilitator) → left, neutral
+            //   guest_envoy (guest advocate) → left, viewer-relative tinted
+            //   system → left, emerald
             const rightAligned = msg.role === "host" || msg.role === "guest";
+
+            // guest_envoy color follows team affiliation, viewer-relative:
+            //   logged-in guest viewer  → blue (your team)
+            //   host viewer             → purple (counterparty)
+            //   anonymous (shouldn't fire) → neutral fallback
+            const guestEnvoyStyle = isGuest
+              ? "bg-blue-900/30 border border-blue-800 text-blue-100 rounded-bl-sm"
+              : isHost
+                ? "bg-purple-900/30 border border-purple-800 text-purple-100 rounded-bl-sm"
+                : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
+            const guestEnvoyLabelColor = isGuest
+              ? "text-blue-300"
+              : isHost
+                ? "text-purple-300"
+                : "text-emerald-400";
 
             const messageStyle =
               msg.role === "host"
@@ -1071,7 +1114,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   ? "bg-indigo-600 text-white rounded-br-sm"
                   : msg.role === "system"
                     ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
-                    : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
+                    : msg.role === "guest_envoy"
+                      ? guestEnvoyStyle
+                      : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
+
+            const guestEnvoyLabel = isGuest
+              ? "Your Envoy"
+              : guestUser?.name
+                ? `${guestUser.name.split(" ")[0]}'s Envoy`
+                : "Guest's Envoy";
 
             const senderLabel =
               msg.role === "host"
@@ -1080,14 +1131,31 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   ? "Guest"
                   : msg.role === "administrator"
                     ? "Envoy"
-                    : null;
+                    : msg.role === "guest_envoy"
+                      ? guestEnvoyLabel
+                      : null;
 
             const labelColor =
               msg.role === "host"
                 ? "text-white/60"
                 : msg.role === "guest"
                   ? "text-white/60"
-                  : "text-emerald-400";
+                  : msg.role === "guest_envoy"
+                    ? guestEnvoyLabelColor
+                    : "text-emerald-400";
+
+            // Bilateral time chips render inline below the guest_envoy's
+            // message — the greeting names a top pick and the chips let the
+            // guest (or host watching) tap an alternative. Only surfaces when
+            // server returned bilateralByDay data (guest is logged in + has
+            // calendar connected). Show on the guest_envoy message that
+            // immediately follows the host's greeting — i.e. the one with no
+            // earlier guest_envoy message in the thread.
+            const isFirstGuestEnvoy =
+              msg.role === "guest_envoy" &&
+              !messages.slice(0, idx).some((m) => m.role === "guest_envoy");
+            const showChipsHere =
+              isFirstGuestEnvoy && bilateralByDay && Object.keys(bilateralByDay).length > 0;
 
             return (
               <div key={msg.id}>
@@ -1100,6 +1168,34 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       </div>
                     )}
                     <div className="whitespace-pre-wrap break-words">{text}</div>
+                    {showChipsHere && bilateralByDay && (
+                      <TimeChipList
+                        bilateralByDay={bilateralByDay}
+                        primaryTimezone={slotTimezone}
+                        counterpartyTimezone={slotTimezone === "America/Los_Angeles" ? undefined : "America/Los_Angeles"}
+                        onSelectSlot={({ start, color }) => {
+                          const d = new Date(start);
+                          const day = d.toLocaleDateString("en-US", {
+                            weekday: "long",
+                            month: "short",
+                            day: "numeric",
+                            timeZone: slotTimezone,
+                          });
+                          const time = d.toLocaleTimeString("en-US", {
+                            hour: "numeric",
+                            minute: "2-digit",
+                            timeZone: slotTimezone,
+                          });
+                          const hostFirst = hostName ? hostName.split(" ")[0] : "you";
+                          const template =
+                            color === "both"
+                              ? `Let's go with ${day} at ${time}.`
+                              : `Any chance ${day} at ${time} could work for ${hostFirst}? It's close — let me know if we can make it happen.`;
+                          setInput(template);
+                          document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                        }}
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -1215,15 +1311,44 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   return (
     <div className="fixed inset-0 bg-surface text-primary flex flex-col overflow-hidden z-20">
-      {/* Header — full dashboard chrome for the host, minimal brand bar for guests */}
+      {/* Header — three branches:
+            host              → full dashboard chrome
+            logged-in guest   → their name + link back to their dashboard
+            anonymous guest   → minimal brand bar with "Sign in" that returns to this deal room */}
       {isHost ? (
         <DashboardHeader />
+      ) : isGuest ? (
+        <header className="border-b border-secondary px-6 py-3 flex items-center justify-between flex-shrink-0">
+          <a href="/">
+            <LogoFull height={24} className="text-primary" />
+          </a>
+          <div className="flex items-center gap-3">
+            {guestUser?.name && (
+              <span className="text-xs text-secondary" data-testid="guest-name">
+                {guestUser.name}
+              </span>
+            )}
+            <a
+              href="/dashboard"
+              className="text-xs text-muted hover:text-primary transition"
+              data-testid="guest-dashboard-link"
+            >
+              My Dashboard
+            </a>
+          </div>
+        </header>
       ) : (
         <header className="border-b border-secondary px-6 py-3 flex items-center justify-between flex-shrink-0">
           <a href="/">
             <LogoFull height={24} className="text-primary" />
           </a>
-          <a href="/" className="text-xs text-muted hover:text-primary transition">
+          <a
+            href={`/api/auth/signin?callbackUrl=${encodeURIComponent(
+              typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"
+            )}`}
+            className="text-xs text-muted hover:text-primary transition"
+            data-testid="anonymous-signin-link"
+          >
             Sign in
           </a>
         </header>
