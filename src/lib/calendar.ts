@@ -36,6 +36,10 @@ export interface CreateEventParams {
   endTime: Date;
   attendeeEmails: string[];
   addMeetLink?: boolean;
+  /** AgentEnvoy session ID — stored as GCal extendedProperties so the event
+   *  can be matched back to its session even if our calendarEventId DB field
+   *  is missing (e.g. old schema versions, event ID rotation). */
+  sessionId?: string;
 }
 
 export interface EventResult {
@@ -135,6 +139,9 @@ class GoogleCalendarProvider implements CalendarProvider {
       start: { dateTime: params.startTime.toISOString() },
       end: { dateTime: params.endTime.toISOString() },
       attendees: params.attendeeEmails.map((email) => ({ email })),
+      ...(params.sessionId && {
+        extendedProperties: { private: { agentenvoySessionId: params.sessionId } },
+      }),
       ...(params.addMeetLink && {
         conferenceData: {
           createRequest: {
@@ -976,6 +983,7 @@ export async function createCalendarEvent(
     endTime: Date;
     attendeeEmails: string[];
     addMeetLink?: boolean;
+    sessionId?: string;
   }
 ) {
   const calendar = await getGoogleCalendarClient(userId);
@@ -986,6 +994,11 @@ export async function createCalendarEvent(
     start: { dateTime: params.startTime.toISOString() },
     end: { dateTime: params.endTime.toISOString() },
     attendees: params.attendeeEmails.map((email) => ({ email })),
+    // Embed the AgentEnvoy session ID so the GCal event can be matched back
+    // to its session even if our DB calendarEventId field is missing.
+    ...(params.sessionId && {
+      extendedProperties: { private: { agentenvoySessionId: params.sessionId } },
+    }),
     ...(params.addMeetLink && {
       conferenceData: {
         createRequest: {

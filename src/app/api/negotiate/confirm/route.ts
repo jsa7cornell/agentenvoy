@@ -174,6 +174,7 @@ export async function POST(req: NextRequest) {
       endTime,
       attendeeEmails,
       addMeetLink: useGoogleMeet,
+      sessionId: session.id,
     });
 
     if (useZoom) {

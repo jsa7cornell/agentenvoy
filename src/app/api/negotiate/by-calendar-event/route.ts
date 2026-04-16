@@ -2,11 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { getGoogleCalendarClient } from "@/lib/calendar";
 
-// GET /api/negotiate/by-calendar-event?eventId=xxx[&eventStart=ISO]
+// GET /api/negotiate/by-calendar-event?eventId=xxx
 // Look up an AgentEnvoy session by Google Calendar event ID.
-// Falls back to matching by agreedTime (±2 min) for sessions confirmed before
-// calendarEventId was added to the schema (calendarEventId was null).
+//
+// Lookup chain (most reliable → least):
+//  1. DB: NegotiationSession.calendarEventId = eventId  (fast, works for all new sessions)
+//  2. GCal extended properties: fetch the event and read
+//     extendedProperties.private.agentenvoySessionId  (reliable for any session created
+//     after this field was added, even if calendarEventId was later cleared)
+//
 // Returns null if no matching session — caller treats the event as a plain calendar event.
 export async function GET(req: NextRequest) {
   const authSession = await getServerSession(authOptions);
@@ -39,7 +45,7 @@ export async function GET(req: NextRequest) {
     },
   };
 
-  // Primary lookup: by calendarEventId
+  // Step 1: Primary DB lookup by calendarEventId
   let session = await prisma.negotiationSession.findFirst({
     where: {
       hostId: authSession.user.id,
@@ -48,26 +54,29 @@ export async function GET(req: NextRequest) {
     select: selectFields,
   });
 
-  // Fallback: for old sessions where calendarEventId was never set, match by
-  // agreedTime within ±2 minutes of the event start time.
+  // Step 2: Fallback — fetch the GCal event and read the embedded session ID
+  // from extendedProperties. This is set by createCalendarEvent() for every
+  // new confirmed session and is reliable even if calendarEventId was null.
   if (!session) {
-    const eventStartParam = req.nextUrl.searchParams.get("eventStart");
-    if (eventStartParam) {
-      const eventStart = new Date(eventStartParam);
-      if (!isNaN(eventStart.getTime())) {
+    try {
+      const calendar = await getGoogleCalendarClient(authSession.user.id);
+      const { data: gcalEvent } = await calendar.events.get({
+        calendarId: "primary",
+        eventId,
+      });
+      const embeddedSessionId =
+        gcalEvent.extendedProperties?.private?.agentenvoySessionId;
+      if (embeddedSessionId) {
         session = await prisma.negotiationSession.findFirst({
           where: {
+            id: embeddedSessionId,
             hostId: authSession.user.id,
-            status: "agreed",
-            calendarEventId: null,
-            agreedTime: {
-              gte: new Date(eventStart.getTime() - 2 * 60 * 1000),
-              lte: new Date(eventStart.getTime() + 2 * 60 * 1000),
-            },
           },
           select: selectFields,
         });
       }
+    } catch {
+      // GCal fetch failed (event not found, no token, etc.) — fall through to null
     }
   }
 
