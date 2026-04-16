@@ -142,21 +142,22 @@ export function WeeklyCalendar({
     return grouped;
   }, [events, days, timezone]);
 
-  // Group all-day events by day (can span multiple days)
+  // Group all-day events by day (can span multiple days).
+  // All-day events are stored with UTC midnight dates (e.g. "2026-04-15T00:00:00Z").
+  // We compare DATE STRINGS, not Date objects, to avoid timezone bleed where
+  // midnight UTC falls on the previous local day (e.g. EDT = UTC-4).
   const allDayByDay = useMemo(() => {
     const grouped: Record<string, TunerEvent[]> = {};
     for (const day of days) grouped[day] = [];
     for (const e of events) {
       if (!e.isAllDay) continue;
       if (e.eventType === "workingLocation" || e.eventType === "outOfOffice") continue;
-      // All-day events span from start date to end date (exclusive)
-      const eStart = new Date(e.start);
-      const eEnd = new Date(e.end);
+      // Extract date portion from stored UTC ISO strings
+      const evStartDate = e.start.substring(0, 10);  // "2026-04-15"
+      const evEndDate = e.end.substring(0, 10);        // "2026-04-16" (exclusive)
       for (const day of days) {
-        const dayStart = new Date(day + "T00:00:00");
-        const dayEnd = new Date(dayStart);
-        dayEnd.setDate(dayEnd.getDate() + 1);
-        if (eStart < dayEnd && eEnd > dayStart) {
+        // day is already "YYYY-MM-DD" — compare strings directly
+        if (day >= evStartDate && day < evEndDate) {
           grouped[day].push(e);
         }
       }
