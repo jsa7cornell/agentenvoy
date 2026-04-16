@@ -20,6 +20,7 @@
     "@ai-sdk/google": "^3.0.59",
     "@ai-sdk/openai": "^3.0.51",
     "@auth/prisma-adapter": "^1.6.0",
+    "@aws-sdk/client-sesv2": "^3.1031.0",
     "@prisma/client": "^5.22.0",
     "ai": "^6.0.144",
     "class-variance-authority": "^0.7.1",
