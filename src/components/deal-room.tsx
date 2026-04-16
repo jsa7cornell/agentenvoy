@@ -697,9 +697,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           {eventFormat && (
             <span>{eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat} &middot; {eventDuration} min</span>
           )}
-          {eventDateTime && (
-            <span>{new Date(eventDateTime).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} {new Date(eventDateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
-          )}
+          {eventDateTime && (() => {
+            const dt = new Date(eventDateTime);
+            const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const hostTz = slotTimezone;
+            const showDual = hostTz && hostTz !== localTz;
+            const datePart = dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+            const localTime = dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+            const hostTime = showDual ? dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: hostTz }) : null;
+            return <span>{datePart} {localTime}{hostTime ? ` (${hostTime})` : ""}</span>;
+          })()}
           {!eventDateTime && !eventFormat && <span>Meeting details pending</span>}
           {eventMeetLink && (
             <a href={eventMeetLink} className="text-indigo-400 hover:text-indigo-300 truncate max-w-[200px]" target="_blank" rel="noopener noreferrer">

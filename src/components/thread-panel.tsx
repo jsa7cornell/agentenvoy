@@ -217,7 +217,7 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
                     {session.status === "agreed" ? "Meeting Confirmed" : "Ready to confirm"}
                   </h4>
                   <div className="text-xs text-gray-400 space-y-1">
-                    <div>{new Date(proposal.dateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
+                    <div>{new Date(proposal.dateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}{proposal.timezone && proposal.timezone !== Intl.DateTimeFormat().resolvedOptions().timeZone ? ` (${new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: proposal.timezone })})` : ""}</div>
                     <div>{proposal.duration} minutes</div>
                     <div>{proposal.format}</div>
                     {proposal.location && <div>{proposal.location}</div>}

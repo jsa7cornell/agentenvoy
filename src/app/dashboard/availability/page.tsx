@@ -166,21 +166,26 @@ export default function AvailabilityPage() {
     fetchSchedule();
   }, [status, fetchSchedule]);
 
-  // Week navigation
+  // Week navigation — allow 4 weeks back, 12 weeks forward
   const thisWeek = getSunday(new Date());
-  const maxWeekStart = (() => {
+  const minWeekStart = (() => {
     const d = new Date(thisWeek + "T12:00:00");
-    d.setDate(d.getDate() + 49);
+    d.setDate(d.getDate() - 28);
     return d.toISOString().slice(0, 10);
   })();
-  const canGoPrev = weekStart > thisWeek;
+  const maxWeekStart = (() => {
+    const d = new Date(thisWeek + "T12:00:00");
+    d.setDate(d.getDate() + 84);
+    return d.toISOString().slice(0, 10);
+  })();
+  const canGoPrev = weekStart > minWeekStart;
   const canGoNext = weekStart < maxWeekStart;
 
   function shiftWeek(dir: number) {
     const d = new Date(weekStart + "T12:00:00");
     d.setDate(d.getDate() + 7 * dir);
     const next = d.toISOString().slice(0, 10);
-    if (dir < 0 && next < thisWeek) return;
+    if (dir < 0 && next < minWeekStart) return;
     if (dir > 0 && next > maxWeekStart) return;
     setWeekStart(next);
   }

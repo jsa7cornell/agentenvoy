@@ -26,7 +26,8 @@ export function getEventAccent(responseStatus?: string, isTransparent?: boolean)
 }
 
 export function getEventBg(responseStatus?: string, isTransparent?: boolean): string {
-  if (isTransparent || responseStatus === "declined") return "bg-zinc-200 dark:bg-zinc-700/70";
+  if (responseStatus === "declined") return "bg-zinc-200/60 dark:bg-zinc-800/60";
+  if (isTransparent) return "bg-zinc-200/80 dark:bg-zinc-700/50";
   if (responseStatus === "tentative") return "bg-amber-50 dark:bg-amber-900/70";
   return "bg-indigo-50 dark:bg-indigo-900/80";
 }
