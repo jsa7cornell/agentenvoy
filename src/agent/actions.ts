@@ -605,8 +605,8 @@ async function handleUpdateKnowledge(
   }
 
   const parts: string[] = [];
-  if (persistent) parts.push("persistent preferences");
-  if (situational) parts.push("upcoming schedule preferences");
+  if (persistent) parts.push("scheduling knowledge");
+  if (situational) parts.push("upcoming schedule context");
   if (blockedWindows) parts.push(`${blockedWindows.length} blocked window(s)`);
   if (currentLocation !== undefined) {
     parts.push(currentLocation === null ? "cleared current location" : `current location: ${currentLocation.label}`);
@@ -614,7 +614,7 @@ async function handleUpdateKnowledge(
 
   return {
     success: true,
-    message: `Updated ${parts.join(" and ")}`,
+    message: `Updated ${parts.join(" and ")} (knowledge base)`,
   };
 }
 

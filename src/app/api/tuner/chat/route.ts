@@ -61,8 +61,15 @@ TONE:
 
 ACTIONS:
 [ACTION]{"action":"update_knowledge","params":{"persistent":"...","situational":"...","blockedWindows":[...],"currentLocation":{...}}}[/ACTION]
+- update_knowledge: for scheduling preferences, work style, travel context, blocked time. Writes to free-text knowledge base.
+  Do NOT use for phone numbers, video providers, or zoom links.
 
-Only include the fields you're updating — partial updates are fine.`;
+[ACTION]{"action":"update_meeting_settings","params":{"phone":"(818) 625-4743"}}[/ACTION]
+- update_meeting_settings: for phone number, video provider, zoom link, default duration. Writes to structured profile settings that auto-populate calendar invites.
+  Fields: phone, videoProvider ("google-meet" | "zoom"), zoomLink, defaultDuration (minutes).
+
+Only include the fields you're updating — partial updates are fine.
+Be specific about WHERE you're saving: "Saving to your profile settings" (structured, auto-populates invites) vs "Noted in your scheduling preferences" (free-text knowledge base).`;
 
 export async function POST(req: NextRequest) {
   try {

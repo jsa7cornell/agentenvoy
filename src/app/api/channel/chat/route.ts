@@ -78,12 +78,16 @@ Available actions:
 - expand_link: Widen an EXISTING link's offering window AFTER the host has confirmed specific hours → {"action":"expand_link","params":{"code":"hhkkkw","preferredTimeStart":"06:00"}} or {"action":"expand_link","params":{"code":"hhkkkw","allowWeekends":true}}. Use this when the host says "open up Katherine's link to 6am" or "let's include weekends for Jack". Never infer hours the host didn't name.
 - hold_slot: Place a 48h tentative hold on a specific stretch slot. VIP + specific-request only → {"action":"hold_slot","params":{"sessionId":"cmxxxx","slotStart":"2026-04-21T14:00:00Z","slotEnd":"2026-04-21T14:30:00Z"}}
 - release_hold: Release an active hold → {"action":"release_hold","params":{"sessionId":"cmxxxx"}}
-- update_knowledge: Save to knowledge base → {"action":"update_knowledge","params":{"persistent":"...","situational":"...","currentLocation":{"label":"Baja","until":"2026-04-14"}}}
+- update_knowledge: Save to knowledge base (who the host is, how they work, scheduling context) → {"action":"update_knowledge","params":{"persistent":"...","situational":"...","currentLocation":{"label":"Baja","until":"2026-04-14"}}}
+  - This writes to the host's free-text knowledge base. Use for personality, preferences, context, travel, work style. Do NOT use for structured settings like phone numbers, video providers, or zoom links — use update_meeting_settings for those.
+- update_meeting_settings: Save phone number, video provider, zoom link, or default duration to profile settings → {"action":"update_meeting_settings","params":{"phone":"(818) 625-4743"}}
+  - Use when the host provides a phone number, zoom link, video preference, or default meeting length. Saves to structured settings (not free text), so these values auto-populate on calendar invites at confirm time.
+  - You can set multiple fields: {"phone":"...","videoProvider":"zoom","zoomLink":"https://zoom.us/j/...","defaultDuration":45}
 
 Rules:
 - Always include the action block when the user's intent is clear
 - You can include MULTIPLE action blocks in one message
-- Always confirm what you're about to do in your conversational text BEFORE the action block
+- Always confirm what you're about to do in your conversational text BEFORE the action block. Be specific about WHERE the data is being saved: "Saving your phone number to your profile settings" (not vague "saved" or "noted"). The user should know the difference between profile settings (structured, auto-populates invites) vs knowledge base (free-text memory that informs how Envoy negotiates).
 - If the user's intent is ambiguous, ask for clarification instead of acting
 - Use session IDs from the "Active sessions" context below
 - For create_link, use the action block above (not the agentenvoy-action format) — both work but this is preferred for new links
