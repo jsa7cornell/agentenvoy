@@ -49,7 +49,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const prevStatusRef = useRef<string>("active");
 
   // Slots state for availability calendar sidebar
-  const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string; score?: number; isShortSlot?: boolean }>> | null>(null);
+  const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string; score?: number; isShortSlot?: boolean; isStretch?: boolean }>> | null>(null);
   const [slotTimezone, setSlotTimezone] = useState("America/New_York");
   const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
   const [slotDuration, setSlotDuration] = useState<number | undefined>(undefined);

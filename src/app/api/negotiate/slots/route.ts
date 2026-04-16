@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
 
   const slotsByDay: Record<
     string,
-    Array<{ start: string; end: string; score: number; isShortSlot?: boolean }>
+    Array<{ start: string; end: string; score: number; isShortSlot?: boolean; isStretch?: boolean }>
   > = {};
 
   let currentLocation: { label: string; until?: string } | null = null;
@@ -148,15 +148,22 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // For guest view: filter based on mode
-    // Exclusive mode (any slot has score -2): only show -2 and -1 slots
-    // Normal mode: hide score 2+ (soft holds and above) — matches greeting template
-    // Host view (selfMode): show everything
+    const isVip = !selfMode && !!(linkRules as Record<string, unknown>).isVip;
+
+    // For guest view: filter based on mode.
+    // Exclusive mode (any slot has score -2): only show -2 and -1 slots.
+    // VIP mode: show score ≤ 1 (green) + score 2-3 (orange stretch), tagged isStretch.
+    // Normal mode: score ≤ 1 only.
+    // Host view (selfMode): show everything.
     if (!selfMode) {
       const hasExclusive = slots.some((s) => s.score === -2);
-      slots = hasExclusive
-        ? slots.filter((s) => s.score <= -1)
-        : slots.filter((s) => s.score <= 1);
+      if (hasExclusive) {
+        slots = slots.filter((s) => s.score <= -1);
+      } else if (isVip) {
+        slots = slots.filter((s) => s.score <= 3);
+      } else {
+        slots = slots.filter((s) => s.score <= 1);
+      }
     }
 
     // Group by day
@@ -175,15 +182,18 @@ export async function GET(req: NextRequest) {
         end: slot.end,
         score: slot.score,
         isShortSlot: slot.isShortSlot,
+        // Score 2-3 on VIP links are stretch slots — shown orange in the widget.
+        isStretch: isVip && (slot.score ?? 0) >= 2,
       });
     }
   } catch (e) {
     console.log("Slots endpoint error:", e);
   }
 
+  const isVipLink = !selfMode && !!(linkRules as Record<string, unknown>).isVip;
   // Pass duration metadata to widget so it can render short-slot tooltips
   const duration = (!selfMode && (linkRules as Record<string, unknown>).duration as number | undefined) || undefined;
   const minDuration = (!selfMode && (linkRules as Record<string, unknown>).minDuration as number | undefined) || undefined;
 
-  return NextResponse.json({ slotsByDay, timezone, currentLocation, duration, minDuration });
+  return NextResponse.json({ slotsByDay, timezone, currentLocation, duration, minDuration, isVip: isVipLink || undefined });
 }

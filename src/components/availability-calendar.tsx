@@ -5,47 +5,51 @@ import { useState, useMemo, useEffect } from "react";
 interface Slot {
   start: string;
   end: string;
-  score?: number; // 0 = explicitly free (green), 1 = open business hours (yellow)
+  score?: number;
   isShortSlot?: boolean; // fits minDuration but not full duration
+  isStretch?: boolean;   // VIP stretch slot (score 2-3) — shown orange
 }
 
 interface AvailabilityCalendarProps {
   slotsByDay: Record<string, Slot[]>;
   timezone: string;
-  onSelectSlot?: (formattedTime: string) => void; // Callback when guest clicks a time pill
+  onSelectSlot?: (formattedTime: string) => void;
   currentLocation?: { label: string; until?: string } | null;
-  onClearLocation?: () => void; // Optional: show a dismiss button on the location notice
-  view?: "month" | "week"; // week = compact single-row strip (ideal for mobile)
-  onTimezoneClick?: () => void; // Callback when guest clicks the timezone label
-  duration?: number; // preferred meeting duration in minutes
-  minDuration?: number; // minimum acceptable duration (enables short-slot rendering)
+  onClearLocation?: () => void;
+  view?: "month" | "week";
+  onTimezoneClick?: () => void;
+  duration?: number;
+  minDuration?: number;
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
   if (isPast) return "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700";
-  // Only consider visible slots (score ≤ 1) for day color
-  const visible = slots.filter((s) => (s.score ?? 0) <= 1);
-  if (visible.length === 0) return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600";
-  const best = Math.min(...visible.map((s) => s.score ?? 0));
-  if (best <= 0) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300"; // free / preferred
-  return "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-600 dark:text-yellow-300"; // 1: open business hours
+  // Green slots (score ≤ 1) take priority over stretch (orange).
+  const green = slots.filter((s) => !s.isStretch && (s.score ?? 0) <= 1);
+  if (green.length > 0) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300";
+  const stretch = slots.filter((s) => s.isStretch);
+  if (stretch.length > 0) return "bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-300";
+  return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600";
 }
 
-function getSlotPillColor(score: number | undefined) {
-  const s = score ?? 0;
-  if (s <= 0) return "border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 hover:border-green-500";
-  if (s <= 1) return "border-yellow-400 dark:border-yellow-700 text-yellow-600 dark:text-yellow-300"; // open hours, non-clickable
-  return ""; // 3+: not rendered
+function getSlotPillColor(slot: Slot) {
+  if (slot.isStretch) {
+    return "border-orange-400 dark:border-orange-700 text-orange-600 dark:text-orange-300 hover:border-orange-500";
+  }
+  // Score 0 and 1 are both green — open, schedulable time.
+  return "border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 hover:border-green-500";
 }
 
-function isSlotVisible(score: number | undefined): boolean {
-  const s = score ?? 0;
-  return s <= 1; // 2+ not shown — matches greeting template (score ≤ 1)
+function isSlotVisible(slot: Slot): boolean {
+  // Stretch slots (score 2-3) are tagged explicitly by the API when isVip.
+  // Regular slots: show score ≤ 1. Score 2+ without isStretch tag = hidden.
+  return slot.isStretch === true || (slot.score ?? 0) <= 1;
 }
 
-function isSlotClickable(score: number | undefined): boolean {
-  const s = score ?? 0;
-  return s <= 0; // only free time (0 and below) is clickable
+function isSlotClickable(slot: Slot): boolean {
+  // Score 0 and 1 are both fully schedulable (green). Stretch is also
+  // clickable so the guest can propose a stretch time — the LLM handles it.
+  return slot.isStretch === true || (slot.score ?? 0) <= 1;
 }
 
 const DAY_HEADERS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -101,12 +105,12 @@ function SlotPills({
   duration?: number;
   minDuration?: number;
 }) {
-  const visible = slots.filter((s) => isSlotVisible(s.score));
+  const visible = slots.filter((s) => isSlotVisible(s));
   if (visible.length === 0) return <p className="text-xs text-muted">No available slots</p>;
   return (
     <div className="flex flex-wrap gap-1.5">
       {visible.map((slot, i) => {
-        const clickable = isSlotClickable(slot.score);
+        const clickable = isSlotClickable(slot);
         const isShort = slot.isShortSlot === true;
         const shortTooltip = isShort && duration && minDuration
           ? `${minDuration} min available — ${duration} min if adjacent time opens up`
@@ -123,7 +127,7 @@ function SlotPills({
             className={`px-2 py-1 bg-surface-secondary border rounded-md text-xs transition
               ${isShort
                 ? "border-dashed border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 opacity-80"
-                : getSlotPillColor(slot.score)}
+                : getSlotPillColor(slot)}
               ${clickable && onSelectSlot ? "hover:bg-surface-tertiary cursor-pointer" : "cursor-default opacity-70"}`}
           >
             {new Date(slot.start).toLocaleTimeString("en-US", {

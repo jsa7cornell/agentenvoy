@@ -13,6 +13,7 @@ import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import {
   formatAvailabilityWindows,
+  formatStretchDays,
   humanTimezoneLabel,
   formatLabel,
 } from "@/lib/greeting-template";
@@ -547,18 +548,35 @@ export async function POST(req: NextRequest) {
       : "a meeting";
     const intro = `${hello} ${formatEmoji} I'm scheduling ${meetingDesc} between you and ${hostFirstName}.`;
 
+    const isVip = !!(linkRules.isVip);
+
     // 3. Schedule block — compact time windows with optional dual timezone.
     let scheduleBlock: string;
     if (windows.lines.length > 0) {
       const header = guestTzDiffers
-        ? `Here are some times that work (${guestTimezoneLabel}, ${hostFirstName}'s time in parens):`
+        ? `Here are some times that work best for ${hostFirstName} (${guestTimezoneLabel}, ${hostFirstName}'s time in parens):`
+        : isVip
+        ? `Here are some times that work best for ${hostFirstName} (${hostTimezoneLabel}):`
         : `Here are some times that work (${hostTimezoneLabel}):`;
       const body = windows.lines.join("\n");
       const legend = windows.hasPreferred
         ? `\n★ = best fit with ${hostFirstName}'s schedule`
         : "";
       const moreNote = windows.wasTruncated ? "\n\nMore times are available in the calendar →" : "";
-      scheduleBlock = `${header}\n\n${body}${legend}${moreNote}`;
+      // VIP one-liner: surface stretch days so the guest knows more can open up.
+      let stretchNote = "";
+      if (isVip) {
+        const stretchDays = formatStretchDays(
+          filteredSlots,
+          hostTimezone,
+          new Date(),
+          guestTzDiffers ? effectiveGuestTz : undefined,
+        );
+        if (stretchDays) {
+          stretchNote = `\n\nIf none of those work, I can also make ${stretchDays} available — just ask.`;
+        }
+      }
+      scheduleBlock = `${header}\n\n${body}${legend}${moreNote}${stretchNote}`;
     } else {
       scheduleBlock = `I don't have open times to show right now — tell me what generally works and I'll find a match.`;
     }

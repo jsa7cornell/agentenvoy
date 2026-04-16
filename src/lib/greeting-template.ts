@@ -348,6 +348,55 @@ export function formatAvailabilityWindows(
   return { lines, hasPreferred, wasTruncated };
 }
 
+// ─── Stretch-day formatter ───────────────────────────────────────────────────
+
+/**
+ * Returns a compact, human-readable list of days that have stretch slots
+ * (score 2–3). Used by the VIP greeting one-liner.
+ *
+ * Example: "Tue Apr 22, Wed Apr 23, and Thu Apr 24"
+ *
+ * Days are grouped using the guest timezone when provided (so the label
+ * matches what the guest sees in the widget), otherwise the host timezone.
+ */
+export function formatStretchDays(
+  slots: ScoredSlot[],
+  hostTimezone: string,
+  now: Date = new Date(),
+  guestTimezone?: string,
+): string {
+  const hasGuestTz = !!guestTimezone && guestTimezone !== hostTimezone;
+  const groupTz = hasGuestTz ? guestTimezone! : hostTimezone;
+
+  const dayFmt = (d: Date) =>
+    d.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      timeZone: groupTz,
+    });
+
+  const seen = new Set<string>();
+  const days: string[] = [];
+
+  for (const slot of slots) {
+    const start = new Date(slot.start);
+    if (start <= now) continue;
+    const score = slot.score ?? 0;
+    if (score < 2 || score > 3) continue;
+    const label = dayFmt(start);
+    if (!seen.has(label)) {
+      seen.add(label);
+      days.push(label);
+    }
+  }
+
+  if (days.length === 0) return "";
+  if (days.length === 1) return days[0];
+  if (days.length === 2) return `${days[0]} and ${days[1]}`;
+  return `${days.slice(0, -1).join(", ")}, and ${days[days.length - 1]}`;
+}
+
 // ─── Format label helpers ────────────────────────────────────────────────────
 
 /** "video" → "video call", "phone" → "phone call", "in-person" → "in-person meeting". */
