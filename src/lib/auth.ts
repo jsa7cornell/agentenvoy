@@ -72,12 +72,41 @@ export const authOptions: NextAuthOptions = {
       }
       return session;
     },
-    async signIn() {
+    async signIn({ account }) {
       // Timezone is seeded once in the `createUser` event below from the
       // user's Google Calendar setting, and from then on is owned by the
       // user's explicit preferences. We deliberately do NOT backfill from
       // Google on subsequent sign-ins — that used to silently overwrite
       // the value the user chose in onboarding or the account page.
+
+      // NextAuth's PrismaAdapter only writes tokens on first linkAccount.
+      // On subsequent sign-ins with the same provider, the new tokens from
+      // Google are silently discarded — leaving stale access_tokens,
+      // expired refresh_tokens, and outdated scopes in the DB. This block
+      // fixes that by updating the Account record with fresh credentials
+      // every time the user signs in via Google.
+      if (account?.provider === "google" && account.providerAccountId) {
+        try {
+          await prisma.account.updateMany({
+            where: {
+              provider: "google",
+              providerAccountId: account.providerAccountId,
+            },
+            data: {
+              access_token: account.access_token ?? undefined,
+              refresh_token: account.refresh_token ?? undefined,
+              expires_at: account.expires_at ?? undefined,
+              scope: account.scope ?? undefined,
+              id_token: account.id_token ?? undefined,
+              token_type: account.token_type ?? undefined,
+            },
+          });
+        } catch (e) {
+          console.error("[signIn] Failed to update Google account tokens:", e);
+          // Don't block sign-in — stale tokens are better than no sign-in
+        }
+      }
+
       return true;
     },
     // JWT callback needed for credentials provider
