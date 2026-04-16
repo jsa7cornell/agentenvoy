@@ -62,17 +62,22 @@ function buildComposeOptions(context: AgentContext) {
   };
 }
 
-export async function streamAgentResponse(context: AgentContext) {
+export async function streamAgentResponse(
+  context: AgentContext,
+  options?: { onFinish?: (result: { text: string }) => void | Promise<void> }
+) {
   const opts = buildComposeOptions(context);
   const systemPrompt = composeSystemPrompt(opts);
 
   return streamText({
     model: envoyModel(getModelForDomain(opts.domain)),
+    maxOutputTokens: 2048,
     system: systemPrompt,
     messages: context.conversationHistory.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
+    onFinish: options?.onFinish,
   });
 }
 
@@ -82,6 +87,7 @@ export async function generateAgentResponse(context: AgentContext) {
 
   const { text } = await generateText({
     model: envoyModel(getModelForDomain(opts.domain)),
+    maxOutputTokens: 2048,
     system: systemPrompt,
     messages: context.conversationHistory.map((m) => ({
       role: m.role as "user" | "assistant",
@@ -97,6 +103,7 @@ export async function parsePreferences(
 ): Promise<Record<string, unknown>> {
   const { text } = await generateText({
     model: envoyModel("claude-sonnet-4-6"),
+    maxOutputTokens: 512,
     system: `You parse natural language scheduling preferences into structured JSON for a meeting negotiation link. Extract ONLY these fields (never invent new ones — the downstream engine ignores unknown keys):
 
 - preferredDays: array of short day names (["Mon","Tue","Wed","Thu","Fri"]) or omit for "any"
@@ -147,6 +154,7 @@ export async function extractLearnings(
 ): Promise<{ persistent: string; situational: string }> {
   const { text } = await generateText({
     model: envoyModel("claude-sonnet-4-6"),
+    maxOutputTokens: 512,
     system: `You analyze completed scheduling negotiation transcripts to extract learnings about the host (${hostName}).
 
 You maintain two knowledge layers:
@@ -198,6 +206,7 @@ export async function extractAvailabilitySummary(
   try {
     const { text } = await generateText({
       model: envoyModel("claude-haiku-4-5-20251001"),
+      maxOutputTokens: 512,
       system: `Extract a 1-2 sentence availability summary from this scheduling conversation. Focus on: what days/times work, what doesn't work, format preferences. If no availability has been stated yet, return "NO_AVAILABILITY". Return ONLY the summary text, no explanation.`,
       prompt: transcript,
     });

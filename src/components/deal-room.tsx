@@ -49,9 +49,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const prevStatusRef = useRef<string>("active");
 
   // Slots state for availability calendar sidebar
-  const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string }>> | null>(null);
+  const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string; score?: number; isShortSlot?: boolean }>> | null>(null);
   const [slotTimezone, setSlotTimezone] = useState("America/New_York");
   const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
+  const [slotDuration, setSlotDuration] = useState<number | undefined>(undefined);
+  const [slotMinDuration, setSlotMinDuration] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -85,6 +87,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           setSlotsByDay(data.slotsByDay);
           setSlotTimezone(data.timezone);
           if (data.currentLocation) setSlotLocation(data.currentLocation);
+          if (data.duration) setSlotDuration(data.duration);
+          if (data.minDuration) setSlotMinDuration(data.minDuration);
         }
       })
       .catch(() => {});
@@ -1084,6 +1088,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   slotsByDay={slotsByDay || {}}
                   timezone={slotTimezone}
                   currentLocation={slotLocation}
+                  duration={slotDuration}
+                  minDuration={slotMinDuration}
                   onSelectSlot={!isHost ? (msg) => {
                     setInput(msg);
                     document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
@@ -1108,6 +1114,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             slotsByDay={slotsByDay || {}}
             timezone={slotTimezone}
             currentLocation={slotLocation}
+            duration={slotDuration}
+            minDuration={slotMinDuration}
             onSelectSlot={!isHost ? (msg) => {
               setInput(msg);
               document.querySelector<HTMLTextAreaElement>("textarea")?.focus();

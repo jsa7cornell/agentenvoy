@@ -203,6 +203,7 @@ Write one sentence now.`;
 
     const { text } = await generateText({
       model: envoyModel(MODEL_ID),
+      maxOutputTokens: 1024,
       system,
       prompt: user,
       temperature: 0.9,
@@ -256,6 +257,7 @@ Write the one-sentence insight now.`;
 
     const { text } = await generateText({
       model: envoyModel(MODEL_ID),
+      maxOutputTokens: 1024,
       system,
       prompt: user,
       temperature: 0.95,

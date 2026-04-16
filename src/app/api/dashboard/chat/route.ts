@@ -151,6 +151,7 @@ export async function POST(req: NextRequest) {
 
   const result = streamText({
     model: envoyModel("claude-sonnet-4-6"),
+    maxOutputTokens: 1024,
     system: DASHBOARD_SYSTEM + "\n\nCONTEXT:\n" + contextMessage,
     messages,
   });

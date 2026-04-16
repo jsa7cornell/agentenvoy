@@ -746,6 +746,7 @@ describe("executeActions", () => {
     });
 
     it("uses meetSlug from context when provided", async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john-ctx", name: "John Anderson" });
       mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
       mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
 
@@ -757,8 +758,8 @@ describe("executeActions", () => {
 
       expect(results[0].success).toBe(true);
       expect(results[0].data?.url).toContain("/meet/john-ctx/");
-      // Should NOT call user.findUnique since meetSlug was in context
-      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+      // Title should use host first name + guest name
+      expect(results[0].data?.title).toBe("John + Noah");
     });
 
     it("looks up meetSlug from user when not in context", async () => {

@@ -85,15 +85,19 @@ export function formatAvailabilityWindows(
   timezone: string,
   now: Date = new Date(),
   guestTimezone?: string,
-  durationMin?: number
+  durationMin?: number,
+  minDurationMin?: number
 ): FormattedWindows {
   const offerable = slots.filter((s) => {
     const start = new Date(s.start);
     return start > now && s.score <= 1;
   });
   // Remove isolated slots that don't have enough consecutive room for the
-  // meeting duration (e.g. a lone 30-min gap can't host a 60-min meeting).
-  const durationFiltered = durationMin ? filterByDuration(offerable, durationMin) : offerable;
+  // meeting. When minDuration is set, use it as the floor so short-but-ok
+  // windows still appear in the greeting.
+  const durationFiltered = durationMin
+    ? filterByDuration(offerable, durationMin, minDurationMin)
+    : offerable;
   const goodSlots = durationFiltered.sort(
     (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
   );

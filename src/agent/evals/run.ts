@@ -126,6 +126,7 @@ async function runCase(evalCase: EvalCase, modelOverride?: string): Promise<Eval
 
   const { text, usage } = await generateText({
     model: envoyModel(model),
+    maxOutputTokens: 2048,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });

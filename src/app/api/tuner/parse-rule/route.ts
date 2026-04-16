@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
 
   const { text: llmResponse } = await generateText({
     model: envoyModel("claude-haiku-4-5-20251001"),
+    maxOutputTokens: 512,
     system: `You parse natural language scheduling preferences into structured rules.
 Today is ${today}. User's timezone is ${tz}.
 Business hours: ${businessHoursStart ?? 9}:00 to ${businessHoursEnd ?? 18}:00.

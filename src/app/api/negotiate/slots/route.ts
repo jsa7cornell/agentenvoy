@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
 
   const slotsByDay: Record<
     string,
-    Array<{ start: string; end: string; score: number }>
+    Array<{ start: string; end: string; score: number; isShortSlot?: boolean }>
   > = {};
 
   let currentLocation: { label: string; until?: string } | null = null;
@@ -136,6 +136,18 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Apply duration filtering for guest view. Uses minDuration as the floor
+    // when set (host agreed shorter is OK) — lone 30-min slots that satisfy
+    // minDuration get isShortSlot: true so the widget can distinguish them.
+    if (!selfMode) {
+      const duration = (linkRules as Record<string, unknown>).duration as number | undefined;
+      const minDuration = (linkRules as Record<string, unknown>).minDuration as number | undefined;
+      if (duration && duration > 30) {
+        const { filterByDuration } = await import("@/lib/scoring");
+        slots = filterByDuration(slots, duration, minDuration);
+      }
+    }
+
     // For guest view: filter based on mode
     // Exclusive mode (any slot has score -2): only show -2 and -1 slots
     // Normal mode: hide score 3+ (moderate friction and above)
@@ -162,11 +174,16 @@ export async function GET(req: NextRequest) {
         start: slot.start,
         end: slot.end,
         score: slot.score,
+        isShortSlot: slot.isShortSlot,
       });
     }
   } catch (e) {
     console.log("Slots endpoint error:", e);
   }
 
-  return NextResponse.json({ slotsByDay, timezone, currentLocation });
+  // Pass duration metadata to widget so it can render short-slot tooltips
+  const duration = (!selfMode && (linkRules as Record<string, unknown>).duration as number | undefined) || undefined;
+  const minDuration = (!selfMode && (linkRules as Record<string, unknown>).minDuration as number | undefined) || undefined;
+
+  return NextResponse.json({ slotsByDay, timezone, currentLocation, duration, minDuration });
 }

@@ -6,6 +6,7 @@ interface Slot {
   start: string;
   end: string;
   score?: number; // 0 = explicitly free (green), 1 = open business hours (yellow)
+  isShortSlot?: boolean; // fits minDuration but not full duration
 }
 
 interface AvailabilityCalendarProps {
@@ -16,6 +17,8 @@ interface AvailabilityCalendarProps {
   onClearLocation?: () => void; // Optional: show a dismiss button on the location notice
   view?: "month" | "week"; // week = compact single-row strip (ideal for mobile)
   onTimezoneClick?: () => void; // Callback when guest clicks the timezone label
+  duration?: number; // preferred meeting duration in minutes
+  minDuration?: number; // minimum acceptable duration (enables short-slot rendering)
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
@@ -88,11 +91,15 @@ function SlotPills({
   dateStr,
   timezone,
   onSelectSlot,
+  duration,
+  minDuration,
 }: {
   slots: Slot[];
   dateStr: string;
   timezone: string;
   onSelectSlot?: (msg: string) => void;
+  duration?: number;
+  minDuration?: number;
 }) {
   const visible = slots.filter((s) => isSlotVisible(s.score));
   if (visible.length === 0) return <p className="text-xs text-muted">No available slots</p>;
@@ -100,14 +107,23 @@ function SlotPills({
     <div className="flex flex-wrap gap-1.5">
       {visible.map((slot, i) => {
         const clickable = isSlotClickable(slot.score);
+        const isShort = slot.isShortSlot === true;
+        const shortTooltip = isShort && duration && minDuration
+          ? `${minDuration} min available — ${duration} min if adjacent time opens up`
+          : isShort
+          ? "Short window — may not fit full meeting"
+          : undefined;
+        const tooltipText = !clickable ? "Potentially doable" : shortTooltip;
         return (
           <button
             key={i}
             onClick={() => clickable && onSelectSlot?.(formatSlotMessage(slot, dateStr, timezone))}
             disabled={!clickable}
-            title={!clickable ? "Potentially doable" : undefined}
+            title={tooltipText}
             className={`px-2 py-1 bg-surface-secondary border rounded-md text-xs transition
-              ${getSlotPillColor(slot.score)}
+              ${isShort
+                ? "border-dashed border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 opacity-80"
+                : getSlotPillColor(slot.score)}
               ${clickable && onSelectSlot ? "hover:bg-surface-tertiary cursor-pointer" : "cursor-default opacity-70"}`}
           >
             {new Date(slot.start).toLocaleTimeString("en-US", {
@@ -180,6 +196,8 @@ function WeekView({
   currentLocation,
   onClearLocation,
   onTimezoneClick,
+  duration,
+  minDuration,
 }: Omit<AvailabilityCalendarProps, "view">) {
   const now = new Date();
   const todayStr = toDateStr(now);
@@ -310,6 +328,8 @@ function WeekView({
             dateStr={selectedDay}
             timezone={timezone}
             onSelectSlot={onSelectSlot}
+            duration={duration}
+            minDuration={minDuration}
           />
         </div>
       )}
@@ -339,6 +359,8 @@ function MonthView({
   currentLocation,
   onClearLocation,
   onTimezoneClick,
+  duration,
+  minDuration,
 }: Omit<AvailabilityCalendarProps, "view">) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
@@ -449,6 +471,8 @@ function MonthView({
             dateStr={selectedDay}
             timezone={timezone}
             onSelectSlot={onSelectSlot}
+            duration={duration}
+            minDuration={minDuration}
           />
         </div>
       )}

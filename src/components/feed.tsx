@@ -453,6 +453,13 @@ export default function Feed() {
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, envoyMsg]);
+
+        // Refresh messages to pick up thread cards created during streaming
+        const refreshRes = await fetch("/api/channel/messages");
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json();
+          setMessages(refreshData.messages || []);
+        }
       }
     } catch (e) {
       console.error("Send error:", e);

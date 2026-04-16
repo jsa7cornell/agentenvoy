@@ -72,6 +72,12 @@ export interface ScoredSlot {
   blockCost?: BlockCost;
   /** Firmness within the block cost — how hard to break. */
   firmness?: BlockFirmness;
+  /**
+   * True when this slot satisfies `minDuration` but not the preferred `duration`.
+   * Set by `filterByDuration` when both are provided. The widget renders these
+   * with a distinct style (dashed border + tooltip) to signal "short window only".
+   */
+  isShortSlot?: boolean;
 }
 
 export interface BlockedWindow {
@@ -173,6 +179,7 @@ export async function compilePreferenceRules(
 
   const { text } = await generateText({
     model: envoyModel("claude-haiku-4-5-20251001"),
+    maxOutputTokens: 512,
     system: `You extract deterministic scheduling rules from natural-language preferences.
 Today is ${today}. The host's timezone is ${tz}.
 
@@ -1140,6 +1147,20 @@ export interface LinkRules {
    * are at most a VIP stretch option.
    */
   allowWeekends?: boolean;
+  /**
+   * Preferred meeting duration in minutes. The ideal length the host wants.
+   * When set, `filterByDuration` requires enough consecutive slots to fit
+   * this duration. If unset, defaults to 30.
+   */
+  duration?: number;
+  /**
+   * Minimum acceptable meeting duration in minutes. When set (and less than
+   * `duration`), the host has agreed that a shorter meeting is OK if a full
+   * `duration` window isn't available. `filterByDuration` uses this as the
+   * hard floor — lone 30-min slots pass through when `minDuration` is 30.
+   * The deal-room agent negotiates the final duration with the guest.
+   */
+  minDuration?: number;
 }
 
 // Canonical short day-name table. All persisted `preferredDays` / `lastResort` /
@@ -1211,6 +1232,18 @@ export function normalizeLinkRules(
     out.allowWeekends = input.allowWeekends;
   } else {
     delete out.allowWeekends;
+  }
+
+  // duration / minDuration: must be positive integers. Drop non-numeric junk.
+  if (typeof input.duration === "number" && input.duration > 0) {
+    out.duration = Math.round(input.duration);
+  } else {
+    delete out.duration;
+  }
+  if (typeof input.minDuration === "number" && input.minDuration > 0) {
+    out.minDuration = Math.round(input.minDuration);
+  } else {
+    delete out.minDuration;
   }
 
   // dateRange: keep only if it's an object with at least one valid ISO date.
@@ -1375,26 +1408,56 @@ export function applyEventOverrides(
 
 /**
  * Filter a slot list so that only slots with a sufficient consecutive run are
- * kept as valid start positions for a meeting of `durationMin` minutes.
+ * kept as valid start positions for a meeting.
  *
  * The scoring engine always generates 30-min granularity slots. If a meeting is
  * 60 min, a lone 30-min slot should never appear as an offerable start — the
- * meeting would bleed into a blocked slot. This filter ensures every returned
- * slot has `ceil(durationMin / 30) - 1` consecutive successors also present in
- * the list.
+ * meeting would bleed into a blocked slot.
+ *
+ * When `minDuration` is set (and < `durationMin`), the floor drops to
+ * `minDuration` — the host has agreed a shorter meeting is acceptable when a
+ * full window isn't available. Slots that satisfy `minDuration` but not
+ * `durationMin` are marked with `isShortSlot: true` so the widget and LLM can
+ * distinguish "fits full duration" from "fits minimum only".
  *
  * Pass-through when durationMin ≤ 30 (every 30-min slot is independently valid).
  */
-export function filterByDuration(slots: ScoredSlot[], durationMin: number): ScoredSlot[] {
+export function filterByDuration(
+  slots: ScoredSlot[],
+  durationMin: number,
+  minDuration?: number
+): ScoredSlot[] {
   if (!durationMin || durationMin <= 30) return slots;
-  const slotsNeeded = Math.ceil(durationMin / 30);
+  const floor = (minDuration && minDuration < durationMin && minDuration > 0)
+    ? minDuration
+    : durationMin;
+  const slotsNeededFull = Math.ceil(durationMin / 30);
+  const slotsNeededMin = Math.ceil(floor / 30);
   const startSet = new Set(slots.map((s) => s.start));
-  return slots.filter((slot) => {
-    const t = new Date(slot.start).getTime();
-    for (let i = 1; i < slotsNeeded; i++) {
-      const nextStart = new Date(t + i * 30 * 60 * 1000).toISOString();
-      if (!startSet.has(nextStart)) return false;
-    }
-    return true;
-  });
+
+  return slots
+    .filter((slot) => {
+      const t = new Date(slot.start).getTime();
+      // Must satisfy at least the minimum floor
+      for (let i = 1; i < slotsNeededMin; i++) {
+        const nextStart = new Date(t + i * 30 * 60 * 1000).toISOString();
+        if (!startSet.has(nextStart)) return false;
+      }
+      return true;
+    })
+    .map((slot) => {
+      if (floor < durationMin) {
+        // Check if it also satisfies the full preferred duration
+        const t = new Date(slot.start).getTime();
+        let fitsFull = true;
+        for (let i = 1; i < slotsNeededFull; i++) {
+          const nextStart = new Date(t + i * 30 * 60 * 1000).toISOString();
+          if (!startSet.has(nextStart)) { fitsFull = false; break; }
+        }
+        if (!fitsFull) {
+          return { ...slot, isShortSlot: true };
+        }
+      }
+      return slot;
+    });
 }

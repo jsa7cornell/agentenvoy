@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { generateText } from "ai";
+import { streamText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule } from "@/agent/composer";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
-import { sanitizeHistory, roleSummary } from "@/lib/conversation";
+import { sanitizeHistory } from "@/lib/conversation";
 import { getUserTimezone } from "@/lib/timezone";
 
 const TUNER_SYSTEM = `You are Envoy, operating inside the Availability Tuner. The user is viewing a weekly calendar overlay that shows their Google Calendar events alongside your scored availability slots. Your job is to help them understand and adjust their availability.
@@ -212,48 +212,37 @@ export async function POST(req: NextRequest) {
       console.warn(`[tuner/chat] History sanitized | userId=${user.id} | ${warnings.join("; ")}`);
     }
 
-    // Generate response
-    let text: string;
-    try {
-      const result = await generateText({
-        model: envoyModel("claude-sonnet-4-6"),
-        system: TUNER_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n"),
-        messages,
-      });
-      text = result.text;
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      console.error(
-        `[tuner/chat] AI call failed | userId=${user.id} | messageCount=${messages.length} | roles=${roleSummary(messages)} | error=${err.message}`
-      );
-      return NextResponse.json(
-        { error: "AI service temporarily unavailable", detail: err.message, retryable: true },
-        { status: 502 }
-      );
-    }
+    // Generate streaming response
+    const result = streamText({
+      model: envoyModel("claude-sonnet-4-6"),
+      maxOutputTokens: 1024,
+      system: TUNER_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n"),
+      messages,
+      async onFinish({ text }) {
+        try {
+          // Parse and execute actions
+          const actions = parseActions(text);
+          if (actions.length > 0) {
+            await executeActions(actions, user.id);
+          }
 
-    // Parse and execute actions
-    const actions = parseActions(text);
-    let actionExecuted = false;
-    if (actions.length > 0) {
-      const results = await executeActions(actions, user.id);
-      actionExecuted = results.some((r) => r.success);
-    }
+          // Strip action blocks from displayed text
+          let displayText = stripActionBlocks(text);
+          displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
 
-    // Strip action blocks from displayed text
-    let displayText = stripActionBlocks(text);
+          const finalText = displayText || "Done.";
 
-    // Also strip legacy action blocks if any
-    displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
-
-    const finalText = displayText || "Done.";
-
-    // Save envoy response
-    await prisma.channelMessage.create({
-      data: { channelId: channel.id, role: "envoy", content: finalText },
+          // Save envoy response
+          await prisma.channelMessage.create({
+            data: { channelId: channel.id, role: "envoy", content: finalText },
+          });
+        } catch (e) {
+          console.error("[tuner/chat] onFinish error:", e);
+        }
+      },
     });
 
-    return NextResponse.json({ message: finalText, actionExecuted });
+    return result.toTextStreamResponse();
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.error(`[tuner/chat] Unhandled error: ${err.message}`, err.stack);

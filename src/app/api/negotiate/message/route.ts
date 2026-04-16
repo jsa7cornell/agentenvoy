@@ -8,7 +8,7 @@ import { computeThreadStatus } from "@/lib/thread-status";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
-import { sanitizeHistory, roleSummary } from "@/lib/conversation";
+import { sanitizeHistory } from "@/lib/conversation";
 
 const VALID_STATUSES = ["active", "proposed", "cancelled", "escalated"];
 
@@ -181,88 +181,60 @@ export async function POST(req: NextRequest) {
     conversationHistory: history,
   };
 
-  const { generateAgentResponse } = await import("@/agent/administrator");
-  let responseText: string;
-  try {
-    responseText = await generateAgentResponse(context);
-  } catch (e) {
-    const err = e instanceof Error ? e : new Error(String(e));
-    console.error(
-      `[negotiate/message] AI call failed | sessionId=${sessionId} | hostId=${session.hostId} | messageCount=${history.length} | roles=${roleSummary(history)} | error=${err.message}`
-    );
-    return new Response(
-      JSON.stringify({
-        error: "AI service temporarily unavailable",
-        detail: err.message,
-        retryable: true,
-      }),
-      { status: 502, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  const { streamAgentResponse } = await import("@/agent/administrator");
+  const streamResult = await streamAgentResponse(context, {
+    async onFinish({ text: responseText }) {
+      try {
+        // Parse and execute [ACTION] blocks
+        const actions = parseActions(responseText);
+        if (actions.length > 0) {
+          await executeActions(actions, session.hostId, { sessionId });
+        }
 
-  // Parse and execute [ACTION] blocks
-  const actions = parseActions(responseText);
-  if (actions.length > 0) {
-    await executeActions(actions, session.hostId, { sessionId });
-  }
+        // Strip all structured blocks from the display text
+        let displayText = stripActionBlocks(responseText);
 
-  // Strip all structured blocks from the display text
-  let displayText = stripActionBlocks(responseText);
+        // Parse and apply status update if present
+        const statusUpdate = parseStatusUpdate(displayText);
+        displayText = stripStatusUpdate(displayText);
 
-  // Note: TIMEZONE_SWITCH blocks are NOT stripped server-side — they're stored in the DB
-  // and parsed client-side by deal-room.tsx to update the widget timezone.
+        // Save the response (stripped of all blocks)
+        await prisma.message.create({
+          data: { sessionId, role: "administrator", content: displayText },
+        });
 
-  // Parse and apply status update if present
-  const statusUpdate = parseStatusUpdate(displayText);
-  displayText = stripStatusUpdate(displayText);
-
-  // Save the response (stripped of all blocks)
-  await prisma.message.create({
-    data: { sessionId, role: "administrator", content: displayText },
-  });
-
-  // Update session status from AI block, or fall back to thread status heuristic
-  if (statusUpdate && VALID_STATUSES.includes(statusUpdate.status)) {
-    await prisma.negotiationSession.update({
-      where: { id: sessionId },
-      data: {
-        status: statusUpdate.status,
-        statusLabel: statusUpdate.label,
-      },
-    });
-  } else {
-    const lastMessage = await prisma.message.findFirst({
-      where: { sessionId },
-      orderBy: { createdAt: "desc" },
-    });
-    const statusResult = computeThreadStatus({
-      status: session.status,
-      inviteeName: session.link.inviteeName,
-      lastMessageRole: lastMessage?.role,
-      guestEmail: session.guestEmail || session.link.inviteeEmail,
-    });
-    await prisma.negotiationSession.update({
-      where: { id: sessionId },
-      data: { statusLabel: statusResult.label },
-    });
-  }
-
-  // Return as a streaming-compatible format
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      // Send in AI SDK text stream format (stripped of all blocks)
-      controller.enqueue(encoder.encode(`0:${JSON.stringify(displayText)}\n`));
-      controller.close();
+        // Update session status from AI block, or fall back to thread status heuristic
+        if (statusUpdate && VALID_STATUSES.includes(statusUpdate.status)) {
+          await prisma.negotiationSession.update({
+            where: { id: sessionId },
+            data: {
+              status: statusUpdate.status,
+              statusLabel: statusUpdate.label,
+            },
+          });
+        } else {
+          const lastMessage = await prisma.message.findFirst({
+            where: { sessionId },
+            orderBy: { createdAt: "desc" },
+          });
+          const statusResult = computeThreadStatus({
+            status: session.status,
+            inviteeName: session.link.inviteeName,
+            lastMessageRole: lastMessage?.role,
+            guestEmail: session.guestEmail || session.link.inviteeEmail,
+          });
+          await prisma.negotiationSession.update({
+            where: { id: sessionId },
+            data: { statusLabel: statusResult.label },
+          });
+        }
+      } catch (e) {
+        console.error("[negotiate/message] onFinish error:", e);
+      }
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache",
-    },
-  });
+  return streamResult.toTextStreamResponse();
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.error(`[negotiate/message] Unhandled error: ${err.message}`, err.stack);

@@ -394,14 +394,17 @@ async function handleCreateLink(
   userId: string,
   meetSlug?: string
 ): Promise<ActionResult> {
+  // Always fetch both slug (if needed) and name in one query so the session
+  // title can use "John + Guest" format. When meetSlug is already provided via
+  // context we still need the name — combine into a single lookup.
+  const userRow = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { meetSlug: true, name: true },
+  });
   if (!meetSlug) {
-    // Look up the user's meetSlug
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { meetSlug: true },
-    });
-    meetSlug = user?.meetSlug || undefined;
+    meetSlug = userRow?.meetSlug || undefined;
   }
+  const hostName: string | null = userRow?.name || null;
 
   if (!meetSlug) {
     return { success: false, message: "No meet slug configured. Set up your profile first." };

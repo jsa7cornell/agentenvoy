@@ -423,6 +423,8 @@ export async function POST(req: NextRequest) {
     (hostExplicit.duration as number | undefined) ||
     session.duration ||
     undefined;
+  const effectiveMinDuration =
+    (linkRules.minDuration as number | undefined) || undefined;
   const formatIsLocked = Boolean(linkRules.format);
 
   // Apply link-level rules (preferredDays, dateRange, lastResort, slot overrides)
@@ -474,7 +476,8 @@ export async function POST(req: NextRequest) {
     hostTimezone,
     new Date(),
     guestTzDiffers ? effectiveGuestTz : undefined,
-    effectiveDuration ?? undefined
+    effectiveDuration ?? undefined,
+    effectiveMinDuration
   );
 
   let greeting: string;
@@ -524,14 +527,20 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Format/duration sentence — "This would be a 30-minute video call."
+    // When minDuration < duration, show "30–45 min" to signal flexibility.
     const fmtLabel = formatLabel(effectiveFormat);
+    const durationLabel = (effectiveMinDuration && effectiveMinDuration < (effectiveDuration ?? 30))
+      ? `${effectiveMinDuration}–${effectiveDuration}`
+      : effectiveDuration
+      ? `${effectiveDuration}`
+      : null;
     let formatSentence = "";
-    if (effectiveDuration && fmtLabel) {
-      formatSentence = `This would be a ${effectiveDuration}-minute ${fmtLabel}.`;
+    if (durationLabel && fmtLabel) {
+      formatSentence = `This would be a ${durationLabel}-minute ${fmtLabel}.`;
     } else if (fmtLabel) {
       formatSentence = `This would be a ${fmtLabel}.`;
-    } else if (effectiveDuration) {
-      formatSentence = `This would be a ${effectiveDuration}-minute meeting.`;
+    } else if (durationLabel) {
+      formatSentence = `This would be a ${durationLabel}-minute meeting.`;
     }
 
     // 4. Options sentence — conditional on what's still flexible.

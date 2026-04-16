@@ -637,7 +637,8 @@ export function formatOfferableSlots(
   // LinkRules doesn't type `duration` (it lives in the rules JSON blob) so we
   // cast through unknown to read it safely.
   const meetingDuration = ((linkRules as unknown as Record<string, unknown>)?.duration as number | undefined);
-  const finalSlots = meetingDuration ? filterByDuration(overriddenSlots, meetingDuration) : overriddenSlots;
+  const meetingMinDuration = ((linkRules as unknown as Record<string, unknown>)?.minDuration as number | undefined);
+  const finalSlots = meetingDuration ? filterByDuration(overriddenSlots, meetingDuration, meetingMinDuration) : overriddenSlots;
 
   const now = new Date();
   const rules = linkRules ?? {};
