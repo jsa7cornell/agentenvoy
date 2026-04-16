@@ -15,7 +15,6 @@ import {
   formatAvailabilityWindows,
   humanTimezoneLabel,
   formatLabel,
-  alternateFormatsLabel,
 } from "@/lib/greeting-template";
 
 const GENERIC_TOPICS = new Set([
@@ -453,8 +452,6 @@ export async function POST(req: NextRequest) {
     undefined;
   const effectiveMinDuration =
     (linkRules.minDuration as number | undefined) || undefined;
-  const formatIsLocked = Boolean(linkRules.format);
-
   // Apply link-level rules (preferredDays, dateRange, lastResort, slot overrides)
   // BEFORE formatting so the greeting shows the same set of times the LLM will
   // see in `formatOfferableSlots` on follow-up turns. Without this, the greeting
