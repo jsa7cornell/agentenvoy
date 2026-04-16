@@ -28,7 +28,8 @@ export type SlotKind =
   | "blackout" // user-declared vacation day
   | "blocked_window" // user preference block (surfing, focus time, etc.)
   | "off_hours" // weekday outside business hours, no other block
-  | "weekend"; // Saturday or Sunday, no other block
+  | "weekend" // Saturday or Sunday, no other block
+  | "office_hours"; // inside an active office-hours rule window
 
 /**
  * INTRINSIC nature of a slot's protection — the primary signal the VIP

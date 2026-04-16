@@ -98,11 +98,11 @@ export function applyOfficeHoursWindow({
       // if desired, and so contiguous-block stitching isn't fooled.
       out.push(slot);
     } else {
-      // Override soft protection: re-score to 0 (explicitly free), kind: "open".
+      // Override soft protection: re-score to 0 (explicitly free).
       out.push({
         ...slot,
         score: 0,
-        kind: "open",
+        kind: "office_hours",
         reason: "office hours",
       });
     }

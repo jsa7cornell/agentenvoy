@@ -134,7 +134,7 @@ describe("applyOfficeHoursWindow — soft protection override", () => {
     });
     expect(out).toHaveLength(1);
     expect(out[0].score).toBe(0);
-    expect(out[0].kind).toBe("open");
+    expect(out[0].kind).toBe("office_hours");
     expect(out[0].reason).toBe("office hours");
   });
 
@@ -146,7 +146,7 @@ describe("applyOfficeHoursWindow — soft protection override", () => {
       timezone: "America/Los_Angeles",
     });
     expect(out[0].score).toBe(0);
-    expect(out[0].kind).toBe("open");
+    expect(out[0].kind).toBe("office_hours");
   });
 
   it("overrides weekend protection inside the window", () => {
@@ -160,7 +160,7 @@ describe("applyOfficeHoursWindow — soft protection override", () => {
     });
     expect(out).toHaveLength(1);
     expect(out[0].score).toBe(0);
-    expect(out[0].kind).toBe("open");
+    expect(out[0].kind).toBe("office_hours");
   });
 });
 

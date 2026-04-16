@@ -220,8 +220,8 @@ export function DayView({
             {Array.from({ length: TOTAL_ROWS }, (_, row) => {
               const mins = gridStartMin + row * 30;
               const slot = slotIndex[`${selectedDay}-${mins}`];
-              const scoreColor = slot ? getScoreColor(slot.score) : "bg-surface-secondary/30";
-              const scoreBorder = slot ? getScoreBorder(slot.score) : "";
+              const scoreColor = slot ? getScoreColor(slot.score, slot.kind) : "bg-surface-secondary/30";
+              const scoreBorder = slot ? getScoreBorder(slot.score, slot.kind) : "";
               const isHourBoundary = row % 2 === 0;
 
               return (

@@ -186,6 +186,7 @@ export function WeeklyCalendar({
       {/* Score legend + timezone badge */}
       <div className="flex items-center gap-4 px-4 py-2 border-b border-secondary text-[11px] text-muted shrink-0">
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-100 dark:bg-emerald-600/60 border border-emerald-500 dark:border-emerald-400" /> Available</span>
+        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-teal-100 dark:bg-teal-600/70 border border-teal-500 dark:border-teal-400" /> Office Hours</span>
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-100 dark:bg-amber-600/50 border border-amber-500 dark:border-amber-400" /> Protected</span>
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-100 dark:bg-red-600/50 border border-red-600 dark:border-red-500" /> Blocked</span>
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-50 dark:bg-indigo-900/80 border border-indigo-500 dark:border-indigo-400" /> Calendar event</span>
@@ -269,8 +270,8 @@ export function WeeklyCalendar({
                 {Array.from({ length: TOTAL_ROWS }, (_, row) => {
                   const mins = gridStartMin + row * 30;
                   const slot = slotIndex[`${day}-${mins}`];
-                  const scoreColor = slot ? getScoreColor(slot.score) : "bg-surface-secondary/30";
-                  const scoreBorder = slot ? getScoreBorder(slot.score) : "";
+                  const scoreColor = slot ? getScoreColor(slot.score, slot.kind) : "bg-surface-secondary/30";
+                  const scoreBorder = slot ? getScoreBorder(slot.score, slot.kind) : "";
                   const isHourBoundary = row % 2 === 0;
 
                   return (
