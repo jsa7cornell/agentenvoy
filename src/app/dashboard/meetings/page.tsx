@@ -220,7 +220,7 @@ export default function MeetingsPage() {
                         className="text-xs text-muted hover:text-secondary transition px-2 py-1"
                       >Keep</button>
                       <button
-                        onClick={(e) => { e.preventDefault(); isConfirmed ? handleCancel(s.id) : handleArchive(s.id); setConfirmCancel(null); }}
+                        onClick={(e) => { e.preventDefault(); if (isConfirmed) { handleCancel(s.id); } else { handleArchive(s.id); setConfirmCancel(null); } }}
                         disabled={cancelling === s.id || archiving === s.id}
                         className="text-xs font-medium text-red-400 hover:text-red-300 border border-red-500/30 rounded px-2 py-1 transition disabled:opacity-50"
                       >{(cancelling === s.id || archiving === s.id) ? "Cancelling…" : "Yes, cancel"}</button>
