@@ -90,6 +90,7 @@ export async function GET() {
     upcomingSchedulePreferences: user.upcomingSchedulePreferences ?? "",
     compiledRules: compiledFromStructured ?? compiled ?? null,
     structuredRules: cleanedRules,
+    videoProvider: (explicit.videoProvider as string) || (prefs.videoProvider as string) || "google-meet",
   });
 }
 

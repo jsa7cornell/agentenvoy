@@ -41,6 +41,7 @@ interface PreferenceData {
   businessHoursEnd: number;
   structuredRules: AvailabilityRule[];
   defaultLocation?: string;
+  videoProvider?: string; // "google-meet" | "zoom"
   // Legacy fields (read-only, kept for backwards compat)
   blockedWindows: unknown[];
   blackoutDays: string[];
@@ -237,7 +238,9 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
       timeStart: pendingRule.timeStart,
       timeEnd: pendingRule.timeEnd,
       allDay: pendingRule.allDay,
-      daysOfWeek: pendingRule.daysOfWeek,
+      // Office hours defaults to every day (all 7) when the parser didn't
+      // capture a specific set — matches the "every day" chooser behavior.
+      daysOfWeek: pendingRule.daysOfWeek ?? (pendingRule.action === "office_hours" ? [0, 1, 2, 3, 4, 5, 6] : undefined),
       effectiveDate: pendingRule.effectiveDate,
       expiryDate: pendingRule.expiryDate,
       bufferMinutesBefore: pendingRule.bufferMinutesBefore,
@@ -411,6 +414,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
           {pendingRule && (
             <ConfirmationCard
               rule={pendingRule}
+              videoProvider={data.videoProvider}
               selectedInterpretation={selectedInterpretation}
               onSelectInterpretation={setSelectedInterpretation}
               onConfirm={confirmRule}
@@ -661,6 +665,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
 
 function ConfirmationCard({
   rule,
+  videoProvider,
   selectedInterpretation,
   onSelectInterpretation,
   onConfirm,
@@ -668,13 +673,19 @@ function ConfirmationCard({
   onUpdateRule,
 }: {
   rule: ParsedRule;
+  videoProvider?: string;
   selectedInterpretation: number;
   onSelectInterpretation: (i: number) => void;
   onConfirm: () => void;
   onCancel: () => void;
   onUpdateRule: (updates: Partial<ParsedRule>) => void;
 }) {
+  // For office_hours rules, fields are always directly editable (no toggle).
+  // For other rule types, keep the existing edit/view toggle.
   const [isEditing, setIsEditing] = useState(false);
+  const alwaysEdit = rule.action === "office_hours";
+  const editing = alwaysEdit || isEditing;
+  const videoProviderLabel = videoProvider === "zoom" ? "Zoom" : "Google Meet";
 
   return (
     <div className="bg-surface-secondary border border-indigo-500/30 rounded-xl p-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -745,51 +756,37 @@ function ConfirmationCard({
             {rule.action === "office_hours" && (
               <>
                 <span className="text-muted">Title</span>
-                {isEditing ? (
-                  <input
-                    type="text"
-                    defaultValue={rule.officeHoursTitle ?? "Office Hours"}
-                    onChange={(e) => onUpdateRule({ officeHoursTitle: e.target.value })}
-                    placeholder="Office Hours"
-                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
-                  />
-                ) : (
-                  <span className="text-primary">{rule.officeHoursTitle?.trim() || "Office Hours"}</span>
-                )}
+                <input
+                  type="text"
+                  value={rule.officeHoursTitle ?? "Office Hours"}
+                  onChange={(e) => onUpdateRule({ officeHoursTitle: e.target.value })}
+                  placeholder="Office Hours"
+                  className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                />
                 <span className="text-muted">Format</span>
-                {isEditing || !rule.officeHoursFormat ? (
-                  <select
-                    value={rule.officeHoursFormat ?? ""}
-                    onChange={(e) => onUpdateRule({ officeHoursFormat: (e.target.value || undefined) as ParsedRule["officeHoursFormat"] })}
-                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
-                  >
-                    <option value="">Choose…</option>
-                    <option value="video">Video</option>
-                    <option value="phone">Phone</option>
-                    <option value="in-person">In-person</option>
-                  </select>
-                ) : (
-                  <span className="text-primary">
-                    {rule.officeHoursFormat === "video" ? "Video" : rule.officeHoursFormat === "phone" ? "Phone" : "In-person"}
-                  </span>
-                )}
+                <select
+                  value={rule.officeHoursFormat ?? ""}
+                  onChange={(e) => onUpdateRule({ officeHoursFormat: (e.target.value || undefined) as ParsedRule["officeHoursFormat"] })}
+                  className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                >
+                  <option value="">Choose…</option>
+                  <option value="video">Video ({videoProviderLabel})</option>
+                  <option value="phone">Phone</option>
+                  <option value="in-person">In-person</option>
+                </select>
                 <span className="text-muted">Duration</span>
-                {isEditing || !rule.officeHoursDurationMinutes ? (
-                  <select
-                    value={rule.officeHoursDurationMinutes ?? ""}
-                    onChange={(e) => onUpdateRule({ officeHoursDurationMinutes: e.target.value ? Number(e.target.value) : undefined })}
-                    className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
-                  >
-                    <option value="">Choose…</option>
-                    <option value="15">15 min</option>
-                    <option value="20">20 min</option>
-                    <option value="30">30 min</option>
-                    <option value="45">45 min</option>
-                    <option value="60">60 min</option>
-                  </select>
-                ) : (
-                  <span className="text-primary">{rule.officeHoursDurationMinutes} min</span>
-                )}
+                <select
+                  value={rule.officeHoursDurationMinutes ?? ""}
+                  onChange={(e) => onUpdateRule({ officeHoursDurationMinutes: e.target.value ? Number(e.target.value) : undefined })}
+                  className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
+                >
+                  <option value="">Choose…</option>
+                  <option value="15">15 min</option>
+                  <option value="20">20 min</option>
+                  <option value="30">30 min</option>
+                  <option value="45">45 min</option>
+                  <option value="60">60 min</option>
+                </select>
               </>
             )}
             {/* Business hours */}
@@ -828,22 +825,24 @@ function ConfirmationCard({
                 </>
               )
             )}
-            {/* When — days of week */}
-            {rule.daysOfWeek && (
-              isEditing ? (
+            {/* When — days of week. Office hours always shows the chooser,
+                defaulting to all 7 days when the parser didn't specify any. */}
+            {(rule.daysOfWeek || rule.action === "office_hours") && (
+              editing ? (
                 <>
                   <span className="text-muted">When</span>
                   <div className="flex flex-wrap gap-1">
                     {DAY_NAMES_SHORT.map((name, i) => {
-                      const active = rule.daysOfWeek!.includes(i);
+                      const currentDays = rule.daysOfWeek ?? [0, 1, 2, 3, 4, 5, 6];
+                      const active = currentDays.includes(i);
                       return (
                         <button
                           key={i}
                           type="button"
                           onClick={() => {
                             const newDays = active
-                              ? rule.daysOfWeek!.filter(d => d !== i)
-                              : [...rule.daysOfWeek!, i].sort();
+                              ? currentDays.filter(d => d !== i)
+                              : [...currentDays, i].sort();
                             onUpdateRule({ daysOfWeek: newDays });
                           }}
                           className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
@@ -862,7 +861,7 @@ function ConfirmationCard({
                 <>
                   <span className="text-muted">When</span>
                   <span className="text-primary">
-                    {rule.type === "recurring" ? "Every " : ""}{daysLabel(rule.daysOfWeek)}
+                    {rule.type === "recurring" ? "Every " : ""}{daysLabel(rule.daysOfWeek ?? [0, 1, 2, 3, 4, 5, 6])}
                   </span>
                 </>
               )
@@ -951,7 +950,7 @@ function ConfirmationCard({
 
             {/* Time */}
             {rule.allDay ? (
-              isEditing ? (
+              editing ? (
                 <>
                   <span className="text-muted">Time</span>
                   <div className="flex items-center gap-1">
@@ -971,7 +970,7 @@ function ConfirmationCard({
                 </>
               )
             ) : rule.timeStart && rule.timeEnd ? (
-              isEditing ? (
+              editing ? (
                 <>
                   <span className="text-muted">Time</span>
                   <div className="flex items-center gap-1">
@@ -1070,12 +1069,14 @@ function ConfirmationCard({
           <Check className="w-4 h-4" />
           Looks good
         </button>
-        <button
-          onClick={() => setIsEditing(!isEditing)}
-          className="px-3 py-2 text-sm text-muted hover:text-secondary border border-DEFAULT rounded-lg transition"
-        >
-          {isEditing ? "Done editing" : "Edit"}
-        </button>
+        {!alwaysEdit && (
+          <button
+            onClick={() => setIsEditing(!isEditing)}
+            className="px-3 py-2 text-sm text-muted hover:text-secondary border border-DEFAULT rounded-lg transition"
+          >
+            {isEditing ? "Done editing" : "Edit"}
+          </button>
+        )}
         <button
           onClick={onCancel}
           className="px-3 py-2 text-sm text-muted hover:text-secondary border border-DEFAULT rounded-lg transition"
