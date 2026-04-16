@@ -6,7 +6,7 @@
  * format consumed by the scoring engine — no LLM needed at compilation time.
  */
 
-import type { CompiledRules, BlockedWindow, CompiledBuffer, CompiledPriorityBucket } from "./scoring";
+import type { CompiledRules, BlockedWindow, AllowWindow, CompiledBuffer, CompiledPriorityBucket } from "./scoring";
 
 // --- Types ---
 
@@ -153,6 +153,7 @@ export function compileStructuredRules(
   defaultBizEnd: number = 18,
 ): CompiledRules {
   const blockedWindows: BlockedWindow[] = [];
+  const allowWindows: AllowWindow[] = [];
   const buffers: CompiledBuffer[] = [];
   const priorityBuckets: CompiledPriorityBucket[] = [];
   const blackoutDays: string[] = [];
@@ -209,13 +210,19 @@ export function compileStructuredRules(
       }
 
       case "allow": {
-        // "Allow" rules don't directly map to blocked windows.
-        // They're informational for the agent — we store them as blocked windows
-        // with a special label prefix so the scoring engine can handle them.
-        // For now, allow rules affect business hours (e.g., "calls OK Saturday before 2pm"
-        // means Saturday 0:00-14:00 should be scored lower).
-        // This is a no-op in the blocked windows model — allow rules are handled
-        // by the agent reading the compiled preferences text.
+        // Allow rules override event-based blocking during the specified window.
+        // E.g. "protein shake reminders at 1pm shouldn't block availability" →
+        // events during 1:00–1:05 are treated as transparent.
+        const aw: AllowWindow = {
+          start: rule.timeStart || "00:00",
+          end: rule.timeEnd || "23:59",
+          label: rule.originalText,
+        };
+        if (rule.daysOfWeek && rule.daysOfWeek.length > 0) {
+          aw.days = rule.daysOfWeek.map(d => DAY_NAMES[d]);
+        }
+        if (rule.expiryDate) aw.expires = rule.expiryDate;
+        allowWindows.push(aw);
         break;
       }
 
@@ -296,6 +303,7 @@ export function compileStructuredRules(
 
   return {
     blockedWindows,
+    allowWindows,
     buffers,
     priorityBuckets,
     businessHoursStart: businessHoursStart ?? defaultBizStart,

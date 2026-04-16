@@ -139,8 +139,19 @@ export interface CompiledPriorityBucket {
   keywords: string[];
 }
 
+/** An allow window overrides event-based blocking during the specified time.
+ *  Events overlapping this window are treated as transparent (score 0). */
+export interface AllowWindow {
+  start: string; // "HH:MM" 24-hour
+  end: string;
+  days?: string[]; // short day names: "Mon", "Tue", etc.
+  label?: string;
+  expires?: string; // ISO date "YYYY-MM-DD"
+}
+
 export interface CompiledRules {
   blockedWindows: BlockedWindow[];
+  allowWindows: AllowWindow[];
   buffers: CompiledBuffer[];
   priorityBuckets: CompiledPriorityBucket[];
   businessHoursStart?: number;
@@ -175,7 +186,7 @@ export async function compilePreferenceRules(
   if (upcomingSchedulePreferences?.trim()) texts.push(`Schedule context:\n${upcomingSchedulePreferences}`);
 
   if (texts.length === 0) {
-    return { blockedWindows: [], buffers: [], priorityBuckets: [], ambiguities: [], compiledAt: new Date().toISOString() };
+    return { blockedWindows: [], allowWindows: [], buffers: [], priorityBuckets: [], ambiguities: [], compiledAt: new Date().toISOString() };
   }
 
   const { text } = await generateText({
@@ -291,6 +302,7 @@ Examples:
       businessHoursStart: typeof parsed.businessHoursStart === "number" ? parsed.businessHoursStart : undefined,
       businessHoursEnd: typeof parsed.businessHoursEnd === "number" ? parsed.businessHoursEnd : undefined,
       blackoutDays: Array.isArray(parsed.blackoutDays) ? parsed.blackoutDays.map(String) : undefined,
+      allowWindows: [],
       ambiguities: Array.isArray(parsed.ambiguities) ? parsed.ambiguities.map(String) : [],
       compiledAt: new Date().toISOString(),
     };
@@ -300,6 +312,7 @@ Examples:
     const fallback = extractTemporalOverrides(persistentKnowledge, upcomingSchedulePreferences);
     return {
       blockedWindows: fallback.extraBlockedWindows,
+      allowWindows: [],
       buffers: [],
       priorityBuckets: [],
       businessHoursStart: fallback.adjustedBizHours?.start,
@@ -410,6 +423,26 @@ function isInBlockedWindow(
 }
 
 /**
+ * Check if a time + day falls within an allow window.
+ * Allow windows make overlapping events transparent (score 0).
+ */
+function isInAllowWindow(
+  hour: number,
+  minute: number,
+  shortDay: string,
+  allowWindows: AllowWindow[],
+  todayStr: string
+): AllowWindow | null {
+  const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  for (const w of allowWindows) {
+    if (w.expires && w.expires < todayStr) continue;
+    if (w.days && !w.days.includes(shortDay)) continue;
+    if (timeStr >= w.start && timeStr < w.end) return w;
+  }
+  return null;
+}
+
+/**
  * Check if an event title matches any keywords (case-insensitive).
  */
 function titleMatches(summary: string, keywords: string[]): boolean {
@@ -431,6 +464,7 @@ function scoreSlot(
   tz: string,
   buffers: CompiledBuffer[] = [],
   priorityBuckets: CompiledPriorityBucket[] = [],
+  allowWindows: AllowWindow[] = [],
 ): ScoredSlot {
   const { hour, minute, dayName } = getLocalParts(slotStart, tz);
   const todayStr = getLocalDateStr(new Date(), tz);
@@ -545,8 +579,27 @@ function scoreSlot(
     }
   }
 
+  // Allow windows — if this slot falls inside one, overlapping timed events
+  // are treated as transparent. Blackouts, OOO, and all-day blocks (above)
+  // still hold. This lets the host say "protein shake reminder at 1pm
+  // shouldn't block availability" or "allow meetings during Focus Time".
+  const allowMatch = isInAllowWindow(hour, minute, dayName, allowWindows, todayStr);
+
   // Find overlapping calendar events (timed, not all-day)
   const overlapping = events.filter((ev) => !ev.isAllDay && slotStart < ev.end && slotEnd > ev.start);
+
+  // If this slot is inside an allow window, treat all timed event overlaps
+  // as transparent — return score 0 (open). The host explicitly said "this
+  // time is available" despite whatever calendar events exist.
+  if (allowMatch && overlapping.length > 0) {
+    return {
+      ...base,
+      score: 0,
+      reason: `allowed: ${allowMatch.label || "allow window"}`,
+      kind: "open",
+      blockCost: "none",
+    };
+  }
 
   if (overlapping.length === 0) {
     // No direct overlap — check buffer zones around nearby events
@@ -967,11 +1020,12 @@ export function computeSchedule(
   const compiled = (preferences as Record<string, unknown>).compiled as CompiledRules | undefined;
   const buffers: CompiledBuffer[] = compiled?.buffers ?? [];
   const priorityBuckets: CompiledPriorityBucket[] = compiled?.priorityBuckets ?? [];
+  const allowWindows: AllowWindow[] = compiled?.allowWindows ?? [];
 
   // Diagnostic logging for buffer/priority debugging
   if (compiled) {
     const eventsWithLocation = events.filter((e) => !!e.location).length;
-    console.log(`[computeSchedule] compiled: ${compiled.blockedWindows.length} blocked, ${buffers.length} buffers, ${priorityBuckets.length} priorities | ${events.length} events (${eventsWithLocation} with location)`);
+    console.log(`[computeSchedule] compiled: ${compiled.blockedWindows.length} blocked, ${allowWindows.length} allow, ${buffers.length} buffers, ${priorityBuckets.length} priorities | ${events.length} events (${eventsWithLocation} with location)`);
     if (buffers.length > 0) {
       console.log(`[computeSchedule] buffers:`, JSON.stringify(buffers));
     }
@@ -1041,7 +1095,8 @@ export function computeSchedule(
       preferences,
       tz,
       buffers,
-      priorityBuckets
+      priorityBuckets,
+      allowWindows
     );
 
     // Apply the hours-protection layer AFTER scoreSlot, ONLY to otherwise-
