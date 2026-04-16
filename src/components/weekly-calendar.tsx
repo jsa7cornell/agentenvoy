@@ -60,11 +60,10 @@ export interface TunerSlot {
  * memorize the numeric score table.
  */
 export function slotTierLabel(score: number): string {
-  if (score <= 0) return "host preferred";
-  if (score <= 2) return "first offer";
-  if (score === 3) return "stretch (VIP)";
-  if (score === 4) return "deep stretch (VIP + explicit)";
-  return "never offered";
+  if (score < 0) return "host preferred";
+  if (score <= 1) return "bookable";
+  if (score <= 3) return "protected (VIP)";
+  return "blocked";
 }
 
 /**

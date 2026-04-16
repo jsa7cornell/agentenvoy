@@ -44,23 +44,20 @@ function slotOf(
 describe("getTier — default non-VIP link", () => {
   const rules: LinkRules = {};
 
-  it("returns first-offer for open slots at score 0-2", () => {
+  it("returns first-offer for bookable-band slots (score 0-1)", () => {
     expect(getTier(slotOf(0), rules, TZ)).toBe("first-offer");
     expect(getTier(slotOf(1), rules, TZ)).toBe("first-offer");
-    expect(getTier(slotOf(2, { blockCost: "preference", firmness: "weak" }), rules, TZ)).toBe("first-offer");
   });
 
-  it("blocks score-3 stretch slots on a non-VIP link", () => {
+  it("blocks protected-band slots (score 2-3) on a non-VIP link", () => {
+    expect(getTier(slotOf(2, { blockCost: "preference", firmness: "weak" }), rules, TZ)).toBeNull();
     expect(getTier(slotOf(3, { kind: "weekend", blockCost: "preference", firmness: "strong" }), rules, TZ)).toBeNull();
     expect(getTier(slotOf(3, { kind: "off_hours", blockCost: "preference", firmness: "strong" }), rules, TZ)).toBeNull();
     expect(getTier(slotOf(3, { kind: "event", blockCost: "commitment", firmness: "weak" }), rules, TZ)).toBeNull();
   });
 
-  it("blocks score-4 slots on a non-VIP link", () => {
+  it("blocks score 4-5 (blocked band) for everyone", () => {
     expect(getTier(slotOf(4, { kind: "off_hours", blockCost: "preference", firmness: "strong" }), rules, TZ)).toBeNull();
-  });
-
-  it("blocks score-5 slots regardless", () => {
     expect(getTier(slotOf(5, { kind: "event", blockCost: "commitment", firmness: "strong" }), rules, TZ)).toBeNull();
   });
 });
@@ -68,47 +65,51 @@ describe("getTier — default non-VIP link", () => {
 describe("getTier — VIP link without explicit expansion", () => {
   const rules: LinkRules = { isVip: true };
 
-  it("still gives first-offer for score 0-2 (same as non-VIP)", () => {
+  it("first-offer for bookable-band slots (score 0-1), same as non-VIP", () => {
     expect(getTier(slotOf(0), rules, TZ)).toBe("first-offer");
-    expect(getTier(slotOf(2, { blockCost: "preference", firmness: "weak" }), rules, TZ)).toBe("first-offer");
+    expect(getTier(slotOf(1), rules, TZ)).toBe("first-offer");
   });
 
-  it("unlocks stretch1 at score 3 for weekend daytime", () => {
+  it("unlocks stretch1 at score 2 (preferred within protected band)", () => {
+    expect(getTier(slotOf(2, { blockCost: "preference", firmness: "weak" }), rules, TZ)).toBe("stretch1");
+  });
+
+  it("unlocks stretch2 at score 3 for weekend daytime", () => {
     const slot = slotOf(3, { kind: "weekend", blockCost: "preference", firmness: "strong" });
-    expect(getTier(slot, rules, TZ)).toBe("stretch1");
-  });
-
-  it("unlocks stretch1 at score 3 for weekday off-hours", () => {
-    const slot = slotOf(3, { kind: "off_hours", blockCost: "preference", firmness: "strong" });
-    expect(getTier(slot, rules, TZ)).toBe("stretch1");
-  });
-
-  it("unlocks stretch1 at score 3 for tentative meetings (commitment:weak)", () => {
-    const slot = slotOf(3, { kind: "event", blockCost: "commitment", firmness: "weak" });
-    expect(getTier(slot, rules, TZ)).toBe("stretch1");
-  });
-
-  it("unlocks stretch2 at score 4 for off-hours (VIP-only, second-round reach)", () => {
-    const slot = slotOf(4, { kind: "off_hours", blockCost: "preference", firmness: "strong" });
     expect(getTier(slot, rules, TZ)).toBe("stretch2");
   });
 
-  it("blocks commitment:strong at score 4 even for VIP (tentative group meeting)", () => {
-    const slot = slotOf(4, { kind: "event", blockCost: "commitment", firmness: "strong" });
+  it("unlocks stretch2 at score 3 for weekday off-hours", () => {
+    const slot = slotOf(3, { kind: "off_hours", blockCost: "preference", firmness: "strong" });
+    expect(getTier(slot, rules, TZ)).toBe("stretch2");
+  });
+
+  it("unlocks stretch2 at score 3 for tentative meetings (commitment:weak)", () => {
+    const slot = slotOf(3, { kind: "event", blockCost: "commitment", firmness: "weak" });
+    expect(getTier(slot, rules, TZ)).toBe("stretch2");
+  });
+
+  it("never offers score 4 — blocked band, not reachable by VIP stretch", () => {
+    const slot = slotOf(4, { kind: "off_hours", blockCost: "preference", firmness: "strong" });
     expect(getTier(slot, rules, TZ)).toBeNull();
   });
 
-  it("always blocks score-5 (immovable) for VIP", () => {
+  it("blocks commitment:strong within protected band even for VIP", () => {
+    const slot = slotOf(3, { kind: "event", blockCost: "commitment", firmness: "strong" });
+    expect(getTier(slot, rules, TZ)).toBeNull();
+  });
+
+  it("always blocks score 5 (immovable)", () => {
     expect(getTier(slotOf(5, { kind: "event", blockCost: "commitment", firmness: "strong" }), rules, TZ)).toBeNull();
   });
 });
 
-// ── Explicit pre-authorization promotes stretch to first-offer ────────────
+// ── Explicit pre-authorization promotes protected slots to first-offer ────
 
 describe("getTier — VIP with explicit preferredTimeStart", () => {
   // The slot is at 07:00 PT on a weekday, score 3 off_hours (2h edge).
   // With preferredTimeStart: "06:00", that slot falls inside the widened
-  // window and is promoted to first-offer. Without pre-auth, it's stretch1.
+  // window and is promoted to first-offer. Without pre-auth it's stretch2.
 
   // 2099-06-15 14:00 UTC = 2099-06-15 07:00 PDT
   const rulesNoAuth: LinkRules = { isVip: true };
@@ -119,21 +120,21 @@ describe("getTier — VIP with explicit preferredTimeStart", () => {
     "2099-06-15T14:00:00.000Z"
   );
 
-  it("without pre-auth, 7 AM off-hours is stretch1", () => {
-    expect(getTier(offHoursSlot, rulesNoAuth, TZ)).toBe("stretch1");
+  it("without pre-auth, 7 AM off-hours is stretch2", () => {
+    expect(getTier(offHoursSlot, rulesNoAuth, TZ)).toBe("stretch2");
   });
 
   it("with preferredTimeStart: 06:00, 7 AM off-hours becomes first-offer", () => {
     expect(getTier(offHoursSlot, rulesWithAuth, TZ)).toBe("first-offer");
   });
 
-  it("a score-4 slot inside the explicit window also promotes to first-offer", () => {
+  it("score-4 slots stay blocked even inside the explicit window (blocked band is hard)", () => {
     const deepSlot = slotOf(
       4,
       { kind: "off_hours", blockCost: "preference", firmness: "strong" },
       "2099-06-15T14:00:00.000Z"
     );
-    expect(getTier(deepSlot, rulesWithAuth, TZ)).toBe("first-offer");
+    expect(getTier(deepSlot, rulesWithAuth, TZ)).toBeNull();
   });
 });
 
@@ -145,9 +146,9 @@ describe("getTier — VIP with allowWeekends", () => {
     expect(getTier(slot, rules, TZ)).toBe("first-offer");
   });
 
-  it("weekend edge (score 4) also promotes to first-offer under allowWeekends", () => {
+  it("weekend edge (score 4) stays blocked even under allowWeekends", () => {
     const slot = slotOf(4, { kind: "weekend", blockCost: "preference", firmness: "strong" });
-    expect(getTier(slot, rules, TZ)).toBe("first-offer");
+    expect(getTier(slot, rules, TZ)).toBeNull();
   });
 });
 
@@ -170,15 +171,15 @@ describe("isFirstOffer / isStretch1 / isStretch2 — classification helpers", ()
   const nonVip: LinkRules = {};
 
   it("exactly one classifier returns true for any tiered slot", () => {
-    const s1 = slotOf(1);
-    const s3 = slotOf(3, { kind: "weekend", blockCost: "preference", firmness: "strong" });
-    const s4 = slotOf(4, { kind: "off_hours", blockCost: "preference", firmness: "strong" });
+    const s1 = slotOf(1); // bookable band → first-offer
+    const s2 = slotOf(2, { kind: "off_hours", blockCost: "preference", firmness: "weak" }); // stretch1
+    const s3 = slotOf(3, { kind: "weekend", blockCost: "preference", firmness: "strong" }); // stretch2
 
     expect([isFirstOffer(s1, nonVip, TZ), isStretch1(s1, nonVip, TZ), isStretch2(s1, nonVip, TZ)])
       .toEqual([true, false, false]);
-    expect([isFirstOffer(s3, vip, TZ), isStretch1(s3, vip, TZ), isStretch2(s3, vip, TZ)])
+    expect([isFirstOffer(s2, vip, TZ), isStretch1(s2, vip, TZ), isStretch2(s2, vip, TZ)])
       .toEqual([false, true, false]);
-    expect([isFirstOffer(s4, vip, TZ), isStretch1(s4, vip, TZ), isStretch2(s4, vip, TZ)])
+    expect([isFirstOffer(s3, vip, TZ), isStretch1(s3, vip, TZ), isStretch2(s3, vip, TZ)])
       .toEqual([false, false, true]);
   });
 
@@ -281,7 +282,7 @@ describe("computeSchedule — v3 envelope + blockCost tagging", () => {
     expect(bizSlot!.blockCost).toBe("none");
   });
 
-  it("weekday 1h edge (9 AM when biz=10) is preference:weak, score 2", () => {
+  it("weekday 1h edge (9 AM when biz=10) is preference:weak, score 2 (stretch1 / protected)", () => {
     const edgeSlot = slots.find((s) => {
       const { hour, isWeekend } = partsOf(s);
       return !isWeekend && hour === 9;
@@ -292,7 +293,7 @@ describe("computeSchedule — v3 envelope + blockCost tagging", () => {
     expect(edgeSlot!.firmness).toBe("weak");
   });
 
-  it("weekday 2-3h edge (7-8 AM when biz=10) is preference:strong, score 3", () => {
+  it("weekday 2-3h edge (7-8 AM when biz=10) is preference:strong, score 3 (stretch2 / protected)", () => {
     const midEdge = slots.find((s) => {
       const { hour, isWeekend } = partsOf(s);
       return !isWeekend && (hour === 7 || hour === 8);
@@ -303,7 +304,7 @@ describe("computeSchedule — v3 envelope + blockCost tagging", () => {
     expect(midEdge!.firmness).toBe("strong");
   });
 
-  it("weekday 4h edge (6 AM when biz=10) is score 4 (deep stretch / explicit only)", () => {
+  it("weekday 4h edge (6 AM when biz=10) is score 4 (blocked band — not offered)", () => {
     const deepEdge = slots.find((s) => {
       const { hour, isWeekend } = partsOf(s);
       return !isWeekend && hour === 6;
@@ -322,7 +323,7 @@ describe("computeSchedule — v3 envelope + blockCost tagging", () => {
     expect(sleepEdge!.score).toBe(5);
   });
 
-  it("weekend daytime is preference:strong, score 3 (stretch 1 band)", () => {
+  it("weekend daytime is preference:strong, score 3 (stretch2 / protected)", () => {
     const weekendDay = slots.find((s) => {
       const { hour, isWeekend } = partsOf(s);
       return isWeekend && hour >= 10 && hour < 18;
@@ -333,7 +334,7 @@ describe("computeSchedule — v3 envelope + blockCost tagging", () => {
     expect(weekendDay!.blockCost).toBe("preference");
   });
 
-  it("weekend 1-2h edge is score 4 (stretch 2 band)", () => {
+  it("weekend 1-2h edge is score 4 (blocked band — not offered)", () => {
     const weekendEdge = slots.find((s) => {
       const { hour, isWeekend } = partsOf(s);
       return isWeekend && (hour === 8 || hour === 9 || hour === 18 || hour === 19);

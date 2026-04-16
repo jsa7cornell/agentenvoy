@@ -4,6 +4,18 @@
  * Computes protection scores for 30-min slots across an 8-week window.
  * Scores range from -2 (exclusive) to 5 (immovable).
  *
+ * ## Score bands (canonical — all consumers align to these)
+ *
+ *   -2, -1 → **Preferred**    Host-explicit boost. Bookable; Envoy stack-
+ *                             ranks these above score 0.
+ *    0, 1  → **Bookable**     Shown to all guests. Within the band, 0 is
+ *                             preferred over 1 (1 = flexible, bumpable).
+ *    2, 3  → **Protected**    Not shown to regular guests. Reachable by
+ *                             VIP links as a fallback (stretch). Within the
+ *                             band, 2 is preferred over 3.
+ *    4, 5  → **Blocked**      Never offered — not even to VIP. Real events,
+ *                             blackouts, deep off-hours, sleep time.
+ *
  * Base scores are deterministic given calendar events + preferences.
  * Event-level overrides (per-thread) are applied at query time by the slots endpoint.
  */
@@ -53,10 +65,10 @@ export type BlockCost = "none" | "preference" | "commitment";
  * preference compiler for blocked windows, derived from distance-from-biz
  * for off-hours slots, and read from event metadata for calendar events.
  *
- * `weak` + `preference` → score 2 (first offer, soft framing)
- * `strong` + `preference` → score 3 or 4 (stretch band depending on context)
- * `weak` + `commitment` → score 3 (stretch, propose with bump language)
- * `strong` + `commitment` → score 5 (host must resolve externally)
+ * `weak` + `preference` → score 2 (protected, VIP stretch1)
+ * `strong` + `preference` → score 3 or 4 (stretch2 at 3, blocked at 4)
+ * `weak` + `commitment` → score 3 (protected, VIP stretch2 with bump language)
+ * `strong` + `commitment` → score 5 (blocked — host must resolve externally)
  */
 export type BlockFirmness = "weak" | "strong";
 
@@ -510,12 +522,14 @@ function scoreSlot(
     let score: number;
     if (blockCost === "commitment") {
       // Commitment: someone else is expecting this. Firm commitments are
-      // hard (family dinner, Mia's pickup); weak commitments (rare for
-      // blocked windows) land in the stretch band with bump-approval.
+      // hard (family dinner, Mia's pickup = blocked); weak commitments
+      // (rare for blocked windows) land in the protected band with
+      // bump-approval.
       score = firmness === "strong" ? 5 : 3;
     } else {
       // Preference: host-only cost. Firm preferences (surf, gym) are
-      // deep-stretch; weak preferences (focus time, buffer) are first-offer.
+      // blocked outright; weak preferences (focus time, buffer) land in
+      // the protected band — VIP can stretch, guests don't see them.
       score = firmness === "strong" ? 4 : 2;
     }
     return {
@@ -699,7 +713,7 @@ function scoreSlot(
       ev_ = { score: 5, reason: "immovable", confidence: "high", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
     }
     // Soft-hold events ("Focus Time", "Hold", "Buffer") = preference:weak.
-    // First-offer tier — these are reschedulable at the host's whim.
+    // Protected tier — hidden from regular guests, VIP-reschedulable.
     else if (titleMatches(ev.summary, SOFT_HOLD_KEYWORDS)) {
       ev_ = { score: 2, reason: "soft hold", confidence: "low", summary: ev.summary, blockCost: "preference", firmness: "weak" };
     }
@@ -708,8 +722,9 @@ function scoreSlot(
     // with); a tentative group meeting involves 4+ people's calendars.
     else if (ev.responseStatus === "tentative") {
       if ((ev.attendeeCount ?? 0) >= 3) {
-        // Commitment:weak but hard enough that we push it into the
-        // deep-stretch band — don't propose bumping 4+ people casually.
+        // Commitment:strong — bumping 4+ people is never a casual ask.
+        // Score 4 = blocked band: Envoy will not propose this even to
+        // VIP; the host has to handle the reshuffle manually.
         ev_ = { score: 4, reason: "tentative group meeting", confidence: "low", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
       } else {
         ev_ = { score: 3, reason: "tentative meeting", confidence: "low", summary: ev.summary, blockCost: "commitment", firmness: "weak" };
@@ -739,10 +754,11 @@ function scoreSlot(
       if (matches) {
         if (bucket.level === "high") {
           ev_ = { score: 5, reason: "high priority", confidence: "high", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
-        } else if (bucket.level === "low" && ev_.score >= 3) {
-          // Downgrade a protected slot to preference:weak (first-offer
-          // tier). "This is flexible — you can schedule over it."
-          ev_ = { score: 2, reason: "low priority (flexible)", confidence: "low", summary: ev.summary, blockCost: "preference", firmness: "weak" };
+        } else if (bucket.level === "low" && ev_.score >= 2) {
+          // Downgrade a protected/blocked slot into the bookable band.
+          // "This is flexible — you can schedule over it." Score 1 (not 0)
+          // so Envoy stack-ranks genuinely-free slots above bumpable ones.
+          ev_ = { score: 1, reason: "low priority (flexible)", confidence: "low", summary: ev.summary, blockCost: "preference", firmness: "weak" };
         }
         break;
       }
@@ -774,15 +790,15 @@ function scoreSlot(
  *
  * Weekday off-hours = preference (host's own time), firmness graded by
  * distance from biz-hour edge:
- *   - 1h edge         → score 2, preference:weak  (first-offer)
- *   - 2-3h edge       → score 3, preference:strong (stretch 1)
- *   - 4h edge         → score 4, preference:strong (stretch 2)
- *   - 5+h edge        → score 5, preference:strong (sleep hours, never)
+ *   - 1h edge         → score 2, preference:weak  (protected, VIP stretch1)
+ *   - 2-3h edge       → score 3, preference:strong (protected, VIP stretch2)
+ *   - 4h edge         → score 4, preference:strong (blocked — never offered)
+ *   - 5+h edge        → score 5, preference:strong (sleep hours, blocked)
  *
  * Weekend = preference:strong, firmness graded by biz-equivalent vs edge:
- *   - biz-equivalent  → score 3 (stretch 1)
- *   - 1-2h edge       → score 4 (stretch 2)
- *   - 3+h edge        → score 5 (never)
+ *   - biz-equivalent  → score 3 (protected, VIP stretch2)
+ *   - 1-2h edge       → score 4 (blocked — never offered)
+ *   - 3+h edge        → score 5 (blocked)
  *
  * Real events sitting on top of these slots keep their own classification
  * (scoreSlot returned first, this layer doesn't touch events).
@@ -827,7 +843,10 @@ function hoursProtectionLayer(
     return { score: 3, reason: "off hours", kind: "off_hours", blockCost: "preference", firmness: "strong" };
   }
   if (distance <= 3) {
-    // 4h edge — significant ask, deep stretch only.
+    // 4h edge — lands in the blocked band. Not offered: not to guests,
+    // not to VIP stretch, not even via preferredTime promotion (that
+    // ceiling is score 3). The host would have to override the slot
+    // directly (score -1/-2) to reach this far.
     return { score: 4, reason: "early morning / late evening", kind: "off_hours", blockCost: "preference", firmness: "strong" };
   }
   // 5+h edge — sleep hours, never offered.
@@ -841,18 +860,20 @@ function hoursProtectionLayer(
  * emit separate prompt blocks (OFFERABLE SLOTS, STRETCH OPTIONS, DEEP STRETCH
  * OPTIONS) with different guardrails about when the LLM may reach into each.
  *
- * Rules:
- *   - `first-offer`: score ≤ 2 (preference:weak and open), OR score 3-4
- *     slots that fall within the host's explicit expansion window
- *     (preferredTimeStart/End + allowWeekends). These are shown in the
- *     widget and in the initial greeting.
- *   - `stretch1`: score 3 slots NOT in first-offer. VIP-only. Surfaced in
- *     conversation after the first round of guest pushback. Requires the
- *     LLM to offer with soft framing; holds are placed via [HOLD_SLOT].
- *   - `stretch2`: score 4 slots NOT in first-offer. VIP-only. Surfaced
- *     after a second round of guest pushback.
- *   - `null`: score 5, commitment:strong events, or a non-VIP link
- *     reaching score ≥ 3. Never offered.
+ * Rules (aligned with the canonical band standard at the top of this file):
+ *   - `first-offer`: score ≤ 1 (bookable band), OR score 2-3 slots that
+ *     fall within the host's explicit expansion window (preferredTimeStart/
+ *     End + allowWeekends). These are shown in the widget and in the
+ *     initial greeting.
+ *   - `stretch1`: score 2 slots NOT in first-offer. VIP-only. First
+ *     fallback inside the protected band — surfaced after the first round
+ *     of guest pushback. Requires the LLM to offer with soft framing; holds
+ *     are placed via [HOLD_SLOT].
+ *   - `stretch2`: score 3 slots NOT in first-offer. VIP-only. Deeper
+ *     fallback within the protected band — surfaced after a second round
+ *     of guest pushback.
+ *   - `null`: score ≥ 4 (blocked band), commitment:strong events, or a
+ *     non-VIP link reaching score ≥ 2. Never offered.
  */
 export type OfferTier = "first-offer" | "stretch1" | "stretch2" | null;
 
@@ -875,12 +896,13 @@ function inExplicitWindow(slot: ScoredSlot, rules: LinkRules, tz: string): boole
  * single source of truth the composer uses to build the three prompt blocks.
  *
  * Never returns a tier for:
- *   - score 5 (immovable — real events, flights, blackouts, sleep hours)
+ *   - score ≥ 4 (blocked band — real events, flights, blackouts, deep
+ *     off-hours, sleep hours, tentative group meetings)
  *   - commitment:strong slots (hard by definition)
- *   - stretches on a non-VIP link
+ *   - protected-band slots (score 2-3) on a non-VIP link
  *
  * First-offer promotion via explicit expansion:
- *   - If the host set preferredTimeStart/End, score 3-4 off-hours slots
+ *   - If the host set preferredTimeStart/End, score 2-3 off-hours slots
  *     inside that window become first-offer (the host pre-authorized).
  *   - If allowWeekends, weekend daytime (score 3) becomes first-offer.
  *   - The original slot score and blockCost are unchanged — only tier
@@ -891,37 +913,37 @@ export function getTier(slot: ScoredSlot, rules: LinkRules, tz: string): OfferTi
   // first-offer regardless of tier logic.
   if (slot.score < 0) return "first-offer";
 
-  // Score 5: never offered.
-  if (slot.score >= 5) return null;
+  // Blocked band (4-5): never offered — not even to VIP. Real events,
+  // blackouts, confirmed meetings, deep off-hours, sleep hours.
+  if (slot.score >= 4) return null;
 
-  // Commitment:strong events are hard — even at score 4 they're not
-  // reachable. The host must break them externally.
+  // Commitment:strong events are hard — the host must break them externally.
+  // Guards against anything in the protected band (2-3) that is a firm
+  // third-party commitment.
   if (slot.blockCost === "commitment" && slot.firmness === "strong") return null;
 
-  // First-offer: the default safe tier.
-  //   - Score ≤ 2: always first-offer (open, preference:weak, buffers,
-  //     soft holds, 1h edge, tagged-soft blocked windows).
-  //   - Score 3 within explicit preferredTime window: host authorized.
-  //   - Score 3 weekend when allowWeekends: host authorized.
-  //   - Score 4 within explicit preferredTime window: deeper pre-auth.
-  if (slot.score <= 2) return "first-offer";
-  if (slot.score <= 4 && inExplicitWindow(slot, rules, tz) && slot.kind === "off_hours") {
+  // First-offer = bookable band (score ≤ 1). Score 2-3 slots can also
+  // land here IF the host pre-authorized the time window (preferredTime*
+  // or allowWeekends) — these are explicit off-hours invites the host
+  // has already blessed for this link.
+  if (slot.score <= 1) return "first-offer";
+  if (slot.score <= 3 && inExplicitWindow(slot, rules, tz) && slot.kind === "off_hours") {
     return "first-offer";
   }
-  if (slot.score <= 4 && slot.kind === "weekend" && rules.allowWeekends) {
+  if (slot.score <= 3 && slot.kind === "weekend" && rules.allowWeekends) {
     return "first-offer";
   }
 
-  // Stretch bands exist only for VIP links.
+  // Protected band (2-3) — VIP-only stretches.
   if (!rules.isVip) return null;
 
-  // Stretch 1: score-3 slots not in first-offer. LLM-reachable after the
-  // first round of guest pushback.
-  if (slot.score === 3) return "stretch1";
+  // Stretch 1: score-2 slots (preferred within the protected band).
+  // First VIP fallback — LLM-reachable after the first round of pushback.
+  if (slot.score === 2) return "stretch1";
 
-  // Stretch 2: score-4 slots not in first-offer. LLM-reachable only after
+  // Stretch 2: score-3 slots (deeper protected). LLM-reachable only after
   // a second round of guest pushback, and only on VIP links.
-  if (slot.score === 4) return "stretch2";
+  if (slot.score === 3) return "stretch2";
 
   return null;
 }
@@ -1251,9 +1273,10 @@ export interface LinkRules {
    * first-offer only, no creative reach, no stretch.
    *
    * `isVip` alone does NOT auto-unlock any protected slots — it unlocks
-   * Envoy's *access* to the stretch (score 3) and deep-stretch (score 4)
-   * bands in her LLM prompt, but the actual opening of weekend / off-hours
-   * slots for guest-facing offerings requires the explicit fields below.
+   * Envoy's *access* to the protected band (stretch1 = score 2, stretch2
+   * = score 3) in her LLM prompt. The actual opening of weekend / off-
+   * hours slots for guest-facing offerings (promotion into first-offer)
+   * requires the explicit fields below.
    */
   isVip?: boolean;
   /**
