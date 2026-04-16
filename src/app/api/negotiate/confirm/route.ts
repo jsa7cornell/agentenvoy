@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createCalendarEvent, deleteCalendarEvent, invalidateSchedule } from "@/lib/calendar";
 import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
-import { Resend } from "resend";
+import { sendMail } from "@/lib/mailer";
 
 // POST /api/negotiate/confirm
 // Confirm an agreed-upon time — creates calendar events, sends emails
@@ -400,19 +400,12 @@ export async function POST(req: NextRequest) {
     ? attendeeEmails
     : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
 
-  let emailSent = false;
-  try {
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    await resend.emails.send({
-      from: "AgentEnvoy <noreply@agentenvoy.ai>",
-      to: emailRecipients,
-      subject: `Meeting Confirmed${session.link.topic ? `: ${session.link.topic}` : ""}`,
-      html: emailBody,
-    });
-    emailSent = true;
-  } catch (e) {
-    console.error("Failed to send confirmation email:", e);
-  }
+  const mailResult = await sendMail({
+    to: emailRecipients,
+    subject: `Meeting Confirmed${session.link.topic ? `: ${session.link.topic}` : ""}`,
+    html: emailBody,
+  });
+  const emailSent = mailResult.sent;
 
   return NextResponse.json({
     status: "confirmed",
