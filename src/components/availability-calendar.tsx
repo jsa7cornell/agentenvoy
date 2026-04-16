@@ -213,9 +213,9 @@ function WeekView({
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
-  // Auto-select today (or the first day with visible slots) on mount
+  // Auto-select today (or the first day with visible slots) once data is available
   useEffect(() => {
-    if (selectedDay) return; // already selected
+    if (selectedDay) return; // already selected — don't override manual choice
     const todaySlots = slotsByDay[todayStr] || [];
     if (todaySlots.some((s) => (s.score ?? 0) <= 1)) {
       setSelectedDay(todayStr);
@@ -227,7 +227,7 @@ function WeekView({
       (d) => d >= todayStr && (slotsByDay[d] || []).some((s) => (s.score ?? 0) <= 1),
     );
     if (first) setSelectedDay(first);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [slotsByDay]); // re-run when data loads (empty on first render → populated async)
 
   // Compute the start of the displayed week
   const weekStartTime = useMemo(() => {
@@ -339,15 +339,13 @@ function WeekView({
       {/* Selected day time slots */}
       {selectedDay && (
         <div className="mt-2.5 space-y-1.5">
-          <div className="flex items-baseline justify-between">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted">
-              {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
-                weekday: "long",
-                month: "short",
-                day: "numeric",
-              })}
-            </div>
-            <span className="text-[9px] text-muted italic">Start times</span>
+          <div className="text-[10px] font-medium text-muted">
+            Start times on{" "}
+            {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
+              weekday: "long",
+              month: "short",
+              day: "numeric",
+            })}
           </div>
           <SlotPills
             slots={selectedSlots}
@@ -402,9 +400,9 @@ function MonthView({
   const now = new Date();
   const todayStr = toDateStr(now);
 
-  // Auto-select today (or the first day with visible slots) on mount
+  // Auto-select today (or the first day with visible slots) once data is available
   useEffect(() => {
-    if (selectedDay) return;
+    if (selectedDay) return; // already selected — don't override manual choice
     const todaySlots = slotsByDay[todayStr] || [];
     if (todaySlots.some((s) => (s.score ?? 0) <= 1)) {
       setSelectedDay(todayStr);
@@ -415,7 +413,7 @@ function MonthView({
       (d) => d >= todayStr && (slotsByDay[d] || []).some((s) => (s.score ?? 0) <= 1),
     );
     if (first) setSelectedDay(first);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [slotsByDay]); // re-run when data loads (empty on first render → populated async)
 
   const cells: Array<{ day: number; dateStr: string } | null> = [];
   for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
@@ -500,15 +498,13 @@ function MonthView({
       {/* Selected day time slots */}
       {selectedDay && (
         <div className="mt-3 space-y-1.5">
-          <div className="flex items-baseline justify-between">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted">
-              {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
-                weekday: "long",
-                month: "short",
-                day: "numeric",
-              })}
-            </div>
-            <span className="text-[9px] text-muted italic">Start times</span>
+          <div className="text-[10px] font-medium text-muted">
+            Start times on{" "}
+            {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
+              weekday: "long",
+              month: "short",
+              day: "numeric",
+            })}
           </div>
           <SlotPills
             slots={selectedSlots}
