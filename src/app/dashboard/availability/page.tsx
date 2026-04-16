@@ -67,7 +67,7 @@ export default function AvailabilityPage() {
     // Seed local protection from what the schedule API already surfaced
     setLocalProtection(ev.protectionOverride !== undefined ? ev.protectionOverride : null);
     try {
-      const res = await fetch(`/api/negotiate/by-calendar-event?eventId=${encodeURIComponent(ev.id)}`);
+      const res = await fetch(`/api/negotiate/by-calendar-event?eventId=${encodeURIComponent(ev.id)}&eventStart=${encodeURIComponent(ev.start)}`);
       const data = res.ok ? await res.json() : null;
       setClickedSession(data?.session ?? null);
     } catch {
