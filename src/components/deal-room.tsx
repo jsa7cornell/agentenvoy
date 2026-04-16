@@ -1075,10 +1075,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   .trim()
               : parsed.text;
 
-            // 3-party model: Envoy (AI) + system notices always left;
-            // humans (host + guest) always right. Color distinguishes which
-            // human spoke — purple = host, indigo = guest.
+            // 3-party model + guest Envoy advocate:
+            //   host / guest (human) → right-aligned, filled color
+            //   administrator (host-side facilitator) → left, neutral
+            //   guest_envoy (guest advocate) → left, viewer-relative tinted
+            //   system → left, emerald
             const rightAligned = msg.role === "host" || msg.role === "guest";
+
+            // guest_envoy color follows team affiliation, viewer-relative:
+            //   logged-in guest viewer  → blue (your team)
+            //   host viewer             → purple (counterparty)
+            //   anonymous (shouldn't fire) → neutral fallback
+            const guestEnvoyStyle = isGuest
+              ? "bg-blue-900/30 border border-blue-800 text-blue-100 rounded-bl-sm"
+              : isHost
+                ? "bg-purple-900/30 border border-purple-800 text-purple-100 rounded-bl-sm"
+                : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
+            const guestEnvoyLabelColor = isGuest
+              ? "text-blue-300"
+              : isHost
+                ? "text-purple-300"
+                : "text-emerald-400";
 
             const messageStyle =
               msg.role === "host"
@@ -1087,7 +1104,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   ? "bg-indigo-600 text-white rounded-br-sm"
                   : msg.role === "system"
                     ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
-                    : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
+                    : msg.role === "guest_envoy"
+                      ? guestEnvoyStyle
+                      : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
+
+            const guestEnvoyLabel = isGuest
+              ? "Your Envoy"
+              : guestUser?.name
+                ? `${guestUser.name.split(" ")[0]}'s Envoy`
+                : "Guest's Envoy";
 
             const senderLabel =
               msg.role === "host"
@@ -1096,14 +1121,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   ? "Guest"
                   : msg.role === "administrator"
                     ? "Envoy"
-                    : null;
+                    : msg.role === "guest_envoy"
+                      ? guestEnvoyLabel
+                      : null;
 
             const labelColor =
               msg.role === "host"
                 ? "text-white/60"
                 : msg.role === "guest"
                   ? "text-white/60"
-                  : "text-emerald-400";
+                  : msg.role === "guest_envoy"
+                    ? guestEnvoyLabelColor
+                    : "text-emerald-400";
 
             return (
               <div key={msg.id}>

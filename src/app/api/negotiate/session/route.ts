@@ -17,6 +17,10 @@ import {
   humanTimezoneLabel,
   formatLabel,
 } from "@/lib/greeting-template";
+import {
+  buildGuestGreeting,
+  extractGuestPreferencesSummary,
+} from "@/lib/guest-greeting-template";
 
 const GENERIC_TOPICS = new Set([
   "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
@@ -669,6 +673,48 @@ export async function POST(req: NextRequest) {
       content: greeting,
     },
   });
+
+  // Bilateral: if the visitor is a logged-in guest, fire a deterministic
+  // greeting from *their* Envoy right after the host's. Template-driven, no
+  // LLM — matches the host-side pattern per SPEC. Skipped for anonymous
+  // guests (isGuest false) and for group events (the group flow handles its
+  // own greeting shape).
+  if (isGuest && !isGroupEvent && authSession?.user?.id) {
+    try {
+      const guestUser = await prisma.user.findUnique({
+        where: { id: authSession.user.id },
+        select: { name: true, preferences: true },
+      });
+      if (guestUser) {
+        const guestPrefsSummary = extractGuestPreferencesSummary(guestUser.preferences);
+        const guestFirstName = guestUser.name ? guestUser.name.split(/\s+/)[0] : null;
+        const hostFirst = (user.name || "the organizer").split(/\s+/)[0];
+        const guestGreeting = buildGuestGreeting({
+          guestFirstName,
+          hostFirstName: hostFirst,
+          offerableSlots: filteredSlots,
+          guestPreferences: guestPrefsSummary,
+          guestTimezone: effectiveGuestTz ?? null,
+          hostTimezone,
+        });
+        if (guestGreeting) {
+          await prisma.message.create({
+            data: {
+              sessionId: session.id,
+              // Distinct role so the client can render this in the guest-team
+              // color (blue for the guest viewer, violet for the host viewer).
+              role: "guest_envoy",
+              content: guestGreeting,
+            },
+          });
+        }
+      }
+    } catch (e) {
+      // Never block the host greeting — bilateral intelligence is strictly
+      // additive. Log and move on.
+      console.error("[negotiate/session] guest-envoy greeting failed", e);
+    }
+  }
 
   const participantSummary = eventParticipants?.map((p) => ({
     name: p.name,
