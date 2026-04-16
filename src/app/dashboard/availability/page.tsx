@@ -510,24 +510,33 @@ export default function AvailabilityPage() {
                       ? mapToLevel(autoScore)
                       : 0; // fallback: show Open
 
-                  const options: { label: string; score: 0 | 3 | 5; desc: string; color: string }[] = [
+                  const options: {
+                    label: string;
+                    score: 0 | 3 | 5;
+                    desc: string;
+                    activeClass: string;
+                    inactiveClass: string;
+                  }[] = [
                     {
                       label: "Open",
                       score: 0,
                       desc: "This time is treated as available. The event won't block scheduling.",
-                      color: "text-emerald-400 border-emerald-700 hover:border-emerald-500",
+                      activeClass: "bg-emerald-500/20 border-2 border-emerald-400 text-emerald-600 dark:text-emerald-300 font-semibold",
+                      inactiveClass: "border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:border-emerald-300 dark:hover:border-emerald-800 hover:text-emerald-600 dark:hover:text-emerald-400",
                     },
                     {
                       label: "Protected",
                       score: 3,
                       desc: "This time is held back from most requests. VIP contacts can still be offered it as a backup if nothing else works.",
-                      color: "text-amber-400 border-amber-700 hover:border-amber-500",
+                      activeClass: "bg-amber-500/20 border-2 border-amber-400 text-amber-600 dark:text-amber-300 font-semibold",
+                      inactiveClass: "border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:border-amber-300 dark:hover:border-amber-800 hover:text-amber-600 dark:hover:text-amber-400",
                     },
                     {
                       label: "Blocked",
                       score: 5,
                       desc: "Fully off-limits. This time will never be offered, not even to VIPs.",
-                      color: "text-red-400 border-red-800 hover:border-red-600",
+                      activeClass: "bg-red-500/20 border-2 border-red-400 text-red-600 dark:text-red-300 font-semibold",
+                      inactiveClass: "border border-zinc-200 dark:border-zinc-700 text-zinc-400 dark:text-zinc-500 hover:border-red-300 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-400",
                     },
                   ];
 
@@ -542,15 +551,15 @@ export default function AvailabilityPage() {
                   return (
                     <>
                       <div className="grid grid-cols-3 gap-2">
-                        {options.map(({ label, score, color }) => {
+                        {options.map(({ label, score, activeClass, inactiveClass }) => {
                           const isActive = score === visualScore;
                           return (
                             <button
                               key={label}
                               disabled={protectionSaving}
                               onClick={() => handleProtectionChange(clickedEvent.id, score)}
-                              className={`px-2 py-2 rounded-lg border text-[11px] font-medium transition disabled:opacity-50 ${color} ${
-                                isActive ? "bg-white/5 ring-1 ring-current" : "bg-transparent"
+                              className={`px-2 py-2.5 rounded-lg text-[11px] transition disabled:opacity-50 ${
+                                isActive ? activeClass : inactiveClass
                               }`}
                             >
                               {label}
