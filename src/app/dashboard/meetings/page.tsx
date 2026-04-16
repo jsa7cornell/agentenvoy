@@ -210,16 +210,20 @@ export default function MeetingsPage() {
                 if (confirmCancel === s.id) {
                   return (
                     <div key={s.id} className="flex items-center gap-2 px-4 py-3 bg-red-950/20">
-                      <span className="text-xs text-secondary flex-1">Cancel this meeting? Google Calendar invite will be deleted.</span>
+                      <span className="text-xs text-secondary flex-1">
+                        {isConfirmed
+                          ? "Cancel this meeting? Google Calendar invite will be deleted."
+                          : "Stop this negotiation? The session will be archived."}
+                      </span>
                       <button
                         onClick={() => setConfirmCancel(null)}
                         className="text-xs text-muted hover:text-secondary transition px-2 py-1"
                       >Keep</button>
                       <button
-                        onClick={(e) => { e.preventDefault(); handleCancel(s.id); }}
-                        disabled={cancelling === s.id}
+                        onClick={(e) => { e.preventDefault(); isConfirmed ? handleCancel(s.id) : handleArchive(s.id); setConfirmCancel(null); }}
+                        disabled={cancelling === s.id || archiving === s.id}
                         className="text-xs font-medium text-red-400 hover:text-red-300 border border-red-500/30 rounded px-2 py-1 transition disabled:opacity-50"
-                      >{cancelling === s.id ? "Cancelling…" : "Yes, cancel"}</button>
+                      >{(cancelling === s.id || archiving === s.id) ? "Cancelling…" : "Yes, cancel"}</button>
                     </div>
                   );
                 }
@@ -236,31 +240,30 @@ export default function MeetingsPage() {
                       </span>
                       <span className="flex-shrink-0 text-[10px] text-muted hidden sm:block">{displayDate}</span>
                     </Link>
-                    {/* Reschedule + Cancel — confirmed sessions only */}
+                    {/* Reschedule — confirmed sessions only */}
                     {isConfirmed && (
-                      <>
-                        <button
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmReschedule(s.id); }}
-                          title="Reschedule meeting"
-                          className="flex-shrink-0 text-[11px] text-indigo-400/70 hover:text-indigo-300 transition"
-                        >
-                          Reschedule
-                        </button>
-                        <button
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmCancel(s.id); }}
-                          title="Cancel meeting"
-                          className="flex-shrink-0 text-[11px] text-red-500/60 hover:text-red-400 transition"
-                        >
-                          Cancel
-                        </button>
-                      </>
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmReschedule(s.id); }}
+                        title="Reschedule meeting"
+                        className="flex-shrink-0 text-[11px] text-indigo-400 hover:text-indigo-300 transition"
+                      >
+                        Reschedule
+                      </button>
                     )}
-                    {/* Archive — all sessions */}
+                    {/* Cancel — all sessions */}
+                    <button
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmCancel(s.id); }}
+                      title="Cancel meeting"
+                      className="flex-shrink-0 text-[11px] text-red-400 hover:text-red-300 transition"
+                    >
+                      Cancel
+                    </button>
+                    {/* Archive icon — keeps the invite, for dismissed/completed flows */}
                     <button
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleArchive(s.id); }}
                       disabled={archiving === s.id}
-                      title="Archive"
-                      className="flex-shrink-0 p-1.5 rounded-md text-zinc-600 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
+                      title="Archive (keeps calendar invite)"
+                      className="flex-shrink-0 p-1.5 rounded-md text-zinc-500 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
                     >
                       {archiving === s.id
                         ? <span className="text-[10px] text-muted">…</span>

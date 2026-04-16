@@ -635,15 +635,18 @@ export default function AvailabilityPage() {
             ) : confirmingCancel && clickedSession ? (
               <div className="mt-1">
                 <p className="text-xs text-secondary mb-3">
-                  Cancel this meeting? The Google Calendar invite will be deleted and{" "}
-                  {clickedSession.guestName || "your guest"} will be notified.
+                  {clickedSession.status === "agreed"
+                    ? <>Cancel this meeting? The Google Calendar invite will be deleted and{" "}{clickedSession.guestName || "your guest"} will be notified.</>
+                    : <>Stop this negotiation? The session will be closed and {clickedSession.guestName || "your guest"} won&apos;t receive a new meeting.</>}
                 </p>
                 <div className="flex gap-2">
                   <button onClick={() => setConfirmingCancel(false)} disabled={sessionActionBusy}
                     className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50">
                     Keep it
                   </button>
-                  <button onClick={() => handleSessionCancel(clickedSession.id)} disabled={sessionActionBusy}
+                  <button
+                    onClick={() => clickedSession.status === "agreed" ? handleSessionCancel(clickedSession.id) : handleSessionArchive(clickedSession.id)}
+                    disabled={sessionActionBusy}
                     className="flex-1 px-3 py-2 text-xs font-medium bg-red-900/40 text-red-300 border border-red-500/30 rounded-lg hover:bg-red-900/60 transition disabled:opacity-50">
                     {sessionActionBusy ? "Cancelling…" : "Yes, cancel"}
                   </button>
@@ -659,29 +662,20 @@ export default function AvailabilityPage() {
                 </button>
                 {clickedSession && !clickedSession.archived && clickedSession.status !== "cancelled" && (
                   <>
-                    <button
-                      onClick={() => handleSessionArchive(clickedSession.id)}
-                      disabled={sessionActionBusy}
-                      className="px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 rounded-lg hover:border-zinc-500 transition disabled:opacity-50"
-                    >
-                      {sessionActionBusy ? "…" : "Archive"}
-                    </button>
                     {clickedSession.status === "agreed" && (
-                      <>
-                        <button
-                          onClick={() => setConfirmingReschedule(true)}
-                          className="px-3 py-2 text-xs text-indigo-400/80 hover:text-indigo-300 border border-indigo-500/20 rounded-lg hover:border-indigo-500/40 transition"
-                        >
-                          Reschedule
-                        </button>
-                        <button
-                          onClick={() => setConfirmingCancel(true)}
-                          className="px-3 py-2 text-xs text-red-400/70 hover:text-red-400 border border-red-500/20 rounded-lg hover:border-red-500/40 transition"
-                        >
-                          Cancel
-                        </button>
-                      </>
+                      <button
+                        onClick={() => setConfirmingReschedule(true)}
+                        className="px-3 py-2 text-xs text-indigo-400 hover:text-indigo-300 border border-indigo-500/30 rounded-lg hover:border-indigo-500/60 transition"
+                      >
+                        Reschedule
+                      </button>
                     )}
+                    <button
+                      onClick={() => setConfirmingCancel(true)}
+                      className="px-3 py-2 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg hover:border-red-500/60 transition"
+                    >
+                      Cancel
+                    </button>
                   </>
                 )}
               </div>
