@@ -522,27 +522,32 @@ export async function POST(req: NextRequest) {
     const rawTopic = link.topic || null;
     const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
 
-    // 1. Intro — short and warm, no "about {topic}" (topic lives in the
-    //    session title and closing, not the greeting body).
+    // 1. Intro — short and warm, includes format + duration up front.
     const hello = inviteeName ? `👋 Hi ${inviteeName}!` : "👋 Hi there!";
-    const intro = `${hello} I'm coordinating a meeting with ${hostFirstName}.`;
+    // Format emoji: phone → 📞, video → 📹, in-person → 🤝, fallback → 📅
+    const formatEmoji = effectiveFormat === "phone" ? "📞"
+      : effectiveFormat === "video" ? "📹"
+      : effectiveFormat === "in-person" ? "🤝"
+      : "📅";
 
-    // 2. Schedule block — compact time windows with optional dual timezone.
+    // 2. Build the intro sentence with format + duration up front.
     const fmtLabel = formatLabel(effectiveFormat);
     const durationLabel = (effectiveMinDuration && effectiveMinDuration < (effectiveDuration ?? 30))
       ? `${effectiveMinDuration}–${effectiveDuration}`
       : effectiveDuration
       ? `${effectiveDuration}`
       : null;
-    // Inline format/duration tag: "📅 45-min phone call" or "📅 30-min meeting"
+    // "a 55-min phone call" / "a video call" / "a 30-min meeting" / "a meeting"
     const meetingDesc = durationLabel && fmtLabel
-      ? `${durationLabel}-min ${fmtLabel}`
+      ? `a ${durationLabel}-min ${fmtLabel}`
       : fmtLabel
-      ? fmtLabel
+      ? `a ${fmtLabel}`
       : durationLabel
-      ? `${durationLabel}-min meeting`
-      : null;
+      ? `a ${durationLabel}-min meeting`
+      : "a meeting";
+    const intro = `${hello} ${formatEmoji} I'm scheduling ${meetingDesc} between you and ${hostFirstName}.`;
 
+    // 3. Schedule block — compact time windows with optional dual timezone.
     let scheduleBlock: string;
     if (windows.lines.length > 0) {
       const header = guestTzDiffers
@@ -552,10 +557,8 @@ export async function POST(req: NextRequest) {
       const legend = windows.hasPreferred
         ? `\n★ = best fit with ${hostFirstName}'s schedule`
         : "";
-      const moreNote = windows.wasTruncated ? "  ·  More times in the calendar →" : "";
-      const tagParts = [meetingDesc ? `📅 ${meetingDesc}` : null, moreNote || null].filter(Boolean);
-      const tagLine = tagParts.length > 0 ? `\n\n${tagParts.join("")}` : "";
-      scheduleBlock = `${header}\n\n${body}${legend}${tagLine}`;
+      const moreNote = windows.wasTruncated ? "\n\nMore times are available in the calendar →" : "";
+      scheduleBlock = `${header}\n\n${body}${legend}${moreNote}`;
     } else {
       scheduleBlock = `I don't have open times to show right now — tell me what generally works and I'll find a match.`;
     }

@@ -247,13 +247,14 @@ export function formatAvailabilityWindows(
     });
   }
 
-  // Ranking:
-  //   - With guest TZ: lead with days that have the most time inside
-  //     08–19 guest-local. Break ties by total offered time, then host
-  //     preferred count, then chronological.
-  //   - Without guest TZ: today's behavior — prefer days with host-
-  //     preferred slots, then chronological.
+  // Ranking: host-preferred slots always come first (they represent explicit
+  // host choices — link rules, scored -1 or lower). Within the same preference
+  // tier, guest-TZ working hours break ties so the most convenient EDT/CEST/etc.
+  // windows surface ahead of chronological order. Final tiebreak: chronological.
   days.sort((a, b) => {
+    if (a.preferredCount !== b.preferredCount) {
+      return b.preferredCount - a.preferredCount;
+    }
     if (hasGuestTz) {
       if (a.guestWorkingMinutes !== b.guestWorkingMinutes) {
         return b.guestWorkingMinutes - a.guestWorkingMinutes;
@@ -261,9 +262,6 @@ export function formatAvailabilityWindows(
       if (a.totalSlots !== b.totalSlots) {
         return b.totalSlots - a.totalSlots;
       }
-    }
-    if (a.preferredCount !== b.preferredCount) {
-      return b.preferredCount - a.preferredCount;
     }
     return a.firstStart.getTime() - b.firstStart.getTime();
   });
