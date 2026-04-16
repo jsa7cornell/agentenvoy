@@ -54,6 +54,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
   const [slotDuration, setSlotDuration] = useState<number | undefined>(undefined);
   const [slotMinDuration, setSlotMinDuration] = useState<number | undefined>(undefined);
+  const [isVip, setIsVip] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -94,6 +95,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           if (data.currentLocation) setSlotLocation(data.currentLocation);
           if (data.duration) setSlotDuration(data.duration);
           if (data.minDuration) setSlotMinDuration(data.minDuration);
+          if (data.isVip) setIsVip(true);
         }
       })
       .catch(() => {});
@@ -665,6 +667,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         <div className="flex items-center gap-2.5 mb-1.5">
           <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />
           <span className="text-sm font-semibold text-primary truncate">{getEventTitle()}</span>
+          {isVip && <span className="text-[10px] text-amber-500/60 dark:text-amber-400/50 flex-shrink-0 select-none" title="Priority meeting">★</span>}
           <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color} flex-shrink-0`}>{statusConfig.label}</span>
           {sessionStatusLabel &&
             sessionStatusLabel.trim().toLowerCase() !== statusConfig.label.toLowerCase() && (
