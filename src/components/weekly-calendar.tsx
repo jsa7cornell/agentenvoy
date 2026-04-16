@@ -95,6 +95,7 @@ interface WeeklyCalendarProps {
   weekStart: string;
   primaryCalendar?: string;
   onSlotClick?: (label: string) => void;
+  onEventClick?: (event: TunerEvent) => void;
 }
 
 export function WeeklyCalendar({
@@ -105,6 +106,7 @@ export function WeeklyCalendar({
   weekStart,
   primaryCalendar,
   onSlotClick,
+  onEventClick,
 }: WeeklyCalendarProps) {
   // Build array of 7 day strings
   const days = useMemo(() => {
@@ -323,7 +325,8 @@ export function WeeklyCalendar({
                   return (
                     <div
                       key={ev.id}
-                      className={`absolute rounded-sm border-l-2 ${getEventAccent(ev.responseStatus, ev.isTransparent)} ${getEventBg(ev.responseStatus, ev.isTransparent)} overflow-hidden z-10 pointer-events-none`}
+                      onClick={() => onEventClick?.(ev)}
+                      className={`absolute rounded-sm border-l-2 ${getEventAccent(ev.responseStatus, ev.isTransparent)} ${getEventBg(ev.responseStatus, ev.isTransparent)} overflow-hidden z-10 ${onEventClick ? "cursor-pointer hover:brightness-110 transition-[filter]" : "pointer-events-none"}`}
                       style={{ top, height, width, left }}
                     >
                       <div className="px-1.5 py-0.5">

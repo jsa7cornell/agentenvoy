@@ -1063,14 +1063,15 @@ export async function createTentativeHoldEvent(
  */
 export async function deleteCalendarEvent(
   userId: string,
-  eventId: string
+  eventId: string,
+  opts: { notifyAttendees?: boolean } = {}
 ): Promise<void> {
   try {
     const calendar = await getGoogleCalendarClient(userId);
     await calendar.events.delete({
       calendarId: "primary",
       eventId,
-      sendUpdates: "none",
+      sendUpdates: opts.notifyAttendees ? "all" : "none",
     });
   } catch (e: unknown) {
     const err = e as { code?: number; response?: { status?: number } };
@@ -1078,6 +1079,60 @@ export async function deleteCalendarEvent(
     if (status === 404 || status === 410) {
       // Already gone — treat as success.
       return;
+    }
+    throw e;
+  }
+}
+
+export type GCalAttendeeStatus = "accepted" | "declined" | "tentative" | "needsAction";
+
+export interface GCalEventStatus {
+  eventExists: boolean;
+  guestEmail: string | null;
+  guestOnInvite: boolean;
+  guestResponseStatus: GCalAttendeeStatus | null;
+  allAttendees: Array<{ email: string; responseStatus: GCalAttendeeStatus; self?: boolean }>;
+}
+
+/**
+ * Fetch a confirmed calendar event and return guest RSVP status.
+ * Used by the gcal-status endpoint so the host can see whether the guest
+ * has accepted the invite without leaving the deal room.
+ */
+export async function getCalendarEventStatus(
+  userId: string,
+  eventId: string,
+  guestEmail: string | null
+): Promise<GCalEventStatus> {
+  try {
+    const calendar = await getGoogleCalendarClient(userId);
+    const { data } = await calendar.events.get({
+      calendarId: "primary",
+      eventId,
+    });
+
+    const attendees = (data.attendees || []).map((a) => ({
+      email: a.email ?? "",
+      responseStatus: (a.responseStatus ?? "needsAction") as GCalAttendeeStatus,
+      self: a.self ?? false,
+    }));
+
+    const guestAttendee = guestEmail
+      ? attendees.find((a) => a.email.toLowerCase() === guestEmail.toLowerCase())
+      : null;
+
+    return {
+      eventExists: true,
+      guestEmail,
+      guestOnInvite: !!guestAttendee,
+      guestResponseStatus: guestAttendee?.responseStatus ?? null,
+      allAttendees: attendees,
+    };
+  } catch (e: unknown) {
+    const err = e as { code?: number; response?: { status?: number } };
+    const status = err?.code ?? err?.response?.status;
+    if (status === 404 || status === 410) {
+      return { eventExists: false, guestEmail, guestOnInvite: false, guestResponseStatus: null, allAttendees: [] };
     }
     throw e;
   }

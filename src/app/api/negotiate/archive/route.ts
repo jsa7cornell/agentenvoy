@@ -2,9 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { deleteCalendarEvent } from "@/lib/calendar";
 
 // PATCH /api/negotiate/archive
-// Archive or unarchive a session
+// Archive (or unarchive) a session.
+//
+// Archiving keeps the confirmed Google Calendar event intact — the meeting
+// still happens, the host just wants it out of their active deal list.
+// BUT: any active holds (tentative blocking events) are always released on
+// archive, since a pending session that's being archived won't be confirmed
+// and those tentative blocks should free up.
 export async function PATCH(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -23,6 +30,9 @@ export async function PATCH(req: NextRequest) {
 
   const negotiationSession = await prisma.negotiationSession.findUnique({
     where: { id: sessionId },
+    include: {
+      holds: { where: { status: "active" }, select: { id: true, calendarEventId: true } },
+    },
   });
 
   if (!negotiationSession) {
@@ -34,21 +44,24 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 
-  // Only allow archiving agreed/expired sessions or past events
-  if (archived) {
-    const isPast =
-      negotiationSession.agreedTime &&
-      new Date(negotiationSession.agreedTime) < new Date();
-    const isClosedStatus =
-      negotiationSession.status === "agreed" ||
-      negotiationSession.status === "expired";
-
-    if (!isPast && !isClosedStatus) {
-      return NextResponse.json(
-        { error: "Can only archive completed or past events" },
-        { status: 400 }
-      );
-    }
+  // When archiving, release any active holds — tentative calendar blocks have
+  // no business sitting on the host's calendar once a session is closed.
+  if (archived && negotiationSession.holds.length > 0) {
+    await Promise.all(
+      negotiationSession.holds.map(async (hold) => {
+        if (hold.calendarEventId) {
+          try {
+            await deleteCalendarEvent(negotiationSession.hostId, hold.calendarEventId);
+          } catch (e) {
+            console.warn(`[archive] failed to delete hold event ${hold.calendarEventId}:`, e);
+          }
+        }
+      })
+    );
+    await prisma.hold.updateMany({
+      where: { sessionId, status: "active" },
+      data: { status: "released" },
+    });
   }
 
   await prisma.negotiationSession.update({

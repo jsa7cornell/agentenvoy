@@ -7,6 +7,20 @@ import { DayView } from "@/components/day-view";
 import { AvailabilityRules } from "@/components/availability-rules";
 import Link from "next/link";
 
+type SessionSummary = {
+  id: string;
+  status: string;
+  archived: boolean;
+  title: string | null;
+  agreedTime: string | null;
+  agreedFormat: string | null;
+  duration: number | null;
+  meetLink: string | null;
+  guestEmail: string | null;
+  guestName: string | null;
+  dealRoomUrl: string;
+};
+
 function getSunday(d: Date): string {
   const date = new Date(d);
   const day = date.getDay();
@@ -35,6 +49,59 @@ export default function AvailabilityPage() {
   const [calendars, setCalendars] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Event click modal state
+  const [clickedEvent, setClickedEvent] = useState<TunerEvent | null>(null);
+  const [clickedSession, setClickedSession] = useState<SessionSummary | null | undefined>(undefined); // undefined=loading, null=not a session
+  const [sessionActionBusy, setSessionActionBusy] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+
+  async function handleEventClick(ev: TunerEvent) {
+    setClickedEvent(ev);
+    setClickedSession(undefined); // loading
+    try {
+      const res = await fetch(`/api/negotiate/by-calendar-event?eventId=${encodeURIComponent(ev.id)}`);
+      const data = res.ok ? await res.json() : null;
+      setClickedSession(data?.session ?? null);
+    } catch {
+      setClickedSession(null);
+    }
+  }
+
+  async function handleSessionArchive(sessionId: string) {
+    setSessionActionBusy(true);
+    try {
+      await fetch("/api/negotiate/archive", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, archived: true }),
+      });
+      setClickedEvent(null);
+      setClickedSession(undefined);
+      await fetchSchedule(); // refresh calendar to remove the hold
+    } finally {
+      setSessionActionBusy(false);
+    }
+  }
+
+  async function handleSessionCancel(sessionId: string) {
+    setSessionActionBusy(true);
+    try {
+      const res = await fetch("/api/negotiate/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (res.ok) {
+        setClickedEvent(null);
+        setClickedSession(undefined);
+        setConfirmingCancel(false);
+        await fetchSchedule(); // refresh calendar — confirmed event is now gone
+      }
+    } finally {
+      setSessionActionBusy(false);
+    }
+  }
 
   // Calendar filter modal state
   const [calendarFilterModal, setCalendarFilterModal] = useState(false);
@@ -302,6 +369,7 @@ export default function AvailabilityPage() {
               timezone={timezone}
               weekStart={weekStart}
               primaryCalendar={calendars[0]}
+              onEventClick={handleEventClick}
             />
           </div>
         </div>
@@ -321,10 +389,114 @@ export default function AvailabilityPage() {
               timezone={timezone}
               weekStart={weekStart}
               primaryCalendar={calendars[0]}
+              onEventClick={handleEventClick}
             />
           </div>
         </div>
       </div>
+
+      {/* Event detail modal */}
+      {clickedEvent && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); }}
+        >
+          <div
+            className="bg-surface-inset border border-DEFAULT rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Event title + time */}
+            <h3 className="text-sm font-semibold text-primary mb-1 truncate">{clickedEvent.summary}</h3>
+            <p className="text-xs text-muted mb-3">
+              {new Date(clickedEvent.start).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+              {" · "}
+              {new Date(clickedEvent.start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone })}
+              {" – "}
+              {new Date(clickedEvent.end).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone, timeZoneName: "short" })}
+            </p>
+
+            {/* AgentEnvoy session details */}
+            {clickedSession === undefined && (
+              <p className="text-xs text-muted py-2">Looking up session…</p>
+            )}
+            {clickedSession !== undefined && clickedSession !== null && (
+              <div className="border-t border-secondary pt-3 mb-3 space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400">AgentEnvoy</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                    clickedSession.status === "agreed" ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" :
+                    clickedSession.status === "cancelled" ? "text-red-400 border-red-500/30" :
+                    "text-zinc-400 border-zinc-700"
+                  }`}>
+                    {clickedSession.status === "agreed" ? "Confirmed" : clickedSession.status}
+                  </span>
+                </div>
+                {clickedSession.guestName && (
+                  <p className="text-xs text-secondary">With {clickedSession.guestName}{clickedSession.guestEmail ? ` (${clickedSession.guestEmail})` : ""}</p>
+                )}
+                <Link
+                  href={clickedSession.dealRoomUrl}
+                  className="inline-block text-xs text-indigo-400 hover:text-indigo-300 transition"
+                  onClick={() => setClickedEvent(null)}
+                >
+                  Open deal room →
+                </Link>
+              </div>
+            )}
+
+            {/* Actions */}
+            {confirmingCancel && clickedSession ? (
+              <div className="mt-1">
+                <p className="text-xs text-secondary mb-3">Cancel this meeting? This will delete the Google Calendar event and notify all attendees.</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setConfirmingCancel(false)}
+                    disabled={sessionActionBusy}
+                    className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50"
+                  >
+                    Keep it
+                  </button>
+                  <button
+                    onClick={() => handleSessionCancel(clickedSession.id)}
+                    disabled={sessionActionBusy}
+                    className="flex-1 px-3 py-2 text-xs font-medium bg-red-900/40 text-red-300 border border-red-500/30 rounded-lg hover:bg-red-900/60 transition disabled:opacity-50"
+                  >
+                    {sessionActionBusy ? "Cancelling…" : "Yes, cancel"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2 mt-1">
+                <button
+                  onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); }}
+                  className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition"
+                >
+                  Close
+                </button>
+                {clickedSession && !clickedSession.archived && clickedSession.status !== "cancelled" && (
+                  <>
+                    <button
+                      onClick={() => handleSessionArchive(clickedSession.id)}
+                      disabled={sessionActionBusy}
+                      className="px-3 py-2 text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 rounded-lg hover:border-zinc-500 transition disabled:opacity-50"
+                    >
+                      {sessionActionBusy ? "…" : "Archive"}
+                    </button>
+                    {clickedSession.status === "agreed" && (
+                      <button
+                        onClick={() => setConfirmingCancel(true)}
+                        className="px-3 py-2 text-xs text-red-400/70 hover:text-red-400 border border-red-500/20 rounded-lg hover:border-red-500/40 transition"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Calendar Filter Modal */}
       {calendarFilterModal && (

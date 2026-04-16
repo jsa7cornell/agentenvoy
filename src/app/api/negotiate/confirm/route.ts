@@ -152,6 +152,7 @@ export async function POST(req: NextRequest) {
   // Create calendar event for the host
   let meetLink: string | undefined;
   let eventLink: string | undefined;
+  let confirmedCalendarEventId: string | undefined;
 
   try {
     const descriptionLines = [
@@ -181,6 +182,7 @@ export async function POST(req: NextRequest) {
       meetLink = result.meetLink || undefined;
     }
     eventLink = result.htmlLink || undefined;
+    confirmedCalendarEventId = result.eventId || undefined;
   } catch (e) {
     console.error("Failed to create calendar event:", e);
     // Continue anyway — calendar isn't strictly required
@@ -271,6 +273,7 @@ export async function POST(req: NextRequest) {
       agreedTime: startTime,
       agreedFormat: meetingFormat,
       meetLink: meetLink || null,
+      calendarEventId: confirmedCalendarEventId || null,
       summary: confirmSummary,
     },
   });

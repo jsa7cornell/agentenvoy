@@ -40,6 +40,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [emailWarning, setEmailWarning] = useState<string | null>(null);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [gcalStatus, setGcalStatus] = useState<{
+    eventExists: boolean;
+    guestOnInvite: boolean;
+    guestResponseStatus: "accepted" | "declined" | "tentative" | "needsAction" | null;
+  } | null>(null);
   const [sessionStatus, setSessionStatus] = useState<string>("active");
   const [sessionStatusLabel, setSessionStatusLabel] = useState<string>("");
   const [statusAnimating, setStatusAnimating] = useState(false);
@@ -100,6 +108,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       })
       .catch(() => {});
   }, [sessionId]);
+
+  // Fetch Google Calendar event status for confirmed meetings (host only).
+  useEffect(() => {
+    if (!sessionId || !isHost || !confirmed) return;
+    fetch(`/api/negotiate/gcal-status?sessionId=${sessionId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data) setGcalStatus(data); })
+      .catch(() => {});
+  }, [sessionId, isHost, confirmed]);
 
   // Track event status changes for animation pulse
   useEffect(() => {
@@ -802,6 +819,80 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             </p>
           </div>
         )}
+
+        {/* Host management row — GCal status + Cancel/Archive */}
+        {isHost && eventStatus !== "cancelled" && (
+          <div className="ml-5 mt-2.5 flex items-center gap-3 flex-wrap">
+            {/* Google Calendar status badge — only when confirmed */}
+            {confirmed && gcalStatus && gcalStatus.eventExists && (
+              <span className="flex items-center gap-1.5 text-[11px] text-muted">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                On Google Calendar
+                {gcalStatus.guestOnInvite && gcalStatus.guestResponseStatus && (
+                  <>
+                    <span className="text-zinc-600 dark:text-zinc-700 mx-0.5">·</span>
+                    <span className={
+                      gcalStatus.guestResponseStatus === "accepted" ? "text-emerald-500" :
+                      gcalStatus.guestResponseStatus === "declined" ? "text-red-400" :
+                      "text-zinc-400"
+                    }>
+                      Guest {gcalStatus.guestResponseStatus === "accepted" ? "accepted" :
+                             gcalStatus.guestResponseStatus === "declined" ? "declined" :
+                             gcalStatus.guestResponseStatus === "tentative" ? "maybe" : "awaiting"}
+                    </span>
+                  </>
+                )}
+                {gcalStatus.guestOnInvite === false && (
+                  <>
+                    <span className="text-zinc-600 dark:text-zinc-700 mx-0.5">·</span>
+                    <span className="text-amber-400">Guest not on invite</span>
+                  </>
+                )}
+              </span>
+            )}
+            {confirmed && gcalStatus && !gcalStatus.eventExists && (
+              <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-600 flex-shrink-0" />
+                Not found on Google Calendar
+              </span>
+            )}
+
+            {/* Spacer to push buttons to the right when badge is present */}
+            <span className="flex-1" />
+
+            {/* Archive button — all non-cancelled sessions */}
+            <button
+              onClick={async () => {
+                if (!sessionId || isArchiving) return;
+                setIsArchiving(true);
+                try {
+                  await fetch("/api/negotiate/archive", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ sessionId, archived: true }),
+                  });
+                  window.location.href = "/dashboard";
+                } catch {
+                  setIsArchiving(false);
+                }
+              }}
+              disabled={isArchiving}
+              className="text-[11px] text-zinc-500 hover:text-zinc-300 transition disabled:opacity-50"
+            >
+              {isArchiving ? "Archiving…" : "Archive"}
+            </button>
+
+            {/* Cancel button — confirmed sessions only */}
+            {confirmed && (
+              <button
+                onClick={() => setShowCancelModal(true)}
+                className="text-[11px] text-red-500/70 hover:text-red-400 transition"
+              >
+                Cancel meeting
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -828,6 +919,59 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         )}
         <button onClick={() => setShowDetailsModal(false)} className="w-full mt-3 px-3 py-2 text-xs text-muted border border-secondary rounded-lg hover:border-DEFAULT transition">Close</button>
+      </div>
+    </div>
+  ) : null;
+
+  // --- Cancel confirm modal ---
+  const cancelModal = showCancelModal ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => !isCancelling && setShowCancelModal(false)}>
+      <div className="bg-surface-inset border border-DEFAULT rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-primary mb-2">Cancel this meeting?</h3>
+        <p className="text-xs text-secondary mb-1">This will:</p>
+        <ul className="text-xs text-secondary space-y-1 mb-4 ml-3 list-disc">
+          <li>Delete the Google Calendar event and notify all attendees</li>
+          <li>Release any holds blocking your calendar</li>
+          <li>Archive this deal room</li>
+        </ul>
+        <p className="text-xs text-zinc-500 mb-5">This can&apos;t be undone.</p>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowCancelModal(false)}
+            disabled={isCancelling}
+            className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50"
+          >
+            Keep it
+          </button>
+          <button
+            onClick={async () => {
+              if (!sessionId || isCancelling) return;
+              setIsCancelling(true);
+              try {
+                const res = await fetch("/api/negotiate/cancel", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ sessionId }),
+                });
+                if (res.ok) {
+                  window.location.href = "/dashboard";
+                } else {
+                  const data = await res.json();
+                  alert(data.error || "Cancel failed — please try again.");
+                  setIsCancelling(false);
+                  setShowCancelModal(false);
+                }
+              } catch {
+                setIsCancelling(false);
+                setShowCancelModal(false);
+              }
+            }}
+            disabled={isCancelling}
+            className="flex-1 px-3 py-2 text-xs font-medium bg-red-900/40 text-red-300 border border-red-500/30 rounded-lg hover:bg-red-900/60 hover:border-red-500/50 transition disabled:opacity-50"
+          >
+            {isCancelling ? "Cancelling…" : "Yes, cancel"}
+          </button>
+        </div>
       </div>
     </div>
   ) : null;
@@ -1145,6 +1289,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
       {/* Details modal */}
       {detailsModal}
+      {/* Cancel modal */}
+      {cancelModal}
     </div>
   );
 }

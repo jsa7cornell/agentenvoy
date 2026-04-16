@@ -131,6 +131,9 @@ model NegotiationSession {
   agreedFormat  String?
   summary       String?  @db.Text
   meetLink      String?
+  /// Google Calendar event ID of the confirmed meeting event.
+  /// Saved on confirmation so cancel can delete it cleanly.
+  calendarEventId String?
   guestEmail     String?
   /// IANA timezone captured from the guest's browser on first visit
   /// (Intl.DateTimeFormat().resolvedOptions().timeZone). First-write-wins —
