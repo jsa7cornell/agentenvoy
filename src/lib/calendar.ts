@@ -715,14 +715,18 @@ export async function getCachedCalendarContext(
       }
     }
 
-    // Deduplicate by iCalUID (cross-calendar) then by id (same calendar)
+    // Deduplicate by iCalUID (cross-calendar) then by id (same calendar).
+    // Include start time in the key so expanded recurring instances (which
+    // share an iCalUID but have different ids and start times) are preserved.
     const seen = new Set<string>();
     const droppedSamples: string[] = [];
     const deduped = events.filter((ev) => {
-      const dedupKey = ev.iCalUID || ev.id;
+      const dedupKey = ev.iCalUID
+        ? `${ev.iCalUID}|${ev.start.getTime()}`
+        : ev.id;
       if (seen.has(dedupKey)) {
         if (droppedSamples.length < 5) {
-          droppedSamples.push(`${ev.summary} [${ev.calendar}] key=${dedupKey.slice(0, 20)}`);
+          droppedSamples.push(`${ev.summary} [${ev.calendar}] key=${dedupKey.slice(0, 30)}`);
         }
         return false;
       }
