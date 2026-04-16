@@ -30,6 +30,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [topic, setTopic] = useState("");
   const [linkFormat, setLinkFormat] = useState("");
   const [inviteeName, setInviteeName] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [archivedData, setArchivedData] = useState<{ hostEmail: string | null; hostName: string | null } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -171,6 +172,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           format: proposal.format,
           location: proposal.location,
           timezone: proposal.timezone,
+          // Client-side fallback: if save_guest_info was called before this
+          // turn, guestEmail is already in DB. If not, this ensures the
+          // confirm route still has the email to add to the calendar invite.
+          guestEmail: guestEmail || undefined,
         }),
       });
       const data = await res.json();
@@ -460,9 +465,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             const { session: sess } = await sessionRes.json();
             setSessionStatus(sess.status);
             setSessionStatusLabel(sess.statusLabel || "");
-            // Update link info (guest name, topic) if changed by save_guest_info action
+            // Update link info (guest name, topic, email) if changed by save_guest_info action
             if (sess.link?.inviteeName && !inviteeName) setInviteeName(sess.link.inviteeName);
             if (sess.link?.topic && !topic) setTopic(sess.link.topic);
+            const freshEmail = sess.guestEmail || sess.link?.inviteeEmail;
+            if (freshEmail && !guestEmail) setGuestEmail(freshEmail);
           }
         } catch {}
       }

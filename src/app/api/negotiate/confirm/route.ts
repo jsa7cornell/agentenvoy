@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   // NOTE: `timezone` from the request body is ignored. The host's timezone
   // is canonical and comes from stored preferences. LLMs must not be trusted
   // to emit IANA strings.
-  const { sessionId, dateTime, duration, format, location } = body;
+  const { sessionId, dateTime, duration, format, location, guestEmail: bodyGuestEmail } = body;
 
   if (!sessionId || !dateTime) {
     return NextResponse.json(
@@ -104,10 +104,13 @@ export async function POST(req: NextRequest) {
     allParticipantSessions = participants.map((p) => p.sessionId);
   }
 
-  const guestEmail = session.guestEmail || session.link.inviteeEmail;
+  // Prefer DB-persisted email (written by save_guest_info action), fall back
+  // to the client-supplied value from deal-room.tsx state (populated after
+  // save_guest_info re-fetch). This ensures the Google Calendar invite always
+  // includes the guest even when the LLM forgot to call save_guest_info first.
+  const guestEmail = session.guestEmail || session.link.inviteeEmail || (bodyGuestEmail as string | undefined) || null;
   if (!guestEmail) {
-    console.warn(`[confirm] sessionId=${sessionId} — no guest email found; calendar invite will only have host. ` +
-      `save_guest_info may not have been called before confirm.`);
+    console.warn(`[confirm] sessionId=${sessionId} — no guest email found; calendar invite will only have host.`);
   }
   const attendeeEmails = isGroupEvent
     ? [hostEmail, ...allParticipantEmails.filter((e) => e !== hostEmail)]
