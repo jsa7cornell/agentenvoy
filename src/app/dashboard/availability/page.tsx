@@ -55,6 +55,7 @@ export default function AvailabilityPage() {
   const [clickedSession, setClickedSession] = useState<SessionSummary | null | undefined>(undefined); // undefined=loading, null=not a session
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [confirmingReschedule, setConfirmingReschedule] = useState(false);
   // Protection override state for external (non-AgentEnvoy) events
   const [protectionSaving, setProtectionSaving] = useState(false);
   // Local optimistic override score for the clicked event (synced from event.protectionOverride)
@@ -64,6 +65,7 @@ export default function AvailabilityPage() {
     setClickedEvent(ev);
     setClickedSession(undefined); // loading
     setConfirmingCancel(false);
+    setConfirmingReschedule(false);
     // Seed local protection from what the schedule API already surfaced
     setLocalProtection(ev.protectionOverride !== undefined ? ev.protectionOverride : null);
     try {
@@ -123,7 +125,26 @@ export default function AvailabilityPage() {
         setClickedEvent(null);
         setClickedSession(undefined);
         setConfirmingCancel(false);
-        await fetchSchedule(); // refresh calendar — confirmed event is now gone
+        await fetchSchedule();
+      }
+    } finally {
+      setSessionActionBusy(false);
+    }
+  }
+
+  async function handleSessionReschedule(sessionId: string) {
+    setSessionActionBusy(true);
+    try {
+      const res = await fetch("/api/negotiate/reschedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (res.ok) {
+        setClickedEvent(null);
+        setClickedSession(undefined);
+        setConfirmingReschedule(false);
+        await fetchSchedule(); // slot reopens, confirmed block disappears
       }
     } finally {
       setSessionActionBusy(false);
@@ -426,7 +447,7 @@ export default function AvailabilityPage() {
       {clickedEvent && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); }}
+          onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); setConfirmingReschedule(false); }}
         >
           <div
             className="bg-surface-inset border border-DEFAULT rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
@@ -474,7 +495,7 @@ export default function AvailabilityPage() {
             )}
 
             {/* External event — protection picker */}
-            {clickedSession === null && clickedEvent && !clickedEvent.isAllDay && (
+            {clickedSession === null && clickedEvent && (
               <div className="border-t border-secondary pt-3 mb-3">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2">
                   How should this affect scheduling?
@@ -594,22 +615,36 @@ export default function AvailabilityPage() {
             )}
 
             {/* Actions */}
-            {confirmingCancel && clickedSession ? (
+            {confirmingReschedule && clickedSession ? (
               <div className="mt-1">
-                <p className="text-xs text-secondary mb-3">Cancel this meeting? This will delete the Google Calendar event and notify all attendees.</p>
+                <p className="text-xs text-secondary mb-3">
+                  Reschedule this meeting? The current calendar invite will be cancelled and{" "}
+                  {clickedSession.guestName || "your guest"} will be notified. A new time will be negotiated.
+                </p>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => setConfirmingCancel(false)}
-                    disabled={sessionActionBusy}
-                    className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50"
-                  >
+                  <button onClick={() => setConfirmingReschedule(false)} disabled={sessionActionBusy}
+                    className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50">
                     Keep it
                   </button>
-                  <button
-                    onClick={() => handleSessionCancel(clickedSession.id)}
-                    disabled={sessionActionBusy}
-                    className="flex-1 px-3 py-2 text-xs font-medium bg-red-900/40 text-red-300 border border-red-500/30 rounded-lg hover:bg-red-900/60 transition disabled:opacity-50"
-                  >
+                  <button onClick={() => handleSessionReschedule(clickedSession.id)} disabled={sessionActionBusy}
+                    className="flex-1 px-3 py-2 text-xs font-medium bg-indigo-900/40 text-indigo-300 border border-indigo-500/30 rounded-lg hover:bg-indigo-900/60 transition disabled:opacity-50">
+                    {sessionActionBusy ? "Working…" : "Yes, reschedule"}
+                  </button>
+                </div>
+              </div>
+            ) : confirmingCancel && clickedSession ? (
+              <div className="mt-1">
+                <p className="text-xs text-secondary mb-3">
+                  Cancel this meeting? The Google Calendar invite will be deleted and{" "}
+                  {clickedSession.guestName || "your guest"} will be notified.
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => setConfirmingCancel(false)} disabled={sessionActionBusy}
+                    className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50">
+                    Keep it
+                  </button>
+                  <button onClick={() => handleSessionCancel(clickedSession.id)} disabled={sessionActionBusy}
+                    className="flex-1 px-3 py-2 text-xs font-medium bg-red-900/40 text-red-300 border border-red-500/30 rounded-lg hover:bg-red-900/60 transition disabled:opacity-50">
                     {sessionActionBusy ? "Cancelling…" : "Yes, cancel"}
                   </button>
                 </div>
@@ -617,7 +652,7 @@ export default function AvailabilityPage() {
             ) : (
               <div className="flex gap-2 mt-1">
                 <button
-                  onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); }}
+                  onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); setConfirmingReschedule(false); }}
                   className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition"
                 >
                   Close
@@ -632,12 +667,20 @@ export default function AvailabilityPage() {
                       {sessionActionBusy ? "…" : "Archive"}
                     </button>
                     {clickedSession.status === "agreed" && (
-                      <button
-                        onClick={() => setConfirmingCancel(true)}
-                        className="px-3 py-2 text-xs text-red-400/70 hover:text-red-400 border border-red-500/20 rounded-lg hover:border-red-500/40 transition"
-                      >
-                        Cancel
-                      </button>
+                      <>
+                        <button
+                          onClick={() => setConfirmingReschedule(true)}
+                          className="px-3 py-2 text-xs text-indigo-400/80 hover:text-indigo-300 border border-indigo-500/20 rounded-lg hover:border-indigo-500/40 transition"
+                        >
+                          Reschedule
+                        </button>
+                        <button
+                          onClick={() => setConfirmingCancel(true)}
+                          className="px-3 py-2 text-xs text-red-400/70 hover:text-red-400 border border-red-500/20 rounded-lg hover:border-red-500/40 transition"
+                        >
+                          Cancel
+                        </button>
+                      </>
                     )}
                   </>
                 )}

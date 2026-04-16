@@ -40,7 +40,9 @@ export default function MeetingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [archiving, setArchiving] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
-  const [confirmCancel, setConfirmCancel] = useState<string | null>(null); // sessionId awaiting confirm
+  const [rescheduling, setRescheduling] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<string | null>(null);
+  const [confirmReschedule, setConfirmReschedule] = useState<string | null>(null);
 
   async function handleArchive(sessionId: string) {
     setArchiving(sessionId);
@@ -76,6 +78,39 @@ export default function MeetingsPage() {
     } finally {
       setCancelling(null);
       setConfirmCancel(null);
+    }
+  }
+
+  async function handleReschedule(sessionId: string) {
+    setRescheduling(sessionId);
+    try {
+      const res = await fetch("/api/negotiate/reschedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (res.ok) {
+        // Session goes back to active — refresh from server so status/date update
+        const refreshed = await fetch("/api/negotiate/sessions?archived=false");
+        const data = refreshed.ok ? await refreshed.json() : null;
+        if (data?.sessions) {
+          const now = new Date();
+          const sorted = [...data.sessions]
+            .sort((a: ActiveSession, b: ActiveSession) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            )
+            .filter((s: ActiveSession) => {
+              const isPast = s.agreedTime && new Date(s.agreedTime) < now;
+              return !isPast && s.status !== "expired";
+            });
+          setActiveSessions(sorted);
+        }
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setRescheduling(null);
+      setConfirmReschedule(null);
     }
   }
 
@@ -155,7 +190,23 @@ export default function MeetingsPage() {
                 const guestLabel = s.link.inviteeName || s.guestEmail || s.link.inviteeEmail || "Guest";
                 const title = s.title || s.link.topic || `Meeting with ${guestLabel}`;
 
-                // Inline cancel confirm state for this row
+                // Inline reschedule confirm state
+                if (confirmReschedule === s.id) {
+                  return (
+                    <div key={s.id} className="flex items-center gap-2 px-4 py-3 bg-indigo-950/20">
+                      <span className="text-xs text-secondary flex-1">Reschedule? Current invite cancelled, new time to be negotiated.</span>
+                      <button onClick={() => setConfirmReschedule(null)}
+                        className="text-xs text-muted hover:text-secondary transition px-2 py-1">Keep</button>
+                      <button onClick={(e) => { e.preventDefault(); handleReschedule(s.id); }}
+                        disabled={rescheduling === s.id}
+                        className="text-xs font-medium text-indigo-400 hover:text-indigo-300 border border-indigo-500/30 rounded px-2 py-1 transition disabled:opacity-50">
+                        {rescheduling === s.id ? "Working…" : "Yes, reschedule"}
+                      </button>
+                    </div>
+                  );
+                }
+
+                // Inline cancel confirm state
                 if (confirmCancel === s.id) {
                   return (
                     <div key={s.id} className="flex items-center gap-2 px-4 py-3 bg-red-950/20">
@@ -185,15 +236,24 @@ export default function MeetingsPage() {
                       </span>
                       <span className="flex-shrink-0 text-[10px] text-muted hidden sm:block">{displayDate}</span>
                     </Link>
-                    {/* Cancel — confirmed sessions only */}
+                    {/* Reschedule + Cancel — confirmed sessions only */}
                     {isConfirmed && (
-                      <button
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmCancel(s.id); }}
-                        title="Cancel meeting"
-                        className="flex-shrink-0 text-[11px] text-red-500/60 hover:text-red-400 transition"
-                      >
-                        Cancel
-                      </button>
+                      <>
+                        <button
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmReschedule(s.id); }}
+                          title="Reschedule meeting"
+                          className="flex-shrink-0 text-[11px] text-indigo-400/70 hover:text-indigo-300 transition"
+                        >
+                          Reschedule
+                        </button>
+                        <button
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmCancel(s.id); }}
+                          title="Cancel meeting"
+                          className="flex-shrink-0 text-[11px] text-red-500/60 hover:text-red-400 transition"
+                        >
+                          Cancel
+                        </button>
+                      </>
                     )}
                     {/* Archive — all sessions */}
                     <button

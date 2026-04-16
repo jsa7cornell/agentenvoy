@@ -188,8 +188,9 @@ export function DayView({
           {allDayEvents.map((e) => (
             <span
               key={e.id}
-              className="text-[10px] leading-tight px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/80 border-l-2 border-l-indigo-500 text-primary truncate max-w-[200px]"
+              className={`text-[10px] leading-tight px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/80 border-l-2 border-l-indigo-500 text-primary truncate max-w-[200px] ${onEventClick ? "cursor-pointer hover:brightness-110 transition-[filter]" : ""}`}
               title={e.summary}
+              onClick={() => onEventClick?.(e)}
             >
               {e.summary}
             </span>
