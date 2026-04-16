@@ -480,11 +480,10 @@ export default function AvailabilityPage() {
                   How should this affect scheduling?
                 </p>
                 {(() => {
-                  // Compute the engine's auto score from overlapping slots.
-                  // Only valid when no override is active — when an override exists
-                  // the slots already reflect that score, not the original auto value.
-                  const noOverride = clickedEvent.protectionOverride === undefined;
-                  const overlappingSlots = noOverride
+                  // Engine's auto score from overlapping slots — only valid when no
+                  // override is active (slots reflect override when one is set).
+                  const hasOverride = localProtection !== null;
+                  const overlappingSlots = !hasOverride
                     ? slots.filter(
                         (s) =>
                           new Date(s.start) < new Date(clickedEvent.end) &&
@@ -496,76 +495,87 @@ export default function AvailabilityPage() {
                       ? Math.max(...overlappingSlots.map((s) => s.score))
                       : null;
 
-                  // Score → color for the auto badge
-                  const scoreBadgeColor =
-                    autoScore === null ? "text-zinc-500" :
-                    autoScore <= 1 ? "text-emerald-400" :
-                    autoScore <= 2 ? "text-yellow-400" :
-                    autoScore <= 3 ? "text-amber-400" :
-                    autoScore <= 4 ? "text-orange-400" :
-                    "text-red-400";
+                  // Map any 0-5 score to the nearest of our 3 explicit levels
+                  function mapToLevel(score: number): 0 | 3 | 5 {
+                    if (score <= 1) return 0;
+                    if (score <= 3) return 3;
+                    return 5;
+                  }
 
-                  const options = [
-                    {
-                      label: "Auto",
-                      score: null as null,
-                      desc: noOverride && autoScore !== null
-                        ? `Engine assigned this a ${autoScore} — confirmed meetings block, tentative events stretch, declined events are ignored.`
-                        : "Engine reads the event — confirmed meetings block, tentative events stretch, declined events are ignored.",
-                      color: "text-zinc-400 border-zinc-700 hover:border-zinc-500",
-                    },
+                  // Visual selection: override if set, otherwise auto-mapped
+                  const visualScore: 0 | 3 | 5 =
+                    hasOverride
+                      ? (localProtection as 0 | 3 | 5)
+                      : autoScore !== null
+                      ? mapToLevel(autoScore)
+                      : 0; // fallback: show Open
+
+                  const options: { label: string; score: 0 | 3 | 5; desc: string; color: string }[] = [
                     {
                       label: "Open",
-                      score: 0 as const,
-                      desc: "Treat this time as available. The event is ignored for scheduling purposes.",
+                      score: 0,
+                      desc: "This time is treated as available. The event won't block scheduling.",
                       color: "text-emerald-400 border-emerald-700 hover:border-emerald-500",
                     },
                     {
-                      label: "VIP backup",
-                      score: 3 as const,
-                      desc: "Protected, but offered to VIP contacts as a last resort if no better times are available.",
+                      label: "Protected",
+                      score: 3,
+                      desc: "This time is held back from most requests. VIP contacts can still be offered it as a backup if nothing else works.",
                       color: "text-amber-400 border-amber-700 hover:border-amber-500",
                     },
                     {
-                      label: "Hard block",
-                      score: 5 as const,
-                      desc: "Never offered — not even to VIPs. This time is fully off-limits.",
+                      label: "Blocked",
+                      score: 5,
+                      desc: "Fully off-limits. This time will never be offered, not even to VIPs.",
                       color: "text-red-400 border-red-800 hover:border-red-600",
                     },
                   ];
-                  const active = options.find((o) =>
-                    o.score === null ? localProtection === null : localProtection === o.score
-                  );
+
+                  const activeOption = options.find((o) => o.score === visualScore) ?? options[0];
+
+                  // Auto label for the reset link
+                  const autoLevelLabel =
+                    autoScore !== null
+                      ? options.find((o) => o.score === mapToLevel(autoScore))?.label
+                      : null;
+
                   return (
                     <>
-                      <div className="grid grid-cols-4 gap-1.5">
+                      <div className="grid grid-cols-3 gap-2">
                         {options.map(({ label, score, color }) => {
-                          const isActive =
-                            score === null ? localProtection === null : localProtection === score;
-                          const isAutoBtn = score === null;
+                          const isActive = score === visualScore;
                           return (
                             <button
                               key={label}
                               disabled={protectionSaving}
-                              onClick={() => handleProtectionChange(clickedEvent.id, score as 0 | 3 | 5 | null)}
-                              className={`flex flex-col items-center gap-0.5 px-1 py-2 rounded-lg border text-[10px] font-medium transition disabled:opacity-50 ${color} ${
+                              onClick={() => handleProtectionChange(clickedEvent.id, score)}
+                              className={`px-2 py-2 rounded-lg border text-[11px] font-medium transition disabled:opacity-50 ${color} ${
                                 isActive ? "bg-white/5 ring-1 ring-current" : "bg-transparent"
                               }`}
                             >
                               {label}
-                              {/* Show engine-computed score badge on the Auto button when no override is active */}
-                              {isAutoBtn && autoScore !== null && (
-                                <span className={`text-[9px] font-bold tabular-nums leading-none ${scoreBadgeColor}`}>
-                                  {autoScore}
-                                </span>
-                              )}
                             </button>
                           );
                         })}
                       </div>
-                      {active && (
-                        <p className="text-[10px] text-muted mt-2 leading-relaxed">
-                          {protectionSaving ? "Saving…" : active.desc}
+
+                      <p className="text-[10px] text-muted mt-2 leading-relaxed">
+                        {protectionSaving ? "Saving…" : activeOption.desc}
+                      </p>
+
+                      {/* Reset to auto — only shown when an override is active */}
+                      {hasOverride && (
+                        <p className="text-[10px] text-muted mt-1.5">
+                          <button
+                            disabled={protectionSaving}
+                            onClick={() => handleProtectionChange(clickedEvent.id, null)}
+                            className="underline hover:text-secondary transition disabled:opacity-50"
+                          >
+                            Reset to auto
+                          </button>
+                          {autoLevelLabel && (
+                            <span className="ml-1">(engine would pick: {autoLevelLabel})</span>
+                          )}
                         </p>
                       )}
                     </>
