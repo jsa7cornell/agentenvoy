@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { generateText } from "ai";
+import { generateText, streamText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
@@ -10,7 +10,7 @@ import { generateCode } from "@/lib/utils";
 import { getUserTimezone } from "@/lib/timezone";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { normalizeLinkRules } from "@/lib/scoring";
-import { sanitizeHistory, roleSummary } from "@/lib/conversation";
+import { sanitizeHistory } from "@/lib/conversation";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -129,10 +129,11 @@ When the host asks you to find time for a specific meeting, be an active collabo
 - When creating a thread, you can mark specific slots as preferred (score -1) using slotOverrides in the link rules. This makes the widget highlight those slots for the guest.
 
 OFFERABLE SLOTS RULE (CRITICAL):
-Your context includes an OFFERABLE SLOTS section — a pre-formatted list of times guests will see. When creating threads or describing availability to the host:
+Your context includes an OFFERABLE SLOTS section — a pre-formatted list of times guests will see. Each window shows its total free duration in parentheses, e.g. "3:30–4 PM (30m)" or "9 AM–1 PM (4h)". When creating threads or describing availability to the host:
 - ONLY reference times from the OFFERABLE SLOTS list. Do NOT invent times or compute availability yourself.
 - Copy day-of-week and dates exactly from the DATE REFERENCE. Never calculate what day a date falls on.
 - When telling the host what you're offering a guest, match the OFFERABLE SLOTS — those are the actual windows guests see.
+- When a meeting has a specific duration, only offer windows that are at least that long. A "3:30–4 PM (30m)" window cannot host a 45-min meeting — skip it and do not mention it to the host or guest.
 
 UPDATING KNOWLEDGE:
 When the host tells you something about their schedule, preferences, or context, save it using the update_knowledge action:
@@ -196,23 +197,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      meetSlug: true,
-      preferences: true,
-      persistentKnowledge: true,
-      upcomingSchedulePreferences: true,
-      hostDirectives: true,
-      lastCalibratedAt: true,
-    },
-  });
+  // Parallel group 1: user lookup + body parse
+  const [user, body] = await Promise.all([
+    prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        meetSlug: true,
+        preferences: true,
+        persistentKnowledge: true,
+        upcomingSchedulePreferences: true,
+        hostDirectives: true,
+        lastCalibratedAt: true,
+      },
+    }),
+    req.json(),
+  ]);
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
+  const { message } = body;
 
   // Get or create channel
   let channel = await prisma.channel.findUnique({ where: { userId: user.id } });
@@ -220,58 +226,81 @@ export async function POST(req: NextRequest) {
     channel = await prisma.channel.create({ data: { userId: user.id } });
   }
 
-  const body = await req.json();
-  const { message } = body;
+  // Detect if the host is asking us to re-check / refresh calendar
+  const lowerMsg = message.toLowerCase();
+  const isRefreshRequest = /\b(check again|re-?check|refresh|re-?pull|changed my (schedule|calendar)|updated my (schedule|calendar)|look again|try again|one more time)\b/i.test(lowerMsg);
 
-  // Save user message
-  await prisma.channelMessage.create({
-    data: { channelId: channel.id, role: "user", content: message },
-  });
-
-  // --- Channel session lifecycle (3-day rolling window) ---
-  // IMPORTANT: must happen immediately after saving the message so the session's
-  // startedAt is close in time to the message's createdAt.
+  // Parallel group 2: save message + session lookup + schedule + active sessions
   const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
   const now = new Date();
-  let activeSession = await prisma.channelSession.findFirst({
-    where: { channelId: channel.id, closed: false },
-    orderBy: { startedAt: "desc" },
-  });
 
-  let previousSummary: string | null = null;
+  const [, sessionResult, scheduleResult, activeSessions] = await Promise.all([
+    // Save user message
+    prisma.channelMessage.create({
+      data: { channelId: channel.id, role: "user", content: message },
+    }),
+    // Find active session
+    prisma.channelSession.findFirst({
+      where: { channelId: channel.id, closed: false },
+      orderBy: { startedAt: "desc" },
+    }),
+    // Fetch scored schedule
+    getOrComputeSchedule(user.id, { forceRefresh: isRefreshRequest }).catch((e) => {
+      console.log("Schedule context error:", e);
+      return null;
+    }),
+    // Fetch active negotiation sessions
+    prisma.negotiationSession.findMany({
+      where: { hostId: user.id, archived: false },
+      include: { link: { select: { inviteeName: true, inviteeEmail: true, topic: true } } },
+      orderBy: { updatedAt: "desc" },
+      take: 20,
+    }),
+  ]);
+
+  // --- Channel session lifecycle (3-day rolling window) ---
+  let activeSession = sessionResult;
 
   if (activeSession && activeSession.expiresAt < now) {
-    // Session expired — close it with a summary and start fresh
-    const recentMsgs = await prisma.channelMessage.findMany({
-      where: {
-        channelId: channel.id,
-        createdAt: { gte: activeSession.startedAt },
-      },
-      orderBy: { createdAt: "asc" },
-      take: 30,
+    // Session expired — close it immediately and summarize in the background.
+    // The summarization runs fire-and-forget so the user's message proceeds without waiting.
+    const expiredSessionId = activeSession.id;
+    const expiredSessionStart = activeSession.startedAt;
+    await prisma.channelSession.update({
+      where: { id: expiredSessionId },
+      data: { closed: true },
     });
-    const summaryText = recentMsgs
-      .filter((m) => m.role !== "system")
-      .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
-      .join("\n");
 
-    try {
-      const summaryResult = await generateText({
-        model: envoyModel("claude-sonnet-4-6"),
-        system: "Summarize this scheduling conversation in 2-3 sentences. Focus on what was decided, what's pending, and any preferences learned.",
-        messages: [{ role: "user", content: summaryText }],
-      });
-      previousSummary = summaryResult.text;
-      await prisma.channelSession.update({
-        where: { id: activeSession.id },
-        data: { closed: true, summary: previousSummary },
-      });
-    } catch {
-      await prisma.channelSession.update({
-        where: { id: activeSession.id },
-        data: { closed: true },
-      });
-    }
+    void (async () => {
+      try {
+        const recentMsgs = await prisma.channelMessage.findMany({
+          where: {
+            channelId: channel.id,
+            createdAt: { gte: expiredSessionStart },
+          },
+          orderBy: { createdAt: "asc" },
+          take: 30,
+        });
+        const summaryText = recentMsgs
+          .filter((m) => m.role !== "system")
+          .map((m) => `${m.role}: ${m.content.slice(0, 200)}`)
+          .join("\n");
+
+        const summaryResult = await generateText({
+          model: envoyModel("claude-sonnet-4-6"),
+          maxOutputTokens: 512,
+          system: "Summarize this scheduling conversation in 2-3 sentences. Focus on what was decided, what's pending, and any preferences learned.",
+          messages: [{ role: "user", content: summaryText }],
+        });
+        await prisma.channelSession.update({
+          where: { id: expiredSessionId },
+          data: { summary: summaryResult.text },
+        });
+      } catch (e) {
+        console.error("[channel/chat] Background summarization failed:", e);
+      }
+    })();
+
     activeSession = null;
   }
 
@@ -293,25 +322,14 @@ export async function POST(req: NextRequest) {
   const contextParts: string[] = [];
   contextParts.push(`User: ${user.name || "User"}`);
 
-  // Detect if the host is asking us to re-check / refresh calendar
-  const lowerMsg = message.toLowerCase();
-  const isRefreshRequest = /\b(check again|re-?check|refresh|re-?pull|changed my (schedule|calendar)|updated my (schedule|calendar)|look again|try again|one more time)\b/i.test(lowerMsg);
-
-  // Scored schedule — pre-computed slots with protection scores
+  // Scored schedule — use pre-fetched result
   let calendarConnected = false;
   const hostPrefs = user.preferences as Record<string, unknown> | null;
   const tz = getUserTimezone(hostPrefs);
-  try {
-    const schedule = await getOrComputeSchedule(user.id, { forceRefresh: isRefreshRequest });
-    if (schedule.connected) {
-      calendarConnected = true;
-      contextParts.push(formatComputedSchedule(schedule.slots, tz, schedule.canWrite));
-      // Add pre-formatted offerable slots — this is the ONLY list the LLM should
-      // reference when creating threads or telling the host what guests will see.
-      contextParts.push(formatOfferableSlots(schedule.slots, tz, schedule.canWrite));
-    }
-  } catch (e) {
-    console.log("Schedule context error:", e);
+  if (scheduleResult?.connected) {
+    calendarConnected = true;
+    contextParts.push(formatComputedSchedule(scheduleResult.slots, tz, scheduleResult.canWrite));
+    contextParts.push(formatOfferableSlots(scheduleResult.slots, tz, scheduleResult.canWrite));
   }
   if (!calendarConnected) {
     contextParts.push("Calendar: Not connected");
@@ -328,13 +346,7 @@ export async function POST(req: NextRequest) {
     contextParts.push(`Host directives (highest priority):\n${(user.hostDirectives as string[]).map(d => `- ${d}`).join("\n")}`);
   }
 
-  // Active sessions context — with IDs so the AI can reference them in actions
-  const activeSessions = await prisma.negotiationSession.findMany({
-    where: { hostId: user.id, archived: false },
-    include: { link: { select: { inviteeName: true, inviteeEmail: true, topic: true } } },
-    orderBy: { updatedAt: "desc" },
-    take: 20,
-  });
+  // Active sessions context — use pre-fetched result
   if (activeSessions.length > 0) {
     const sessionList = activeSessions.map(s =>
       `- "${s.title || 'Untitled'}" (ID: ${s.id}) — status: ${s.status}, guest: ${s.link.inviteeName || s.guestEmail || "unknown"}${s.statusLabel ? `, note: ${s.statusLabel}` : ""}`
@@ -368,11 +380,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Add previous session summary to context if starting fresh
-  if (previousSummary) {
-    contextParts.push(`Previous session summary: ${previousSummary}`);
-  }
-
   // Get conversation history — hard cap at 3 days
   const threeDaysAgo = new Date(Date.now() - THREE_DAYS_MS);
   const sessionStart = new Date(activeSession.startedAt.getTime() - 5000);
@@ -396,198 +403,132 @@ export async function POST(req: NextRequest) {
     console.warn(`[channel/chat] History sanitized | userId=${user.id} | ${warnings.join("; ")}`);
   }
 
-  // Generate response
-  let text: string;
-  try {
-    const result = await generateText({
-      model: envoyModel("claude-sonnet-4-6"),
-      system: CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n"),
-      messages,
-    });
-    text = result.text;
-  } catch (e) {
-    const err = e instanceof Error ? e : new Error(String(e));
-    console.error(
-      `[channel/chat] AI call failed | userId=${user.id} | messageCount=${messages.length} | roles=${roleSummary(messages)} | error=${err.message}`
-    );
-    return NextResponse.json(
-      { error: "AI service temporarily unavailable", detail: err.message, retryable: true },
-      { status: 502 }
-    );
-  }
+  // Generate streaming response
+  const result = streamText({
+    model: envoyModel("claude-sonnet-4-6"),
+    maxOutputTokens: 1024,
+    system: CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n"),
+    messages,
+    async onFinish({ text }) {
+      try {
+        // --- Parse and execute [ACTION] blocks ---
+        const actions = parseActions(text);
+        let actionResults: Awaited<ReturnType<typeof executeActions>> = [];
+        if (actions.length > 0) {
+          actionResults = await executeActions(actions, user.id, { meetSlug: user.meetSlug || undefined });
+        }
 
-  // --- Parse and execute [ACTION] blocks ---
-  const actions = parseActions(text);
-  let actionResults: Awaited<ReturnType<typeof executeActions>> = [];
-  if (actions.length > 0) {
-    actionResults = await executeActions(actions, user.id, { meetSlug: user.meetSlug || undefined });
-  }
+        // Strip [ACTION] blocks from displayed text
+        let displayText = stripActionBlocks(text);
 
-  // Strip [ACTION] blocks from displayed text
-  let displayText = stripActionBlocks(text);
+        // --- Legacy: parse agentenvoy-action blocks (create_thread) ---
+        const actionRegex = /```agentenvoy-action\s*\n?([\s\S]*?)\n?```/g;
+        const actionMatch = actionRegex.exec(displayText);
 
-  // --- Legacy: parse agentenvoy-action blocks (create_thread) ---
-  const actionRegex = /```agentenvoy-action\s*\n?([\s\S]*?)\n?```/g;
-  const actionMatch = actionRegex.exec(displayText);
+        // Strip legacy action blocks from the visible message
+        displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
 
-  // Strip legacy action blocks from the visible message
-  displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
+        // Process legacy create_thread action if found
+        if (actionMatch) {
+          try {
+            const action = JSON.parse(actionMatch[1]);
 
-  // Process legacy create_thread action if found
-  if (actionMatch) {
-    try {
-      const action = JSON.parse(actionMatch[1]);
+            if (action.action === "create_thread") {
+              const code = generateCode();
+              const title = action.topic
+                ? `${action.topic} — ${action.inviteeName || "Invitee"}`
+                : `Catch up — ${action.inviteeName || "Invitee"}`;
 
-      if (action.action === "create_thread") {
-        const code = generateCode();
-        const baseUrl = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
-        const threadUrl = `${baseUrl}/meet/${user.meetSlug}/${code}`;
-        const title = action.topic
-          ? `${action.topic} — ${action.inviteeName || "Invitee"}`
-          : `Catch up — ${action.inviteeName || "Invitee"}`;
+              const linkRules = normalizeLinkRules({
+                ...(action.rules || {}),
+                ...(action.format ? { format: action.format } : {}),
+                ...(action.duration ? { duration: action.duration } : {}),
+                ...(action.urgency ? { urgency: action.urgency } : {}),
+              });
+              const link = await prisma.negotiationLink.create({
+                data: {
+                  userId: user.id,
+                  type: "contextual",
+                  slug: user.meetSlug || "",
+                  code,
+                  inviteeEmail: action.inviteeEmail || null,
+                  inviteeName: action.inviteeName || null,
+                  topic: action.topic || null,
+                  rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
+                },
+              });
 
-        // Create contextual link — merge format/duration/urgency into rules
-        // so they're available when generating the deal room greeting.
-        // Normalize day-name arrays / dateRange to canonical persistence shape.
-        const linkRules = normalizeLinkRules({
-          ...(action.rules || {}),
-          ...(action.format ? { format: action.format } : {}),
-          ...(action.duration ? { duration: action.duration } : {}),
-          ...(action.urgency ? { urgency: action.urgency } : {}),
-        });
-        const link = await prisma.negotiationLink.create({
-          data: {
-            userId: user.id,
-            type: "contextual",
-            slug: user.meetSlug || "",
-            code,
-            inviteeEmail: action.inviteeEmail || null,
-            inviteeName: action.inviteeName || null,
-            topic: action.topic || null,
-            rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
-          },
-        });
+              const negotiationSession = await prisma.negotiationSession.create({
+                data: {
+                  linkId: link.id,
+                  hostId: user.id,
+                  type: "calendar",
+                  status: "active",
+                  title,
+                  statusLabel: `Waiting for ${action.inviteeName || "invitee"}`,
+                  format: action.format || null,
+                  duration: action.duration || (hostPrefs?.defaultDuration as number) || 30,
+                },
+              });
 
-        // Create negotiation session
-        const negotiationSession = await prisma.negotiationSession.create({
-          data: {
-            linkId: link.id,
-            hostId: user.id,
-            type: "calendar",
-            status: "active",
-            title,
-            statusLabel: `Waiting for ${action.inviteeName || "invitee"}`,
-            format: action.format || null,
-            duration: action.duration || (hostPrefs?.defaultDuration as number) || 30,
-          },
-        });
+              await prisma.channelMessage.create({
+                data: {
+                  channelId: channel.id,
+                  role: "envoy",
+                  content: displayText || `I've set up a thread for ${action.inviteeName || "your meeting"}.`,
+                  threadId: negotiationSession.id,
+                },
+              });
+              return; // Message saved with threadId
+            }
+          } catch (e) {
+            console.error("Failed to parse/execute legacy action:", e);
+          }
+        }
 
-        // Save envoy response (stripped of action block) with threadId
-        await prisma.channelMessage.create({
-          data: {
-            channelId: channel.id,
-            role: "envoy",
-            content: displayText || `I've set up a thread for ${action.inviteeName || "your meeting"}.`,
-            threadId: negotiationSession.id,
-          },
-        });
-
-        // Build a response that includes the thread data
-        const shareNote = action.inviteeEmail
-          ? `I'll send the invite to ${action.inviteeEmail}.`
-          : `Here's the link to share: ${threadUrl}`;
-
-        const responsePayload = {
-          message: displayText || `I've set up a thread for ${action.inviteeName || "your meeting"}.`,
-          shareNote,
-          thread: {
-            id: negotiationSession.id,
-            title,
-            status: "active",
-            statusLabel: `Waiting for ${action.inviteeName || "invitee"}`,
-            format: action.format || null,
-            duration: action.duration || (hostPrefs?.defaultDuration as number) || 30,
-            url: threadUrl,
-            code,
-            link: {
-              inviteeName: action.inviteeName || null,
-              inviteeEmail: action.inviteeEmail || null,
-              topic: action.topic || null,
-              code,
-              slug: user.meetSlug || "",
+        // Check if create_link action was among the new-style actions
+        const createLinkResult = actionResults.find(
+          (r) => r.success && r.data?.url
+        );
+        if (createLinkResult?.data) {
+          const d = createLinkResult.data;
+          await prisma.channelMessage.create({
+            data: {
+              channelId: channel.id,
+              role: "envoy",
+              content: displayText || createLinkResult.message,
+              threadId: d.sessionId as string,
             },
-          },
-        };
+          });
+          return; // Message saved with threadId
+        }
 
-        return NextResponse.json(responsePayload);
+        // If actions executed and AI didn't provide conversational text, build a summary
+        if (actionResults.length > 0) {
+          const summary = actionResults
+            .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
+            .join("\n");
+          if (!displayText) {
+            displayText = summary;
+          } else {
+            await prisma.channelMessage.create({
+              data: { channelId: channel.id, role: "system", content: summary },
+            });
+          }
+        }
+
+        // Save envoy response
+        const finalText = displayText || text || "Done.";
+        await prisma.channelMessage.create({
+          data: { channelId: channel.id, role: "envoy", content: finalText },
+        });
+      } catch (e) {
+        console.error("[channel/chat] onFinish error:", e);
       }
-    } catch (e) {
-      console.error("Failed to parse/execute legacy action:", e);
-    }
-  }
-
-  // Check if create_link action was among the new-style actions
-  const createLinkResult = actionResults.find(
-    (r) => r.success && r.data?.url
-  );
-  if (createLinkResult?.data) {
-    const d = createLinkResult.data;
-    // Save envoy response with threadId for thread card rendering
-    await prisma.channelMessage.create({
-      data: {
-        channelId: channel.id,
-        role: "envoy",
-        content: displayText || createLinkResult.message,
-        threadId: d.sessionId as string,
-      },
-    });
-
-    return NextResponse.json({
-      message: displayText || createLinkResult.message,
-      shareNote: `Here's the link to share: ${d.url}`,
-      thread: {
-        id: d.sessionId,
-        title: d.title,
-        status: "active",
-        statusLabel: `Waiting for invitee`,
-        url: d.url,
-        code: d.code,
-        link: {
-          slug: user.meetSlug || "",
-          code: d.code,
-        },
-      },
-    });
-  }
-
-  // If actions executed and AI didn't provide conversational text, build a summary
-  if (actionResults.length > 0) {
-    const summary = actionResults
-      .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
-      .join("\n");
-    if (!displayText) {
-      displayText = summary;
-    } else {
-      // Save action results as a separate system message
-      await prisma.channelMessage.create({
-        data: { channelId: channel.id, role: "system", content: summary },
-      });
-    }
-  }
-
-  // Final fallback — never save or return empty content
-  const finalText = displayText || text || "Done.";
-
-  // Save envoy response
-  await prisma.channelMessage.create({
-    data: { channelId: channel.id, role: "envoy", content: finalText },
+    },
   });
 
-  // Return as stream-compatible format (matching existing pattern)
-  const encoded = JSON.stringify(finalText);
-  return new Response(`0:${encoded}\n`, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-  });
+  return result.toTextStreamResponse();
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.error(`[channel/chat] Unhandled error: ${err.message}`, err.stack);
