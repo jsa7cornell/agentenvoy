@@ -570,7 +570,12 @@ function scoreSlot(
   // The date portion of the stored ISO string IS the correct calendar date.
   const allDayBlocking = events.filter((ev) => {
     if (!ev.isAllDay || ev.isTransparent || ev.responseStatus === "declined") return false;
-    if (!(ev.eventType === "outOfOffice" || (!ev.eventType && !ev.isTransparent))) return false;
+    // Exclude event types that don't block time. Regular events have eventType
+    // "default" OR undefined — both should block. The old check `!ev.eventType`
+    // failed because Google always returns eventType:"default" for regular events,
+    // so multi-day all-day busy events (vacations, trips, etc.) were silently
+    // excluded and the affected days showed as available.
+    if (ev.eventType === "workingLocation" || ev.eventType === "focusTime") return false;
     // Extract date from stored Date: "2026-04-16T00:00:00.000Z" → "2026-04-16"
     const evStartDate = ev.start.toISOString().substring(0, 10);
     const evEndDate = ev.end.toISOString().substring(0, 10);
@@ -590,13 +595,17 @@ function scoreSlot(
         firmness: "strong",
       };
     }
-    const accepted = allDayBlocking.find((ev) => ev.responseStatus === "accepted");
-    if (accepted) {
+    // Block on accepted, tentative, or organizer-only events (no responseStatus
+    // means you created it yourself — it's definitely on your calendar).
+    const blocking = allDayBlocking.find(
+      (ev) => !ev.responseStatus || ev.responseStatus === "accepted" || ev.responseStatus === "tentative"
+    );
+    if (blocking) {
       return {
         ...base,
         score: 5,
-        reason: `all-day event: ${accepted.summary}`,
-        eventSummary: accepted.summary,
+        reason: `all-day event: ${blocking.summary}`,
+        eventSummary: blocking.summary,
         kind: "event",
         blockCost: "commitment",
         firmness: "strong",
