@@ -1267,7 +1267,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         {/* Availability sidebar — desktop only */}
         <div className="hidden md:flex w-80 flex-shrink-0 border-l border-secondary p-5 overflow-y-auto flex-col">
           <h4 className="text-[11px] font-bold uppercase tracking-widest text-muted mb-3">
-            Availability
+            {hostName ? `${hostName.split(" ")[0]}'s Availability` : "Availability"}
+            {slotTimezone && (() => {
+              const abbr = new Intl.DateTimeFormat("en-US", { timeZone: slotTimezone, timeZoneName: "short" })
+                .formatToParts(new Date())
+                .find((p) => p.type === "timeZoneName")?.value;
+              return abbr ? `, ${abbr}` : "";
+            })()}
           </h4>
           <AvailabilityCalendar
             slotsByDay={slotsByDay || {}}
