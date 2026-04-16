@@ -487,14 +487,15 @@ function scoreSlot(
   // even though they're technically self-imposed, because the host has
   // explicitly marked the whole day off and a VIP reaching in would violate
   // the explicit boundary rather than a soft preference.
+  const slotLocalDate = getLocalDateStr(slotStart, tz);
+
   const blackoutDays = prefs.explicit?.blackoutDays;
   if (blackoutDays && blackoutDays.length > 0) {
-    const slotDateStr = getLocalDateStr(slotStart, tz);
-    if (blackoutDays.includes(slotDateStr)) {
+    if (blackoutDays.includes(slotLocalDate)) {
       return {
         ...base,
         score: 5,
-        reason: `blackout day: ${slotDateStr}`,
+        reason: `blackout day: ${slotLocalDate}`,
         kind: "blackout",
         blockCost: "commitment",
         firmness: "strong",
@@ -503,14 +504,19 @@ function scoreSlot(
   }
 
   // All-day blocking events (OOO, travel) — commitment:strong.
-  const allDayBlocking = events.filter((ev) =>
-    ev.isAllDay &&
-    !ev.isTransparent &&
-    ev.responseStatus !== "declined" &&
-    slotStart < ev.end &&
-    slotEnd > ev.start &&
-    (ev.eventType === "outOfOffice" || (!ev.eventType && !ev.isTransparent))
-  );
+  // Use DATE comparison, not UTC time-range overlap. Google all-day events
+  // are stored as midnight UTC which bleeds across local day boundaries for
+  // non-UTC timezones (e.g., a Wed event spans Tue 8 PM–Wed 8 PM in EDT).
+  // The date portion of the stored ISO string IS the correct calendar date.
+  const allDayBlocking = events.filter((ev) => {
+    if (!ev.isAllDay || ev.isTransparent || ev.responseStatus === "declined") return false;
+    if (!(ev.eventType === "outOfOffice" || (!ev.eventType && !ev.isTransparent))) return false;
+    // Extract date from stored Date: "2026-04-16T00:00:00.000Z" → "2026-04-16"
+    const evStartDate = ev.start.toISOString().substring(0, 10);
+    const evEndDate = ev.end.toISOString().substring(0, 10);
+    // Google end date is exclusive (event on Apr 16 has end "2026-04-17")
+    return slotLocalDate >= evStartDate && slotLocalDate < evEndDate;
+  });
   if (allDayBlocking.length > 0) {
     const ooo = allDayBlocking.find((ev) => ev.eventType === "outOfOffice");
     if (ooo) {
@@ -1079,7 +1085,9 @@ export function computeInputHash(
     //     extended to 5 AM, tentative groups bumped to score 4, buffers
     //     dropped to score 2, soft-tagged blocks at score 2, priority
     //     tiers collapsed to binary isVip.
-    scheduleVersion: "v3",
+    // v3.1: all-day event overlap uses date comparison instead of UTC time
+    //       range — fixes timezone bleed (Wed event showing Tue+Wed in EDT).
+    scheduleVersion: "v3.1",
     events: events.map((e) => ({
       id: e.id,
       start: e.start,
