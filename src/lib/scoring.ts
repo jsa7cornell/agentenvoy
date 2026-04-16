@@ -105,6 +105,15 @@ export interface BlockedWindow {
   firmness?: BlockFirmness;
 }
 
+/** A host-set protection override for a specific Google Calendar event.
+ *  score 0 = Open (treat as schedulable even though event exists)
+ *  score 3 = Protected (harder to book, stretch-band)
+ *  score 5 = Blocked (hard block, never offer) */
+export interface EventProtectionOverride {
+  eventId: string;
+  score: 0 | 3 | 5;
+}
+
 export interface UserPreferences {
   timezone?: string;
   phone?: string; // host phone number (with country code) — default location for phone calls
@@ -124,6 +133,8 @@ export interface UserPreferences {
     videoProvider?: "google-meet" | "zoom";
     zoomLink?: string;
     defaultDuration?: number;
+    /** Per-event protection overrides set by the host from the availability view. */
+    eventProtectionOverrides?: EventProtectionOverride[];
   };
   learned?: Record<string, unknown>;
 }
@@ -1056,6 +1067,14 @@ export function computeSchedule(
   const horizon = new Date(now.getTime() + 56 * 24 * 60 * 60 * 1000); // 8 weeks
   const slots: ScoredSlot[] = [];
 
+  // Build event-protection override map once (eventId → score).
+  // Applied after scoreSlot + hoursProtectionLayer to give host-set
+  // overrides the final word on a slot's protection level.
+  const rawOverrides = preferences.explicit?.eventProtectionOverrides ?? [];
+  const eventOverrideMap = new Map<string, 0 | 3 | 5>(
+    rawOverrides.map((o) => [o.eventId, o.score])
+  );
+
   // Snap to next :00 or :30 boundary
   const current = new Date(now);
   const { minute: mins } = getLocalParts(current, tz);
@@ -1110,6 +1129,39 @@ export function computeSchedule(
         scored.kind = layer.kind;
         scored.blockCost = layer.blockCost;
         scored.firmness = layer.firmness;
+      }
+    }
+
+    // Apply host-set per-event protection overrides. These take precedence
+    // over all other scoring — the host explicitly said "treat this event's
+    // time as X". Only applies when an overridden event overlaps this slot.
+    if (eventOverrideMap.size > 0) {
+      const overriddenEvent = events.find(
+        (e) =>
+          eventOverrideMap.has(e.id) &&
+          new Date(e.start) < slotEnd &&
+          new Date(e.end) > current
+      );
+      if (overriddenEvent) {
+        const overrideScore = eventOverrideMap.get(overriddenEvent.id)!;
+        scored.score = overrideScore;
+        scored.eventSummary = overriddenEvent.summary;
+        if (overrideScore === 0) {
+          scored.reason = "open (host override)";
+          scored.kind = "open";
+          scored.blockCost = "none";
+          scored.firmness = undefined;
+        } else if (overrideScore <= 3) {
+          scored.reason = "protected (host set)";
+          scored.kind = "event";
+          scored.blockCost = "preference";
+          scored.firmness = "strong";
+        } else {
+          scored.reason = "blocked (host set)";
+          scored.kind = "event";
+          scored.blockCost = "commitment";
+          scored.firmness = "strong";
+        }
       }
     }
 

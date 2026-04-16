@@ -32,6 +32,8 @@ export interface TunerEvent {
   isRecurring: boolean;
   isTransparent?: boolean;
   eventType?: string;
+  /** Host-set protection override score (0=Open, 3=Protected, 5=Blocked). Undefined = Auto. */
+  protectionOverride?: number;
 }
 
 export interface TunerSlot {

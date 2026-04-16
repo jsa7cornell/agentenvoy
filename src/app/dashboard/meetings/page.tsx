@@ -39,6 +39,8 @@ export default function MeetingsPage() {
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [archiving, setArchiving] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<string | null>(null); // sessionId awaiting confirm
 
   async function handleArchive(sessionId: string) {
     setArchiving(sessionId);
@@ -55,6 +57,25 @@ export default function MeetingsPage() {
       // silently fail
     } finally {
       setArchiving(null);
+    }
+  }
+
+  async function handleCancel(sessionId: string) {
+    setCancelling(sessionId);
+    try {
+      const res = await fetch("/api/negotiate/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (res.ok) {
+        setActiveSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setCancelling(null);
+      setConfirmCancel(null);
     }
   }
 
@@ -133,17 +154,28 @@ export default function MeetingsPage() {
                   : `Created ${new Date(s.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
                 const guestLabel = s.link.inviteeName || s.guestEmail || s.link.inviteeEmail || "Guest";
                 const title = s.title || s.link.topic || `Meeting with ${guestLabel}`;
-                // Mirror the backend archive guard so we only surface the
-                // button where it will actually work. The backend only allows
-                // archiving agreed/expired sessions or sessions whose agreedTime
-                // has already passed — every other status 400s.
-                const canArchive =
-                  s.status === "agreed" ||
-                  s.status === "expired" ||
-                  (!!s.agreedTime && new Date(s.agreedTime) < new Date());
+
+                // Inline cancel confirm state for this row
+                if (confirmCancel === s.id) {
+                  return (
+                    <div key={s.id} className="flex items-center gap-2 px-4 py-3 bg-red-950/20">
+                      <span className="text-xs text-secondary flex-1">Cancel this meeting? Google Calendar invite will be deleted.</span>
+                      <button
+                        onClick={() => setConfirmCancel(null)}
+                        className="text-xs text-muted hover:text-secondary transition px-2 py-1"
+                      >Keep</button>
+                      <button
+                        onClick={(e) => { e.preventDefault(); handleCancel(s.id); }}
+                        disabled={cancelling === s.id}
+                        className="text-xs font-medium text-red-400 hover:text-red-300 border border-red-500/30 rounded px-2 py-1 transition disabled:opacity-50"
+                      >{cancelling === s.id ? "Cancelling…" : "Yes, cancel"}</button>
+                    </div>
+                  );
+                }
+
                 return (
-                  <div key={s.id} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-secondary/40 transition group">
-                    <Link href={getDealRoomUrl(s)} className="flex-1 min-w-0 flex items-center gap-3">
+                  <div key={s.id} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-secondary/40 transition">
+                    <Link href={getDealRoomUrl(s)} className="flex-1 min-w-0 flex items-center gap-3 min-w-0">
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-primary truncate">{title}</div>
                         <div className="text-xs text-muted truncate">{s.statusLabel || guestLabel}</div>
@@ -151,24 +183,32 @@ export default function MeetingsPage() {
                       <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${sd.bg} ${sd.text}`}>
                         {sd.label}
                       </span>
-                      <span className="flex-shrink-0 text-[10px] text-muted">{displayDate}</span>
+                      <span className="flex-shrink-0 text-[10px] text-muted hidden sm:block">{displayDate}</span>
                     </Link>
-                    {canArchive && (
+                    {/* Cancel — confirmed sessions only */}
+                    {isConfirmed && (
                       <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleArchive(s.id);
-                        }}
-                        disabled={archiving === s.id}
-                        title="Archive"
-                        className="flex-shrink-0 p-1.5 rounded-md text-muted opacity-0 group-hover:opacity-100 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setConfirmCancel(s.id); }}
+                        title="Cancel meeting"
+                        className="flex-shrink-0 text-[11px] text-red-500/60 hover:text-red-400 transition"
                       >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-                        </svg>
+                        Cancel
                       </button>
                     )}
+                    {/* Archive — all sessions */}
+                    <button
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleArchive(s.id); }}
+                      disabled={archiving === s.id}
+                      title="Archive"
+                      className="flex-shrink-0 p-1.5 rounded-md text-zinc-600 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
+                    >
+                      {archiving === s.id
+                        ? <span className="text-[10px] text-muted">…</span>
+                        : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                          </svg>
+                      }
+                    </button>
                   </div>
                 );
               })}

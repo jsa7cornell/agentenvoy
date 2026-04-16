@@ -42,6 +42,8 @@ export async function GET(req: NextRequest) {
   const prefs = (user.preferences as Record<string, unknown>) || {};
   const explicit = (prefs.explicit as Record<string, unknown>) || {};
   const structuredRules = (explicit.structuredRules as AvailabilityRule[] | undefined) ?? [];
+  const eventProtectionOverrides = (explicit.eventProtectionOverrides as Array<{ eventId: string; score: number }> | undefined) ?? [];
+  const eventOverrideMap = new Map<string, number>(eventProtectionOverrides.map((o) => [o.eventId, o.score]));
   const defaultLocation = (explicit.defaultLocation as string | undefined) || undefined;
 
   // Filter slots to the requested week
@@ -74,7 +76,7 @@ export async function GET(req: NextRequest) {
     const eEnd = new Date(e.end).getTime();
     return eEnd > weekStart.getTime() && eStart < weekEnd.getTime();
   });
-  const events = weekFiltered.map((e) => serializeEvent(e));
+  const events = weekFiltered.map((e) => serializeEvent(e, eventOverrideMap));
 
   const locationByDay: Record<string, string | null> = {};
   for (let d = 0; d < 7; d++) {
@@ -121,7 +123,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-function serializeEvent(e: CalendarEvent) {
+function serializeEvent(e: CalendarEvent, overrideMap?: Map<string, number>) {
   return {
     id: e.id,
     summary: e.summary,
@@ -135,5 +137,7 @@ function serializeEvent(e: CalendarEvent) {
     isRecurring: e.isRecurring,
     isTransparent: e.isTransparent,
     eventType: e.eventType,
+    /** Host-set protection override score (0=Open, 3=Protected, 5=Blocked). Undefined if Auto. */
+    protectionOverride: overrideMap?.has(e.id) ? overrideMap.get(e.id) : undefined,
   };
 }

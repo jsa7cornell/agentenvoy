@@ -55,16 +55,43 @@ export default function AvailabilityPage() {
   const [clickedSession, setClickedSession] = useState<SessionSummary | null | undefined>(undefined); // undefined=loading, null=not a session
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  // Protection override state for external (non-AgentEnvoy) events
+  const [protectionSaving, setProtectionSaving] = useState(false);
+  // Local optimistic override score for the clicked event (synced from event.protectionOverride)
+  const [localProtection, setLocalProtection] = useState<number | null | undefined>(undefined);
 
   async function handleEventClick(ev: TunerEvent) {
     setClickedEvent(ev);
     setClickedSession(undefined); // loading
+    setConfirmingCancel(false);
+    // Seed local protection from what the schedule API already surfaced
+    setLocalProtection(ev.protectionOverride !== undefined ? ev.protectionOverride : null);
     try {
       const res = await fetch(`/api/negotiate/by-calendar-event?eventId=${encodeURIComponent(ev.id)}`);
       const data = res.ok ? await res.json() : null;
       setClickedSession(data?.session ?? null);
     } catch {
       setClickedSession(null);
+    }
+  }
+
+  async function handleProtectionChange(eventId: string, score: 0 | 3 | 5 | null) {
+    setProtectionSaving(true);
+    // Optimistic update
+    setLocalProtection(score);
+    try {
+      await fetch("/api/tuner/event-protection", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId, score }),
+      });
+      // Refresh schedule so the heatmap reflects the new protection
+      await fetchSchedule();
+    } catch {
+      // Revert on error
+      setLocalProtection(clickedEvent?.protectionOverride !== undefined ? clickedEvent.protectionOverride : null);
+    } finally {
+      setProtectionSaving(false);
     }
   }
 
@@ -415,10 +442,12 @@ export default function AvailabilityPage() {
               {new Date(clickedEvent.end).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone, timeZoneName: "short" })}
             </p>
 
-            {/* AgentEnvoy session details */}
+            {/* Session lookup spinner */}
             {clickedSession === undefined && (
               <p className="text-xs text-muted py-2">Looking up session…</p>
             )}
+
+            {/* AgentEnvoy session details */}
             {clickedSession !== undefined && clickedSession !== null && (
               <div className="border-t border-secondary pt-3 mb-3 space-y-1.5">
                 <div className="flex items-center gap-1.5">
@@ -441,6 +470,41 @@ export default function AvailabilityPage() {
                 >
                   Open deal room →
                 </Link>
+              </div>
+            )}
+
+            {/* External event — protection picker */}
+            {clickedSession === null && clickedEvent && !clickedEvent.isAllDay && (
+              <div className="border-t border-secondary pt-3 mb-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2">
+                  How should this affect scheduling?
+                </p>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {([
+                    { label: "Auto", score: null, desc: "Engine decides", color: "text-zinc-400 border-zinc-700 hover:border-zinc-500" },
+                    { label: "Open", score: 0,    desc: "Treat as free",  color: "text-emerald-400 border-emerald-700 hover:border-emerald-500" },
+                    { label: "Soft block", score: 3,    desc: "Stretch only",  color: "text-amber-400 border-amber-700 hover:border-amber-500" },
+                    { label: "Hard block", score: 5,    desc: "Never offer",   color: "text-red-400 border-red-800 hover:border-red-600" },
+                  ] as const).map(({ label, score, color }) => {
+                    const isActive =
+                      score === null ? localProtection === null : localProtection === score;
+                    return (
+                      <button
+                        key={label}
+                        disabled={protectionSaving}
+                        onClick={() => handleProtectionChange(clickedEvent.id, score as 0 | 3 | 5 | null)}
+                        className={`flex flex-col items-center gap-0.5 px-1 py-2 rounded-lg border text-[10px] font-medium transition disabled:opacity-50 ${color} ${
+                          isActive ? "bg-white/5 ring-1 ring-current" : "bg-transparent"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {protectionSaving && (
+                  <p className="text-[10px] text-muted mt-1.5">Saving…</p>
+                )}
               </div>
             )}
 
