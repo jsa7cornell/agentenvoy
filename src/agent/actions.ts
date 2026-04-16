@@ -5,6 +5,19 @@ import type { AvailabilityRule } from "@/lib/availability-rules";
 import { normalizeLinkRules } from "@/lib/scoring";
 import { createTentativeHoldEvent, deleteCalendarEvent } from "@/lib/calendar";
 
+// --- Helpers ---
+
+/** Topics that are just filler — LLMs emit these when no real topic was given. */
+const GENERIC_TOPICS = new Set([
+  "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
+  "check in", "check-in", "checkin", "connect", "touch base",
+  "quick chat", "quick meeting", "quick sync", "discussion",
+]);
+
+function isGenericTopic(topic: string): boolean {
+  return GENERIC_TOPICS.has(topic.trim().toLowerCase());
+}
+
 // --- Types ---
 
 export interface ActionRequest {
@@ -413,7 +426,10 @@ async function handleCreateLink(
   const code = generateCode();
   const inviteeName = (params.inviteeName as string) || null;
   const inviteeEmail = (params.inviteeEmail as string) || null;
-  const topic = (params.topic as string) || null;
+  // Strip generic filler topics — LLMs often set "Meeting" or "Catch up" when
+  // the host didn't specify a topic, which produces "about Meeting" in the greeting.
+  const rawTopic = (params.topic as string) || null;
+  const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
   const format = (params.format as string) || null;
   const urgency = (params.urgency as string) || null;
   const rules = (params.rules as Record<string, unknown>) || {};

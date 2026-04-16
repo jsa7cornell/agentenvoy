@@ -150,13 +150,13 @@ export async function GET(req: NextRequest) {
 
     // For guest view: filter based on mode
     // Exclusive mode (any slot has score -2): only show -2 and -1 slots
-    // Normal mode: hide score 3+ (moderate friction and above)
+    // Normal mode: hide score 2+ (soft holds and above) — matches greeting template
     // Host view (selfMode): show everything
     if (!selfMode) {
       const hasExclusive = slots.some((s) => s.score === -2);
       slots = hasExclusive
         ? slots.filter((s) => s.score <= -1)
-        : slots.filter((s) => s.score <= 2);
+        : slots.filter((s) => s.score <= 1);
     }
 
     // Group by day

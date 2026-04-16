@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 interface Slot {
   start: string;
@@ -23,24 +23,24 @@ interface AvailabilityCalendarProps {
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
   if (isPast) return "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700";
-  // Only consider visible slots (score ≤ 2) for day color
-  const visible = slots.filter((s) => (s.score ?? 0) <= 2);
+  // Only consider visible slots (score ≤ 1) for day color
+  const visible = slots.filter((s) => (s.score ?? 0) <= 1);
   if (visible.length === 0) return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600";
   const best = Math.min(...visible.map((s) => s.score ?? 0));
-  if (best <= 0) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300"; // free time
-  return "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-600 dark:text-yellow-300"; // 1-2: potentially doable
+  if (best <= 0) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300"; // free / preferred
+  return "bg-yellow-100 dark:bg-yellow-900/40 text-yellow-600 dark:text-yellow-300"; // 1: open business hours
 }
 
 function getSlotPillColor(score: number | undefined) {
   const s = score ?? 0;
   if (s <= 0) return "border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 hover:border-green-500";
-  if (s <= 2) return "border-yellow-400 dark:border-yellow-700 text-yellow-600 dark:text-yellow-300"; // non-clickable
+  if (s <= 1) return "border-yellow-400 dark:border-yellow-700 text-yellow-600 dark:text-yellow-300"; // open hours, non-clickable
   return ""; // 3+: not rendered
 }
 
 function isSlotVisible(score: number | undefined): boolean {
   const s = score ?? 0;
-  return s <= 2; // 3+ not shown
+  return s <= 1; // 2+ not shown — matches greeting template (score ≤ 1)
 }
 
 function isSlotClickable(score: number | undefined): boolean {
@@ -206,6 +206,22 @@ function WeekView({
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
+  // Auto-select today (or the first day with visible slots) on mount
+  useEffect(() => {
+    if (selectedDay) return; // already selected
+    const todaySlots = slotsByDay[todayStr] || [];
+    if (todaySlots.some((s) => (s.score ?? 0) <= 1)) {
+      setSelectedDay(todayStr);
+      return;
+    }
+    // Fallback: first day in the current week with visible slots
+    const sorted = Object.keys(slotsByDay).sort();
+    const first = sorted.find(
+      (d) => d >= todayStr && (slotsByDay[d] || []).some((s) => (s.score ?? 0) <= 1),
+    );
+    if (first) setSelectedDay(first);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Compute the start of the displayed week
   const weekStartTime = useMemo(() => {
     const d = new Date(thisWeekStartTime);
@@ -281,7 +297,7 @@ function WeekView({
       <div className="grid grid-cols-7 gap-1">
         {weekDays.map((wd) => {
           const daySlots = slotsByDay[wd.dateStr] || [];
-          const visibleSlots = daySlots.filter((s) => (s.score ?? 0) <= 2);
+          const visibleSlots = daySlots.filter((s) => (s.score ?? 0) <= 1);
           const isPast = wd.dateStr < todayStr;
           const isToday = wd.dateStr === todayStr;
           const isSelected = wd.dateStr === selectedDay;
@@ -376,6 +392,21 @@ function MonthView({
   const now = new Date();
   const todayStr = toDateStr(now);
 
+  // Auto-select today (or the first day with visible slots) on mount
+  useEffect(() => {
+    if (selectedDay) return;
+    const todaySlots = slotsByDay[todayStr] || [];
+    if (todaySlots.some((s) => (s.score ?? 0) <= 1)) {
+      setSelectedDay(todayStr);
+      return;
+    }
+    const sorted = Object.keys(slotsByDay).sort();
+    const first = sorted.find(
+      (d) => d >= todayStr && (slotsByDay[d] || []).some((s) => (s.score ?? 0) <= 1),
+    );
+    if (first) setSelectedDay(first);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const cells: Array<{ day: number; dateStr: string } | null> = [];
   for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) {
@@ -431,7 +462,7 @@ function MonthView({
         {cells.map((cell, i) => {
           if (!cell) return <div key={`empty-${i}`} />;
           const daySlots = slotsByDay[cell.dateStr] || [];
-          const visibleSlots = daySlots.filter((s) => (s.score ?? 0) <= 2);
+          const visibleSlots = daySlots.filter((s) => (s.score ?? 0) <= 1);
           const isPast = cell.dateStr < todayStr;
           const isToday = cell.dateStr === todayStr;
           const isSelected = cell.dateStr === selectedDay;

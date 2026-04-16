@@ -18,6 +18,27 @@ import {
   alternateFormatsLabel,
 } from "@/lib/greeting-template";
 
+const GENERIC_TOPICS = new Set([
+  "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
+  "check in", "check-in", "checkin", "connect", "touch base",
+  "quick chat", "quick meeting", "quick sync", "discussion",
+]);
+function isGenericTopic(topic: string): boolean {
+  return GENERIC_TOPICS.has(topic.trim().toLowerCase());
+}
+
+function buildSessionTitle(
+  topic: string | null,
+  inviteeName: string | null,
+  hostFirstName: string,
+): string {
+  if (topic && !isGenericTopic(topic)) {
+    return `${topic}${inviteeName ? ` — ${inviteeName}` : ""}`;
+  }
+  if (inviteeName) return `${hostFirstName} + ${inviteeName}`;
+  return `Meeting — ${hostFirstName}`;
+}
+
 // POST /api/negotiate/session
 // Start a new negotiation session from a link click
 export async function POST(req: NextRequest) {
@@ -298,32 +319,36 @@ export async function POST(req: NextRequest) {
     }
     if (!session) {
       // Shouldn't happen, but fall through to create
+      const hostFirstName = (user.name || "Host").split(/\s+/)[0];
+      const lr = (link.rules as Record<string, unknown>) || {};
       session = await prisma.negotiationSession.create({
         data: {
           linkId: link.id,
           hostId: user.id,
           type: "calendar",
           status: "active",
-          title: link.topic
-            ? `${link.topic}${link.inviteeName ? ` — ${link.inviteeName}` : ''}`
-            : `Meeting${link.inviteeName ? ` with ${link.inviteeName}` : ''}`,
+          title: buildSessionTitle(link.topic, link.inviteeName, hostFirstName),
           statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
           guestTimezone: guestTimezone || null,
+          duration: (lr.duration as number) || 30,
+          format: (lr.format as string) || null,
         },
       });
     }
   } else {
+    const hostFirstName = (user.name || "Host").split(/\s+/)[0];
+    const lr = (link.rules as Record<string, unknown>) || {};
     session = await prisma.negotiationSession.create({
       data: {
         linkId: link.id,
         hostId: user.id,
         type: "calendar",
         status: "active",
-        title: link.topic
-          ? `${link.topic}${link.inviteeName ? ` — ${link.inviteeName}` : ''}`
-          : `Meeting${link.inviteeName ? ` with ${link.inviteeName}` : ''}`,
+        title: buildSessionTitle(link.topic, link.inviteeName, hostFirstName),
         statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
         guestTimezone: guestTimezone || null,
+        duration: (lr.duration as number) || 30,
+        format: (lr.format as string) || null,
       },
     });
   }
@@ -494,7 +519,8 @@ export async function POST(req: NextRequest) {
     const hostName = user.name || "the organizer";
     const hostFirstName = hostName.split(/\s+/)[0] || hostName;
     const inviteeName = link.inviteeName || null;
-    const topic = link.topic || null;
+    const rawTopic = link.topic || null;
+    const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
 
     // 1. Intro — "Hi [name]! I'm coordinating a meeting with {host} [about {topic}]."
     // Office hours use the generic phrasing — no "about {topic}" — since the
