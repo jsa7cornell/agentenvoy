@@ -92,14 +92,16 @@ describe("formatAvailabilityWindows", () => {
     expect(out.lines[0]).toContain("10 AM–1 PM");
   });
 
-  it("caps output at 5 days", () => {
+  it("caps output at 5 days (plus week headers)", () => {
     // Seven days, each with a single 30-min open slot at 10 AM PT.
     const slots: ScoredSlot[] = [];
     for (let day = 15; day <= 21; day++) {
       slots.push(...run([2026, 4, day], 17, 0, 1, 1));
     }
     const out = formatAvailabilityWindows(slots, TZ, NOW);
-    expect(out.lines).toHaveLength(5);
+    // 5 day lines + week headers when days span multiple weeks
+    const dayLines = out.lines.filter((l) => l.startsWith("  •"));
+    expect(dayLines).toHaveLength(5);
   });
 
   it("prioritizes days with preferred slots when trimming to the 5-day cap", () => {
@@ -111,7 +113,8 @@ describe("formatAvailabilityWindows", () => {
     }
     slots.push(...run([2026, 4, 20], 17, 0, 1, -1)); // preferred
     const out = formatAvailabilityWindows(slots, TZ, NOW);
-    expect(out.lines).toHaveLength(5);
+    const dayLines = out.lines.filter((l) => l.startsWith("  •"));
+    expect(dayLines).toHaveLength(5);
     expect(out.hasPreferred).toBe(true);
     const joined = out.lines.join("\n");
     expect(joined).toContain("Apr 20");

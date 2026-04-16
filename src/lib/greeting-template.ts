@@ -276,11 +276,55 @@ export function formatAvailabilityWindows(
   const guestShort = hasGuestTz ? shortTimezoneLabel(guestTimezone!, now) : null;
   const hostShort = shortTimezoneLabel(timezone, now);
 
+  // Week grouping: insert "This week:", "Next week:", "Week of May 5:" headers
+  // when the offered days span multiple weeks. Uses the grouping timezone so
+  // the week boundary matches the day labels the guest sees.
+  const DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  function weekMonday(d: Date): string {
+    const dow = DOW_NAMES.indexOf(
+      new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: groupTz })
+        .formatToParts(d)
+        .find((p) => p.type === "weekday")!.value
+    );
+    const offset = dow === 0 ? 6 : dow - 1; // days since Monday
+    const mondayMs = d.getTime() - offset * 86400000;
+    return new Date(mondayMs).toISOString().slice(0, 10);
+  }
+
+  const nowMonday = weekMonday(now);
+  const nextMonday = new Date(new Date(nowMonday + "T12:00:00").getTime() + 7 * 86400000)
+    .toISOString().slice(0, 10);
+
+  function weekLabel(d: Date): string {
+    const mon = weekMonday(d);
+    if (mon === nowMonday) return "This week:";
+    if (mon === nextMonday) return "Next week:";
+    // "Week of May 5:"
+    const monDate = new Date(mon + "T12:00:00");
+    const label = monDate.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+    return `Week of ${label}:`;
+  }
+
   let hasPreferred = false;
-  const lines = picked.map((entry) => {
+  const lines: string[] = [];
+  let currentWeekLabel: string | null = null;
+  const needsWeekHeaders = picked.length > 1 &&
+    weekMonday(picked[0].firstStart) !== weekMonday(picked[picked.length - 1].firstStart);
+
+  for (const entry of picked) {
+    if (needsWeekHeaders) {
+      const wl = weekLabel(entry.firstStart);
+      if (wl !== currentWeekLabel) {
+        currentWeekLabel = wl;
+        lines.push(wl);
+      }
+    }
+
     const parts = entry.blocks.map((b) => {
-      // Default (no guest TZ): single range in the given timezone, no label —
-      // matches pre-v2 behavior so every existing test stays green.
       if (!hasGuestTz) {
         const range = fmtTimeRange(b.start, b.end, timezone);
         if (b.hasPreferred) {
@@ -289,8 +333,6 @@ export function formatAvailabilityWindows(
         }
         return range;
       }
-      // Dual render: "5–7 PM CEST (8–10 AM PT)". Primary is guest-local
-      // because that's where the guest is making decisions.
       const guestRange = fmtTimeRange(b.start, b.end, guestTimezone!);
       const hostRange = fmtTimeRange(b.start, b.end, timezone);
       const dual = `${guestRange} ${guestShort} (${hostRange} ${hostShort})`;
@@ -300,8 +342,8 @@ export function formatAvailabilityWindows(
       }
       return dual;
     });
-    return `  • ${entry.day} — ${parts.join(", ")}`;
-  });
+    lines.push(`  • ${entry.day} — ${parts.join(", ")}`);
+  }
 
   return { lines, hasPreferred, wasTruncated };
 }
