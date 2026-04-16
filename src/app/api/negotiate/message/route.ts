@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { AgentContext, extractAvailabilitySummary } from "@/agent/administrator";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import type { CalendarContext } from "@/lib/calendar";
-import type { ScoredSlot } from "@/lib/scoring";
+import type { ScoredSlot, LinkRules } from "@/lib/scoring";
+import { applyEventOverrides } from "@/lib/scoring";
 import { computeThreadStatus } from "@/lib/thread-status";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -111,6 +112,15 @@ export async function POST(req: NextRequest) {
         canWrite: schedule.canWrite,
       };
       scoredSlots = schedule.slots;
+
+      // Apply link-level overrides (preferredDays, dateRange, slot overrides)
+      // so the LLM sees the same filtered set as the widget and greeting.
+      const lr = (session.link.rules as LinkRules) || {};
+      if (Object.keys(lr).length > 0) {
+        const hostPrefs = (session.host.preferences as Record<string, unknown>) || {};
+        const hostTz = (hostPrefs.explicit as Record<string, unknown>)?.timezone as string || schedule.timezone;
+        scoredSlots = applyEventOverrides(scoredSlots, lr, hostTz);
+      }
     }
   } catch (e) {
     console.log("Schedule context error in negotiate/message:", e);
@@ -181,13 +191,21 @@ export async function POST(req: NextRequest) {
     conversationHistory: history,
   };
 
+  console.log(`[negotiate/message] start | session=${sessionId} | role=${messageRole} | slots=${scoredSlots.length} | history=${history.length}`);
+
   const { streamAgentResponse } = await import("@/agent/administrator");
   const streamResult = await streamAgentResponse(context, {
     async onFinish({ text: responseText }) {
       try {
+        const responseLen = responseText?.length || 0;
+        if (responseLen === 0) {
+          console.warn(`[negotiate/message] empty response | session=${sessionId}`);
+        }
+
         // Parse and execute [ACTION] blocks
         const actions = parseActions(responseText);
         if (actions.length > 0) {
+          console.log(`[negotiate/message] actions | session=${sessionId} | ${actions.map(a => a.action).join(",")}`);
           await executeActions(actions, session.hostId, { sessionId });
         }
 

@@ -461,6 +461,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           }
         }
       }
+
+      // If stream ended with no text, remove the empty bubble and show error
+      if (!fullText.trim()) {
+        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+        setMessages((prev) => [
+          ...prev,
+          { id: `error-${Date.now()}`, role: "system", content: "Something went wrong — please try again." },
+        ]);
+      }
       // Re-fetch session status + link info after AI response
       if (sessionId) {
         try {
@@ -619,7 +628,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     : latestProposal?.format ?? linkFormat ?? null;
   const eventDuration = confirmed && confirmData
     ? String(confirmData.duration)
-    : latestProposal ? String(latestProposal.duration) : "30";
+    : latestProposal ? String(latestProposal.duration) : String(slotDuration || 30);
   const eventLocation = confirmed && confirmData
     ? (confirmData.location as string | null)
     : latestProposal?.location ?? null;

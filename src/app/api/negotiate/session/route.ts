@@ -353,6 +353,8 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  console.log(`[negotiate/session] created | session=${session.id} | duration=${session.duration} | format=${session.format} | topic=${link.topic || "none"}`);
+
   // Effective guest timezone used for downstream formatting. Prefer the
   // persisted value (first-observed) over what the current request provided
   // — they're usually the same, but a re-visit from a different browser
@@ -547,7 +549,10 @@ export async function POST(req: NextRequest) {
       const legend = windows.hasPreferred
         ? `\n\n★ = best fit with ${hostFirstName}'s schedule`
         : "";
-      scheduleBlock = `${header}\n\n${body}${legend}`;
+      const moreNote = windows.wasTruncated
+        ? "\n\nMore times are available in the calendar on the right."
+        : "";
+      scheduleBlock = `${header}\n\n${body}${legend}${moreNote}`;
     } else {
       scheduleBlock = `I don't have open times to show yet in ${hostTimezoneLabel} — just tell me what generally works and I'll find a match.`;
     }
@@ -643,6 +648,7 @@ export async function POST(req: NextRequest) {
       topic: link.topic,
       inviteeName: link.inviteeName,
       format: (link.rules as Record<string, unknown>)?.format ?? null,
+      duration: (link.rules as Record<string, unknown>)?.duration ?? null,
     },
     isHost,
     isGroupEvent: isGroupEvent || undefined,

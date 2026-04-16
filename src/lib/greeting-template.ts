@@ -17,6 +17,8 @@ export interface FormattedWindows {
   lines: string[];
   /** True if any shown block contains a preferred (score ≤ -1) slot. */
   hasPreferred: boolean;
+  /** True if any block was truncated by the 3-hour cap or days were capped. */
+  wasTruncated: boolean;
 }
 
 // ─── Timezone label ──────────────────────────────────────────────────────────
@@ -102,7 +104,9 @@ export function formatAvailabilityWindows(
     (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()
   );
 
-  if (goodSlots.length === 0) return { lines: [], hasPreferred: false };
+  if (goodSlots.length === 0) return { lines: [], hasPreferred: false, wasTruncated: false };
+
+  let wasTruncated = false;
 
   // When the guest has a distinct timezone, group by the GUEST's local calendar
   // so "Wednesday 8 PM CEST" doesn't visually split across two days in PT.
@@ -172,6 +176,7 @@ export function formatAvailabilityWindows(
         split.push(b);
       } else {
         // Keep the first 3 hours. The agent can widen search on follow-up.
+        wasTruncated = true;
         const cutoff = new Date(b.start.getTime() + MAX_BLOCK_MS);
         split.push({
           start: b.start,
@@ -264,6 +269,7 @@ export function formatAvailabilityWindows(
   });
 
   const picked = days.slice(0, MAX_DAYS);
+  if (days.length > MAX_DAYS) wasTruncated = true;
   // Re-sort chronologically for display.
   picked.sort((a, b) => a.firstStart.getTime() - b.firstStart.getTime());
 
@@ -299,7 +305,7 @@ export function formatAvailabilityWindows(
     return `  • ${entry.day} — ${parts.join(", ")}`;
   });
 
-  return { lines, hasPreferred };
+  return { lines, hasPreferred, wasTruncated };
 }
 
 // ─── Format label helpers ────────────────────────────────────────────────────
