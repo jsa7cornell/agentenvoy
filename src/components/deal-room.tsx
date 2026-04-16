@@ -85,7 +85,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       .then((data) => {
         if (data) {
           setSlotsByDay(data.slotsByDay);
-          setSlotTimezone(data.timezone);
+          // Show widget in the guest's local timezone when it differs from the
+          // host's — the guest shouldn't have to mentally convert. The slot
+          // start/end values are ISO strings (absolute instants) so they render
+          // correctly in any timezone via toLocaleTimeString.
+          const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          setSlotTimezone(browserTz && browserTz !== data.timezone ? browserTz : data.timezone);
           if (data.currentLocation) setSlotLocation(data.currentLocation);
           if (data.duration) setSlotDuration(data.duration);
           if (data.minDuration) setSlotMinDuration(data.minDuration);
@@ -445,21 +450,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (line.startsWith("0:")) {
-            try {
-              const text = JSON.parse(line.slice(2));
-              fullText += text;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: fullText } : m
-                )
-              );
-            } catch {}
-          }
-        }
+        fullText += chunk;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: fullText } : m
+          )
+        );
       }
 
       // If stream ended with no text, remove the empty bubble and show error

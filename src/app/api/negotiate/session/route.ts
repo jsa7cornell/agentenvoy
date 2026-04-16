@@ -22,6 +22,7 @@ const GENERIC_TOPICS = new Set([
   "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
   "check in", "check-in", "checkin", "connect", "touch base",
   "quick chat", "quick meeting", "quick sync", "discussion",
+  "call", "quick call", "phone call", "video call",
 ]);
 function isGenericTopic(topic: string): boolean {
   return GENERIC_TOPICS.has(topic.trim().toLowerCase());
@@ -524,84 +525,52 @@ export async function POST(req: NextRequest) {
     const rawTopic = link.topic || null;
     const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
 
-    // 1. Intro — "Hi [name]! I'm coordinating a meeting with {host} [about {topic}]."
-    // Office hours use the generic phrasing — no "about {topic}" — since the
-    // topic is internal (the rule's title, e.g. "Office Hours"), not a subject
-    // the guest picked. Topic is still set internally so the closing doesn't
-    // ask for a meeting subject.
-    const isOfficeHours = Boolean(officeHoursRule);
-    const hello = inviteeName ? `Hi ${inviteeName}!` : "Hi!";
-    const introCore = topic && !isOfficeHours
-      ? `I'm coordinating a meeting with ${hostName} about ${topic}.`
-      : `I'm coordinating a meeting with ${hostName}.`;
-    const intro = `${hello} ${introCore}`;
+    // 1. Intro — short and warm, no "about {topic}" (topic lives in the
+    //    session title and closing, not the greeting body).
+    const hello = inviteeName ? `👋 Hi ${inviteeName}!` : "👋 Hi there!";
+    const intro = `${hello} I'm coordinating a meeting with ${hostFirstName}.`;
 
-    // 2. Schedule block. When guest TZ differs from host, the window lines
-    // already contain dual-labeled ranges ("5–7 PM CEST (8–10 AM PT)") and
-    // are grouped by the guest-local day, so the header just says "in your
-    // local time" rather than naming the host timezone.
-    let scheduleBlock: string;
-    if (windows.lines.length > 0) {
-      const header = guestTzDiffers
-        ? `Here are some times that work — times in your local time (${guestTimezoneLabel}), ${hostFirstName}'s time in parentheses:`
-        : `Here are some times that work (${hostTimezoneLabel}):`;
-      const body = windows.lines.join("\n");
-      const legend = windows.hasPreferred
-        ? `\n\n★ = best fit with ${hostFirstName}'s schedule`
-        : "";
-      const moreNote = windows.wasTruncated
-        ? "\n\nMore times are available in the calendar on the right."
-        : "";
-      scheduleBlock = `${header}\n\n${body}${legend}${moreNote}`;
-    } else {
-      scheduleBlock = `I don't have open times to show yet in ${hostTimezoneLabel} — just tell me what generally works and I'll find a match.`;
-    }
-
-    // 3. Format/duration sentence — "This would be a 30-minute video call."
-    // When minDuration < duration, show "30–45 min" to signal flexibility.
+    // 2. Schedule block — compact time windows with optional dual timezone.
     const fmtLabel = formatLabel(effectiveFormat);
     const durationLabel = (effectiveMinDuration && effectiveMinDuration < (effectiveDuration ?? 30))
       ? `${effectiveMinDuration}–${effectiveDuration}`
       : effectiveDuration
       ? `${effectiveDuration}`
       : null;
-    let formatSentence = "";
-    if (durationLabel && fmtLabel) {
-      formatSentence = `This would be a ${durationLabel}-minute ${fmtLabel}.`;
-    } else if (fmtLabel) {
-      formatSentence = `This would be a ${fmtLabel}.`;
-    } else if (durationLabel) {
-      formatSentence = `This would be a ${durationLabel}-minute meeting.`;
+    // Inline format/duration tag: "📅 45-min phone call" or "📅 30-min meeting"
+    const meetingDesc = durationLabel && fmtLabel
+      ? `${durationLabel}-min ${fmtLabel}`
+      : fmtLabel
+      ? fmtLabel
+      : durationLabel
+      ? `${durationLabel}-min meeting`
+      : null;
+
+    let scheduleBlock: string;
+    if (windows.lines.length > 0) {
+      const header = guestTzDiffers
+        ? `Here are some times that work (${guestTimezoneLabel}, ${hostFirstName}'s time in parens):`
+        : `Here are some times that work (${hostTimezoneLabel}):`;
+      const body = windows.lines.join("\n");
+      const legend = windows.hasPreferred
+        ? `\n★ = best fit with ${hostFirstName}'s schedule`
+        : "";
+      const moreNote = windows.wasTruncated ? "  ·  More times in the calendar →" : "";
+      const tagParts = [meetingDesc ? `📅 ${meetingDesc}` : null, moreNote || null].filter(Boolean);
+      const tagLine = tagParts.length > 0 ? `\n\n${tagParts.join("")}` : "";
+      scheduleBlock = `${header}\n\n${body}${legend}${tagLine}`;
+    } else {
+      scheduleBlock = `I don't have open times to show right now — tell me what generally works and I'll find a match.`;
     }
 
-    // 4. Options sentence — conditional on what's still flexible.
-    const options: string[] = ["find another time"];
-    if (!formatIsLocked) {
-      const alts = alternateFormatsLabel(effectiveFormat);
-      if (alts) {
-        options.push(`change format (to ${alts})`);
-      } else {
-        options.push("change format");
-      }
-    }
-    if (guestTzDiffers) {
-      options.push("convert the times to your timezone");
-    }
-    const optionsSentence =
-      options.length === 1
-        ? `If you'd like, I can ${options[0]}.`
-        : options.length === 2
-        ? `If you'd like, I can ${options[0]} or ${options[1]}.`
-        : `If you'd like, I can ${options.slice(0, -1).join(", ")}, or ${options[options.length - 1]}.`;
-
-    // 5. Closing sentence — ask for whatever's still needed.
+    // 3. Closing — ask for what's still needed, keep it tight.
     const needed: string[] = [];
-    if (!topic) needed.push("the meeting subject");
+    if (!topic) needed.push("what it's about");
     if (!inviteeName) needed.push("your name");
     if (!link.inviteeEmail) needed.push("your email");
     let closing: string;
     if (needed.length === 0) {
-      closing = "Otherwise, just pick a time and I'll get it booked.";
+      closing = "Pick a time and I'll get it booked! 🤝";
     } else {
       const joined =
         needed.length === 1
@@ -609,14 +578,11 @@ export async function POST(req: NextRequest) {
           : needed.length === 2
           ? `${needed[0]} and ${needed[1]}`
           : `${needed.slice(0, -1).join(", ")}, and ${needed[needed.length - 1]}`;
-      closing = `Otherwise, just pick a time and let me know ${joined} — I'll get it booked.`;
+      closing = `Pick a time and let me know ${joined} — I'll get it booked! 🤝`;
     }
 
-    // Assemble. Blank lines separate semantic blocks so the greeting skims cleanly.
-    const parts: string[] = [intro, scheduleBlock];
-    if (formatSentence) parts.push(formatSentence);
-    parts.push(optionsSentence);
-    parts.push(closing);
+    // Assemble — three tight blocks.
+    const parts: string[] = [intro, scheduleBlock, closing];
     greeting = parts.join("\n\n");
   }
 
