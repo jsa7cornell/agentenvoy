@@ -66,7 +66,7 @@ function toDateStr(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/** Format a slot as a human-readable time proposal, including end time */
+/** Format a slot as a human-readable time proposal */
 function formatSlotMessage(slot: Slot, dateStr: string, timezone: string) {
   const date = new Date(dateStr + "T12:00:00");
   const dayStr = date.toLocaleDateString("en-US", {
@@ -74,21 +74,18 @@ function formatSlotMessage(slot: Slot, dateStr: string, timezone: string) {
     month: "short",
     day: "numeric",
   });
-  const fmtTime = (iso: string) =>
-    new Date(iso).toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      timeZone: timezone,
-    });
-  const startStr = fmtTime(slot.start);
-  const endStr = fmtTime(slot.end);
+  const timeStr = new Date(slot.start).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: timezone,
+  });
   const tzAbbr = new Intl.DateTimeFormat("en-US", {
     timeZoneName: "short",
     timeZone: timezone,
   })
     .formatToParts(new Date(slot.start))
     .find((p) => p.type === "timeZoneName")?.value ?? "";
-  return `How about ${dayStr}, ${startStr}–${endStr} ${tzAbbr}?`;
+  return `How about ${dayStr} at ${timeStr} ${tzAbbr}?`;
 }
 
 // ─── Shared sub-components ────────────────────────────────────────────
@@ -339,15 +336,12 @@ function WeekView({
       {/* Selected day time slots */}
       {selectedDay && (
         <div className="mt-2.5 space-y-1.5">
-          <div className="flex items-baseline justify-between">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted">
-              {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
-                weekday: "long",
-                month: "short",
-                day: "numeric",
-              })}
-            </div>
-            <span className="text-[9px] text-muted italic">Start times</span>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-muted">
+            {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
+              weekday: "long",
+              month: "short",
+              day: "numeric",
+            })}
           </div>
           <SlotPills
             slots={selectedSlots}
@@ -500,15 +494,12 @@ function MonthView({
       {/* Selected day time slots */}
       {selectedDay && (
         <div className="mt-3 space-y-1.5">
-          <div className="flex items-baseline justify-between">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-muted">
-              {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
-                weekday: "long",
-                month: "short",
-                day: "numeric",
-              })}
-            </div>
-            <span className="text-[9px] text-muted italic">Start times</span>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-muted">
+            {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
+              weekday: "long",
+              month: "short",
+              day: "numeric",
+            })}
           </div>
           <SlotPills
             slots={selectedSlots}

@@ -136,13 +136,25 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Apply duration filtering for guest view. Uses minDuration as the floor
+    // when set (host agreed shorter is OK) — lone 30-min slots that satisfy
+    // minDuration get isShortSlot: true so the widget can distinguish them.
+    if (!selfMode) {
+      const duration = (linkRules as Record<string, unknown>).duration as number | undefined;
+      const minDuration = (linkRules as Record<string, unknown>).minDuration as number | undefined;
+      if (duration && duration > 30) {
+        const { filterByDuration } = await import("@/lib/scoring");
+        slots = filterByDuration(slots, duration, minDuration);
+      }
+    }
+
     const isVip = !selfMode && !!(linkRules as Record<string, unknown>).isVip;
 
-    // Score filter FIRST — so the duration chain-check below only considers
-    // slots that would actually be offered to the guest. Without this ordering,
-    // filterByDuration builds its consecutive-slot set from ALL slots (including
-    // blocked/off-hours ones with score > 1), producing false valid windows like
-    // "3:30 PM for a 3-hour meeting" when the subsequent slots are blocked.
+    // For guest view: filter based on mode.
+    // Exclusive mode (any slot has score -2): only show -2 and -1 slots.
+    // VIP mode: show score ≤ 1 (green) + score 2-3 (orange stretch), tagged isStretch.
+    // Normal mode: score ≤ 1 only.
+    // Host view (selfMode): show everything.
     if (!selfMode) {
       const hasExclusive = slots.some((s) => s.score === -2);
       if (hasExclusive) {
@@ -151,18 +163,6 @@ export async function GET(req: NextRequest) {
         slots = slots.filter((s) => s.score <= 3);
       } else {
         slots = slots.filter((s) => s.score <= 1);
-      }
-    }
-
-    // Duration filtering AFTER score filter. Now the consecutive-slot chain
-    // only walks through offerable slots — a 3:30 PM start for a 3-hour meeting
-    // is correctly rejected if 4:00–6:00 PM slots aren't also offered.
-    if (!selfMode) {
-      const duration = (linkRules as Record<string, unknown>).duration as number | undefined;
-      const minDuration = (linkRules as Record<string, unknown>).minDuration as number | undefined;
-      if (duration && duration > 30) {
-        const { filterByDuration } = await import("@/lib/scoring");
-        slots = filterByDuration(slots, duration, minDuration);
       }
     }
 
