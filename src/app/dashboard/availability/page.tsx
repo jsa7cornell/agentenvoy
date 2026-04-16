@@ -479,32 +479,64 @@ export default function AvailabilityPage() {
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted mb-2">
                   How should this affect scheduling?
                 </p>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {([
-                    { label: "Auto", score: null, desc: "Engine decides", color: "text-zinc-400 border-zinc-700 hover:border-zinc-500" },
-                    { label: "Open", score: 0,    desc: "Treat as free",  color: "text-emerald-400 border-emerald-700 hover:border-emerald-500" },
-                    { label: "Soft block", score: 3,    desc: "Stretch only",  color: "text-amber-400 border-amber-700 hover:border-amber-500" },
-                    { label: "Hard block", score: 5,    desc: "Never offer",   color: "text-red-400 border-red-800 hover:border-red-600" },
-                  ] as const).map(({ label, score, color }) => {
-                    const isActive =
-                      score === null ? localProtection === null : localProtection === score;
-                    return (
-                      <button
-                        key={label}
-                        disabled={protectionSaving}
-                        onClick={() => handleProtectionChange(clickedEvent.id, score as 0 | 3 | 5 | null)}
-                        className={`flex flex-col items-center gap-0.5 px-1 py-2 rounded-lg border text-[10px] font-medium transition disabled:opacity-50 ${color} ${
-                          isActive ? "bg-white/5 ring-1 ring-current" : "bg-transparent"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                {protectionSaving && (
-                  <p className="text-[10px] text-muted mt-1.5">Saving…</p>
-                )}
+                {(() => {
+                  const options = [
+                    {
+                      label: "Auto",
+                      score: null as null,
+                      desc: "Engine reads the event — confirmed meetings block, tentative events stretch, declined events are ignored.",
+                      color: "text-zinc-400 border-zinc-700 hover:border-zinc-500",
+                    },
+                    {
+                      label: "Open",
+                      score: 0 as const,
+                      desc: "Treat this time as available. The event is ignored for scheduling purposes.",
+                      color: "text-emerald-400 border-emerald-700 hover:border-emerald-500",
+                    },
+                    {
+                      label: "VIP backup",
+                      score: 3 as const,
+                      desc: "Protected, but offered to VIP contacts as a last resort if no better times are available.",
+                      color: "text-amber-400 border-amber-700 hover:border-amber-500",
+                    },
+                    {
+                      label: "Hard block",
+                      score: 5 as const,
+                      desc: "Never offered — not even to VIPs. This time is fully off-limits.",
+                      color: "text-red-400 border-red-800 hover:border-red-600",
+                    },
+                  ];
+                  const active = options.find((o) =>
+                    o.score === null ? localProtection === null : localProtection === o.score
+                  );
+                  return (
+                    <>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {options.map(({ label, score, color }) => {
+                          const isActive =
+                            score === null ? localProtection === null : localProtection === score;
+                          return (
+                            <button
+                              key={label}
+                              disabled={protectionSaving}
+                              onClick={() => handleProtectionChange(clickedEvent.id, score as 0 | 3 | 5 | null)}
+                              className={`flex flex-col items-center gap-0.5 px-1 py-2 rounded-lg border text-[10px] font-medium transition disabled:opacity-50 ${color} ${
+                                isActive ? "bg-white/5 ring-1 ring-current" : "bg-transparent"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {active && (
+                        <p className="text-[10px] text-muted mt-2 leading-relaxed">
+                          {protectionSaving ? "Saving…" : active.desc}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
