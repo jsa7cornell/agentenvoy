@@ -27,6 +27,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isSending, setIsSending] = useState(false);
   const [hostName, setHostName] = useState("");
   const [isHost, setIsHost] = useState(false);
+  // Bilateral: logged-in guest (authenticated User, not the host).
+  // Anonymous guests leave this false.
+  const [isGuest, setIsGuest] = useState(false);
+  const [guestUser, setGuestUser] = useState<{
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null>(null);
   const [topic, setTopic] = useState("");
   const [linkFormat, setLinkFormat] = useState("");
   const [inviteeName, setInviteeName] = useState("");
@@ -314,6 +322,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setSessionId(data.sessionId);
         setHostName(data.host?.name || data.hostName || "");
         setIsHost(data.isHost || false);
+        setIsGuest(data.isGuest || false);
+        setGuestUser(data.guestUser || null);
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
         setInviteeName(data.link?.inviteeName || "");
@@ -807,12 +817,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         )}
 
-        {/* Signup CTA — guests only, after confirmation */}
-        {confirmed && !isHost && (
+        {/* Signup CTA — only for anonymous guests after confirmation.
+            Logged-in guests already have an account; don't re-pitch them. */}
+        {confirmed && !isHost && !isGuest && (
           <div className="ml-5 mt-3 p-3 rounded-xl bg-purple-500/8 border border-purple-500/20">
             <p className="text-xs text-primary">
               Want your own AI negotiator?{" "}
-              <a href="/api/auth/signin" className="text-purple-400 hover:text-purple-300 font-semibold transition">
+              <a
+                href={`/api/auth/signin?callbackUrl=${encodeURIComponent(
+                  typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"
+                )}`}
+                className="text-purple-400 hover:text-purple-300 font-semibold transition"
+              >
                 Create a free AgentEnvoy account
               </a>{" "}
               — Envoy handles scheduling so you don&apos;t have to.
@@ -1215,15 +1231,44 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   return (
     <div className="fixed inset-0 bg-surface text-primary flex flex-col overflow-hidden z-20">
-      {/* Header — full dashboard chrome for the host, minimal brand bar for guests */}
+      {/* Header — three branches:
+            host              → full dashboard chrome
+            logged-in guest   → their name + link back to their dashboard
+            anonymous guest   → minimal brand bar with "Sign in" that returns to this deal room */}
       {isHost ? (
         <DashboardHeader />
+      ) : isGuest ? (
+        <header className="border-b border-secondary px-6 py-3 flex items-center justify-between flex-shrink-0">
+          <a href="/">
+            <LogoFull height={24} className="text-primary" />
+          </a>
+          <div className="flex items-center gap-3">
+            {guestUser?.name && (
+              <span className="text-xs text-secondary" data-testid="guest-name">
+                {guestUser.name}
+              </span>
+            )}
+            <a
+              href="/dashboard"
+              className="text-xs text-muted hover:text-primary transition"
+              data-testid="guest-dashboard-link"
+            >
+              My Dashboard
+            </a>
+          </div>
+        </header>
       ) : (
         <header className="border-b border-secondary px-6 py-3 flex items-center justify-between flex-shrink-0">
           <a href="/">
             <LogoFull height={24} className="text-primary" />
           </a>
-          <a href="/" className="text-xs text-muted hover:text-primary transition">
+          <a
+            href={`/api/auth/signin?callbackUrl=${encodeURIComponent(
+              typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"
+            )}`}
+            className="text-xs text-muted hover:text-primary transition"
+            data-testid="anonymous-signin-link"
+          >
             Sign in
           </a>
         </header>
