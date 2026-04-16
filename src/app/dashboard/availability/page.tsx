@@ -62,7 +62,7 @@ function CalendarFilterPanel({
   onSave: () => void;
   onRetry: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
   // Sort: primary first, then alphabetical
   const sorted = useMemo(
@@ -156,8 +156,8 @@ function CalendarFilterPanel({
                 </div>
               </div>
 
-              {/* Calendar list */}
-              <ul className="space-y-0.5 mb-3">
+              {/* Calendar list — show up to 8, scroll beyond */}
+              <ul className="space-y-0.5 mb-3 max-h-[224px] overflow-y-auto">
                 {sorted.map((cal) => (
                   <li key={cal.id}>
                     <label className="flex items-center gap-2.5 cursor-pointer py-1 rounded hover:bg-surface-secondary px-1 -mx-1 transition">
