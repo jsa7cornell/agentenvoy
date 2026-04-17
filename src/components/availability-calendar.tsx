@@ -213,7 +213,9 @@ function WeekView({
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
-  // Auto-select today (or the first day with visible slots) once data is available
+  // Auto-select today (or the first day with visible slots) once data is available.
+  // Also jump the week view to the first available day — matters when a link has
+  // a dateRange constraint (e.g. "next Monday") and all slots are weeks away.
   useEffect(() => {
     if (selectedDay) return; // already selected — don't override manual choice
     const todaySlots = slotsByDay[todayStr] || [];
@@ -221,12 +223,22 @@ function WeekView({
       setSelectedDay(todayStr);
       return;
     }
-    // Fallback: first day in the current week with visible slots
+    // Fallback: first day anywhere in the slot data with visible slots
     const sorted = Object.keys(slotsByDay).sort();
     const first = sorted.find(
       (d) => d >= todayStr && (slotsByDay[d] || []).some((s) => (s.score ?? 0) <= 1),
     );
-    if (first) setSelectedDay(first);
+    if (!first) return;
+    setSelectedDay(first);
+    // Jump week view if the first available day isn't in the currently-displayed
+    // week. Only auto-jump on initial load (weekOffset === 0); user navigation
+    // sets weekOffset nonzero and we respect that.
+    if (weekOffset === 0) {
+      const firstTime = new Date(first + "T12:00:00").getTime();
+      const daysDiff = Math.floor((firstTime - thisWeekStartTime) / (24 * 60 * 60 * 1000));
+      const targetOffset = Math.floor(daysDiff / 7);
+      if (targetOffset > 0) setWeekOffset(targetOffset);
+    }
   }, [slotsByDay]); // re-run when data loads (empty on first render → populated async)
 
   // Compute the start of the displayed week
@@ -400,7 +412,10 @@ function MonthView({
   const now = new Date();
   const todayStr = toDateStr(now);
 
-  // Auto-select today (or the first day with visible slots) once data is available
+  // Auto-select today (or the first day with visible slots) once data is available.
+  // Also jump the month view to the month containing the first available day —
+  // matters when a link has a dateRange constraint (e.g. "next Monday") and all
+  // slots are in a different month than today.
   useEffect(() => {
     if (selectedDay) return; // already selected — don't override manual choice
     const todaySlots = slotsByDay[todayStr] || [];
@@ -412,7 +427,17 @@ function MonthView({
     const first = sorted.find(
       (d) => d >= todayStr && (slotsByDay[d] || []).some((s) => (s.score ?? 0) <= 1),
     );
-    if (first) setSelectedDay(first);
+    if (!first) return;
+    setSelectedDay(first);
+    // Jump month view if first available day is in a different month. Only auto-jump
+    // on initial load (viewMonth still equals current month); respect user nav after.
+    const firstDate = new Date(first + "T12:00:00");
+    const nowMonth = now.getMonth();
+    const nowYear = now.getFullYear();
+    const viewingCurrentMonth = viewMonth.getMonth() === nowMonth && viewMonth.getFullYear() === nowYear;
+    if (viewingCurrentMonth && (firstDate.getFullYear() !== nowYear || firstDate.getMonth() !== nowMonth)) {
+      setViewMonth(new Date(firstDate.getFullYear(), firstDate.getMonth(), 1));
+    }
   }, [slotsByDay]); // re-run when data loads (empty on first render → populated async)
 
   const cells: Array<{ day: number; dateStr: string } | null> = [];
