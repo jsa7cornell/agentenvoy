@@ -11,6 +11,7 @@ import { getUserTimezone } from "@/lib/timezone";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { normalizeLinkRules } from "@/lib/scoring";
 import { sanitizeHistory } from "@/lib/conversation";
+import { needsActionEmissionRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -23,6 +24,13 @@ try {
 }
 
 const CHANNEL_SYSTEM = `${personaPlaybook ? personaPlaybook + "\n\n---\n\n" : ""}You operate in the user's feed — a chat interface where scheduling threads appear as inline cards.
+
+ACTION EMISSION IS MANDATORY (read this first, every turn):
+When you do ANYTHING that changes state — create a thread/link, expand one, place or release a hold, archive, cancel, update preferences, save guest info, confirm a time — you MUST emit the corresponding agentenvoy-action block in the SAME message as your conversational text. A sentence like "set up", "ready to share", "I've archived it", or "done" is NOT doing it. Only the action block does the thing. If you describe an action without emitting the block, nothing happens — the user sees your prose but no card, no change in their dashboard.
+
+Before you send any response that claims something was created, set up, archived, cancelled, scheduled, or otherwise acted on: stop and check that your message contains the matching \`\`\`agentenvoy-action\`\`\` fence (or [ACTION] block). If it doesn't, add it before sending. This is non-negotiable.
+
+The server will detect intent-without-emit and force a retry, so you'll pay the latency cost anyway. Emit the block the first time.
 
 CORE BEHAVIOR:
 1. Create scheduling threads when the user describes a meeting they want to set up
@@ -241,13 +249,17 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
+  // Pin narrowed user for closures later in this handler. TypeScript drops
+  // null-check narrowing across nested function boundaries on let-bound locals.
+  const safeUser = user;
   const { message } = body;
 
   // Get or create channel
-  let channel = await prisma.channel.findUnique({ where: { userId: user.id } });
+  let channel = await prisma.channel.findUnique({ where: { userId: safeUser.id } });
   if (!channel) {
-    channel = await prisma.channel.create({ data: { userId: user.id } });
+    channel = await prisma.channel.create({ data: { userId: safeUser.id } });
   }
+  const safeChannel = channel;
 
   // Detect if the host is asking us to re-check / refresh calendar
   const lowerMsg = message.toLowerCase();
@@ -260,21 +272,21 @@ export async function POST(req: NextRequest) {
   const [, sessionResult, scheduleResult, activeSessions] = await Promise.all([
     // Save user message
     prisma.channelMessage.create({
-      data: { channelId: channel.id, role: "user", content: message },
+      data: { channelId: safeChannel.id, role: "user", content: message },
     }),
     // Find active session
     prisma.channelSession.findFirst({
-      where: { channelId: channel.id, closed: false },
+      where: { channelId: safeChannel.id, closed: false },
       orderBy: { startedAt: "desc" },
     }),
     // Fetch scored schedule
-    getOrComputeSchedule(user.id, { forceRefresh: isRefreshRequest }).catch((e) => {
+    getOrComputeSchedule(safeUser.id, { forceRefresh: isRefreshRequest }).catch((e) => {
       console.log("Schedule context error:", e);
       return null;
     }),
     // Fetch active negotiation sessions
     prisma.negotiationSession.findMany({
-      where: { hostId: user.id, archived: false },
+      where: { hostId: safeUser.id, archived: false },
       include: { link: { select: { inviteeName: true, inviteeEmail: true, topic: true } } },
       orderBy: { updatedAt: "desc" },
       take: 20,
@@ -298,7 +310,7 @@ export async function POST(req: NextRequest) {
       try {
         const recentMsgs = await prisma.channelMessage.findMany({
           where: {
-            channelId: channel.id,
+            channelId: safeChannel.id,
             createdAt: { gte: expiredSessionStart },
           },
           orderBy: { createdAt: "asc" },
@@ -330,7 +342,7 @@ export async function POST(req: NextRequest) {
   if (!activeSession) {
     activeSession = await prisma.channelSession.create({
       data: {
-        channelId: channel.id,
+        channelId: safeChannel.id,
         expiresAt: new Date(Date.now() + THREE_DAYS_MS),
       },
     });
@@ -409,7 +421,7 @@ export async function POST(req: NextRequest) {
   const historyStart = sessionStart > threeDaysAgo ? sessionStart : threeDaysAgo;
   const history = await prisma.channelMessage.findMany({
     where: {
-      channelId: channel.id,
+      channelId: safeChannel.id,
       createdAt: { gte: historyStart },
     },
     orderBy: { createdAt: "desc" },
@@ -423,135 +435,173 @@ export async function POST(req: NextRequest) {
     ["envoy", "assistant"]
   );
   if (warnings.length > 0) {
-    console.warn(`[channel/chat] History sanitized | userId=${user.id} | ${warnings.join("; ")}`);
+    console.warn(`[channel/chat] History sanitized | userId=${safeUser.id} | ${warnings.join("; ")}`);
   }
 
-  // Generate streaming response
-  const result = streamText({
-    model: envoyModel("claude-sonnet-4-6"),
-    maxOutputTokens: 1024,
-    system: CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n"),
-    messages,
-    async onFinish({ text }) {
-      try {
-        // --- Parse and execute [ACTION] blocks ---
-        const actions = parseActions(text);
-        let actionResults: Awaited<ReturnType<typeof executeActions>> = [];
-        if (actions.length > 0) {
-          actionResults = await executeActions(actions, user.id, { meetSlug: user.meetSlug || undefined });
-        }
+  const system = CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n");
+  const modelId = "claude-sonnet-4-6";
 
-        // Strip [ACTION] blocks from displayed text
-        let displayText = stripActionBlocks(text);
+  // Action-parsing + DB-write logic, hoisted out of onFinish so the
+  // emission-retry path (below) can run it on the COMBINED text (original
+  // stream + retry's appended action block). If we left it in onFinish it
+  // would fire on the first text alone, and a retry-emitted action would
+  // never hit the DB.
+  const finalizeResponse = async (text: string) => {
+    try {
+      const actions = parseActions(text);
+      let actionResults: Awaited<ReturnType<typeof executeActions>> = [];
+      if (actions.length > 0) {
+        actionResults = await executeActions(actions, safeUser.id, { meetSlug: safeUser.meetSlug || undefined });
+      }
 
-        // --- Legacy: parse agentenvoy-action blocks (create_thread) ---
-        const actionRegex = /```agentenvoy-action\s*\n?([\s\S]*?)\n?```/g;
-        const actionMatch = actionRegex.exec(displayText);
+      let displayText = stripActionBlocks(text);
 
-        // Strip legacy action blocks from the visible message
-        displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
+      const actionRegex = /```agentenvoy-action\s*\n?([\s\S]*?)\n?```/g;
+      const actionMatch = actionRegex.exec(displayText);
+      displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
 
-        // Process legacy create_thread action if found
-        if (actionMatch) {
-          try {
-            const action = JSON.parse(actionMatch[1]);
+      if (actionMatch) {
+        try {
+          const action = JSON.parse(actionMatch[1]);
 
-            if (action.action === "create_thread") {
-              const code = generateCode();
-              const title = action.topic
-                ? `${action.topic} — ${action.inviteeName || "Invitee"}`
-                : `Catch up — ${action.inviteeName || "Invitee"}`;
+          if (action.action === "create_thread") {
+            const code = generateCode();
+            const title = action.topic
+              ? `${action.topic} — ${action.inviteeName || "Invitee"}`
+              : `Catch up — ${action.inviteeName || "Invitee"}`;
 
-              const linkRules = normalizeLinkRules({
-                ...(action.rules || {}),
-                ...(action.format ? { format: action.format } : {}),
-                ...(action.duration ? { duration: action.duration } : {}),
-                ...(action.urgency ? { urgency: action.urgency } : {}),
-              });
-              const link = await prisma.negotiationLink.create({
-                data: {
-                  userId: user.id,
-                  type: "contextual",
-                  slug: user.meetSlug || "",
-                  code,
-                  inviteeEmail: action.inviteeEmail || null,
-                  inviteeName: action.inviteeName || null,
-                  topic: action.topic || null,
-                  rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
-                },
-              });
-
-              const negotiationSession = await prisma.negotiationSession.create({
-                data: {
-                  linkId: link.id,
-                  hostId: user.id,
-                  type: "calendar",
-                  status: "active",
-                  title,
-                  statusLabel: `Waiting for ${action.inviteeName || "invitee"}`,
-                  format: action.format || null,
-                  duration: action.duration || (hostPrefs?.defaultDuration as number) || 30,
-                },
-              });
-
-              await prisma.channelMessage.create({
-                data: {
-                  channelId: channel.id,
-                  role: "envoy",
-                  content: displayText || `I've set up a thread for ${action.inviteeName || "your meeting"}.`,
-                  threadId: negotiationSession.id,
-                },
-              });
-              return; // Message saved with threadId
-            }
-          } catch (e) {
-            console.error("Failed to parse/execute legacy action:", e);
-          }
-        }
-
-        // Check if create_link action was among the new-style actions
-        const createLinkResult = actionResults.find(
-          (r) => r.success && r.data?.url
-        );
-        if (createLinkResult?.data) {
-          const d = createLinkResult.data;
-          await prisma.channelMessage.create({
-            data: {
-              channelId: channel.id,
-              role: "envoy",
-              content: displayText || createLinkResult.message,
-              threadId: d.sessionId as string,
-            },
-          });
-          return; // Message saved with threadId
-        }
-
-        // If actions executed and AI didn't provide conversational text, build a summary
-        if (actionResults.length > 0) {
-          const summary = actionResults
-            .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
-            .join("\n");
-          if (!displayText) {
-            displayText = summary;
-          } else {
-            await prisma.channelMessage.create({
-              data: { channelId: channel.id, role: "system", content: summary },
+            const linkRules = normalizeLinkRules({
+              ...(action.rules || {}),
+              ...(action.format ? { format: action.format } : {}),
+              ...(action.duration ? { duration: action.duration } : {}),
+              ...(action.urgency ? { urgency: action.urgency } : {}),
             });
+            const link = await prisma.negotiationLink.create({
+              data: {
+                userId: safeUser.id,
+                type: "contextual",
+                slug: safeUser.meetSlug || "",
+                code,
+                inviteeEmail: action.inviteeEmail || null,
+                inviteeName: action.inviteeName || null,
+                topic: action.topic || null,
+                rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
+              },
+            });
+
+            const negotiationSession = await prisma.negotiationSession.create({
+              data: {
+                linkId: link.id,
+                hostId: safeUser.id,
+                type: "calendar",
+                status: "active",
+                title,
+                statusLabel: `Waiting for ${action.inviteeName || "invitee"}`,
+                format: action.format || null,
+                duration: action.duration || (hostPrefs?.defaultDuration as number) || 30,
+              },
+            });
+
+            await prisma.channelMessage.create({
+              data: {
+                channelId: safeChannel.id,
+                role: "envoy",
+                content: displayText || `I've set up a thread for ${action.inviteeName || "your meeting"}.`,
+                threadId: negotiationSession.id,
+              },
+            });
+            return;
           }
+        } catch (e) {
+          console.error("Failed to parse/execute legacy action:", e);
+        }
+      }
+
+      const createLinkResult = actionResults.find((r) => r.success && r.data?.url);
+      if (createLinkResult?.data) {
+        const d = createLinkResult.data;
+        await prisma.channelMessage.create({
+          data: {
+            channelId: safeChannel.id,
+            role: "envoy",
+            content: displayText || createLinkResult.message,
+            threadId: d.sessionId as string,
+          },
+        });
+        return;
+      }
+
+      if (actionResults.length > 0) {
+        const summary = actionResults
+          .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
+          .join("\n");
+        if (!displayText) {
+          displayText = summary;
+        } else {
+          await prisma.channelMessage.create({
+            data: { channelId: safeChannel.id, role: "system", content: summary },
+          });
+        }
+      }
+
+      const finalText = displayText || text || "Done.";
+      await prisma.channelMessage.create({
+        data: { channelId: safeChannel.id, role: "envoy", content: finalText },
+      });
+    } catch (e) {
+      console.error("[channel/chat] finalizeResponse error:", e);
+    }
+  }
+
+  // Stream to the client while buffering. If the LLM described a
+  // state-change without emitting an action block, fire one retry and
+  // append its output. finalizeResponse then runs on the combined text.
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        const first = streamText({
+          model: envoyModel(modelId),
+          maxOutputTokens: 1024,
+          system,
+          messages,
+        });
+        let fullText = "";
+        for await (const chunk of first.textStream) {
+          controller.enqueue(encoder.encode(chunk));
+          fullText += chunk;
         }
 
-        // Save envoy response
-        const finalText = displayText || text || "Done.";
-        await prisma.channelMessage.create({
-          data: { channelId: channel.id, role: "envoy", content: finalText },
-        });
+        if (needsActionEmissionRetry(fullText)) {
+          console.warn(
+            `[channel/chat] intent-without-emit detected for user ${safeUser.id}, forcing retry`
+          );
+          const retry = await generateText({
+            model: envoyModel(modelId),
+            maxOutputTokens: 512,
+            system,
+            messages: [
+              ...messages,
+              { role: "assistant", content: fullText },
+              { role: "user", content: ACTION_EMISSION_RETRY_PROMPT },
+            ],
+          });
+          if (retry.text.trim()) {
+            controller.enqueue(encoder.encode("\n\n" + retry.text));
+            fullText += "\n\n" + retry.text;
+          }
+        }
+        controller.close();
+        await finalizeResponse(fullText);
       } catch (e) {
-        console.error("[channel/chat] onFinish error:", e);
+        controller.error(e);
       }
     },
   });
 
-  return result.toTextStreamResponse();
+  return new Response(stream, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.error(`[channel/chat] Unhandled error: ${err.message}`, err.stack);

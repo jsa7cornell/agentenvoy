@@ -2,16 +2,24 @@ import { NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { streamText } from "ai";
+import { generateText, streamText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
 import { getUserTimezone } from "@/lib/timezone";
+import { needsActionEmissionRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
 
 const DASHBOARD_SYSTEM = `You are Envoy, the user's scheduling agent. You help them:
 1. Create meeting links from natural language
 2. Configure their scheduling preferences
 3. View and manage their negotiations
+
+ACTION EMISSION IS MANDATORY (read this first, every turn):
+When you do ANYTHING that changes state — create a link, expand a link, place or release a hold, update preferences, save guest info — you MUST emit the corresponding agentenvoy-action block in the SAME message as your conversational text. A sentence like "link ready", "I've set it up", "sending it", or "done" is NOT doing it. Only the action block does the thing. If you describe an action without emitting the block, nothing happens — the user sees your prose but no session, no link, no change appears in their dashboard.
+
+Before you send any response that claims something was created, set up, prepared, sent, archived, cancelled, or otherwise acted on: stop and check that your message contains the matching \`\`\`agentenvoy-action\`\`\` fence. If it does not, add it before sending. This is non-negotiable.
+
+The server will detect intent-without-emit and force a retry, so you'll pay the latency cost anyway. Emit the block the first time.
 
 CALENDAR AWARENESS:
 You have access to the user's Google Calendar connection status and their upcoming availability.
@@ -178,12 +186,56 @@ export async function POST(req: NextRequest) {
 
   const contextMessage = `User: ${user?.name || "User"}\nMeet slug: ${user?.meetSlug || "not set"}\nCurrent preferences: ${JSON.stringify(user?.preferences || {})}\nBase URL: ${process.env.NEXTAUTH_URL || "https://agentenvoy.ai"}${availabilityContext}${knowledgeContext}`;
 
-  const result = streamText({
-    model: envoyModel("claude-sonnet-4-6"),
-    maxOutputTokens: 1024,
-    system: DASHBOARD_SYSTEM + "\n\nCONTEXT:\n" + contextMessage,
-    messages,
+  const system = DASHBOARD_SYSTEM + "\n\nCONTEXT:\n" + contextMessage;
+  const modelId = "claude-sonnet-4-6";
+
+  // Stream to the client while buffering for a post-stream action-emission
+  // check. If the LLM wrote "link ready" (etc.) without emitting the action
+  // block, we fire a single retry and append just the block. User sees the
+  // first response stream normally, then the action block arrives a moment
+  // later — UI strips the block for display but picks up the created session.
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        const first = streamText({
+          model: envoyModel(modelId),
+          maxOutputTokens: 1024,
+          system,
+          messages,
+        });
+        let fullText = "";
+        for await (const chunk of first.textStream) {
+          controller.enqueue(encoder.encode(chunk));
+          fullText += chunk;
+        }
+
+        if (needsActionEmissionRetry(fullText)) {
+          console.warn(
+            `[dashboard/chat] intent-without-emit detected for user ${session.user.id}, forcing retry`
+          );
+          const retry = await generateText({
+            model: envoyModel(modelId),
+            maxOutputTokens: 512,
+            system,
+            messages: [
+              ...messages,
+              { role: "assistant", content: fullText },
+              { role: "user", content: ACTION_EMISSION_RETRY_PROMPT },
+            ],
+          });
+          if (retry.text.trim()) {
+            controller.enqueue(encoder.encode("\n\n" + retry.text));
+          }
+        }
+        controller.close();
+      } catch (e) {
+        controller.error(e);
+      }
+    },
   });
 
-  return result.toTextStreamResponse();
+  return new Response(stream, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
 }
