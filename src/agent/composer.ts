@@ -259,6 +259,10 @@ function formatRules(rules: Record<string, unknown>): string {
     lines.push(`- [GROUND TRUTH] Duration (decided by host): ${rules.duration} minutes. State as fact — do NOT ask the guest about duration.`);
   }
 
+  if (typeof rules.location === "string" && rules.location.trim()) {
+    lines.push(`- [GROUND TRUTH] Location (decided by host): ${rules.location.trim()}. State as fact in the greeting ("...meeting at ${rules.location.trim()}"). Pass this exact string as the \`location\` param when you confirm the meeting so it lands on the calendar invite.`);
+  }
+
   const conditional = rules.conditionalRules as Array<{ condition: string; rule: string }> | undefined;
   if (conditional && conditional.length > 0) {
     for (const cr of conditional) {
@@ -272,7 +276,7 @@ function formatRules(rules: Record<string, unknown>): string {
   }
 
   // Include any other rules not already handled
-  const handled = new Set(["format", "duration", "conditionalRules", "lastResort"]);
+  const handled = new Set(["format", "duration", "location", "conditionalRules", "lastResort"]);
   for (const [key, value] of Object.entries(rules)) {
     if (!handled.has(key) && value !== null && value !== undefined) {
       lines.push(`- ${key}: ${JSON.stringify(value)}`);

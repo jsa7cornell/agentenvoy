@@ -611,7 +611,15 @@ export async function POST(req: NextRequest) {
       : durationLabel
       ? `a ${durationLabel}-min meeting`
       : "a meeting";
-    const intro = `${hello} ${formatEmoji} I'm scheduling ${meetingDesc} between you and ${hostFirstName}.`;
+    // Optional venue/address tail. Pulled from link.rules.location when the
+    // host named a specific place in the create_link dialog (e.g. "at Coupa
+    // Cafe"). Show for in-person; show for other formats too when set
+    // (host may have pinned a specific address for a phone/video meeting).
+    const linkLocation = typeof linkRules.location === "string" && linkRules.location.trim()
+      ? linkRules.location.trim()
+      : null;
+    const locationTail = linkLocation ? ` at ${linkLocation}` : "";
+    const intro = `${hello} ${formatEmoji} I'm scheduling ${meetingDesc} between you and ${hostFirstName}${locationTail}.`;
 
     const isVip = !!(linkRules.isVip);
 

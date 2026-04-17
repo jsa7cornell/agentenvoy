@@ -56,7 +56,7 @@ When the user says "open up her window further" or "make it earlier for her" abo
 IMPORTANT: When you create a link, include the structured data in a JSON block at the end of your message. Do NOT include a URL in your text — the UI will display the contextual URL automatically.
 
 \`\`\`agentenvoy-action
-{"action": "create_link", "inviteeEmail": "...", "inviteeName": "...", "topic": "...", "rules": {"preferredDays": ["Mon","Tue"], "lastResort": ["Fri"], "format": "...", "duration": 30, "isVip": true, "dateRange": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}, "notes": "..."}}
+{"action": "create_link", "inviteeEmail": "...", "inviteeName": "...", "topic": "...", "location": "Coupa Cafe, Palo Alto", "rules": {"preferredDays": ["Mon","Tue"], "lastResort": ["Fri"], "format": "...", "duration": 30, "isVip": true, "dateRange": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}, "notes": "..."}}
 \`\`\`
 
 To expand an EXISTING link AFTER the host has confirmed specific hours. preferredTimeStart/End widen the daily offering window; allowWeekends unlocks Saturdays/Sundays. Pass the link's 6-char code:

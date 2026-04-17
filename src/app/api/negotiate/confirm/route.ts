@@ -140,8 +140,18 @@ export async function POST(req: NextRequest) {
     return `Meeting with ${guestLabel}`;
   })();
 
-  // Default location — phone calls get host's number, Zoom gets the link
+  // Default location cascade:
+  //   1. Explicit `location` from confirm body (LLM passed it)
+  //   2. Link-level location pinned at create time (link.rules.location)
+  //   3. Phone → "guest calls host @ number"
+  //   4. Video + Zoom → personal Zoom link
+  //   5. null (GCal handles video generation for meet: { generateMeetLink })
+  const linkRulesObj = (session.link?.rules as Record<string, unknown> | null) || {};
+  const linkLocation = typeof linkRulesObj.location === "string" && linkRulesObj.location.trim()
+    ? linkRulesObj.location.trim()
+    : null;
   const effectiveLocation = location
+    || linkLocation
     || (meetingFormat === "phone" && hostPhone
       ? `${guestLabel} calls ${session.host.name || "host"} @ ${hostPhone}`
       : null)

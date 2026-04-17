@@ -432,6 +432,12 @@ async function handleCreateLink(
   const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
   const format = (params.format as string) || null;
   const urgency = (params.urgency as string) || null;
+  // Meeting location for in-person (or phone/video where host wants to pin
+  // a specific address/URL). Flows into link.rules.location so the deal-
+  // room greeting can reference it and the confirm step uses it as the
+  // GCal event location.
+  const rawLocation = params.location;
+  const location = typeof rawLocation === "string" && rawLocation.trim() ? rawLocation.trim() : null;
   const rules = (params.rules as Record<string, unknown>) || {};
 
   // Merge format/duration/urgency/VIP/window into rules so they're available
@@ -489,6 +495,7 @@ async function handleCreateLink(
     ...(preferredTimeEnd ? { preferredTimeEnd } : {}),
     ...(preferredDays ? { preferredDays } : {}),
     ...(dateRange ? { dateRange } : {}),
+    ...(location ? { location } : {}),
   });
 
   const link = await prisma.negotiationLink.create({
