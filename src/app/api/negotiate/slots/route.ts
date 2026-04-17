@@ -202,32 +202,77 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // ── Bilateral compute (read-only consumer of guest's pre-configured
-    // calendar + rules). Runs only when the session has a logged-in guest
-    // who isn't the host. If the guest hasn't connected a calendar, this
-    // gracefully produces nothing and we fall back to the host-only shape.
-    // No setup UI in the deal room; the push to configure lives on the
-    // guest's own dashboard.
-    if (guestId && guestId !== hostId && !selfMode) {
-      try {
-        const guestSchedule = await getOrComputeSchedule(guestId);
-        const bilateralSlots = computeBilateralAvailability({
-          hostSlots: slots,
-          guestSlots: guestSchedule.connected ? guestSchedule.slots : [],
-          guestScheduleAvailable: guestSchedule.connected,
-        });
-        if (bilateralSlots.length > 0) {
-          const grouped: Record<string, BilateralSlot[]> = {};
-          for (const bs of bilateralSlots) {
-            const dateKey = dateFmt.format(new Date(bs.start));
-            if (!grouped[dateKey]) grouped[dateKey] = [];
-            grouped[dateKey].push(bs);
+    // ── Bilateral compute. Two paths lead here:
+    //
+    //   (1) Logged-in guest with their own Google Calendar connected → read
+    //       their scored schedule via getOrComputeSchedule(guestId).
+    //   (2) Anonymous guest who OAuth'd a read-only calendar connect from
+    //       the deal room (Slice 8) → the callback stashed a ScoredSlot[]
+    //       snapshot on a system message's metadata. Use that.
+    //
+    // If neither path yields data, bilateralByDay stays undefined and the
+    // widget falls back to host-only rendering (today's behavior).
+    if (!selfMode) {
+      let guestSlots: ScoredSlot[] = [];
+      let guestAvailable = false;
+
+      // Path 1: logged-in guest (live calendar).
+      if (guestId && guestId !== hostId) {
+        try {
+          const guestSchedule = await getOrComputeSchedule(guestId);
+          if (guestSchedule.connected) {
+            guestSlots = guestSchedule.slots;
+            guestAvailable = true;
           }
-          bilateralByDay = grouped;
+        } catch (e) {
+          console.log("Bilateral compute: guestId lookup failed", guestId, e);
         }
-      } catch (e) {
-        // Never block the widget on a bilateral failure — log and continue.
-        console.log("Bilateral compute failed for guestId=", guestId, e);
+      }
+
+      // Path 2: anonymous-guest calendar snapshot on this session. Only
+      // consult if Path 1 didn't produce data — a logged-in guest's live
+      // calendar always trumps an older one-time snapshot.
+      if (!guestAvailable && sessionId) {
+        try {
+          const snapshotMsg = await prisma.message.findFirst({
+            where: {
+              sessionId,
+              role: "system",
+              metadata: { path: ["kind"], equals: "guest_calendar_snapshot" },
+            },
+            orderBy: { createdAt: "desc" },
+            select: { metadata: true },
+          });
+          const snapshot = snapshotMsg?.metadata as Record<string, unknown> | null | undefined;
+          const snapSlots = snapshot?.scoredSlots;
+          if (Array.isArray(snapSlots) && snapSlots.length > 0) {
+            guestSlots = snapSlots as ScoredSlot[];
+            guestAvailable = true;
+          }
+        } catch (e) {
+          console.log("Bilateral compute: snapshot lookup failed", sessionId, e);
+        }
+      }
+
+      if (guestAvailable) {
+        try {
+          const bilateralSlots = computeBilateralAvailability({
+            hostSlots: slots,
+            guestSlots,
+            guestScheduleAvailable: true,
+          });
+          if (bilateralSlots.length > 0) {
+            const grouped: Record<string, BilateralSlot[]> = {};
+            for (const bs of bilateralSlots) {
+              const dateKey = dateFmt.format(new Date(bs.start));
+              if (!grouped[dateKey]) grouped[dateKey] = [];
+              grouped[dateKey].push(bs);
+            }
+            bilateralByDay = grouped;
+          }
+        } catch (e) {
+          console.log("Bilateral compute failed", e);
+        }
       }
     }
   } catch (e) {

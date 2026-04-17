@@ -85,6 +85,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [tzBannerDismissed, setTzBannerDismissed] = useState(false);
   const [isSwitchingTz, setIsSwitchingTz] = useState(false);
 
+  // Anonymous calendar-link CTA state (Slice 8). Anonymous guests — no
+  // AgentEnvoy account — can OAuth a read-only Google Calendar connect from
+  // the deal room. After a successful round-trip the bilateral chips appear
+  // just like they do for logged-in guests (same compute path, different
+  // storage). Dismissal persists per-session in localStorage.
+  const [anonCalCtaDismissed, setAnonCalCtaDismissed] = useState(false);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -148,6 +155,41 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       // localStorage blocked (private mode on some browsers) — just skip,
       // the banner will be shown and that's fine.
     }
+  }, [sessionId]);
+
+  // Same hydration for the anon-calendar CTA dismissal (Slice 8).
+  useEffect(() => {
+    if (!sessionId || typeof window === "undefined") return;
+    try {
+      const key = `anon-cal-cta-dismissed:${sessionId}`;
+      if (window.localStorage.getItem(key) === "1") {
+        setAnonCalCtaDismissed(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [sessionId]);
+
+  // After OAuth returns with ?calendarConnected=true, refetch slots so the
+  // bilateral chips surface. Strip the query param so a later reload doesn't
+  // re-trigger the refresh.
+  useEffect(() => {
+    if (!sessionId || typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("calendarConnected") !== "true") return;
+    fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);
+        if (data?.bilateralByDay && typeof data.bilateralByDay === "object") {
+          setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        url.searchParams.delete("calendarConnected");
+        window.history.replaceState({}, "", url.pathname + url.search);
+      });
   }, [sessionId]);
 
   // Fetch Google Calendar event status for confirmed meetings (host only).
@@ -1482,6 +1524,70 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               </div>
             );
           })()}
+
+          {/* Anonymous calendar-link CTA (Slice 8) — offers anonymous guests
+              a one-click read-only Google Calendar connect so bilateral
+              chips appear. Shown only when: not host, not logged-in guest,
+              not confirmed, chips aren't already loaded, and the guest
+              hasn't dismissed the card this session. Complements the
+              existing "Sign in" path (upgrade to full account) with a
+              lower-friction middle option. */}
+          {(() => {
+            if (isHost) return null;
+            if (isGuest) return null;
+            if (confirmed) return null;
+            if (anonCalCtaDismissed) return null;
+            if (!sessionId) return null;
+            // If chips are already rendering, the guest already connected —
+            // don't re-offer.
+            if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
+
+            const dismiss = () => {
+              setAnonCalCtaDismissed(true);
+              try {
+                if (typeof window !== "undefined") {
+                  window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1");
+                }
+              } catch { /* ignore */ }
+            };
+
+            const connect = () => {
+              if (typeof window === "undefined") return;
+              const returnUrl = window.location.pathname + window.location.search;
+              window.location.href = `/api/auth/guest-calendar?sessionId=${encodeURIComponent(sessionId)}&returnUrl=${encodeURIComponent(returnUrl)}`;
+            };
+
+            return (
+              <div
+                className="border-b border-DEFAULT bg-gradient-to-b from-blue-900/10 to-transparent px-4 py-3 flex-shrink-0"
+                data-testid="anon-cal-cta"
+              >
+                <div className="text-sm font-semibold text-blue-200 mb-1">
+                  🗓️ Want me to find the best time automatically?
+                </div>
+                <p className="text-xs text-secondary leading-relaxed mb-3 max-w-prose">
+                  Connect your calendar (read-only, takes ~5 seconds). I&apos;ll compute the overlap with {hostName ? hostName.split(" ")[0] : "the host"} and show you only times that work for <em>both</em> of you — no account needed. Data stays scoped to this session.
+                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={connect}
+                    className="px-3 py-1.5 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition"
+                  >
+                    Link Google Calendar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={dismiss}
+                    className="px-3 py-1.5 rounded-md text-xs font-medium text-secondary hover:text-primary hover:bg-black/5 dark:hover:bg-white/5 transition"
+                  >
+                    Not now, I&apos;ll find time myself
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Mobile availability toggle — hidden on desktop where sidebar shows */}
           {slotsByDay && Object.keys(slotsByDay).length > 0 && (
             <details className="md:hidden border-b border-secondary flex-shrink-0">
