@@ -5,6 +5,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { Prisma } from "@prisma/client";
 import { google } from "googleapis";
 import { prisma } from "./prisma";
+import { dispatchWelcomeEmailOnce } from "@/lib/emails/welcome";
 
 // Dev-only credentials provider — NEVER available in production
 const devProvider =
@@ -182,6 +183,14 @@ export const authOptions: NextAuthOptions = {
           ].join("\n"),
         },
       });
+
+      // Welcome email — gated + dispatched + stamped inside the helper.
+      // An email failure never blocks user creation (same pattern as confirm).
+      try {
+        await dispatchWelcomeEmailOnce(user.id);
+      } catch (e) {
+        console.error("[createUser] welcome email dispatch failed:", e);
+      }
     },
   },
 };

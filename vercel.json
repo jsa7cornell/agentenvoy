@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/expire-holds",
       "schedule": "17 7 * * *"
+    },
+    {
+      "path": "/api/cron/dev-stats",
+      "schedule": "0 16 * * *"
     }
   ]
 }

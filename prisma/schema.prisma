@@ -58,6 +58,11 @@ model User {
   upcomingSchedulePreferences String?   @db.Text @map("situationalKnowledge") // Near-term non-time context: mood, goals, temp rules
   lastCalibratedAt DateTime?              // null = never calibrated, triggers onboarding flow
   onboardingPhase  String?                // null = not started, tracks progress through onboarding chat
+  /// Stamped on first dispatch of the welcome email (any status — sent, suppressed,
+  /// dryrun, or failed). Non-null = don't fire it again. Backfilled to `createdAt`
+  /// for users that existed before the welcome flow shipped so they don't receive
+  /// a retroactive welcome on their next sign-in.
+  welcomeEmailSentAt DateTime?
   createdAt        DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -360,4 +365,46 @@ model SideEffectLog {
 
   @@index([kind, createdAt])
   @@index([status, createdAt])
+}
+
+/// Audit trail for every `/api/negotiate/confirm` attempt. Every entry
+/// to the route writes exactly one row, regardless of outcome — so we
+/// have a durable record even when Vercel function logs rotate or a
+/// timeout swallows the response. Read at `/admin/failures`.
+model ConfirmAttempt {
+  id           String    @id @default(cuid())
+  sessionId    String?
+  slotStart    DateTime?
+  slotEnd      DateTime?
+  /// success | already_agreed | slot_mismatch | gcal_failed | server_error | validation_failed
+  outcome      String
+  errorMessage String?   @db.Text
+  /// Truncated to 200 chars; raw UA scrubbed of other PII.
+  userAgent    String?
+  durationMs   Int?
+  createdAt    DateTime  @default(now())
+
+  @@index([sessionId, createdAt])
+  @@index([outcome, createdAt])
+}
+
+/// Generic route-error audit trail. Any API route can call
+/// `logRouteError()` (`src/lib/route-error.ts`) to persist a server-side
+/// error. Shown on `/admin/failures` alongside ConfirmAttempt and
+/// SideEffectLog failures.
+model RouteError {
+  id          String   @id @default(cuid())
+  route       String
+  method      String?
+  statusCode  Int?
+  errorClass  String?
+  message     String   @db.Text
+  stack       String?  @db.Text
+  contextJson Json?
+  userId      String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([route, createdAt])
+  @@index([createdAt])
 }

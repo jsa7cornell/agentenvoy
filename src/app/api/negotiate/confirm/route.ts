@@ -1,445 +1,562 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/prisma";
 import { createCalendarEvent, deleteCalendarEvent, invalidateSchedule } from "@/lib/calendar";
 import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
 import { dispatch } from "@/lib/side-effects/dispatcher";
+import { logRouteError } from "@/lib/route-error";
 
 // POST /api/negotiate/confirm
-// Confirm an agreed-upon time — creates calendar events, sends emails
+// Confirm an agreed-upon time — creates calendar events, sends emails.
+//
+// Reliability invariants (2026-04-16):
+//   1. Every call writes exactly one ConfirmAttempt row regardless of outcome.
+//   2. Session status transition `active → agreed` uses a compare-and-swap
+//      (`updateMany where status != 'agreed'`) so concurrent confirms can't
+//      both succeed. Loser returns winner's data (same slot) or 409 (different).
+//   3. Independent post-GCal work runs in parallel. Only `extractLearnings`
+//      (slow Claude call) is deferred to `waitUntil` — everything user-visible
+//      stays in the critical path.
+//
+// See: agentenvoy/app/src/app/admin/failures/page.tsx
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  // NOTE: `timezone` from the request body is ignored. The host's timezone
-  // is canonical and comes from stored preferences. LLMs must not be trusted
-  // to emit IANA strings.
-  const { sessionId, dateTime, duration, format, location, guestEmail: bodyGuestEmail } = body;
+  const t0 = Date.now();
+  const userAgent = (req.headers.get("user-agent") ?? "").slice(0, 200) || null;
 
-  if (!sessionId || !dateTime) {
-    return NextResponse.json(
-      { error: "Missing sessionId or dateTime" },
-      { status: 400 }
-    );
-  }
-
-  const session = await prisma.negotiationSession.findUnique({
-    where: { id: sessionId },
-    include: {
-      link: true,
-      host: true,
-    },
-  });
-
-  if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
-
-  if (session.status === "agreed") {
-    return NextResponse.json(
-      { error: "Session already confirmed" },
-      { status: 400 }
-    );
-  }
-
-  // Host's timezone is canonical — read from stored preferences, never from the body.
-  const hostPrefs = session.host.preferences as Record<string, unknown> | null;
-  const hostTimezone = getUserTimezone(hostPrefs);
-
-  // Parse dateTime — if it includes a UTC offset (e.g., "2026-04-03T16:00:00-07:00"),
-  // new Date() handles it correctly. If it's bare (legacy, no offset), interpret it
-  // in the host's timezone by appending the offset.
-  let dateTimeStr = dateTime as string;
-  const hasOffset = /[+-]\d{2}:\d{2}$/.test(dateTimeStr) || dateTimeStr.endsWith("Z");
-  if (!hasOffset) {
-    // Legacy: bare ISO string without offset. Compute a rough date with the
-    // current offset, then re-compute the offset for THAT specific date so
-    // meetings scheduled across a DST boundary get the right offset.
-    const roughOffset = computeUtcOffset(hostTimezone);
-    const roughDate = new Date(`${dateTimeStr}${roughOffset}`);
-    const dstCorrectOffset = computeUtcOffset(hostTimezone, roughDate);
-    dateTimeStr = `${dateTimeStr}${dstCorrectOffset}`;
-  } else {
-    // Has an offset — but it may be stale if the LLM embedded "now"s offset
-    // at session-creation time and the meeting crosses a DST boundary.
-    // Auto-correct: parse the date as-is, compute the correct offset for that
-    // date in the host timezone, and if they differ by exactly 1h re-stamp.
-    const embeddedDate = new Date(dateTimeStr);
-    const correctOffset = computeUtcOffset(hostTimezone, embeddedDate);
-    const embeddedOffsetMatch = dateTimeStr.match(/([+-]\d{2}:\d{2})$/);
-    const embeddedOffset = embeddedOffsetMatch?.[1];
-    if (embeddedOffset && embeddedOffset !== correctOffset) {
-      const bare = dateTimeStr.slice(0, dateTimeStr.length - embeddedOffset.length);
-      dateTimeStr = `${bare}${correctOffset}`;
-      console.log(
-        `[confirm] DST offset corrected: ${embeddedOffset} → ${correctOffset} for "${bare}" (${hostTimezone})`
-      );
-    }
-  }
-
-  const startTime = new Date(dateTimeStr);
-  const durationMin = duration || 30;
-  const endTime = new Date(startTime.getTime() + durationMin * 60 * 1000);
-  const meetingFormat = format || "video";
-
-  const hostEmail = session.host.email;
-
-  if (!hostEmail) {
-    return NextResponse.json(
-      { error: "Host email not found" },
-      { status: 400 }
-    );
-  }
-
-  // Determine if this is a group event
-  const isGroupEvent = session.link.mode === "group";
-  let allParticipantEmails: string[] = [];
-  let allParticipantSessions: string[] = [];
-
-  if (isGroupEvent) {
-    const participants = await prisma.sessionParticipant.findMany({
-      where: { linkId: session.linkId },
-    });
-    allParticipantEmails = participants
-      .map((p) => p.email)
-      .filter((e): e is string => !!e);
-    allParticipantSessions = participants.map((p) => p.sessionId);
-  }
-
-  // Prefer DB-persisted email (written by save_guest_info action), fall back
-  // to the client-supplied value from deal-room.tsx state (populated after
-  // save_guest_info re-fetch). This ensures the Google Calendar invite always
-  // includes the guest even when the LLM forgot to call save_guest_info first.
-  const guestEmail = session.guestEmail || session.link.inviteeEmail || (bodyGuestEmail as string | undefined) || null;
-  if (!guestEmail) {
-    console.warn(`[confirm] sessionId=${sessionId} — no guest email found; calendar invite will only have host.`);
-  }
-  const attendeeEmails = isGroupEvent
-    ? [hostEmail, ...allParticipantEmails.filter((e) => e !== hostEmail)]
-    : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
-
-  // Build the deal room URL for this session
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://agentenvoy.ai";
-  const dealRoomUrl = session.link.code
-    ? `${baseUrl}/meet/${session.link.slug}/${session.link.code}`
-    : `${baseUrl}/meet/${session.link.slug}`;
-
-  // Resolve meeting settings from preferences
-  const hostPhone = (hostPrefs?.phone as string) || null;
-  const videoProvider = (hostPrefs?.videoProvider as string) || "google-meet";
-  const zoomLink = (hostPrefs?.zoomLink as string) || null;
-
-  // Build event summary — format-aware
-  const guestLabel = session.link.inviteeName || guestEmail || "guest";
-  const hostLabel = session.host.name || "Host";
-  const eventSummary = (() => {
-    if (session.link.topic) {
-      return `${session.link.topic} — ${guestLabel}`;
-    }
-    if (meetingFormat === "phone") {
-      return `Phone call: ${guestLabel} & ${hostLabel}`;
-    }
-    return `Meeting with ${guestLabel}`;
-  })();
-
-  // Default location cascade:
-  //   1. Explicit `location` from confirm body (LLM passed it)
-  //   2. Link-level location pinned at create time (link.rules.location)
-  //   3. Phone → "guest calls host @ number"
-  //   4. Video + Zoom → personal Zoom link
-  //   5. null (GCal handles video generation for meet: { generateMeetLink })
-  const linkRulesObj = (session.link?.rules as Record<string, unknown> | null) || {};
-  const linkLocation = typeof linkRulesObj.location === "string" && linkRulesObj.location.trim()
-    ? linkRulesObj.location.trim()
-    : null;
-  const effectiveLocation = location
-    || linkLocation
-    || (meetingFormat === "phone" && hostPhone
-      ? `${guestLabel} calls ${session.host.name || "host"} @ ${hostPhone}`
-      : null)
-    || (meetingFormat === "video" && videoProvider === "zoom" && zoomLink
-      ? zoomLink
-      : null);
-
-  // Create calendar event for the host
-  let meetLink: string | undefined;
-  let eventLink: string | undefined;
-  let confirmedCalendarEventId: string | undefined;
+  // Attempt-tracking state — written to ConfirmAttempt in `finally`.
+  let attemptOutcome:
+    | "success"
+    | "already_agreed"
+    | "slot_mismatch"
+    | "gcal_failed"
+    | "server_error"
+    | "validation_failed" = "server_error";
+  let attemptError: string | null = null;
+  let attemptSessionId: string | null = null;
+  let attemptSlotStart: Date | null = null;
+  let attemptSlotEnd: Date | null = null;
 
   try {
-    const descriptionLines = [
-      `Scheduled via AgentEnvoy`,
-      `Format: ${meetingFormat}`,
-      ...(effectiveLocation ? [`Location: ${effectiveLocation}`] : []),
-      ...(isGroupEvent ? [`Participants: ${attendeeEmails.length}`] : []),
-      "",
-      `Need to change or cancel? ${dealRoomUrl}`,
-    ];
-    // For Zoom: skip Google Meet auto-creation, use the host's Zoom link
-    const useGoogleMeet = meetingFormat === "video" && videoProvider !== "zoom";
-    const useZoom = meetingFormat === "video" && videoProvider === "zoom" && !!zoomLink;
+    const body = await req.json();
+    // NOTE: `timezone` from the request body is ignored. The host's timezone
+    // is canonical and comes from stored preferences. LLMs must not be trusted
+    // to emit IANA strings.
+    const { sessionId, dateTime, duration, format, location, guestEmail: bodyGuestEmail } = body;
 
-    const result = await createCalendarEvent(session.hostId, {
-      summary: eventSummary,
-      description: descriptionLines.join("\n"),
-      startTime,
-      endTime,
-      attendeeEmails,
-      addMeetLink: useGoogleMeet,
-      sessionId: session.id,
+    if (!sessionId || !dateTime) {
+      attemptOutcome = "validation_failed";
+      attemptError = "Missing sessionId or dateTime";
+      return NextResponse.json(
+        { error: "Missing sessionId or dateTime" },
+        { status: 400 }
+      );
+    }
+    attemptSessionId = sessionId;
+
+    const session = await prisma.negotiationSession.findUnique({
+      where: { id: sessionId },
+      include: { link: true, host: true },
     });
 
-    if (useZoom) {
-      meetLink = zoomLink!;
+    if (!session) {
+      attemptOutcome = "validation_failed";
+      attemptError = "Session not found";
+      return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    // Host's timezone is canonical — read from stored preferences, never from the body.
+    const hostPrefs = session.host.preferences as Record<string, unknown> | null;
+    const hostTimezone = getUserTimezone(hostPrefs);
+
+    // Parse + DST-correct dateTime → startTime.
+    let dateTimeStr = dateTime as string;
+    const hasOffset = /[+-]\d{2}:\d{2}$/.test(dateTimeStr) || dateTimeStr.endsWith("Z");
+    if (!hasOffset) {
+      const roughOffset = computeUtcOffset(hostTimezone);
+      const roughDate = new Date(`${dateTimeStr}${roughOffset}`);
+      const dstCorrectOffset = computeUtcOffset(hostTimezone, roughDate);
+      dateTimeStr = `${dateTimeStr}${dstCorrectOffset}`;
     } else {
-      meetLink = result.meetLink || undefined;
-    }
-    eventLink = result.htmlLink || undefined;
-    confirmedCalendarEventId = result.eventId || undefined;
-  } catch (e) {
-    console.error("Failed to create calendar event:", e);
-    // Continue anyway — calendar isn't strictly required
-  }
-
-  // Invalidate the schedule cache so the availability widget immediately
-  // reflects the new booking instead of showing the slot for up to 5 minutes.
-  try {
-    await invalidateSchedule(session.hostId);
-  } catch (e) {
-    console.warn("[confirm] schedule cache invalidation failed (non-blocking):", e);
-  }
-
-  // Format times in the host's timezone for display
-  const displayDate = startTime.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: hostTimezone,
-  });
-  const displayTime = startTime.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: hostTimezone,
-  });
-  const tzAbbr = new Intl.DateTimeFormat("en-US", {
-    timeZoneName: "short",
-    timeZone: hostTimezone,
-  })
-    .formatToParts(startTime)
-    .find((p) => p.type === "timeZoneName")?.value ?? hostTimezone;
-
-  // Clear any active holds on this session — the meeting is now confirmed,
-  // so the tentative protection is no longer needed. We flip hold.status to
-  // "satisfied" and delete the backing tentative calendar event so the
-  // real confirmed event (created above) is the only thing on the host's
-  // calendar for this time. Non-blocking on gcal failures.
-  //
-  // If any holds were satisfied, this was a "stretch booking" — Envoy
-  // reached into the host's protected time on a VIP link and the guest
-  // confirmed. Post a system message into the host's dashboard channel
-  // so the host is explicitly aware ("that stretch slot just landed").
-  let hadStretchHold = false;
-  try {
-    const activeHolds = await prisma.hold.findMany({
-      where: { sessionId, status: "active" },
-      select: { id: true, calendarEventId: true },
-    });
-    if (activeHolds.length > 0) {
-      hadStretchHold = true;
-      await Promise.all(
-        activeHolds.map(async (h) => {
-          if (!h.calendarEventId) return;
-          try {
-            await deleteCalendarEvent(session.hostId, h.calendarEventId);
-          } catch (e) {
-            console.warn(
-              `[confirm] could not delete tentative hold event ${h.calendarEventId}:`,
-              e
-            );
-          }
-        })
-      );
-      await prisma.hold.updateMany({
-        where: { sessionId, status: "active" },
-        data: { status: "satisfied" },
-      });
-    }
-  } catch (e) {
-    // Non-blocking — confirmation itself still succeeds even if hold
-    // cleanup fails. The cron sweeper will pick up any orphaned holds.
-    console.error("[confirm] hold satisfaction cleanup failed:", e);
-  }
-
-  // Update session(s) — for group events, update ALL linked sessions
-  const sessionIdsToUpdate = isGroupEvent ? allParticipantSessions : [sessionId];
-  const confirmSummary = `${meetingFormat} meeting on ${displayDate} at ${displayTime} ${tzAbbr}${effectiveLocation ? ` — ${effectiveLocation}` : ""}`;
-
-  await prisma.negotiationSession.updateMany({
-    where: { id: { in: sessionIdsToUpdate } },
-    data: {
-      status: "agreed",
-      // statusLabel stays null on confirmation — the status pill in the
-      // header already renders "Confirmed" from statusConfig, and setting
-      // it here used to produce a duplicate label next to the pill.
-      statusLabel: null,
-      agreedTime: startTime,
-      agreedFormat: meetingFormat,
-      meetLink: meetLink || null,
-      calendarEventId: confirmedCalendarEventId || null,
-      summary: confirmSummary,
-    },
-  });
-
-  // Update all participant statuses to "agreed"
-  if (isGroupEvent) {
-    await prisma.sessionParticipant.updateMany({
-      where: { linkId: session.linkId },
-      data: { status: "agreed" },
-    });
-  }
-
-  // (No system "Meeting confirmed" message — the inline green card below
-  // the administrator's proposal, plus the header status pill, already
-  // communicate the confirmation. The duplicate system notice under the
-  // last message was visual noise.)
-
-  // Stretch booking notification — when a confirmed meeting had an active
-  // hold on it, that means Envoy reached into the host's protected time on
-  // a VIP link and this was the payoff. Post a system message into the
-  // host's dashboard channel so the host is explicitly notified ("that
-  // stretch slot you approved just landed"). Linked to the thread so it
-  // renders as a thread-card update in the dashboard feed.
-  if (hadStretchHold) {
-    try {
-      let channel = await prisma.channel.findUnique({
-        where: { userId: session.hostId },
-      });
-      if (!channel) {
-        channel = await prisma.channel.create({ data: { userId: session.hostId } });
+      const embeddedDate = new Date(dateTimeStr);
+      const correctOffset = computeUtcOffset(hostTimezone, embeddedDate);
+      const embeddedOffsetMatch = dateTimeStr.match(/([+-]\d{2}:\d{2})$/);
+      const embeddedOffset = embeddedOffsetMatch?.[1];
+      if (embeddedOffset && embeddedOffset !== correctOffset) {
+        const bare = dateTimeStr.slice(0, dateTimeStr.length - embeddedOffset.length);
+        dateTimeStr = `${bare}${correctOffset}`;
+        console.log(
+          `[confirm] DST offset corrected: ${embeddedOffset} → ${correctOffset} for "${bare}" (${hostTimezone})`
+        );
       }
-      const guestLabel = session.link.inviteeName || guestEmail || "the guest";
-      const stretchNote =
-        `Stretch slot confirmed for ${guestLabel}: ${displayDate} at ${displayTime} ${tzAbbr}. ` +
-        `This was a VIP hold you approved earlier — the guest accepted and it's now on your calendar.`;
-      await prisma.channelMessage.create({
+    }
+
+    const startTime = new Date(dateTimeStr);
+    const durationMin = duration || 30;
+    const endTime = new Date(startTime.getTime() + durationMin * 60 * 1000);
+    const meetingFormat = format || "video";
+    attemptSlotStart = startTime;
+    attemptSlotEnd = endTime;
+
+    // === Idempotency: handle already-agreed sessions ===
+    // Belt (pre-check): cheap short-circuit if we already know the answer.
+    // Suspenders (CAS below): atomic at the DB even if this pre-check races.
+    if (session.status === "agreed") {
+      const slotMatches =
+        session.agreedTime &&
+        Math.abs(session.agreedTime.getTime() - startTime.getTime()) < 60_000;
+      if (slotMatches) {
+        attemptOutcome = "already_agreed";
+        return NextResponse.json({
+          status: "confirmed",
+          dateTime: session.agreedTime!.toISOString(),
+          duration: durationMin,
+          format: session.agreedFormat ?? meetingFormat,
+          location: location || null,
+          meetLink: session.meetLink ?? undefined,
+          eventLink: undefined,
+          emailSent: false,
+          idempotent: true,
+        });
+      }
+      attemptOutcome = "slot_mismatch";
+      attemptError = `Session already agreed at ${session.agreedTime?.toISOString()}, requested ${startTime.toISOString()}`;
+      return NextResponse.json(
+        { error: "Session already confirmed for a different slot" },
+        { status: 409 }
+      );
+    }
+
+    const hostEmail = session.host.email;
+    if (!hostEmail) {
+      attemptOutcome = "validation_failed";
+      attemptError = "Host email not found";
+      return NextResponse.json({ error: "Host email not found" }, { status: 400 });
+    }
+
+    // Group event resolution
+    const isGroupEvent = session.link.mode === "group";
+    let allParticipantEmails: string[] = [];
+    let allParticipantSessions: string[] = [];
+    if (isGroupEvent) {
+      const participants = await prisma.sessionParticipant.findMany({
+        where: { linkId: session.linkId },
+      });
+      allParticipantEmails = participants
+        .map((p) => p.email)
+        .filter((e): e is string => !!e);
+      allParticipantSessions = participants.map((p) => p.sessionId);
+    }
+
+    const guestEmail =
+      session.guestEmail ||
+      session.link.inviteeEmail ||
+      (bodyGuestEmail as string | undefined) ||
+      null;
+    if (!guestEmail) {
+      console.warn(
+        `[confirm] sessionId=${sessionId} — no guest email; calendar invite will only have host.`
+      );
+    }
+    const attendeeEmails = isGroupEvent
+      ? [hostEmail, ...allParticipantEmails.filter((e) => e !== hostEmail)]
+      : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
+
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://agentenvoy.ai";
+    const dealRoomUrl = session.link.code
+      ? `${baseUrl}/meet/${session.link.slug}/${session.link.code}`
+      : `${baseUrl}/meet/${session.link.slug}`;
+
+    const hostPhone = (hostPrefs?.phone as string) || null;
+    const videoProvider = (hostPrefs?.videoProvider as string) || "google-meet";
+    const zoomLink = (hostPrefs?.zoomLink as string) || null;
+
+    const guestLabel = session.link.inviteeName || guestEmail || "guest";
+    const hostLabel = session.host.name || "Host";
+    const eventSummary = (() => {
+      if (session.link.topic) return `${session.link.topic} — ${guestLabel}`;
+      if (meetingFormat === "phone") return `Phone call: ${guestLabel} & ${hostLabel}`;
+      return `Meeting with ${guestLabel}`;
+    })();
+
+    const linkRulesObj = (session.link?.rules as Record<string, unknown> | null) || {};
+    const linkLocation =
+      typeof linkRulesObj.location === "string" && linkRulesObj.location.trim()
+        ? linkRulesObj.location.trim()
+        : null;
+    const effectiveLocation =
+      location ||
+      linkLocation ||
+      (meetingFormat === "phone" && hostPhone
+        ? `${guestLabel} calls ${session.host.name || "host"} @ ${hostPhone}`
+        : null) ||
+      (meetingFormat === "video" && videoProvider === "zoom" && zoomLink
+        ? zoomLink
+        : null);
+
+    // === Compare-and-swap: claim the slot ===
+    // Only one concurrent request can flip status `active → agreed`. The
+    // loser returns `already_agreed` (same slot) or 409 (different) above
+    // on its own next read. Combined with the pre-check, this is our
+    // belt-and-suspenders against double-confirm races.
+    const sessionIdsToUpdate = isGroupEvent ? allParticipantSessions : [sessionId];
+    const confirmSummaryPlaceholder = `${meetingFormat} meeting${effectiveLocation ? ` — ${effectiveLocation}` : ""}`;
+    const casResult = await prisma.negotiationSession.updateMany({
+      where: { id: { in: sessionIdsToUpdate }, status: { not: "agreed" } },
+      data: {
+        status: "agreed",
+        statusLabel: null,
+        agreedTime: startTime,
+        agreedFormat: meetingFormat,
+        summary: confirmSummaryPlaceholder,
+      },
+    });
+
+    if (casResult.count === 0) {
+      // Someone else won. Reload and return their data (idempotent success)
+      // or 409 if it's a different slot.
+      const winner = await prisma.negotiationSession.findUnique({
+        where: { id: sessionId },
+      });
+      if (
+        winner?.agreedTime &&
+        Math.abs(winner.agreedTime.getTime() - startTime.getTime()) < 60_000
+      ) {
+        attemptOutcome = "already_agreed";
+        return NextResponse.json({
+          status: "confirmed",
+          dateTime: winner.agreedTime.toISOString(),
+          duration: durationMin,
+          format: winner.agreedFormat ?? meetingFormat,
+          location: effectiveLocation || location || null,
+          meetLink: winner.meetLink ?? undefined,
+          eventLink: undefined,
+          emailSent: false,
+          idempotent: true,
+        });
+      }
+      attemptOutcome = "slot_mismatch";
+      attemptError = "Concurrent confirm landed on a different slot";
+      return NextResponse.json(
+        { error: "Session already confirmed for a different slot" },
+        { status: 409 }
+      );
+    }
+
+    // We won the CAS. Proceed with GCal + post-work.
+
+    // Create calendar event for the host
+    let meetLink: string | undefined;
+    let eventLink: string | undefined;
+    let confirmedCalendarEventId: string | undefined;
+
+    const tGcalStart = Date.now();
+    try {
+      const descriptionLines = [
+        `Scheduled via AgentEnvoy`,
+        `Format: ${meetingFormat}`,
+        ...(effectiveLocation ? [`Location: ${effectiveLocation}`] : []),
+        ...(isGroupEvent ? [`Participants: ${attendeeEmails.length}`] : []),
+        "",
+        `Need to change or cancel? ${dealRoomUrl}`,
+      ];
+      const useGoogleMeet = meetingFormat === "video" && videoProvider !== "zoom";
+      const useZoom = meetingFormat === "video" && videoProvider === "zoom" && !!zoomLink;
+
+      const result = await createCalendarEvent(session.hostId, {
+        summary: eventSummary,
+        description: descriptionLines.join("\n"),
+        startTime,
+        endTime,
+        attendeeEmails,
+        addMeetLink: useGoogleMeet,
+        sessionId: session.id,
+      });
+
+      if (useZoom) {
+        meetLink = zoomLink!;
+      } else {
+        meetLink = result.meetLink || undefined;
+      }
+      eventLink = result.htmlLink || undefined;
+      confirmedCalendarEventId = result.eventId || undefined;
+    } catch (e) {
+      console.error("[confirm] Failed to create calendar event:", e);
+      // Continue — calendar is not strictly required. We still mark the
+      // attempt as gcal_failed so it surfaces on the admin page for triage.
+      attemptOutcome = "gcal_failed";
+      attemptError = e instanceof Error ? e.message : String(e);
+    }
+    const tGcalMs = Date.now() - tGcalStart;
+
+    // === Parallelize independent post-GCal work ===
+    // All of these are safe to run concurrently — none depend on each other.
+    const tParStart = Date.now();
+
+    const displayDate = startTime.toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      timeZone: hostTimezone,
+    });
+    const displayTime = startTime.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: hostTimezone,
+    });
+    const tzAbbr =
+      new Intl.DateTimeFormat("en-US", {
+        timeZoneName: "short",
+        timeZone: hostTimezone,
+      })
+        .formatToParts(startTime)
+        .find((p) => p.type === "timeZoneName")?.value ?? hostTimezone;
+    const confirmSummary = `${meetingFormat} meeting on ${displayDate} at ${displayTime} ${tzAbbr}${effectiveLocation ? ` — ${effectiveLocation}` : ""}`;
+
+    // Task A: finalize session row with calendar data + real summary
+    const taskFinalizeSession = prisma.negotiationSession.updateMany({
+      where: { id: { in: sessionIdsToUpdate } },
+      data: {
+        meetLink: meetLink || null,
+        calendarEventId: confirmedCalendarEventId || null,
+        summary: confirmSummary,
+      },
+    });
+
+    // Task B: invalidate schedule cache (non-blocking failure)
+    const taskInvalidate = invalidateSchedule(session.hostId).catch((e) => {
+      console.warn("[confirm] schedule cache invalidation failed (non-blocking):", e);
+    });
+
+    // Task C: hold cleanup — promote tentative to confirmed.
+    // Returns whether this was a stretch booking so we can notify.
+    const taskHoldCleanup: Promise<{ hadStretch: boolean }> = (async () => {
+      try {
+        const activeHolds = await prisma.hold.findMany({
+          where: { sessionId, status: "active" },
+          select: { id: true, calendarEventId: true },
+        });
+        if (activeHolds.length === 0) return { hadStretch: false };
+        await Promise.all(
+          activeHolds.map(async (h) => {
+            if (!h.calendarEventId) return;
+            try {
+              await deleteCalendarEvent(session.hostId, h.calendarEventId);
+            } catch (e) {
+              console.warn(
+                `[confirm] could not delete tentative hold event ${h.calendarEventId}:`,
+                e
+              );
+            }
+          })
+        );
+        await prisma.hold.updateMany({
+          where: { sessionId, status: "active" },
+          data: { status: "satisfied" },
+        });
+        return { hadStretch: true };
+      } catch (e) {
+        console.error("[confirm] hold satisfaction cleanup failed:", e);
+        return { hadStretch: false };
+      }
+    })();
+
+    // Task D: fetch messages once — shared by outcome + learnings.
+    // (Previously this was two identical queries.)
+    const taskMessages = prisma.message.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: "asc" },
+    });
+
+    // Task E: participant status sync (group only)
+    const taskParticipants = isGroupEvent
+      ? prisma.sessionParticipant.updateMany({
+          where: { linkId: session.linkId },
+          data: { status: "agreed" },
+        })
+      : Promise.resolve(null);
+
+    const [, , holdResult, allMessages] = await Promise.all([
+      taskFinalizeSession,
+      taskInvalidate,
+      taskHoldCleanup,
+      taskMessages,
+      taskParticipants,
+    ]);
+    const tParMs = Date.now() - tParStart;
+
+    // NegotiationOutcome write (uses allMessages from above — no re-query)
+    try {
+      const guestMessages = allMessages.filter((m) => m.role === "guest");
+      const hasCounterProposal = guestMessages.some((m) =>
+        /none of|don't work|doesn't work|how about|instead|different/i.test(m.content)
+      );
+      const timeToConfirmationSec = Math.round(
+        (Date.now() - session.createdAt.getTime()) / 1000
+      );
+      await prisma.negotiationOutcome.create({
         data: {
-          channelId: channel.id,
-          role: "envoy",
-          content: stretchNote,
-          threadId: sessionId,
+          sessionId,
+          exchangeCount: guestMessages.length,
+          tierReached: 1,
+          guestCounterProposed: hasCounterProposal,
+          timeToConfirmationSec,
+          proposedFormat: session.format || null,
+          agreedFormat: meetingFormat,
+          participantCount: isGroupEvent ? attendeeEmails.length : 2,
         },
       });
     } catch (e) {
-      // Non-blocking — the confirmation succeeded, this is just the
-      // courtesy heads-up in the dashboard feed.
-      console.error("[confirm] stretch booking channel notification failed:", e);
+      console.error("[confirm] Failed to create NegotiationOutcome:", e);
     }
-  }
 
-  // Create NegotiationOutcome for tracking
-  try {
-    const messages = await prisma.message.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: "asc" },
+    // Stretch booking notification (only when the hold cleanup found one)
+    if (holdResult.hadStretch) {
+      try {
+        let channel = await prisma.channel.findUnique({
+          where: { userId: session.hostId },
+        });
+        if (!channel) {
+          channel = await prisma.channel.create({ data: { userId: session.hostId } });
+        }
+        const gl = session.link.inviteeName || guestEmail || "the guest";
+        const stretchNote =
+          `Stretch slot confirmed for ${gl}: ${displayDate} at ${displayTime} ${tzAbbr}. ` +
+          `This was a VIP hold you approved earlier — the guest accepted and it's now on your calendar.`;
+        await prisma.channelMessage.create({
+          data: {
+            channelId: channel.id,
+            role: "envoy",
+            content: stretchNote,
+            threadId: sessionId,
+          },
+        });
+      } catch (e) {
+        console.error("[confirm] stretch booking channel notification failed:", e);
+      }
+    }
+
+    // === Defer learnings extraction ===
+    // extractLearnings is a Claude API call (2-4s). Don't block the response
+    // on it — the learnings are advisory and the user is waiting.
+    waitUntil(
+      (async () => {
+        try {
+          const transcript = allMessages
+            .map((m) => `[${m.role}]: ${m.content}`)
+            .join("\n");
+          const updates = await extractLearnings(
+            transcript,
+            session.host.persistentKnowledge,
+            session.host.upcomingSchedulePreferences,
+            session.host.name || "host"
+          );
+          await prisma.user.update({
+            where: { id: session.hostId },
+            data: {
+              persistentKnowledge: updates.persistent,
+              upcomingSchedulePreferences: updates.situational,
+            },
+          });
+        } catch (e) {
+          console.error("[confirm] deferred extractLearnings failed:", e);
+        }
+      })()
+    );
+
+    // === Send confirmation email (stays in critical path) ===
+    // Guests expect the invite. Keep this awaited.
+    const tEmailStart = Date.now();
+    const emailBody = buildConfirmationEmail({
+      hostName: session.host.name || "The organizer",
+      guestName: session.link.inviteeName || undefined,
+      topic: session.link.topic || undefined,
+      dateTime: startTime,
+      duration: durationMin,
+      format: meetingFormat,
+      location: effectiveLocation || undefined,
+      meetLink,
+      timezone: hostTimezone,
+      dealRoomUrl,
     });
-    const guestMessages = messages.filter((m) => m.role === "guest");
-    const hasCounterProposal = guestMessages.some((m) =>
-      /none of|don't work|doesn't work|how about|instead|different/i.test(m.content)
-    );
-    const timeToConfirmationSec = Math.round(
-      (Date.now() - session.createdAt.getTime()) / 1000
-    );
-
-    await prisma.negotiationOutcome.create({
-      data: {
-        sessionId,
-        exchangeCount: guestMessages.length,
-        tierReached: 1, // TODO: track tier progression
-        guestCounterProposed: hasCounterProposal,
-        timeToConfirmationSec,
-        proposedFormat: session.format || null,
-        agreedFormat: meetingFormat,
-        participantCount: isGroupEvent ? attendeeEmails.length : 2,
+    const emailRecipients = isGroupEvent
+      ? attendeeEmails
+      : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
+    const emailResult = await dispatch({
+      kind: "email.send",
+      to: emailRecipients,
+      subject: `Meeting Confirmed${session.link.topic ? `: ${session.link.topic}` : ""}`,
+      html: emailBody,
+      context: {
+        sessionId: session.id,
+        hostId: session.hostId,
+        linkId: session.linkId,
+        purpose: "meeting_confirmation",
       },
     });
-  } catch (e) {
-    console.error("Failed to create NegotiationOutcome:", e);
-  }
+    const emailSent = emailResult.status === "sent";
+    if (emailResult.status === "failed") {
+      console.error("[confirm] Failed to send confirmation email:", emailResult.error);
+    }
+    const tEmailMs = Date.now() - tEmailStart;
 
-  // Extract learnings and update host knowledge base
-  try {
-    const allMessages = await prisma.message.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: "asc" },
-    });
-    const transcript = allMessages
-      .map((m) => `[${m.role}]: ${m.content}`)
-      .join("\n");
-    const updates = await extractLearnings(
-      transcript,
-      session.host.persistentKnowledge,
-      session.host.upcomingSchedulePreferences,
-      session.host.name || "host"
+    const totalMs = Date.now() - t0;
+    console.log(
+      `[confirm] sessionId=${sessionId} total=${totalMs}ms gcal=${tGcalMs}ms parallel=${tParMs}ms email=${tEmailMs}ms`
     );
-    await prisma.user.update({
-      where: { id: session.hostId },
-      data: {
-        persistentKnowledge: updates.persistent,
-        upcomingSchedulePreferences: updates.situational,
-      },
+
+    // Only flip outcome to "success" if we didn't already mark gcal_failed.
+    if (attemptOutcome !== "gcal_failed") {
+      attemptOutcome = "success";
+    }
+
+    return NextResponse.json({
+      status: "confirmed",
+      dateTime: startTime.toISOString(),
+      duration: durationMin,
+      format: meetingFormat,
+      location: effectiveLocation || location || null,
+      meetLink,
+      eventLink,
+      emailSent,
     });
   } catch (e) {
-    console.error("Failed to extract learnings:", e);
-    // Non-blocking — confirmation already succeeded
+    // Top-level unexpected error — persist to RouteError so it surfaces on
+    // /admin/failures alongside the ConfirmAttempt record.
+    attemptOutcome = "server_error";
+    attemptError = e instanceof Error ? e.message : String(e);
+    logRouteError({
+      route: "/api/negotiate/confirm",
+      method: "POST",
+      statusCode: 500,
+      error: e,
+      context: { sessionId: attemptSessionId ?? undefined },
+      userAgent,
+    });
+    console.error("[confirm] unhandled error:", e);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  } finally {
+    // Fire-and-forget ConfirmAttempt write. Deliberately not awaited — we
+    // don't want to delay the response, and we don't want a DB hiccup to
+    // convert a successful confirm into a client error.
+    const durationMs = Date.now() - t0;
+    prisma.confirmAttempt
+      .create({
+        data: {
+          sessionId: attemptSessionId,
+          slotStart: attemptSlotStart,
+          slotEnd: attemptSlotEnd,
+          outcome: attemptOutcome,
+          errorMessage: attemptError,
+          userAgent,
+          durationMs,
+        },
+      })
+      .catch((dbErr) => {
+        console.error("[confirm] Failed to persist ConfirmAttempt:", dbErr);
+      });
   }
-
-  // Send confirmation emails
-  const emailBody = buildConfirmationEmail({
-    hostName: session.host.name || "The organizer",
-    guestName: session.link.inviteeName || undefined,
-    topic: session.link.topic || undefined,
-    dateTime: startTime,
-    duration: durationMin,
-    format: meetingFormat,
-    location: effectiveLocation || undefined,
-    meetLink,
-    timezone: hostTimezone,
-    dealRoomUrl,
-  });
-
-  const emailRecipients = isGroupEvent
-    ? attendeeEmails
-    : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
-
-  const emailResult = await dispatch({
-    kind: "email.send",
-    to: emailRecipients,
-    subject: `Meeting Confirmed${session.link.topic ? `: ${session.link.topic}` : ""}`,
-    html: emailBody,
-    context: {
-      sessionId: session.id,
-      hostId: session.hostId,
-      linkId: session.linkId,
-      purpose: "meeting_confirmation",
-    },
-  });
-  // "sent" = a real email went out via SES (live or allowlist mode).
-  // "suppressed" / "dryrun" = preview/dev; nothing actually sent.
-  // "failed" = SES refused; confirmation still proceeds.
-  const emailSent = emailResult.status === "sent";
-  if (emailResult.status === "failed") {
-    console.error("Failed to send confirmation email:", emailResult.error);
-  }
-
-  return NextResponse.json({
-    status: "confirmed",
-    dateTime: startTime.toISOString(),
-    duration: durationMin,
-    format: meetingFormat,
-    location: effectiveLocation || location || null,
-    meetLink,
-    eventLink,
-    emailSent,
-  });
 }
 
 // PATCH /api/negotiate/confirm
