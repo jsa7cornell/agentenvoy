@@ -17,6 +17,12 @@ import { gatherDevStats } from "@/lib/emails/dev-stats-gather";
  * one recipient; this is explicitly not a generic digest system.
  */
 
+// Cron endpoint — never prerender at build time. Without this, Next.js
+// attempts a static render which executes Prisma queries against whatever
+// DB the build env points at, and fails the build if any expected table
+// isn't there.
+export const dynamic = "force-dynamic";
+
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export async function GET(req: NextRequest) {
