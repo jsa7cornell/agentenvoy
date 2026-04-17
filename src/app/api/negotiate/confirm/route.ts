@@ -42,7 +42,16 @@ export async function POST(req: NextRequest) {
     // NOTE: `timezone` from the request body is ignored. The host's timezone
     // is canonical and comes from stored preferences. LLMs must not be trusted
     // to emit IANA strings.
-    const { sessionId, dateTime, duration, format, location, guestEmail: bodyGuestEmail } = body;
+    const {
+      sessionId,
+      dateTime,
+      duration,
+      format,
+      location,
+      guestEmail: bodyGuestEmail,
+      guestName: bodyGuestName,
+      wantsReminder: bodyWantsReminder,
+    } = body;
 
     if (!sessionId || !dateTime) {
       attemptOutcome = "validation_failed";
@@ -148,10 +157,23 @@ export async function POST(req: NextRequest) {
       allParticipantSessions = participants.map((p) => p.sessionId);
     }
 
+    // Body-provided guest info (from the confirm card) takes precedence so
+    // guests can correct what Envoy captured earlier in conversation.
+    const bodyGuestEmailStr = typeof bodyGuestEmail === "string" && bodyGuestEmail.trim()
+      ? bodyGuestEmail.trim()
+      : null;
+    const bodyGuestNameStr = typeof bodyGuestName === "string" && bodyGuestName.trim()
+      ? bodyGuestName.trim()
+      : null;
     const guestEmail =
+      bodyGuestEmailStr ||
       session.guestEmail ||
       session.link.inviteeEmail ||
-      (bodyGuestEmail as string | undefined) ||
+      null;
+    const guestName =
+      bodyGuestNameStr ||
+      session.guestName ||
+      session.link.inviteeName ||
       null;
     if (!guestEmail) {
       console.warn(
@@ -171,7 +193,7 @@ export async function POST(req: NextRequest) {
     const videoProvider = (hostPrefs?.videoProvider as string) || "google-meet";
     const zoomLink = (hostPrefs?.zoomLink as string) || null;
 
-    const guestLabel = session.link.inviteeName || guestEmail || "guest";
+    const guestLabel = guestName || guestEmail || "guest";
     const hostLabel = session.host.name || "Host";
     const eventSummary = (() => {
       if (session.link.topic) return `${session.link.topic} — ${guestLabel}`;
@@ -209,6 +231,9 @@ export async function POST(req: NextRequest) {
         agreedTime: startTime,
         agreedFormat: meetingFormat,
         summary: confirmSummaryPlaceholder,
+        ...(bodyGuestNameStr ? { guestName: bodyGuestNameStr } : {}),
+        ...(bodyGuestEmailStr ? { guestEmail: bodyGuestEmailStr } : {}),
+        ...(typeof bodyWantsReminder === "boolean" ? { wantsReminder: bodyWantsReminder } : {}),
       },
     });
 
@@ -470,7 +495,7 @@ export async function POST(req: NextRequest) {
     const tEmailStart = Date.now();
     const emailBody = buildConfirmationEmail({
       hostName: session.host.name || "The organizer",
-      guestName: session.link.inviteeName || undefined,
+      guestName: guestName || undefined,
       topic: session.link.topic || undefined,
       dateTime: startTime,
       duration: durationMin,
