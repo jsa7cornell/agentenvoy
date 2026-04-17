@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { LogoFull } from "./logo";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
@@ -386,7 +387,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     }
   }
 
-  // Detect guest calendar connect via URL param
+  // Detect guest calendar connect via URL param.
+  //
+  // The OAuth callback at /api/auth/guest-calendar/callback already wrote a
+  // system-role Message with structured metadata.scoredSlots — the slots
+  // endpoint reads that for bilateral compute, so all we need to do here is
+  // clean up the URL param and refetch the slots payload. Posting a
+  // [SYSTEM: ...] message from the client was both redundant (calendar data
+  // is already in the DB) and actively harmful — /api/negotiate/message
+  // defaults the role to "guest" for unauthenticated POSTs, which surfaced
+  // as a purple guest bubble and triggered a generic Envoy response that
+  // had no real bilateral data to work with (sanitizeHistory strips the
+  // system-role message before Envoy sees history). The widget is the
+  // affordance; no LLM turn needed.
   const calendarCheckDone = useRef(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -397,46 +410,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       const url = new URL(window.location.href);
       url.searchParams.delete("calendarConnected");
       window.history.replaceState({}, "", url.pathname);
-      fetch("/api/negotiate/message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          content: "[SYSTEM: The guest connected their Google Calendar (read-only). Their availability has been added to the session. Cross-reference both calendars to propose optimal mutual times.]",
-        }),
-      }).then(async (res) => {
-        if (!res.ok) return;
-        const reader = res.body?.getReader();
-        if (!reader) return;
-        const decoder = new TextDecoder();
-        let fullText = "";
-        const assistantId = (Date.now() + 1).toString();
-        setMessages((prev) => [
-          ...prev,
-          { id: assistantId, role: "administrator", content: "" },
-        ]);
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          for (const line of lines) {
-            if (line.startsWith("0:")) {
-              try {
-                const text = JSON.parse(line.slice(2));
-                fullText += text;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId ? { ...m, content: fullText } : m
-                  )
-                );
-              } catch {}
-            }
-          }
-        }
-      }).catch(() => {});
+      // Refetch slots so bilateralByDay + green/orange chips appear.
+      fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);
+          if (data?.bilateralByDay) setBilateralByDay(data.bilateralByDay);
+        })
+        .catch(() => {});
     }
-  }, [sessionId, calendarConnected, slug, code]);
+  }, [sessionId, calendarConnected]);
 
   // Initialize session on mount
   useEffect(() => {
@@ -1664,13 +1647,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           <a href="/">
             <LogoFull height={24} className="text-primary" />
           </a>
-          <a
-            href={`/api/auth/signin?callbackUrl=${encodeURIComponent(`/meet/${slug}${code ? `/${code}` : ""}`)}`}
+          <button
+            type="button"
+            onClick={() =>
+              signIn("google", {
+                callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
+              })
+            }
             className="text-xs text-muted hover:text-primary transition"
             data-testid="anonymous-signin-link"
           >
             Sign in
-          </a>
+          </button>
         </header>
       )}
 
@@ -1995,14 +1983,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 <span>Share your own link &mdash; Envoy handles the back-and-forth.</span>
               </li>
             </ol>
-            <a
-              href={`/api/auth/signin?callbackUrl=${encodeURIComponent(
-                typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"
-              )}`}
+            <button
+              type="button"
+              onClick={() =>
+                signIn("google", {
+                  callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
+                })
+              }
               className="block w-full text-center px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition"
             >
               Connect with Google to begin
-            </a>
+            </button>
             <button
               type="button"
               onClick={() => {
