@@ -20,6 +20,7 @@ interface AvailabilityCalendarProps {
   onTimezoneClick?: () => void;
   duration?: number;
   minDuration?: number;
+  headerSlot?: React.ReactNode;
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
@@ -205,6 +206,7 @@ function WeekView({
   onTimezoneClick,
   duration,
   minDuration,
+  headerSlot,
 }: Omit<AvailabilityCalendarProps, "view">) {
   const now = new Date();
   const todayStr = toDateStr(now);
@@ -216,6 +218,12 @@ function WeekView({
   // Auto-select today (or the first day with visible slots) once data is available.
   // Also jump the week view to the first available day — matters when a link has
   // a dateRange constraint (e.g. "next Monday") and all slots are weeks away.
+  //
+  // Auto-select today (or the first day with visible slots) once data is available.
+  // Deliberately keyed on slotsByDay only: selectedDay/weekOffset are state the
+  // effect itself sets (including them would undo user navigation on the next
+  // render); todayStr/thisWeekStartTime derive from new Date() at render time
+  // (including them would re-fire every render).
   useEffect(() => {
     if (selectedDay) return; // already selected — don't override manual choice
     const todaySlots = slotsByDay[todayStr] || [];
@@ -239,7 +247,8 @@ function WeekView({
       const targetOffset = Math.floor(daysDiff / 7);
       if (targetOffset > 0) setWeekOffset(targetOffset);
     }
-  }, [slotsByDay]); // re-run when data loads (empty on first render → populated async)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotsByDay]);
 
   // Compute the start of the displayed week
   const weekStartTime = useMemo(() => {
@@ -289,6 +298,9 @@ function WeekView({
 
   return (
     <div>
+      {/* Header slot — e.g., inline CTA chip for calendar connect */}
+      {headerSlot && <div className="mb-3">{headerSlot}</div>}
+
       {/* Week navigation header */}
       <div className="flex items-center justify-between mb-2">
         <button
@@ -397,6 +409,7 @@ function MonthView({
   onTimezoneClick,
   duration,
   minDuration,
+  headerSlot,
 }: Omit<AvailabilityCalendarProps, "view">) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
@@ -416,6 +429,11 @@ function MonthView({
   // Also jump the month view to the month containing the first available day —
   // matters when a link has a dateRange constraint (e.g. "next Monday") and all
   // slots are in a different month than today.
+  //
+  // Deliberately keyed on slotsByDay only: selectedDay/viewMonth are state the
+  // effect itself sets (including them would undo user navigation on the next
+  // render); now/todayStr derive from new Date() at render time (including them
+  // would re-fire every render).
   useEffect(() => {
     if (selectedDay) return; // already selected — don't override manual choice
     const todaySlots = slotsByDay[todayStr] || [];
@@ -438,7 +456,8 @@ function MonthView({
     if (viewingCurrentMonth && (firstDate.getFullYear() !== nowYear || firstDate.getMonth() !== nowMonth)) {
       setViewMonth(new Date(firstDate.getFullYear(), firstDate.getMonth(), 1));
     }
-  }, [slotsByDay]); // re-run when data loads (empty on first render → populated async)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotsByDay]);
 
   const cells: Array<{ day: number; dateStr: string } | null> = [];
   for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
@@ -456,6 +475,9 @@ function MonthView({
 
   return (
     <div>
+      {/* Header slot — e.g., inline CTA chip for calendar connect */}
+      {headerSlot && <div className="mb-3">{headerSlot}</div>}
+
       {/* Month header */}
       <div className="flex items-center justify-between mb-2">
         <button
