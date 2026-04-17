@@ -1424,6 +1424,53 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           })
         )}
 
+        {/* Standalone bilateral chips (2026-04-17). Rendered outside the
+            message stream so anonymous guests — who have no guest_envoy
+            message to attach chips to — can see mutual-availability overlap
+            after connecting their calendar. Skipped for logged-in guests
+            whose guest_envoy greeting already embeds the TimeChipList. */}
+        {!confirmed && !isHost && !isGuest && !latestProposal && bilateralByDay &&
+          Object.keys(bilateralByDay).length > 0 && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] rounded-2xl border border-emerald-700/40 bg-emerald-900/10 px-4 py-3">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-2">
+                  Calendar connected ✓
+                </div>
+                <p className="text-xs text-secondary mb-2 leading-snug">
+                  Here are the times that work for both of you. Tap a green chip to lock one in.
+                </p>
+                <TimeChipList
+                  bilateralByDay={bilateralByDay}
+                  primaryTimezone={slotTimezone}
+                  counterpartyTimezone={slotTimezone === "America/Los_Angeles" ? undefined : "America/Los_Angeles"}
+                  onSelectSlot={({ start, end, color }) => {
+                    if (color === "both" && !confirmed) {
+                      proposeFromSlot({ start, end });
+                      return;
+                    }
+                    const d = new Date(start);
+                    const day = d.toLocaleDateString("en-US", {
+                      weekday: "long",
+                      month: "short",
+                      day: "numeric",
+                      timeZone: slotTimezone,
+                    });
+                    const time = d.toLocaleTimeString("en-US", {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      timeZone: slotTimezone,
+                    });
+                    const hostFirst = hostName ? hostName.split(" ")[0] : "you";
+                    setInput(
+                      `Any chance ${day} at ${time} could work for ${hostFirst}? It's close — let me know if we can make it happen.`
+                    );
+                    document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
         {/* Single proposal + confirm card (direct-confirm flow, 2026-04-17).
             Reads local pendingProposal first (set on chip click) then falls
             back to Envoy's most recent CONFIRMATION_PROPOSAL message. Shows

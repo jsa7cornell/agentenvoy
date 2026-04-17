@@ -72,37 +72,38 @@ export async function GET(req: NextRequest) {
         end: new Date(b.end!),
       })) ?? [];
 
-    // Walk the window in 30-min steps. Business hours only (9–18 weekday)
-    // — same heuristic as the prior impl. Free slots get score=1
-    // (bookable, no preference); busy slots are simply omitted, which
-    // computeBilateralAvailability treats as "unknown for guest" → no chip.
-    // That's the right behavior for a read-only freebusy signal where we
-    // can't distinguish "protected" from "blocked."
+    // Walk the window in 30-min steps and emit EVERY non-busy slot as
+    // score=1. We don't pre-filter by hour — the prior implementation used
+    // `current.getHours()` which reads server-local (UTC on Vercel) time,
+    // so for a guest in PT the "9–18" window was 2 AM–11 AM PT, and real
+    // business-hours overlap was silently dropped. Business-hours
+    // restriction is the HOST's job, applied downstream via their scored
+    // schedule — the intersection naturally filters to when the host
+    // actually wants to meet.
+    //
+    // Cap is generous (14d × 48 half-hours = 672 possible) because busy
+    // slots reduce it naturally and the JSON footprint stays small.
     const current = new Date(now);
     current.setMinutes(Math.ceil(current.getMinutes() / 30) * 30, 0, 0);
 
-    while (current < twoWeeks && scoredSlots.length < 240) {
-      const hour = current.getHours();
-      const day = current.getDay();
-      if (day !== 0 && day !== 6 && hour >= 9 && hour < 18) {
-        const slotEnd = new Date(current.getTime() + 30 * 60 * 1000);
-        const isBusy = busySlots.some(
-          (busy) => current < busy.end && slotEnd > busy.start,
-        );
-        if (!isBusy) {
-          scoredSlots.push({
-            start: current.toISOString(),
-            end: slotEnd.toISOString(),
-            score: 1,
-            kind: "open",
-            reason: "guest free (read-only cal)",
-            confidence: "high",
-          });
-          if (humanLabels.length < 20) {
-            humanLabels.push(
-              `${current.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} ${current.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
-            );
-          }
+    while (current < twoWeeks && scoredSlots.length < 672) {
+      const slotEnd = new Date(current.getTime() + 30 * 60 * 1000);
+      const isBusy = busySlots.some(
+        (busy) => current < busy.end && slotEnd > busy.start,
+      );
+      if (!isBusy) {
+        scoredSlots.push({
+          start: current.toISOString(),
+          end: slotEnd.toISOString(),
+          score: 1,
+          kind: "open",
+          reason: "guest free (read-only cal)",
+          confidence: "high",
+        });
+        if (humanLabels.length < 20) {
+          humanLabels.push(
+            `${current.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} ${current.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+          );
         }
       }
       current.setMinutes(current.getMinutes() + 30);
