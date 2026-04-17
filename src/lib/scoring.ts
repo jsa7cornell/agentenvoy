@@ -1322,6 +1322,44 @@ export interface LinkRules {
    * The deal-room agent negotiates the final duration with the guest.
    */
   minDuration?: number;
+  /**
+   * Deferred-to-guest fields (2026-04-17). When the host's directive leaves
+   * details open ("he picks the time and place"), the host-side LLM encodes
+   * the deferral here instead of picking a value. The greeting template
+   * switches to its open-window variant, and the slot API clamps to any
+   * provided window. Each field's presence means "guest decides":
+   *   - `window`: guest picks start time within this host-tz window
+   *   - `date: true`: guest picks which day (within dateRange if also set)
+   *   - `duration: true`: guest picks any duration; `duration: number[]`:
+   *     guest picks one of these
+   *   - `location: true`: guest picks the venue (free text)
+   * Absence of a field = host decided (use the top-level `duration`,
+   * `preferredTimeStart/End`, etc.).
+   */
+  guestPicks?: {
+    window?: { startHour: number; endHour: number };
+    date?: boolean;
+    duration?: boolean | number[];
+    location?: boolean;
+  };
+  /**
+   * Qualitative hints from the host to personalize the guest experience
+   * without constraining the link. Rendered in the deal-room greeting;
+   * never treated as instructions by Envoy (see playbooks/ground-truth.md
+   * "HOST FLAVOR" rule).
+   *   - `suggestions`: structured lists (locations, durations) rendered as
+   *     examples/chips. Free-form strings inside are sanitized.
+   *   - `tone`: one-liner flavor text (<=200 chars). Passed through
+   *     `sanitizeHostFlavor` — injection markers reject, URLs/emails/phones
+   *     are stripped.
+   */
+  guestGuidance?: {
+    suggestions?: {
+      locations?: string[];
+      durations?: number[]; // minutes
+    };
+    tone?: string;
+  };
 }
 
 // Canonical short day-name table. All persisted `preferredDays` / `lastResort` /
@@ -1421,6 +1459,75 @@ export function normalizeLinkRules(
     } else {
       delete out.dateRange;
     }
+  }
+
+  // guestPicks: defer-to-guest markers. Each sub-field is optional and
+  // independently validated. An empty object is dropped so the absence of
+  // any real deferral flags leaves no stub behind.
+  const gp = input.guestPicks;
+  if (gp && typeof gp === "object" && !Array.isArray(gp)) {
+    const src = gp as Record<string, unknown>;
+    const cleaned: NonNullable<LinkRules["guestPicks"]> = {};
+    if (
+      src.window &&
+      typeof src.window === "object" &&
+      typeof (src.window as Record<string, unknown>).startHour === "number" &&
+      typeof (src.window as Record<string, unknown>).endHour === "number"
+    ) {
+      const startHour = Math.max(0, Math.min(23, Math.floor((src.window as Record<string, number>).startHour)));
+      const endHour = Math.max(0, Math.min(24, Math.floor((src.window as Record<string, number>).endHour)));
+      if (endHour > startHour) cleaned.window = { startHour, endHour };
+    }
+    if (src.date === true) cleaned.date = true;
+    if (src.duration === true) {
+      cleaned.duration = true;
+    } else if (Array.isArray(src.duration)) {
+      const durs = src.duration
+        .filter((d): d is number => typeof d === "number" && d > 0)
+        .map((d) => Math.round(d));
+      if (durs.length) cleaned.duration = Array.from(new Set(durs)).sort((a, b) => a - b);
+    }
+    if (src.location === true) cleaned.location = true;
+    if (Object.keys(cleaned).length) out.guestPicks = cleaned;
+    else delete out.guestPicks;
+  } else {
+    delete out.guestPicks;
+  }
+
+  // guestGuidance: suggestions + tone. Tone sanitization happens at the
+  // action-handler boundary (so we can log rejections server-side) — here we
+  // just accept already-cleaned strings. Suggestions are shape-checked.
+  const gg = input.guestGuidance;
+  if (gg && typeof gg === "object" && !Array.isArray(gg)) {
+    const src = gg as Record<string, unknown>;
+    const cleaned: NonNullable<LinkRules["guestGuidance"]> = {};
+    if (src.suggestions && typeof src.suggestions === "object" && !Array.isArray(src.suggestions)) {
+      const s = src.suggestions as Record<string, unknown>;
+      const suggestions: { locations?: string[]; durations?: number[] } = {};
+      if (Array.isArray(s.locations)) {
+        const locs = s.locations
+          .filter((l): l is string => typeof l === "string" && l.trim().length > 0)
+          .map((l) => l.trim().slice(0, 80))
+          .slice(0, 8);
+        if (locs.length) suggestions.locations = locs;
+      }
+      if (Array.isArray(s.durations)) {
+        const durs = s.durations
+          .filter((d): d is number => typeof d === "number" && d > 0)
+          .map((d) => Math.round(d));
+        if (durs.length) suggestions.durations = Array.from(new Set(durs)).sort((a, b) => a - b).slice(0, 6);
+      }
+      if (Object.keys(suggestions).length) cleaned.suggestions = suggestions;
+    }
+    if (typeof src.tone === "string" && src.tone.trim().length > 0) {
+      // Hard cap here too — the sanitizer at the action boundary already
+      // trims, but defense-in-depth for anything written through a raw API.
+      cleaned.tone = src.tone.trim().slice(0, 200);
+    }
+    if (Object.keys(cleaned).length) out.guestGuidance = cleaned;
+    else delete out.guestGuidance;
+  } else {
+    delete out.guestGuidance;
   }
 
   return out;
