@@ -31,8 +31,12 @@ import {
 
 const VALID_MODES: EffectMode[] = ["live", "allowlist", "log", "dryrun", "off"];
 
-/** Per-kind env var names — one place to grep. */
-const MODE_ENV_VAR: Record<EffectKind, string> = {
+/**
+ * Per-kind env var names — one place to grep. Partial so Phase 2 / Phase 3
+ * can land handlers without pre-declaring every env var here. Kinds without
+ * an entry fall back to the safe default in `resolveMode`.
+ */
+const MODE_ENV_VAR: Partial<Record<EffectKind, string>> = {
   "email.send": "EFFECT_MODE_EMAIL",
   // "calendar.create_event": "EFFECT_MODE_CALENDAR",  (Phase 2)
   // "mcp.callback":          "EFFECT_MODE_MCP_CALLBACK", (Phase 3)
@@ -42,20 +46,27 @@ const MODE_ENV_VAR: Record<EffectKind, string> = {
  * Default mode when the env var is missing. These defaults prioritize safety:
  * absent config = don't reach the outside world. Production deploys should
  * always set these explicitly — Phase 4 adds a build-time check for that.
+ * Any kind without an explicit entry falls back to "log" via resolveMode.
  */
-const DEFAULT_MODE: Record<EffectKind, EffectMode> = {
+const DEFAULT_MODE: Partial<Record<EffectKind, EffectMode>> = {
   "email.send": "log",
 };
 
+/** Universal safe fallback for kinds that haven't declared their own default. */
+const UNIVERSAL_FALLBACK_MODE: EffectMode = "log";
+
 export function resolveMode(kind: EffectKind): EffectMode {
-  const raw = process.env[MODE_ENV_VAR[kind]];
-  if (!raw) return DEFAULT_MODE[kind];
+  const envVar = MODE_ENV_VAR[kind];
+  const fallback = DEFAULT_MODE[kind] ?? UNIVERSAL_FALLBACK_MODE;
+  if (!envVar) return fallback;
+  const raw = process.env[envVar];
+  if (!raw) return fallback;
   const mode = raw.toLowerCase() as EffectMode;
   if (!VALID_MODES.includes(mode)) {
     console.warn(
-      `[side-effects] invalid ${MODE_ENV_VAR[kind]}="${raw}", falling back to ${DEFAULT_MODE[kind]}`,
+      `[side-effects] invalid ${envVar}="${raw}", falling back to ${fallback}`,
     );
-    return DEFAULT_MODE[kind];
+    return fallback;
   }
   return mode;
 }
@@ -84,6 +95,10 @@ function scrubPayload(effect: SideEffect): Record<string, unknown> {
         htmlSnippet: html.slice(0, 280),
       };
     }
+    default:
+      // Unimplemented kind — record the kind only for audit, strip the rest
+      // (we don't know what's safe to log for an unknown shape).
+      return { kind: (effect as SideEffect).kind, unhandled: true };
   }
 }
 
@@ -91,6 +106,8 @@ function summarizeTarget(effect: SideEffect): string {
   switch (effect.kind) {
     case "email.send":
       return summarizeEmailTarget(effect);
+    default:
+      return `(unhandled kind: ${(effect as SideEffect).kind})`;
   }
 }
 
@@ -114,6 +131,15 @@ async function runHandler(
       const outcome: EmailHandlerOutcome = await handleEmail(effect, mode);
       return outcome;
     }
+    default:
+      // Kind is declared in types.ts but has no handler yet (Phase 2+ work).
+      // Fail loudly in the return value — caller gets status:"failed" +
+      // explanatory error — rather than throwing, so callers don't break.
+      return {
+        status: "failed",
+        effectiveMode: mode,
+        error: `No handler registered for kind "${(effect as SideEffect).kind}". This kind is declared in types.ts but its handler hasn't been implemented yet.`,
+      };
   }
 }
 
