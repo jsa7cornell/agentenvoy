@@ -646,10 +646,14 @@ export async function POST(req: NextRequest) {
       const anchorIso = !guestPicks!.date && filteredSlots.length > 0
         ? new Intl.DateTimeFormat("en-CA", { timeZone: hostTimezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(filteredSlots[0].start))
         : null;
+      // The open-window path emits its own intro so topic ("hike", "welcome-back
+      // lunch") can flow through naturally. Email is NOT asked for up front —
+      // it's collected by the confirm card flow when the guest locks a time.
       greeting = buildOpenWindowGreeting({
         hostFirstName,
         inviteeName,
         topic,
+        formatEmoji,
         hostTimezone,
         guestTimezone: guestTzDiffers ? effectiveGuestTz : undefined,
         window: guestPicks!.window,

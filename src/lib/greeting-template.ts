@@ -408,6 +408,8 @@ interface BuildOpenWindowOpts {
   inviteeName: string | null;
   /** Session topic (post-filter for generic terms). Null = no topic. */
   topic: string | null;
+  /** Meeting format emoji ("📞" / "📹" / "🤝" / "📅") chosen by the caller. */
+  formatEmoji?: string;
   /** Host's timezone IANA for window label rendering. */
   hostTimezone: string;
   /** Guest's timezone if distinct from host; triggers dual-tz window label. */
@@ -428,17 +430,33 @@ interface BuildOpenWindowOpts {
   };
 }
 
+/** "hike" → "a hike", "adventure" → "an adventure". Leaves phrases alone
+ *  when they already carry an article/determiner so we don't double-up. */
+function articled(noun: string): string {
+  const trimmed = noun.trim();
+  if (!trimmed) return trimmed;
+  if (/^(a|an|the|this|that|some|our|your|my|his|her|their)\s/i.test(trimmed)) {
+    return trimmed;
+  }
+  const art = /^[aeiouAEIOU]/.test(trimmed) ? "an" : "a";
+  return `${art} ${trimmed}`;
+}
+
 /**
- * Render the open-window greeting used when `link.rules.guestPicks` is set.
- * Replaces the day-bullet windows list with a single sentence naming the
- * host's deferred window + what the guest is choosing. Always terse —
- * never enumerates slots because by definition the host didn't pin one.
+ * Render the full open-window (guestPicks) greeting — intro + anchor + ask.
+ * Replaces the standard day-bullet scheduleBlock when the host has deferred
+ * details to the guest. Preserves the host's ambiguity instead of artificially
+ * pinning a narrow offer.
+ *
+ * Email is deliberately NOT requested here — it's collected by the confirm
+ * card flow when the guest locks a time, not up front.
  */
 export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
   const {
     hostFirstName,
     inviteeName,
     topic,
+    formatEmoji,
     hostTimezone,
     guestTimezone,
     window,
@@ -451,32 +469,43 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
   const hasDistinctGuestTz = guestTimezone && guestTimezone !== hostTimezone;
   const guestShort = hasDistinctGuestTz ? shortTimezoneLabel(guestTimezone!, new Date()) : null;
 
-  // Format a window like "afternoon (12–5 PM PDT)" or, when the guest is in a
-  // distinct TZ, "12–5 PM PDT (3–8 PM EDT)". Hour-only; we never invent
-  // minutes since the host's directive didn't include them.
-  function fmtHour(h: number, tz: string): string {
-    // Build an arbitrary ISO instant today at hour h in tz, then format. We
-    // can use any day — we only need the hour label.
-    const d = new Date();
-    const iso = `${d.toISOString().slice(0, 10)}T00:00:00Z`;
-    // Easier path: just use 12h formatting on a fixed reference.
-    const ref = new Date(iso);
-    ref.setUTCHours(h);
-    return ref.toLocaleTimeString("en-US", { hour: "numeric", timeZone: tz }).replace(":00", "");
+  // Render an hour given in HOST-LOCAL 24h form as a 12h label in the target
+  // timezone. Critical: the previous version used setUTCHours(h) which
+  // treated `h` as a UTC hour and produced completely wrong labels (noon
+  // host-local rendered as "5 AM" for PDT hosts). We now resolve today's
+  // host-local-to-UTC offset and build a real UTC instant.
+  function hostHourIn(targetTz: string, h: number): string {
+    const ref = new Date();
+    const hostNowH = Number(
+      new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        hour12: false,
+        timeZone: hostTimezone,
+      }).format(ref),
+    );
+    const utcNowH = ref.getUTCHours();
+    let hostDelta = hostNowH - utcNowH;
+    if (hostDelta > 12) hostDelta -= 24;
+    if (hostDelta < -12) hostDelta += 24;
+    const utcHour = ((h - hostDelta) % 24 + 24) % 24;
+    const instant = new Date(ref);
+    instant.setUTCHours(utcHour, 0, 0, 0);
+    return instant
+      .toLocaleTimeString("en-US", { hour: "numeric", timeZone: targetTz })
+      .replace(":00", "");
   }
+
   const windowLabel = window
     ? (() => {
-        const hostLabel = `${fmtHour(window.startHour, hostTimezone)}–${fmtHour(window.endHour, hostTimezone)} ${hostShort}`;
+        const hostLabel = `${hostHourIn(hostTimezone, window.startHour)}–${hostHourIn(hostTimezone, window.endHour)} ${hostShort}`;
         if (hasDistinctGuestTz) {
-          const guestLabel = `${fmtHour(window.startHour, guestTimezone!)}–${fmtHour(window.endHour, guestTimezone!)} ${guestShort}`;
+          const guestLabel = `${hostHourIn(guestTimezone!, window.startHour)}–${hostHourIn(guestTimezone!, window.endHour)} ${guestShort}`;
           return `${guestLabel} (${hostLabel})`;
         }
         return hostLabel;
       })()
     : null;
 
-  // Prose the date anchor if provided. "today", "this afternoon" etc. stay
-  // implicit — the LLM layer sends us the ISO date and we resolve from there.
   const dateProse = anchorDate
     ? (() => {
         const today = new Date();
@@ -487,54 +516,62 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
       })()
     : null;
 
-  // Build the "pick these" clause.
-  const toPickParts: string[] = [];
-  if (picks.date) toPickParts.push("the day");
-  // Start time: always pickable in the open-window variant (that's the point).
-  toPickParts.push(picks.date ? "time" : "the start time");
-  if (picks.duration === true) toPickParts.push("how long you need");
+  // Anchor line — phrased as a WINDOW, not as an event duration. We want
+  // "open anytime today between 12–5 PM PDT" to read as "John's window of
+  // availability," not as "a 5-hour meeting."
+  const anchorLine = (() => {
+    if (windowLabel && dateProse) {
+      return `📅 Open anytime ${dateProse} between ${windowLabel}.`;
+    }
+    if (windowLabel) {
+      return `📅 Open anytime between ${windowLabel}.`;
+    }
+    if (dateProse) {
+      return `📅 ${hostFirstName} is open ${dateProse}.`;
+    }
+    return `📅 Any time that works.`;
+  })();
+
+  // Tone grace-note on the anchor line. Sanitizer already stripped URLs,
+  // emails, injection markers.
+  const toneSuffix = guidance?.tone ? ` ${guidance.tone}` : "";
+
+  // Intro — thread the topic through when we have one so context like
+  // "hike" flows to the guest. Without topic we fall back to a generic
+  // "find time" since format/duration are often deferred in this branch.
+  const greetee = inviteeName ? inviteeName.split(/\s+/)[0] : "there";
+  const hello = `👋 Hi ${greetee}!`;
+  const emoji = formatEmoji ? ` ${formatEmoji}` : "";
+  const intro = topic
+    ? `${hello}${emoji} I'm helping ${hostFirstName} plan ${articled(topic)} with you.`
+    : `${hello}${emoji} I'm helping ${hostFirstName} find time with you.`;
+
+  // Build "Pick a time and location" style ask.
+  const items: string[] = [];
+  if (picks.date) items.push("day");
+  items.push("time");
+  if (picks.duration === true) items.push("duration");
   else if (Array.isArray(picks.duration) && picks.duration.length > 0) {
-    const durs = picks.duration.join(" or ");
-    toPickParts.push(`how long (${durs} min)`);
+    items.push(`duration (${picks.duration.join(" or ")} min)`);
   }
-  if (picks.location) toPickParts.push("where");
+  if (picks.location) items.push("location");
 
   const pickClause =
-    toPickParts.length === 1
-      ? toPickParts[0]
-      : toPickParts.length === 2
-      ? `${toPickParts[0]} and ${toPickParts[1]}`
-      : `${toPickParts.slice(0, -1).join(", ")}, and ${toPickParts[toPickParts.length - 1]}`;
+    items.length === 1
+      ? `a ${items[0]}`
+      : items.length === 2
+      ? `a ${items[0]} and ${items[1]}`
+      : `a ${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 
-  // Intro line — mirrors the standard greeting's voice.
-  const greetee = inviteeName ? inviteeName.split(/\s+/)[0] : "there";
-  const topicClause = topic ? ` about ${topic}` : "";
-  const intro = `👋 Hi ${greetee}! ${hostFirstName} is making time${topicClause}.`;
-
-  // Anchor line — when / window.
-  const anchorBits = [dateProse, windowLabel].filter(Boolean).join(", ");
-  const anchorLine = anchorBits
-    ? `📅 ${anchorBits}.`
-    : `📅 Any time that works for you.`;
-
-  // Tone — ONLY surfaced with a leading "—" beat so it reads as a small
-  // grace note, not an instruction. Sanitizer already stripped injection risk.
-  const toneLine = guidance?.tone ? ` ${guidance.tone}` : "";
-
-  // Ask line.
-  const askLine = `You pick ${pickClause}.`;
-
-  // Location suggestions as a chip-ish prose list.
   const locSugs = guidance?.suggestions?.locations || [];
   const locHint =
     picks.location && locSugs.length > 0
-      ? ` A few places ${hostFirstName} suggested: ${locSugs.map((l) => `**${l}**`).join(", ")}.${locSugs.length ? " Pick anything else if you'd prefer." : ""}`
+      ? ` A few places ${hostFirstName} suggested: ${locSugs.map((l) => `**${l}**`).join(", ")}.`
       : "";
 
-  // Closing (matches standard greeting's "share your email" hook when missing).
-  const closing = `Share your email and I'll get it on the calendar. 🤝`;
+  const askLine = `Pick ${pickClause}, and I'll get it booked. 🤝${locHint}`;
 
-  return [intro + toneLine, anchorLine, askLine + locHint, closing].join("\n\n");
+  return [intro, anchorLine + toneSuffix, askLine].join("\n\n");
 }
 
 // ─── Format label helpers ────────────────────────────────────────────────────
