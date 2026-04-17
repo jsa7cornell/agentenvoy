@@ -77,6 +77,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // existing host-only availability widget carries the interaction load.
   const [bilateralByDay, setBilateralByDay] = useState<Record<string, TimeChipData[]> | null>(null);
 
+  // TZ recovery banner state (Slice 7). When someone raced ahead of the human
+  // guest — host, MCP agent, or a proxy — the session's guestTimezone ends up
+  // set to a different TZ than the human guest's browser. Banner asks whether
+  // to switch the thread to the guest's TZ. Silent otherwise.
+  const [sessionTimezone, setSessionTimezone] = useState<string | null>(null);
+  const [tzBannerDismissed, setTzBannerDismissed] = useState(false);
+  const [isSwitchingTz, setIsSwitchingTz] = useState(false);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -125,6 +133,21 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         }
       })
       .catch(() => {});
+  }, [sessionId]);
+
+  // Hydrate TZ-banner dismissal from localStorage once we know the sessionId.
+  // Keyed per session so dismissing on one deal room doesn't silence others.
+  useEffect(() => {
+    if (!sessionId || typeof window === "undefined") return;
+    try {
+      const key = `tz-banner-dismissed:${sessionId}`;
+      if (window.localStorage.getItem(key) === "1") {
+        setTzBannerDismissed(true);
+      }
+    } catch {
+      // localStorage blocked (private mode on some browsers) — just skip,
+      // the banner will be shown and that's fine.
+    }
   }, [sessionId]);
 
   // Fetch Google Calendar event status for confirmed meetings (host only).
@@ -334,6 +357,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setIsHost(data.isHost || false);
         setIsGuest(data.isGuest || false);
         setGuestUser(data.guestUser || null);
+        // TZ recovery banner: capture the session's stored guestTimezone so
+        // we can compare against the browser's detected TZ. Null when no
+        // visitor has posted a TZ yet.
+        if (typeof data.sessionTimezone === "string" || data.sessionTimezone === null) {
+          setSessionTimezone(data.sessionTimezone);
+        }
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
         setInviteeName(data.link?.inviteeName || "");
@@ -1360,6 +1389,99 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {/* Event card — sticky inside chat column */}
           {eventCard}
+
+          {/* TZ recovery banner — appears when someone raced ahead of this
+              human guest and the session's primary TZ differs from their
+              browser TZ. Silent when they match or the banner was dismissed.
+              Hidden once the meeting is confirmed. */}
+          {(() => {
+            if (confirmed) return null;
+            if (tzBannerDismissed) return null;
+            if (!sessionId || !sessionTimezone) return null;
+            if (typeof window === "undefined") return null;
+            let browserTz = "";
+            try {
+              browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+            } catch {
+              return null;
+            }
+            if (!browserTz || browserTz === sessionTimezone) return null;
+
+            const prettyTz = (tz: string) =>
+              tz.split("/").pop()?.replace(/_/g, " ") ?? tz;
+
+            const dismiss = () => {
+              setTzBannerDismissed(true);
+              try {
+                window.localStorage.setItem(`tz-banner-dismissed:${sessionId}`, "1");
+              } catch {
+                /* ignore — state already dismissed */
+              }
+            };
+
+            const switchTz = async () => {
+              setIsSwitchingTz(true);
+              try {
+                const res = await fetch("/api/negotiate/session/timezone", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ sessionId, timezone: browserTz }),
+                });
+                if (res.ok) {
+                  const body = await res.json();
+                  if (typeof body?.sessionTimezone === "string") {
+                    setSessionTimezone(body.sessionTimezone);
+                    setSlotTimezone(body.sessionTimezone);
+                  }
+                  // Re-fetch slots so bilateral chips render with the new TZ
+                  // (ISO datetimes are TZ-agnostic; labels flip on re-render).
+                  fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
+                    .then((r) => (r.ok ? r.json() : null))
+                    .then((data) => {
+                      if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);
+                      if (data?.bilateralByDay && typeof data.bilateralByDay === "object") {
+                        setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
+                      }
+                    })
+                    .catch(() => {});
+                  dismiss();
+                }
+              } catch {
+                /* soft fail — leave banner visible so user can retry */
+              } finally {
+                setIsSwitchingTz(false);
+              }
+            };
+
+            return (
+              <div
+                className="border-b border-amber-800/40 bg-amber-900/10 px-4 py-2.5 flex items-center gap-3 text-sm flex-shrink-0"
+                data-testid="tz-recovery-banner"
+              >
+                <span role="img" aria-label="clock">🕐</span>
+                <span className="flex-1 text-amber-100/90">
+                  Looks like you&apos;re in <strong>{prettyTz(browserTz)}</strong>.
+                  This thread is currently in <strong>{prettyTz(sessionTimezone)}</strong>.
+                </span>
+                <button
+                  type="button"
+                  onClick={switchTz}
+                  disabled={isSwitchingTz}
+                  className="px-3 py-1 rounded-md text-xs font-medium bg-amber-500/80 hover:bg-amber-500 text-amber-950 transition disabled:opacity-50"
+                >
+                  {isSwitchingTz ? "Switching…" : `Switch to ${prettyTz(browserTz)}`}
+                </button>
+                <button
+                  type="button"
+                  onClick={dismiss}
+                  className="px-3 py-1 rounded-md text-xs font-medium text-amber-200 hover:text-amber-100 hover:bg-amber-900/20 transition"
+                  aria-label="Keep current timezone"
+                >
+                  Keep {prettyTz(sessionTimezone)}
+                </button>
+              </div>
+            );
+          })()}
           {/* Mobile availability toggle — hidden on desktop where sidebar shows */}
           {slotsByDay && Object.keys(slotsByDay).length > 0 && (
             <details className="md:hidden border-b border-secondary flex-shrink-0">
