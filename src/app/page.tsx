@@ -79,14 +79,7 @@ export default function Home() {
       </nav>
 
       {/* ── HERO ──────────────────────────────────────────── */}
-      <section className="relative overflow-hidden px-6 py-16 md:py-20">
-        <div
-          className="absolute inset-0 -z-10 pointer-events-none"
-          style={{
-            background:
-              "radial-gradient(ellipse 900px 500px at 30% 20%, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 60%), radial-gradient(ellipse 600px 400px at 90% 60%, color-mix(in srgb, var(--accent-2) 12%, transparent) 0%, transparent 60%)",
-          }}
-        />
+      <section className="relative px-6 py-16 md:py-20">
         <div className="max-w-[1160px] mx-auto grid lg:grid-cols-[1.05fr_1fr] gap-14 items-center">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent-surface text-accent text-xs font-semibold border border-accent/25 mb-6">
