@@ -288,6 +288,56 @@ export async function dispatch<K extends EffectKind>(
   return result;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Idempotency gate
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Terminal statuses that count as "we already tried — don't try again" for
+ * the idempotency gate. `skipped` (the `off` kill-switch) is deliberately
+ * excluded so that turning the kill-switch back on re-enables delivery.
+ */
+const GATE_TERMINAL_STATUSES = ["sent", "suppressed", "dryrun", "failed"] as const;
+
+/**
+ * Has a dispatch already been recorded for the given (kind, userId, purpose)
+ * triple? Reads from SideEffectLog — the authoritative record of every
+ * dispatch attempt.
+ *
+ * Replaces per-email stamp columns on the User model (e.g. the deprecated
+ * `welcomeEmailSentAt`). Pattern: call this at the top of a
+ * `dispatchXxxOnce(userId)` helper and bail early when it returns true.
+ *
+ * Index: partial expression index
+ * `SideEffectLog_kind_user_purpose_idx` on
+ * `(kind, (contextJson->>'userId'), (contextJson->>'purpose'))`
+ * WHERE status IN (sent, suppressed, dryrun, failed) — keeps this lookup
+ * O(log n) even as the log grows.
+ *
+ * Retention note: the gate assumes non-skipped rows matching a user/purpose
+ * are never pruned. If a retention policy is added later, gate-relevant
+ * rows must be exempt — otherwise the gate goes stale and re-fires.
+ */
+export async function hasDispatchedFor(params: {
+  kind: EffectKind;
+  userId: string;
+  purpose: string;
+}): Promise<boolean> {
+  const { kind, userId, purpose } = params;
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "SideEffectLog"
+    WHERE kind = ${kind}
+      AND status IN ('sent', 'suppressed', 'dryrun', 'failed')
+      AND "contextJson"->>'userId' = ${userId}
+      AND "contextJson"->>'purpose' = ${purpose}
+    LIMIT 1
+  `;
+  return rows.length > 0;
+}
+
+/** Exported for tests only — matches the statuses used in the raw SQL above. */
+export const __GATE_TERMINAL_STATUSES_FOR_TESTS = GATE_TERMINAL_STATUSES;
+
 // Re-export types for callers.
 export type {
   SideEffect,

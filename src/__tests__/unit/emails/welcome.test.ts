@@ -2,19 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Module mocks must be hoisted above the import under test.
 const findUniqueMock = vi.fn();
-const updateMock = vi.fn();
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: {
       findUnique: (...args: unknown[]) => findUniqueMock(...args),
-      update: (...args: unknown[]) => updateMock(...args),
     },
   },
 }));
 
 const dispatchMock = vi.fn();
+const hasDispatchedForMock = vi.fn();
 vi.mock("@/lib/side-effects/dispatcher", () => ({
   dispatch: (...args: unknown[]) => dispatchMock(...args),
+  hasDispatchedFor: (...args: unknown[]) => hasDispatchedForMock(...args),
 }));
 
 import { buildWelcomeEmail, dispatchWelcomeEmailOnce } from "@/lib/emails/welcome";
@@ -71,57 +71,52 @@ describe("buildWelcomeEmail", () => {
 describe("dispatchWelcomeEmailOnce", () => {
   beforeEach(() => {
     findUniqueMock.mockReset();
-    updateMock.mockReset();
     dispatchMock.mockReset();
+    hasDispatchedForMock.mockReset();
+    // Default: no prior dispatch. Tests that exercise the gate override this.
+    hasDispatchedForMock.mockResolvedValue(false);
     dispatchMock.mockResolvedValue({ status: "suppressed", mode: "log", logId: "log_123", kind: "email.send" });
   });
 
-  it("dispatches once and stamps welcomeEmailSentAt when the gate is null", async () => {
+  it("dispatches once when the gate reports no prior send", async () => {
     findUniqueMock.mockResolvedValue({
       email: "john@example.com",
       name: "John Abramson",
       meetSlug: "johna",
-      welcomeEmailSentAt: null,
     });
     const result = await dispatchWelcomeEmailOnce("user_1");
     expect(result).toEqual({ dispatched: true });
+    expect(hasDispatchedForMock).toHaveBeenCalledWith({
+      kind: "email.send",
+      userId: "user_1",
+      purpose: "welcome",
+    });
     expect(dispatchMock).toHaveBeenCalledTimes(1);
     const effect = dispatchMock.mock.calls[0][0];
     expect(effect.kind).toBe("email.send");
     expect(effect.to).toBe("john@example.com");
     expect(effect.context).toMatchObject({ userId: "user_1", purpose: "welcome" });
-    expect(updateMock).toHaveBeenCalledTimes(1);
-    expect(updateMock.mock.calls[0][0].data.welcomeEmailSentAt).toBeInstanceOf(Date);
   });
 
-  it("skips dispatch when welcomeEmailSentAt is already set", async () => {
+  it("skips dispatch when the gate reports a prior send", async () => {
+    hasDispatchedForMock.mockResolvedValue(true);
+    const result = await dispatchWelcomeEmailOnce("user_1");
+    expect(result).toEqual({ dispatched: false, reason: "already_sent" });
+    expect(dispatchMock).not.toHaveBeenCalled();
+    // Short-circuits before even loading the user — the gate is the only
+    // read needed when it's already been sent.
+    expect(findUniqueMock).not.toHaveBeenCalled();
+  });
+
+  it("calling twice in a row only dispatches once (gate becomes true after first call)", async () => {
+    // Gate is false first time, true second time — simulates the SideEffectLog
+    // row being written between calls.
+    hasDispatchedForMock.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     findUniqueMock.mockResolvedValue({
       email: "john@example.com",
       name: "John",
       meetSlug: "johna",
-      welcomeEmailSentAt: new Date("2026-01-01T00:00:00Z"),
     });
-    const result = await dispatchWelcomeEmailOnce("user_1");
-    expect(result).toEqual({ dispatched: false, reason: "already_sent" });
-    expect(dispatchMock).not.toHaveBeenCalled();
-    expect(updateMock).not.toHaveBeenCalled();
-  });
-
-  it("calling twice in a row (simulating two createUser events) only dispatches once", async () => {
-    // First call — gate is null, second call — gate is populated.
-    findUniqueMock
-      .mockResolvedValueOnce({
-        email: "john@example.com",
-        name: "John",
-        meetSlug: "johna",
-        welcomeEmailSentAt: null,
-      })
-      .mockResolvedValueOnce({
-        email: "john@example.com",
-        name: "John",
-        meetSlug: "johna",
-        welcomeEmailSentAt: new Date(),
-      });
     await dispatchWelcomeEmailOnce("user_1");
     await dispatchWelcomeEmailOnce("user_1");
     expect(dispatchMock).toHaveBeenCalledTimes(1);
@@ -132,7 +127,6 @@ describe("dispatchWelcomeEmailOnce", () => {
       email: null,
       name: "Ghost",
       meetSlug: "ghost",
-      welcomeEmailSentAt: null,
     });
     const result = await dispatchWelcomeEmailOnce("user_1");
     expect(result).toEqual({ dispatched: false, reason: "missing_email" });
@@ -144,7 +138,6 @@ describe("dispatchWelcomeEmailOnce", () => {
       email: "john@example.com",
       name: "John",
       meetSlug: null,
-      welcomeEmailSentAt: null,
     });
     const result = await dispatchWelcomeEmailOnce("user_1");
     expect(result).toEqual({ dispatched: false, reason: "missing_slug" });

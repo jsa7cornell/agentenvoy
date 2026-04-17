@@ -6,12 +6,15 @@
  * structurally: inline CSS, mobile-friendly, purple accent.
  *
  * Fires from `events.createUser` in `src/lib/auth.ts` through
- * `dispatch({ kind: "email.send", ... })`. Gated on
- * `User.welcomeEmailSentAt` so re-seeding / retries don't spam.
+ * `dispatch({ kind: "email.send", ... })`. Idempotency gated by
+ * `hasDispatchedFor({ kind: "email.send", userId, purpose: "welcome" })`
+ * against SideEffectLog — replaces the deprecated `welcomeEmailSentAt`
+ * column on User, which turned out to be the wrong place to track this
+ * (see LOG 2026-04-17 schema drift incident).
  */
 
 import { prisma } from "@/lib/prisma";
-import { dispatch } from "@/lib/side-effects/dispatcher";
+import { dispatch, hasDispatchedFor } from "@/lib/side-effects/dispatcher";
 
 const BASE_URL = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
 
@@ -81,22 +84,32 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Gate + dispatch + stamp, all in one. Idempotent: if
- * `welcomeEmailSentAt` is already set we return without dispatching.
- * The stamp is written on ANY dispatch outcome (sent / suppressed /
- * dryrun / failed) — SideEffectLog keeps the audit trail, and we'd
- * rather not spam on intermittent SES failures. Safe to call from
- * anywhere; the createUser event in auth.ts is the production caller.
+ * Gate + dispatch, idempotent. If a prior dispatch row for
+ * `(email.send, userId, purpose: "welcome")` exists in SideEffectLog with
+ * any terminal status EXCEPT `skipped` (sent/suppressed/dryrun/failed),
+ * this is a no-op. `skipped` rows come from the `off` kill-switch and
+ * should be retried once it's turned back on.
+ *
+ * The stamp lives in SideEffectLog itself — every `dispatch()` call
+ * writes exactly one row, so the gate just queries that log. No per-email
+ * columns on the User model. Safe to call from anywhere; the createUser
+ * event in auth.ts is the production caller.
  */
 export async function dispatchWelcomeEmailOnce(userId: string): Promise<
   { dispatched: true } | { dispatched: false; reason: "already_sent" | "missing_email" | "missing_slug" }
 > {
+  const alreadySent = await hasDispatchedFor({
+    kind: "email.send",
+    userId,
+    purpose: "welcome",
+  });
+  if (alreadySent) return { dispatched: false, reason: "already_sent" };
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { email: true, name: true, meetSlug: true, welcomeEmailSentAt: true },
+    select: { email: true, name: true, meetSlug: true },
   });
   if (!user) return { dispatched: false, reason: "missing_email" };
-  if (user.welcomeEmailSentAt) return { dispatched: false, reason: "already_sent" };
   if (!user.email) return { dispatched: false, reason: "missing_email" };
   if (!user.meetSlug) return { dispatched: false, reason: "missing_slug" };
 
@@ -108,10 +121,6 @@ export async function dispatchWelcomeEmailOnce(userId: string): Promise<
     subject,
     html,
     context: { userId, purpose: "welcome" },
-  });
-  await prisma.user.update({
-    where: { id: userId },
-    data: { welcomeEmailSentAt: new Date() },
   });
   return { dispatched: true };
 }

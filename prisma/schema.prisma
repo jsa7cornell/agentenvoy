@@ -58,11 +58,6 @@ model User {
   upcomingSchedulePreferences String?   @db.Text @map("situationalKnowledge") // Near-term non-time context: mood, goals, temp rules
   lastCalibratedAt DateTime?              // null = never calibrated, triggers onboarding flow
   onboardingPhase  String?                // null = not started, tracks progress through onboarding chat
-  /// Stamped on first dispatch of the welcome email (any status — sent, suppressed,
-  /// dryrun, or failed). Non-null = don't fire it again. Backfilled to `createdAt`
-  /// for users that existed before the welcome flow shipped so they don't receive
-  /// a retroactive welcome on their next sign-in.
-  welcomeEmailSentAt DateTime?
   createdAt        DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
