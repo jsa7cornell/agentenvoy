@@ -17,13 +17,26 @@ import type {
   EffectKind,
   EffectMode,
   SideEffectResult,
-  EmailSendEffect,
 } from "./types";
+// Individual effect type imports (EmailSendEffect, CalendarCreateEventEffect,
+// etc.) live only in the `export type { ... } from "./types"` re-export block
+// below — they aren't referenced locally, so lint would reject a top-level
+// import. Phase 2/3 handlers will land their own imports inside their handler
+// files, not here.
 import {
   handleEmail,
   summarizeEmailTarget,
   type EmailHandlerOutcome,
 } from "./handlers/email";
+import {
+  handleCalendarCreateEvent,
+  handleCalendarCreateHold,
+  handleCalendarDeleteEvent,
+  summarizeCalendarCreateEventTarget,
+  summarizeCalendarCreateHoldTarget,
+  summarizeCalendarDeleteEventTarget,
+  type CalendarHandlerOutcome,
+} from "./handlers/calendar";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Env resolution
@@ -38,7 +51,11 @@ const VALID_MODES: EffectMode[] = ["live", "allowlist", "log", "dryrun", "off"];
  */
 const MODE_ENV_VAR: Partial<Record<EffectKind, string>> = {
   "email.send": "EFFECT_MODE_EMAIL",
-  // "calendar.create_event": "EFFECT_MODE_CALENDAR",  (Phase 2)
+  // All three calendar kinds share one env var for simplicity —
+  // there's no realistic scenario for e.g. live event-create + dryrun hold-create.
+  "calendar.create_event": "EFFECT_MODE_CALENDAR",
+  "calendar.create_hold": "EFFECT_MODE_CALENDAR",
+  "calendar.delete_event": "EFFECT_MODE_CALENDAR",
   // "mcp.callback":          "EFFECT_MODE_MCP_CALLBACK", (Phase 3)
 };
 
@@ -50,6 +67,13 @@ const MODE_ENV_VAR: Partial<Record<EffectKind, string>> = {
  */
 const DEFAULT_MODE: Partial<Record<EffectKind, EffectMode>> = {
   "email.send": "log",
+  // Calendar create_* default to `dryrun` (not `log`) because upstream
+  // confirm + hold flows expect a plausible eventId + meetLink to continue.
+  // `dryrun` returns synthetic values; `log` returns nulls which break the UI.
+  "calendar.create_event": "dryrun",
+  "calendar.create_hold": "dryrun",
+  // Delete has no useful return — `log` is fine as the safe default.
+  "calendar.delete_event": "log",
 };
 
 /** Universal safe fallback for kinds that haven't declared their own default. */
@@ -95,6 +119,38 @@ function scrubPayload(effect: SideEffect): Record<string, unknown> {
         htmlSnippet: html.slice(0, 280),
       };
     }
+    case "calendar.create_event": {
+      return {
+        kind: "calendar.create_event",
+        userId: effect.userId,
+        summary: effect.summary,
+        attendees: effect.attendeeEmails,
+        startTime: effect.startTime.toISOString(),
+        endTime: effect.endTime.toISOString(),
+        addMeetLink: !!effect.addMeetLink,
+        sessionId: effect.sessionId ?? null,
+        sendUpdatesOverride: effect.sendUpdatesOverride ?? null,
+        descriptionBytes: effect.description?.length ?? 0,
+      };
+    }
+    case "calendar.create_hold": {
+      return {
+        kind: "calendar.create_hold",
+        userId: effect.userId,
+        summary: effect.summary,
+        startTime: effect.startTime.toISOString(),
+        endTime: effect.endTime.toISOString(),
+        descriptionBytes: effect.description?.length ?? 0,
+      };
+    }
+    case "calendar.delete_event": {
+      return {
+        kind: "calendar.delete_event",
+        userId: effect.userId,
+        eventId: effect.eventId,
+        notifyAttendees: !!effect.notifyAttendees,
+      };
+    }
     default:
       // Unimplemented kind — record the kind only for audit, strip the rest
       // (we don't know what's safe to log for an unknown shape).
@@ -106,6 +162,12 @@ function summarizeTarget(effect: SideEffect): string {
   switch (effect.kind) {
     case "email.send":
       return summarizeEmailTarget(effect);
+    case "calendar.create_event":
+      return summarizeCalendarCreateEventTarget(effect);
+    case "calendar.create_hold":
+      return summarizeCalendarCreateHoldTarget(effect);
+    case "calendar.delete_event":
+      return summarizeCalendarDeleteEventTarget(effect);
     default:
       return `(unhandled kind: ${(effect as SideEffect).kind})`;
   }
@@ -115,10 +177,17 @@ function summarizeTarget(effect: SideEffect): string {
 // Handler routing
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Superset shape covering every possible handler output. */
 interface HandlerOutcomeBase {
   status: SideEffectResult["status"];
   effectiveMode: EffectMode;
+  /** email.send only */
   providerMessageId?: string;
+  /** calendar.create_event, calendar.create_hold */
+  eventId?: string | null;
+  htmlLink?: string | null;
+  /** calendar.create_event only */
+  meetLink?: string | null;
   error?: string;
 }
 
@@ -129,6 +198,18 @@ async function runHandler(
   switch (effect.kind) {
     case "email.send": {
       const outcome: EmailHandlerOutcome = await handleEmail(effect, mode);
+      return outcome;
+    }
+    case "calendar.create_event": {
+      const outcome: CalendarHandlerOutcome = await handleCalendarCreateEvent(effect, mode);
+      return outcome;
+    }
+    case "calendar.create_hold": {
+      const outcome: CalendarHandlerOutcome = await handleCalendarCreateHold(effect, mode);
+      return outcome;
+    }
+    case "calendar.delete_event": {
+      const outcome: CalendarHandlerOutcome = await handleCalendarDeleteEvent(effect, mode);
       return outcome;
     }
     default:
@@ -184,7 +265,9 @@ export async function dispatch<K extends EffectKind>(
         "context" in effect && effect.context
           ? (effect.context as object)
           : undefined,
-      providerRef: outcome.providerMessageId ?? null,
+      // Prefer email's providerMessageId; fall back to calendar's eventId —
+      // both are "what the external system gave us back."
+      providerRef: outcome.providerMessageId ?? outcome.eventId ?? null,
       error: outcome.error ?? null,
     },
     select: { id: true },
@@ -195,9 +278,10 @@ export async function dispatch<K extends EffectKind>(
     status: outcome.status,
     mode: outcome.effectiveMode,
     logId: log.id,
-    ...(outcome.providerMessageId
-      ? { providerMessageId: outcome.providerMessageId }
-      : {}),
+    ...(outcome.providerMessageId !== undefined && { providerMessageId: outcome.providerMessageId }),
+    ...(outcome.eventId !== undefined && { eventId: outcome.eventId }),
+    ...(outcome.htmlLink !== undefined && { htmlLink: outcome.htmlLink }),
+    ...(outcome.meetLink !== undefined && { meetLink: outcome.meetLink }),
     ...(outcome.error ? { error: outcome.error } : {}),
   } as SideEffectResult<K>;
 
@@ -205,7 +289,15 @@ export async function dispatch<K extends EffectKind>(
 }
 
 // Re-export types for callers.
-export type { SideEffect, SideEffectResult, EffectKind, EffectMode } from "./types";
-/** Convenience alias — callers can do `dispatch({ kind: "email.send", ... })` using the EmailSendEffect shape. */
+export type {
+  SideEffect,
+  SideEffectResult,
+  EffectKind,
+  EffectMode,
+  EmailSendEffect,
+  CalendarCreateEventEffect,
+  CalendarCreateHoldEffect,
+  CalendarDeleteEventEffect,
+} from "./types";
+/** Convenience alias — callers can do `dispatch({ kind: "email.send", ... })`. */
 export type DispatchInput = SideEffect;
-export type { EmailSendEffect };

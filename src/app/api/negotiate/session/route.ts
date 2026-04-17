@@ -213,6 +213,7 @@ export async function POST(req: NextRequest) {
             isHost,
             isGuest,
             guestUser: guestUserPayload,
+            sessionTimezone: existingSession.guestTimezone ?? null,
             isGroupEvent: true,
             participants: participantSummary,
             hostName: user.name,
@@ -234,6 +235,7 @@ export async function POST(req: NextRequest) {
             isHost,
             isGuest,
             guestUser: guestUserPayload,
+            sessionTimezone: existingSession.guestTimezone ?? null,
             isGroupEvent: true,
             participants: participantSummary,
             hostName: user.name,
@@ -288,6 +290,7 @@ export async function POST(req: NextRequest) {
             isHost,
             isGuest,
             guestUser: guestUserPayload,
+            sessionTimezone: existingSession.guestTimezone ?? null,
             hostName: user.name,
           });
         }
@@ -307,6 +310,7 @@ export async function POST(req: NextRequest) {
             isHost,
             isGuest,
             guestUser: guestUserPayload,
+            sessionTimezone: existingSession.guestTimezone ?? null,
             hostName: user.name,
           });
         }
@@ -740,6 +744,10 @@ export async function POST(req: NextRequest) {
     isHost,
     isGuest,
     guestUser: guestUserPayload,
+    // Session's stored guest timezone (first-write-wins). Client compares to
+    // the browser's detected TZ to decide whether to show the TZ recovery
+    // banner. Null when no visitor has posted a TZ yet.
+    sessionTimezone: session.guestTimezone ?? null,
     isGroupEvent: isGroupEvent || undefined,
     participants: participantSummary,
     hostName: user.name,
