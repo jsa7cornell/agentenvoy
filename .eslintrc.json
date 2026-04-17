@@ -1,3 +1,59 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "@aws-sdk/client-sesv2",
+            "message": "Direct SES imports are forbidden outside `src/lib/side-effects/handlers/`. Use `dispatch({ kind: 'email.send', ... })` from @/lib/side-effects/dispatcher. See RISK-MANAGEMENT.md."
+          },
+          {
+            "name": "@aws-sdk/client-ses",
+            "message": "Direct SES imports are forbidden outside `src/lib/side-effects/handlers/`. Use `dispatch({ kind: 'email.send', ... })` from @/lib/side-effects/dispatcher. See RISK-MANAGEMENT.md."
+          },
+          {
+            "name": "resend",
+            "message": "Resend was replaced by SES. Use `dispatch({ kind: 'email.send', ... })` from @/lib/side-effects/dispatcher."
+          }
+        ]
+      }
+    ],
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "CallExpression[callee.property.name='insert'][callee.object.property.name='events']",
+        "message": "Direct calendar event writes (`calendar.events.insert`) are forbidden outside `src/lib/side-effects/handlers/`. Use `dispatch({ kind: 'calendar.create_event' | 'calendar.create_hold', ... })` from @/lib/side-effects/dispatcher. See RISK-MANAGEMENT.md."
+      },
+      {
+        "selector": "CallExpression[callee.property.name='delete'][callee.object.property.name='events']",
+        "message": "Direct calendar event writes (`calendar.events.delete`) are forbidden outside `src/lib/side-effects/handlers/`. Use `dispatch({ kind: 'calendar.delete_event', ... })` from @/lib/side-effects/dispatcher."
+      },
+      {
+        "selector": "CallExpression[callee.property.name='update'][callee.object.property.name='events']",
+        "message": "Direct calendar event writes (`calendar.events.update`) are forbidden outside `src/lib/side-effects/handlers/`. Use a dispatch({ kind: 'calendar.*', ... }) effect (add a new kind if none fits). See RISK-MANAGEMENT.md."
+      },
+      {
+        "selector": "CallExpression[callee.property.name='patch'][callee.object.property.name='events']",
+        "message": "Direct calendar event writes (`calendar.events.patch`) are forbidden outside `src/lib/side-effects/handlers/`. Use a dispatch({ kind: 'calendar.*', ... }) effect (add a new kind if none fits). See RISK-MANAGEMENT.md."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/lib/side-effects/handlers/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": "off",
+        "no-restricted-syntax": "off"
+      }
+    },
+    {
+      "files": ["src/__tests__/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": "off",
+        "no-restricted-syntax": "off"
+      }
+    }
+  ]
 }

@@ -152,6 +152,14 @@ class GoogleCalendarProvider implements CalendarProvider {
       }),
     };
 
+    // This class-based abstraction (GoogleCalendarProvider.createEvent) is
+    // currently dead code — getProviders() is only invoked for READS. When the
+    // multi-provider abstraction is revived (Outlook, iCal, CalDAV), this
+    // method should route through dispatch({ kind: 'calendar.create_event' })
+    // like the rest of the write paths. Keeping the implementation intact for
+    // now so the shape survives, but it's explicitly exempt from the
+    // no-direct-google-write rule pending that rewrite.
+    // eslint-disable-next-line no-restricted-syntax -- dead-code, see comment above
     const { data } = await this.client.events.insert({
       calendarId: "primary",
       requestBody: event,
