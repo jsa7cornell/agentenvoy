@@ -24,6 +24,15 @@ AWS_SES_ACCESS_KEY_ID=op://Private/AWS Access Key/username
 AWS_SES_SECRET_ACCESS_KEY=op://Private/AWS Access Key/credential
 AWS_SES_REGION=us-west-2
 
+# ─── Side-effect dispatcher ────────────────────────────────
+# Per-kind mode: live | allowlist | log | dryrun | off.
+# Local dev defaults to `log` — no real email, everything recorded to SideEffectLog.
+# Vercel sets preview=log, production=live. See RISK-MANAGEMENT.md.
+EFFECT_MODE_EMAIL=log
+# Comma-separated domains allowed when EFFECT_MODE_EMAIL=allowlist.
+# Leave empty except during targeted allowlist testing.
+EFFECT_ALLOW_EMAIL_DOMAINS=agentenvoy.dev
+
 # ─── Dev Auth (non-secret, dev-only) ──────────────────────
 DEV_AUTH_SECRET=dev-test-secret-local-only
 NEXT_PUBLIC_DEV_AUTH_SECRET=dev-test-secret-local-only

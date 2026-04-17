@@ -330,3 +330,34 @@ model Hold {
   @@index([hostId])
   @@index([status, expiresAt]) // for the expiry sweeper
 }
+
+/// Audit trail for every outbound side effect (email, calendar, MCP callback, ...)
+/// dispatched through `src/lib/side-effects/dispatcher.ts`.
+///
+/// Every dispatch writes exactly one row — including when mode is `log`/`dryrun`
+/// and no external service was contacted. This is the "what actually happened"
+/// record; queryable via `/dev/side-effects`. See RISK-MANAGEMENT.md.
+model SideEffectLog {
+  id             String   @id @default(cuid())
+  /// SideEffect.kind (e.g. "email.send", "calendar.create_event")
+  kind           String
+  /// Active EffectMode at dispatch time
+  mode           String
+  /// Terminal EffectStatus: sent | suppressed | dryrun | failed | skipped
+  status         String
+  /// Short human-readable target (e.g. "mike@example.com" or "host calendar")
+  /// — scrubbed of anything that wouldn't be OK in a log line.
+  targetSummary  String
+  /// Full effect payload, minus secrets. Safe to dump on the dashboard.
+  payload        Json
+  /// Optional structured context from the caller (sessionId, userId, etc.).
+  contextJson    Json?
+  /// Provider-assigned message ID or fake dryrun ID. Optional.
+  providerRef    String?
+  /// Error message if status === "failed".
+  error          String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  @@index([kind, createdAt])
+  @@index([status, createdAt])
+}

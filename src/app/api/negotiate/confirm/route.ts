@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createCalendarEvent, deleteCalendarEvent, invalidateSchedule } from "@/lib/calendar";
 import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
-import { sendMail } from "@/lib/mailer";
+import { dispatch } from "@/lib/side-effects/dispatcher";
 
 // POST /api/negotiate/confirm
 // Confirm an agreed-upon time — creates calendar events, sends emails
@@ -400,12 +400,25 @@ export async function POST(req: NextRequest) {
     ? attendeeEmails
     : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
 
-  const mailResult = await sendMail({
+  const emailResult = await dispatch({
+    kind: "email.send",
     to: emailRecipients,
     subject: `Meeting Confirmed${session.link.topic ? `: ${session.link.topic}` : ""}`,
     html: emailBody,
+    context: {
+      sessionId: session.id,
+      hostId: session.hostId,
+      linkId: session.linkId,
+      purpose: "meeting_confirmation",
+    },
   });
-  const emailSent = mailResult.sent;
+  // "sent" = a real email went out via SES (live or allowlist mode).
+  // "suppressed" / "dryrun" = preview/dev; nothing actually sent.
+  // "failed" = SES refused; confirmation still proceeds.
+  const emailSent = emailResult.status === "sent";
+  if (emailResult.status === "failed") {
+    console.error("Failed to send confirmation email:", emailResult.error);
+  }
 
   return NextResponse.json({
     status: "confirmed",
