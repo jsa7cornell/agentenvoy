@@ -446,6 +446,38 @@ async function handleCreateLink(
   const allowWeekends = params.allowWeekends === true;
   const preferredTimeStart = typeof params.preferredTimeStart === "string" ? params.preferredTimeStart : undefined;
   const preferredTimeEnd = typeof params.preferredTimeEnd === "string" ? params.preferredTimeEnd : undefined;
+
+  // Temporal constraints — previously these only came through if nested in
+  // params.rules. Promote them to top-level params so the LLM's "next Monday"
+  // intent actually lands in the link rules (and gets respected by the
+  // scoring engine's dateRange filter).
+  const preferredDays = Array.isArray(params.preferredDays) ? params.preferredDays : undefined;
+  let dateRange: { start?: string; end?: string } | undefined =
+    params.dateRange && typeof params.dateRange === "object" && !Array.isArray(params.dateRange)
+      ? (params.dateRange as { start?: string; end?: string })
+      : undefined;
+
+  // Safety net: when the host signals urgency ("asap") with a specific day
+  // preference but the LLM didn't emit a concrete dateRange, constrain to the
+  // next 14 days in host timezone. This prevents "find time with X next Monday"
+  // from being interpreted as "all Mondays for the next 3 months."
+  if (!dateRange && urgency === "asap" && preferredDays && preferredDays.length > 0) {
+    const userRow2 = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
+    });
+    const hostTz = getUserTimezone(userRow2?.preferences as Record<string, unknown> | null);
+    const dateFmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: hostTz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const today = dateFmt.format(new Date());
+    const plus14 = dateFmt.format(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000));
+    dateRange = { start: today, end: plus14 };
+  }
+
   const linkRules = normalizeLinkRules({
     ...rules,
     ...(format ? { format } : {}),
@@ -455,6 +487,8 @@ async function handleCreateLink(
     ...(allowWeekends ? { allowWeekends: true } : {}),
     ...(preferredTimeStart ? { preferredTimeStart } : {}),
     ...(preferredTimeEnd ? { preferredTimeEnd } : {}),
+    ...(preferredDays ? { preferredDays } : {}),
+    ...(dateRange ? { dateRange } : {}),
   });
 
   const link = await prisma.negotiationLink.create({
