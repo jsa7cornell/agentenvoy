@@ -169,6 +169,12 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Filter out past slots — the calendar cache starts 7 days in the past
+    // (for incremental sync coverage) so without this filter the widget would
+    // show green chips for times that have already passed.
+    const now = new Date();
+    slots = slots.filter((s) => new Date(s.start) > now);
+
     // Duration filtering AFTER score filter. Now the consecutive-slot chain
     // only walks through offerable slots — a 3:30 PM start for a 3-hour meeting
     // is correctly rejected if 4:00–6:00 PM slots aren't also offered.
