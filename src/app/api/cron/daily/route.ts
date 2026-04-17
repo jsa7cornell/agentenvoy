@@ -28,6 +28,7 @@ import { checkSchemaDrift, formatDriftSummary } from "@/lib/schema-drift";
 import { logRouteError } from "@/lib/route-error";
 import { buildDevStatsEmail } from "@/lib/emails/dev-stats";
 import { gatherDevStats } from "@/lib/emails/dev-stats-gather";
+import { buildMeetingReminderEmail } from "@/lib/emails/meeting-reminder";
 
 // Cron routes must never be prerendered — see PLAYBOOK Rule 11.
 export const dynamic = "force-dynamic";
@@ -58,11 +59,15 @@ export async function GET(req: NextRequest) {
   // ───────── Phase 3: daily dev-stats digest ─────────
   const statsResult = await runDevStats(windowStart, ranAt);
 
+  // ───────── Phase 4: 24h meeting reminders ─────────
+  const remindersResult = await runMeetingReminders(ranAt);
+
   return NextResponse.json({
     ranAt: ranAt.toISOString(),
     holds: holdsResult,
     schemaHealth: schemaResult,
     devStats: statsResult,
+    reminders: remindersResult,
   });
 }
 
@@ -236,6 +241,147 @@ async function runDevStats(
   });
 
   return { status: result.status, to: recipient };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4 — 24h meeting reminders
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runMeetingReminders(now: Date): Promise<{
+  scanned: number;
+  sent: number;
+  skipped: number;
+  errors: string[];
+}> {
+  const windowStart = new Date(now.getTime() + 23 * 60 * 60 * 1000); // now + 23h
+  const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000);   // now + 25h
+
+  let scanned = 0;
+  let sent = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  try {
+    const sessions = await prisma.negotiationSession.findMany({
+      where: {
+        status: "agreed",
+        archived: false,
+        wantsReminder: true,
+        agreedTime: { gte: windowStart, lte: windowEnd },
+      },
+      select: {
+        id: true,
+        hostId: true,
+        guestEmail: true,
+        guestTimezone: true,
+        agreedTime: true,
+        agreedFormat: true,
+        format: true,
+        duration: true,
+        meetLink: true,
+        host: { select: { name: true, preferences: true } },
+        link: { select: { inviteeName: true, slug: true, code: true } },
+      },
+    });
+
+    scanned = sessions.length;
+
+    for (const session of sessions) {
+      try {
+        // Idempotency: check SideEffectLog for a prior reminder on this session.
+        const alreadySent = await prisma.$queryRaw<{ id: string }[]>`
+          SELECT id FROM "SideEffectLog"
+          WHERE kind = 'email.send'
+            AND status IN ('sent', 'suppressed', 'dryrun', 'failed')
+            AND "contextJson"->>'sessionId' = ${session.id}
+            AND "contextJson"->>'purpose' = 'meeting_reminder'
+          LIMIT 1
+        `;
+        if (alreadySent.length > 0) {
+          skipped += 1;
+          continue;
+        }
+
+        if (!session.guestEmail) {
+          skipped += 1;
+          continue;
+        }
+
+        const agreedTime = session.agreedTime!;
+
+        // Display timezone: prefer the guest's captured timezone (shown in
+        // guest's local time so the reminder is actionable), fall back to host's
+        // stored tz, then UTC.
+        const hostPrefs = session.host.preferences as Record<string, unknown> | null;
+        const hostTz = (hostPrefs?.explicit as Record<string, unknown> | undefined)?.timezone as string | undefined
+          ?? (hostPrefs?.timezone as string | undefined)
+          ?? "UTC";
+        const displayTz = session.guestTimezone || hostTz;
+
+        const displayDate = agreedTime.toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+          timeZone: displayTz,
+        });
+        const displayTime = agreedTime.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          timeZone: displayTz,
+        });
+        const tzAbbr = new Intl.DateTimeFormat("en-US", {
+          timeZoneName: "short",
+          timeZone: displayTz,
+        })
+          .formatToParts(agreedTime)
+          .find((p) => p.type === "timeZoneName")?.value ?? displayTz;
+
+        const durationMin = session.duration || 30;
+        const agreedFormat = session.agreedFormat || session.format || "video";
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://agentenvoy.ai";
+        const dealRoomUrl = session.link.code
+          ? `${baseUrl}/meet/${session.link.slug}/${session.link.code}`
+          : `${baseUrl}/meet/${session.link.slug}`;
+
+        const { subject, html } = buildMeetingReminderEmail({
+          guestName: session.link.inviteeName || null,
+          hostName: session.host.name || "Your host",
+          whenLabel: `${displayDate} at ${displayTime}`,
+          timezoneLabel: tzAbbr,
+          durationLabel: `${durationMin} min`,
+          format: agreedFormat,
+          location: null,
+          meetLink: session.meetLink || null,
+          dealRoomUrl,
+        });
+
+        const result = await dispatch({
+          kind: "email.send",
+          to: session.guestEmail,
+          subject,
+          html,
+          context: {
+            purpose: "meeting_reminder",
+            sessionId: session.id,
+            hostId: session.hostId,
+          },
+        });
+
+        if (result.status === "failed") {
+          errors.push(`reminder ${session.id}: ${result.error ?? "unknown"}`);
+        } else {
+          sent += 1;
+        }
+      } catch (e) {
+        errors.push(`reminder ${session.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  } catch (e) {
+    errors.push(`scan failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  return { scanned, sent, skipped, errors };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

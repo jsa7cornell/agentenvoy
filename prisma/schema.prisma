@@ -140,6 +140,10 @@ model NegotiationSession {
   /// not overwritten on subsequent visits. Null when the guest visited
   /// before we started capturing, or when detection failed.
   guestTimezone String?
+  /// Whether to send the guest a 24h-ahead reminder email. Default true (opt-in).
+  /// The daily cron scans sessions where this is true + status=agreed + agreedTime
+  /// falls in the now+23h..now+25h window. Idempotency via SideEffectLog.
+  wantsReminder Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

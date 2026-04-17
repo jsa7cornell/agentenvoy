@@ -6,6 +6,7 @@ import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { logRouteError } from "@/lib/route-error";
+import { buildHostNewBookingEmail } from "@/lib/emails/host-new-booking";
 
 // POST /api/negotiate/confirm
 // Confirm an agreed-upon time — creates calendar events, sends emails.
@@ -499,6 +500,44 @@ export async function POST(req: NextRequest) {
     if (emailResult.status === "failed") {
       console.error("[confirm] Failed to send confirmation email:", emailResult.error);
     }
+
+    // === Host new-booking notification ===
+    // Fire for generic links (host had no prior context about this invitee) and
+    // office-hours links (sourceRuleId is set — host shared an open slot to anyone).
+    // Skip contextual links — the host already knew about the specific invitee.
+    const isGenericLink = session.link.type === "generic";
+    const isOfficeHoursLink = !!session.link.sourceRuleId;
+    if (isGenericLink || isOfficeHoursLink) {
+      const hostFirst = session.host.name?.split(/\s+/)[0] ?? null;
+      const durationStr = `${durationMin} min`;
+      const formatFormatted = meetingFormat;
+      const { subject: hostSubject, html: hostHtml } = buildHostNewBookingEmail({
+        hostFirstName: hostFirst,
+        guestName: session.link.inviteeName || null,
+        guestEmail: guestEmail,
+        topic: session.link.topic || null,
+        whenLabel: `${displayDate} at ${displayTime}`,
+        timezoneLabel: tzAbbr,
+        durationLabel: durationStr,
+        format: formatFormatted,
+        dealRoomUrl,
+      });
+      dispatch({
+        kind: "email.send",
+        to: hostEmail,
+        subject: hostSubject,
+        html: hostHtml,
+        context: {
+          purpose: "host_new_booking",
+          sessionId: session.id,
+          hostId: session.hostId,
+          linkId: session.linkId,
+        },
+      }).catch((e) => {
+        console.error("[confirm] host_new_booking email dispatch failed:", e);
+      });
+    }
+
     const tEmailMs = Date.now() - tEmailStart;
 
     const totalMs = Date.now() - t0;
