@@ -16,9 +16,9 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "AgentEnvoy — Your AI Negotiates So You Don't Have To",
+  title: "AgentEnvoy — Every meeting deserves its own scheduler",
   description:
-    "AI agent that negotiates meetings, proposals, and schedules on your behalf. Connect your Google Calendar and let Envoy handle the back-and-forth.",
+    "Personal AI scheduling for every meeting. Lock the slots, set the format, add context — and let your AI agent negotiate the rest. Not a generic calendar link.",
 };
 
 export default function RootLayout({
@@ -39,8 +39,8 @@ export default function RootLayout({
           </div>
           <div className="flex-1 min-h-0 flex flex-col overflow-auto">
             {children}
+            <ConditionalFooter />
           </div>
-          <ConditionalFooter />
         </Providers>
       </body>
     </html>

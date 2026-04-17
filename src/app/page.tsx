@@ -84,20 +84,20 @@ export default function Home() {
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent-surface text-accent text-xs font-semibold border border-accent/25 mb-6">
               <span className="w-1.5 h-1.5 rounded-full bg-accent3 animate-pulse-ring" />
-              OPEN STANDARD FOR AI SCHEDULING
+              PERSONAL MEETING COORDINATION
             </div>
             <h1 className="text-4xl md:text-[3.5rem] lg:text-[4rem] font-extrabold leading-[1.05] tracking-[-0.03em] mb-5">
-              Scheduling, built for the{" "}
+              Every meeting deserves its{" "}
               <span
                 className="bg-clip-text text-transparent"
                 style={{ backgroundImage: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
               >
-                age of AI agents
+                own scheduler
               </span>
               .
             </h1>
             <p className="text-lg text-secondary leading-relaxed mb-8 max-w-lg">
-              AgentEnvoy is the neutral administrator that coordinates meetings between AI agents, humans, and everyone in between. Connect your Google Calendar. Point your agent at our API. Done.
+              Generic links with static slots don&apos;t fit real life. AgentEnvoy gives each meeting its own rules — locked times, the right format, shared context — and an AI that negotiates within them. Your agent handles it. You just show up.
             </p>
             <div className="flex flex-wrap gap-3.5 items-center">
               <button
@@ -169,10 +169,10 @@ export default function Home() {
         <div className="max-w-[1160px] mx-auto">
           <SectionLabel>How It Works</SectionLabel>
           <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight mb-4">
-            Three steps to never schedule again
+            A custom scheduler for every meeting
           </h2>
           <p className="text-base md:text-lg text-secondary max-w-xl mx-auto mb-14">
-            Connect your calendar. Share a link. Envoy takes it from there.
+            Connect your calendar. Set the rules per meeting. Envoy negotiates within them.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-12">
@@ -180,21 +180,21 @@ export default function Home() {
               {
                 num: "1",
                 title: "Connect your calendar",
-                desc: "Sign in with Google. Envoy learns your schedule, preferences, and how you like to meet — in a quick calibration chat.",
+                desc: "Sign in with Google. Envoy learns your schedule, your habits, and how you like to meet — in a quick chat.",
               },
               {
                 num: "2",
-                title: "Share your link",
+                title: "Customize each meeting",
                 desc: (
                   <>
-                    Your personal link works for anyone. Or create event-specific links with locked slots and custom rules.
+                    Tell Envoy who, when, what format, and the context. Each meeting gets its own link with your rules baked in. Or use your general link for quick catch-ups.
                   </>
                 ),
               },
               {
                 num: "3",
-                title: "Envoy handles the rest",
-                desc: "Envoy proposes times, negotiates preferences, and books the meeting. You get a calendar invite. Done.",
+                title: "Envoy negotiates",
+                desc: "Guests chat with Envoy — or their agent does. Times stay locked to your rules. Invites land in both calendars.",
               },
             ].map((step) => (
               <div key={step.num}>
@@ -216,12 +216,12 @@ export default function Home() {
       <section id="custom-links" className="py-24 px-6 bg-surface-inset">
         <div className="max-w-[1080px] mx-auto grid md:grid-cols-2 gap-16 items-center">
           <div>
-            <SectionLabel>The Killer Feature</SectionLabel>
+            <SectionLabel>Per-Meeting Control</SectionLabel>
             <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight mb-4 leading-[1.15]">
               Every meeting gets its own link
             </h2>
             <p className="text-base text-secondary leading-relaxed mb-7">
-              Don&apos;t just share your calendar — tell Envoy <em>how</em> to schedule each meeting. Lock specific time slots, set the format, add context. Every guest gets a link pre-configured with your rules.
+              Not one generic link for every situation. Each meeting is coordinated on its own terms — locked slots, required format, the context that matters. Envoy enforces the rules while it negotiates.
             </p>
             <ul className="space-y-2">
               {[
@@ -522,7 +522,7 @@ envoy = Client(<span className="text-emerald-300">&quot;https://agentenvoy.ai/mc
             Ready to stop scheduling?
           </h2>
           <p className="text-base md:text-lg text-secondary mb-9">
-            Connect your Google Calendar and let Envoy handle the back-and-forth.
+            Connect your Google Calendar. Customize each meeting in seconds. Let Envoy handle the rest.
           </p>
           <div className="inline-flex gap-3.5 items-center flex-wrap justify-center">
             <button
