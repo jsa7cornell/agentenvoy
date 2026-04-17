@@ -6,7 +6,8 @@ import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { logRouteError } from "@/lib/route-error";
-import { buildHostNewBookingEmail } from "@/lib/emails/host-new-booking";
+import { buildGuestConfirmationEmail } from "@/lib/emails/guest-confirmation";
+import { buildHostBookingConfirmedEmail } from "@/lib/emails/host-booking-confirmed";
 
 // POST /api/negotiate/confirm
 // Confirm an agreed-upon time — creates calendar events, sends emails.
@@ -378,12 +379,34 @@ export async function POST(req: NextRequest) {
         })
       : Promise.resolve(null);
 
-    const [, , holdResult, allMessages] = await Promise.all([
+    // Task F: host email context — upcoming + pending sessions.
+    // Fetched in-parallel so they're ready for fire-and-forget dispatch below.
+    const taskHostEmailData = (async () => {
+      const now = new Date();
+      const [upcoming, pending] = await Promise.all([
+        prisma.negotiationSession.findMany({
+          where: { hostId: session.hostId, status: "agreed", archived: false, agreedTime: { gte: now }, id: { not: sessionId } },
+          orderBy: { agreedTime: "asc" },
+          take: 5,
+          select: { agreedTime: true, duration: true, agreedFormat: true, format: true, link: { select: { inviteeName: true } } },
+        }),
+        prisma.negotiationSession.findMany({
+          where: { hostId: session.hostId, status: "active", archived: false },
+          orderBy: { updatedAt: "desc" },
+          take: 4,
+          select: { link: { select: { inviteeName: true, topic: true } }, updatedAt: true },
+        }),
+      ]);
+      return { upcoming, pending };
+    })();
+
+    const [, , holdResult, allMessages, , hostEmailData] = await Promise.all([
       taskFinalizeSession,
       taskInvalidate,
       taskHoldCleanup,
       taskMessages,
       taskParticipants,
+      taskHostEmailData,
     ]);
     const tParMs = Date.now() - tParStart;
 
@@ -466,77 +489,78 @@ export async function POST(req: NextRequest) {
       })()
     );
 
-    // === Send confirmation email (stays in critical path) ===
-    // Guests expect the invite. Keep this awaited.
+    // === Guest confirmation email (critical path — guests expect it instantly) ===
     const tEmailStart = Date.now();
-    const emailBody = buildConfirmationEmail({
-      hostName: session.host.name || "The organizer",
-      guestName: session.link.inviteeName || undefined,
-      topic: session.link.topic || undefined,
+    const guestTz = session.guestTimezone || null;
+
+    const guestRecipients = isGroupEvent
+      ? attendeeEmails
+      : guestEmail ? [guestEmail] : [];
+
+    let emailSent = false;
+    if (guestRecipients.length > 0) {
+      const { subject: guestSubject, html: guestHtml } = buildGuestConfirmationEmail({
+        hostName: session.host.name || "The organizer",
+        guestName: session.link.inviteeName || undefined,
+        topic: session.link.topic || undefined,
+        dateTime: startTime,
+        duration: durationMin,
+        format: meetingFormat,
+        location: effectiveLocation || undefined,
+        meetLink,
+        hostTimezone,
+        guestTimezone: guestTz,
+        dealRoomUrl,
+      });
+      const emailResult = await dispatch({
+        kind: "email.send",
+        to: guestRecipients,
+        subject: guestSubject,
+        html: guestHtml,
+        context: { sessionId: session.id, hostId: session.hostId, purpose: "guest_confirmation" },
+      });
+      emailSent = emailResult.status === "sent";
+      if (emailResult.status === "failed") {
+        console.error("[confirm] guest confirmation email failed:", emailResult.error);
+      }
+    }
+
+    // === Host booking-confirmed email (fire-and-forget — host is never blocking) ===
+    const hostFirst = session.host.name?.split(/\s+/)[0] ?? null;
+    const { subject: hostSubject, html: hostHtml } = buildHostBookingConfirmedEmail({
+      hostFirstName: hostFirst,
+      guestName: session.link.inviteeName || null,
+      guestEmail: guestEmail,
+      topic: session.link.topic || null,
       dateTime: startTime,
       duration: durationMin,
       format: meetingFormat,
-      location: effectiveLocation || undefined,
+      location: effectiveLocation || null,
       meetLink,
-      timezone: hostTimezone,
+      hostTimezone,
+      guestTimezone: guestTz,
       dealRoomUrl,
+      upcoming: hostEmailData.upcoming.map((s) => ({
+        agreedTime: s.agreedTime!,
+        guestDisplay: s.link.inviteeName || "Guest",
+        duration: s.duration || 30,
+        format: s.agreedFormat || s.format || "video",
+      })),
+      pending: hostEmailData.pending.map((s) => ({
+        guestDisplay: s.link.inviteeName || "Guest",
+        topic: s.link.topic,
+        updatedAt: s.updatedAt,
+      })),
     });
-    const emailRecipients = isGroupEvent
-      ? attendeeEmails
-      : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
-    const emailResult = await dispatch({
+    dispatch({
       kind: "email.send",
-      to: emailRecipients,
-      subject: `Meeting Confirmed${session.link.topic ? `: ${session.link.topic}` : ""}`,
-      html: emailBody,
-      context: {
-        sessionId: session.id,
-        hostId: session.hostId,
-        linkId: session.linkId,
-        purpose: "meeting_confirmation",
-      },
+      to: hostEmail,
+      subject: hostSubject,
+      html: hostHtml,
+      context: { sessionId: session.id, hostId: session.hostId, purpose: "host_booking_confirmed" },
+    }).catch((e) => {
+      console.error("[confirm] host_booking_confirmed email failed:", e);
     });
-    const emailSent = emailResult.status === "sent";
-    if (emailResult.status === "failed") {
-      console.error("[confirm] Failed to send confirmation email:", emailResult.error);
-    }
-
-    // === Host new-booking notification ===
-    // Fire for generic links (host had no prior context about this invitee) and
-    // office-hours links (sourceRuleId is set — host shared an open slot to anyone).
-    // Skip contextual links — the host already knew about the specific invitee.
-    const isGenericLink = session.link.type === "generic";
-    const isOfficeHoursLink = !!session.link.sourceRuleId;
-    if (isGenericLink || isOfficeHoursLink) {
-      const hostFirst = session.host.name?.split(/\s+/)[0] ?? null;
-      const durationStr = `${durationMin} min`;
-      const formatFormatted = meetingFormat;
-      const { subject: hostSubject, html: hostHtml } = buildHostNewBookingEmail({
-        hostFirstName: hostFirst,
-        guestName: session.link.inviteeName || null,
-        guestEmail: guestEmail,
-        topic: session.link.topic || null,
-        whenLabel: `${displayDate} at ${displayTime}`,
-        timezoneLabel: tzAbbr,
-        durationLabel: durationStr,
-        format: formatFormatted,
-        dealRoomUrl,
-      });
-      dispatch({
-        kind: "email.send",
-        to: hostEmail,
-        subject: hostSubject,
-        html: hostHtml,
-        context: {
-          purpose: "host_new_booking",
-          sessionId: session.id,
-          hostId: session.hostId,
-          linkId: session.linkId,
-        },
-      }).catch((e) => {
-        console.error("[confirm] host_new_booking email dispatch failed:", e);
-      });
-    }
 
     const tEmailMs = Date.now() - tEmailStart;
 
@@ -651,50 +675,4 @@ function computeUtcOffset(tz: string, date: Date = new Date()): string {
   const h = String(Math.floor(absMin / 60)).padStart(2, "0");
   const m = String(absMin % 60).padStart(2, "0");
   return `${sign}${h}:${m}`;
-}
-
-function buildConfirmationEmail(params: {
-  hostName: string;
-  guestName?: string;
-  topic?: string;
-  dateTime: Date;
-  duration: number;
-  format: string;
-  location?: string;
-  meetLink?: string;
-  timezone?: string;
-  dealRoomUrl?: string;
-}) {
-  const tz = params.timezone || "America/Los_Angeles";
-  const tzAbbr = new Intl.DateTimeFormat("en-US", {
-    timeZoneName: "short",
-    timeZone: tz,
-  })
-    .formatToParts(params.dateTime)
-    .find((p) => p.type === "timeZoneName")?.value ?? tz;
-
-  return `
-    <div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
-      <div style="text-align: center; margin-bottom: 24px;">
-        <div style="font-size: 48px; margin-bottom: 8px;">✅</div>
-        <h1 style="font-size: 24px; font-weight: 700; color: #1a1a2e; margin: 0;">Meeting Confirmed</h1>
-      </div>
-      <div style="background: #f8f8fc; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-        ${params.topic ? `<p style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600;">${params.topic}</p>` : ""}
-        <p style="margin: 0 0 8px 0; color: #666;">📅 ${params.dateTime.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: tz })}</p>
-        <p style="margin: 0 0 8px 0; color: #666;">🕐 ${params.dateTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz })} ${tzAbbr} (${params.duration} min)</p>
-        <p style="margin: 0 0 8px 0; color: #666;">📱 ${params.format.charAt(0).toUpperCase() + params.format.slice(1)}</p>
-        ${params.location ? `<p style="margin: 0 0 8px 0; color: #666;">📍 ${params.location}</p>` : ""}
-        ${params.meetLink ? `<p style="margin: 0;"><a href="${params.meetLink}" style="color: #6c5ce7; font-weight: 600;">Join Google Meet</a></p>` : ""}
-      </div>
-      ${params.dealRoomUrl ? `
-      <div style="text-align: center; margin-bottom: 20px;">
-        <a href="${params.dealRoomUrl}" style="display: inline-block; padding: 10px 24px; background: #f8f8fc; border: 1px solid #e0e0e8; border-radius: 8px; color: #6c5ce7; font-size: 13px; font-weight: 600; text-decoration: none;">Need to change or cancel?</a>
-      </div>
-      ` : ""}
-      <p style="text-align: center; font-size: 13px; color: #999;">
-        Scheduled by <a href="https://agentenvoy.ai" style="color: #6c5ce7;">AgentEnvoy</a> — your AI negotiates so you don't have to.
-      </p>
-    </div>
-  `;
 }

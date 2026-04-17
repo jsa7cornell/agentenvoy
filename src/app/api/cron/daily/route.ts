@@ -253,8 +253,9 @@ async function runMeetingReminders(now: Date): Promise<{
   skipped: number;
   errors: string[];
 }> {
-  const windowStart = new Date(now.getTime() + 23 * 60 * 60 * 1000); // now + 23h
-  const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000);   // now + 25h
+  // Catch any meeting in the next 24 hours. Using `gt: now` as the lower
+  // bound guarantees we never send a reminder after the event has passed.
+  const windowEnd = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
   let scanned = 0;
   let sent = 0;
@@ -267,7 +268,7 @@ async function runMeetingReminders(now: Date): Promise<{
         status: "agreed",
         archived: false,
         wantsReminder: true,
-        agreedTime: { gte: windowStart, lte: windowEnd },
+        agreedTime: { gt: now, lt: windowEnd },
       },
       select: {
         id: true,
