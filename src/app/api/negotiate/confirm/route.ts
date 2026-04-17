@@ -6,6 +6,7 @@ import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { logRouteError } from "@/lib/route-error";
+import { buildGuestConfirmationEmail } from "@/lib/emails/guest-confirmation";
 
 // POST /api/negotiate/confirm
 // Confirm an agreed-upon time — creates calendar events, sends emails.
@@ -465,10 +466,16 @@ export async function POST(req: NextRequest) {
       })()
     );
 
-    // === Send confirmation email (stays in critical path) ===
-    // Guests expect the invite. Keep this awaited.
+    // === Meeting confirmation email — sent to both host and guest ===
     const tEmailStart = Date.now();
-    const emailBody = buildConfirmationEmail({
+    const guestTz = session.guestTimezone || null;
+
+    // Build the recipient list: host always gets it; guest added when known.
+    const confirmRecipients = isGroupEvent
+      ? attendeeEmails
+      : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
+
+    const { subject: confirmSubject, html: confirmHtml } = buildGuestConfirmationEmail({
       hostName: session.host.name || "The organizer",
       guestName: session.link.inviteeName || undefined,
       topic: session.link.topic || undefined,
@@ -477,28 +484,24 @@ export async function POST(req: NextRequest) {
       format: meetingFormat,
       location: effectiveLocation || undefined,
       meetLink,
-      timezone: hostTimezone,
+      hostTimezone,
+      guestTimezone: guestTz,
       dealRoomUrl,
     });
-    const emailRecipients = isGroupEvent
-      ? attendeeEmails
-      : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
+
+    let emailSent = false;
     const emailResult = await dispatch({
       kind: "email.send",
-      to: emailRecipients,
-      subject: `Meeting Confirmed${session.link.topic ? `: ${session.link.topic}` : ""}`,
-      html: emailBody,
-      context: {
-        sessionId: session.id,
-        hostId: session.hostId,
-        linkId: session.linkId,
-        purpose: "meeting_confirmation",
-      },
+      to: confirmRecipients,
+      subject: confirmSubject,
+      html: confirmHtml,
+      context: { sessionId: session.id, hostId: session.hostId, purpose: "meeting_confirmed" },
     });
-    const emailSent = emailResult.status === "sent";
+    emailSent = emailResult.status === "sent";
     if (emailResult.status === "failed") {
-      console.error("[confirm] Failed to send confirmation email:", emailResult.error);
+      console.error("[confirm] meeting confirmation email failed:", emailResult.error);
     }
+
     const tEmailMs = Date.now() - tEmailStart;
 
     const totalMs = Date.now() - t0;
@@ -612,50 +615,4 @@ function computeUtcOffset(tz: string, date: Date = new Date()): string {
   const h = String(Math.floor(absMin / 60)).padStart(2, "0");
   const m = String(absMin % 60).padStart(2, "0");
   return `${sign}${h}:${m}`;
-}
-
-function buildConfirmationEmail(params: {
-  hostName: string;
-  guestName?: string;
-  topic?: string;
-  dateTime: Date;
-  duration: number;
-  format: string;
-  location?: string;
-  meetLink?: string;
-  timezone?: string;
-  dealRoomUrl?: string;
-}) {
-  const tz = params.timezone || "America/Los_Angeles";
-  const tzAbbr = new Intl.DateTimeFormat("en-US", {
-    timeZoneName: "short",
-    timeZone: tz,
-  })
-    .formatToParts(params.dateTime)
-    .find((p) => p.type === "timeZoneName")?.value ?? tz;
-
-  return `
-    <div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
-      <div style="text-align: center; margin-bottom: 24px;">
-        <div style="font-size: 48px; margin-bottom: 8px;">✅</div>
-        <h1 style="font-size: 24px; font-weight: 700; color: #1a1a2e; margin: 0;">Meeting Confirmed</h1>
-      </div>
-      <div style="background: #f8f8fc; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-        ${params.topic ? `<p style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600;">${params.topic}</p>` : ""}
-        <p style="margin: 0 0 8px 0; color: #666;">📅 ${params.dateTime.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: tz })}</p>
-        <p style="margin: 0 0 8px 0; color: #666;">🕐 ${params.dateTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz })} ${tzAbbr} (${params.duration} min)</p>
-        <p style="margin: 0 0 8px 0; color: #666;">📱 ${params.format.charAt(0).toUpperCase() + params.format.slice(1)}</p>
-        ${params.location ? `<p style="margin: 0 0 8px 0; color: #666;">📍 ${params.location}</p>` : ""}
-        ${params.meetLink ? `<p style="margin: 0;"><a href="${params.meetLink}" style="color: #6c5ce7; font-weight: 600;">Join Google Meet</a></p>` : ""}
-      </div>
-      ${params.dealRoomUrl ? `
-      <div style="text-align: center; margin-bottom: 20px;">
-        <a href="${params.dealRoomUrl}" style="display: inline-block; padding: 10px 24px; background: #f8f8fc; border: 1px solid #e0e0e8; border-radius: 8px; color: #6c5ce7; font-size: 13px; font-weight: 600; text-decoration: none;">Need to change or cancel?</a>
-      </div>
-      ` : ""}
-      <p style="text-align: center; font-size: 13px; color: #999;">
-        Scheduled by <a href="https://agentenvoy.ai" style="color: #6c5ce7;">AgentEnvoy</a> — your AI negotiates so you don't have to.
-      </p>
-    </div>
-  `;
 }

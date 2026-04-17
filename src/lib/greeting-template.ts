@@ -399,6 +399,144 @@ export function formatStretchDays(
   return `${days.slice(0, -1).join(", ")}, and ${days[days.length - 1]}`;
 }
 
+// ─── Open-window greeting (guestPicks variant, 2026-04-17) ─────────────────
+
+interface BuildOpenWindowOpts {
+  /** Host's first name. Used in the greeting prose. */
+  hostFirstName: string;
+  /** The guest's display name, or null if unknown. */
+  inviteeName: string | null;
+  /** Session topic (post-filter for generic terms). Null = no topic. */
+  topic: string | null;
+  /** Host's timezone IANA for window label rendering. */
+  hostTimezone: string;
+  /** Guest's timezone if distinct from host; triggers dual-tz window label. */
+  guestTimezone?: string;
+  /** The window the host specified (e.g., afternoon = 12–17). Optional — if
+   *  not set, the greeting just says "any time" (within offerable hours). */
+  window?: { startHour: number; endHour: number };
+  /** The ISO date (YYYY-MM-DD, host-local) the host anchored to ("today",
+   *  "this afternoon" resolves to today's date). Null = open date too. */
+  anchorDate?: string | null;
+  /** What the guest is being asked to pick. All three flags independent. */
+  picks: { date?: boolean; duration?: boolean | number[]; location?: boolean };
+  /** Sanitized guidance from the host. `tone` has already been run through
+   *  sanitizeHostFlavor at save time. */
+  guidance?: {
+    suggestions?: { locations?: string[]; durations?: number[] };
+    tone?: string;
+  };
+}
+
+/**
+ * Render the open-window greeting used when `link.rules.guestPicks` is set.
+ * Replaces the day-bullet windows list with a single sentence naming the
+ * host's deferred window + what the guest is choosing. Always terse —
+ * never enumerates slots because by definition the host didn't pin one.
+ */
+export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
+  const {
+    hostFirstName,
+    inviteeName,
+    topic,
+    hostTimezone,
+    guestTimezone,
+    window,
+    anchorDate,
+    picks,
+    guidance,
+  } = opts;
+
+  const hostShort = shortTimezoneLabel(hostTimezone, new Date());
+  const hasDistinctGuestTz = guestTimezone && guestTimezone !== hostTimezone;
+  const guestShort = hasDistinctGuestTz ? shortTimezoneLabel(guestTimezone!, new Date()) : null;
+
+  // Format a window like "afternoon (12–5 PM PDT)" or, when the guest is in a
+  // distinct TZ, "12–5 PM PDT (3–8 PM EDT)". Hour-only; we never invent
+  // minutes since the host's directive didn't include them.
+  function fmtHour(h: number, tz: string): string {
+    // Build an arbitrary ISO instant today at hour h in tz, then format. We
+    // can use any day — we only need the hour label.
+    const d = new Date();
+    const iso = `${d.toISOString().slice(0, 10)}T00:00:00Z`;
+    // Easier path: just use 12h formatting on a fixed reference.
+    const ref = new Date(iso);
+    ref.setUTCHours(h);
+    return ref.toLocaleTimeString("en-US", { hour: "numeric", timeZone: tz }).replace(":00", "");
+  }
+  const windowLabel = window
+    ? (() => {
+        const hostLabel = `${fmtHour(window.startHour, hostTimezone)}–${fmtHour(window.endHour, hostTimezone)} ${hostShort}`;
+        if (hasDistinctGuestTz) {
+          const guestLabel = `${fmtHour(window.startHour, guestTimezone!)}–${fmtHour(window.endHour, guestTimezone!)} ${guestShort}`;
+          return `${guestLabel} (${hostLabel})`;
+        }
+        return hostLabel;
+      })()
+    : null;
+
+  // Prose the date anchor if provided. "today", "this afternoon" etc. stay
+  // implicit — the LLM layer sends us the ISO date and we resolve from there.
+  const dateProse = anchorDate
+    ? (() => {
+        const today = new Date();
+        const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: hostTimezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(today);
+        if (anchorDate === todayIso) return "today";
+        const anchor = new Date(`${anchorDate}T12:00:00`);
+        return anchor.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+      })()
+    : null;
+
+  // Build the "pick these" clause.
+  const toPickParts: string[] = [];
+  if (picks.date) toPickParts.push("the day");
+  // Start time: always pickable in the open-window variant (that's the point).
+  toPickParts.push(picks.date ? "time" : "the start time");
+  if (picks.duration === true) toPickParts.push("how long you need");
+  else if (Array.isArray(picks.duration) && picks.duration.length > 0) {
+    const durs = picks.duration.join(" or ");
+    toPickParts.push(`how long (${durs} min)`);
+  }
+  if (picks.location) toPickParts.push("where");
+
+  const pickClause =
+    toPickParts.length === 1
+      ? toPickParts[0]
+      : toPickParts.length === 2
+      ? `${toPickParts[0]} and ${toPickParts[1]}`
+      : `${toPickParts.slice(0, -1).join(", ")}, and ${toPickParts[toPickParts.length - 1]}`;
+
+  // Intro line — mirrors the standard greeting's voice.
+  const greetee = inviteeName ? inviteeName.split(/\s+/)[0] : "there";
+  const topicClause = topic ? ` about ${topic}` : "";
+  const intro = `👋 Hi ${greetee}! ${hostFirstName} is making time${topicClause}.`;
+
+  // Anchor line — when / window.
+  const anchorBits = [dateProse, windowLabel].filter(Boolean).join(", ");
+  const anchorLine = anchorBits
+    ? `📅 ${anchorBits}.`
+    : `📅 Any time that works for you.`;
+
+  // Tone — ONLY surfaced with a leading "—" beat so it reads as a small
+  // grace note, not an instruction. Sanitizer already stripped injection risk.
+  const toneLine = guidance?.tone ? ` ${guidance.tone}` : "";
+
+  // Ask line.
+  const askLine = `You pick ${pickClause}.`;
+
+  // Location suggestions as a chip-ish prose list.
+  const locSugs = guidance?.suggestions?.locations || [];
+  const locHint =
+    picks.location && locSugs.length > 0
+      ? ` A few places ${hostFirstName} suggested: ${locSugs.map((l) => `**${l}**`).join(", ")}.${locSugs.length ? " Pick anything else if you'd prefer." : ""}`
+      : "";
+
+  // Closing (matches standard greeting's "share your email" hook when missing).
+  const closing = `Share your email and I'll get it on the calendar. 🤝`;
+
+  return [intro + toneLine, anchorLine, askLine + locHint, closing].join("\n\n");
+}
+
 // ─── Format label helpers ────────────────────────────────────────────────────
 
 /** "video" → "video call", "phone" → "phone call", "in-person" → "in-person meeting". */

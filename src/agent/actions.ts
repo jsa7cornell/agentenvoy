@@ -4,6 +4,8 @@ import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { normalizeLinkRules } from "@/lib/scoring";
 import { createTentativeHoldEvent, deleteCalendarEvent } from "@/lib/calendar";
+import { parseTimeOfDay, TIME_OF_DAY_WINDOWS } from "@/lib/time-of-day";
+import { sanitizeHostFlavor, sanitizeSuggestionList } from "@/lib/host-flavor-sanitizer";
 
 // --- Helpers ---
 
@@ -484,6 +486,58 @@ async function handleCreateLink(
     dateRange = { start: today, end: plus14 };
   }
 
+  // guestPicks / guestGuidance (2026-04-17): capture host deferrals and
+  // qualitative hints. Envoy's create_link playbook is responsible for only
+  // emitting these when the host explicitly defers ("he picks", "whatever
+  // works for them"). `tone` runs through the flavor sanitizer here at the
+  // action boundary so injection attempts can be logged server-side.
+  const rawGuestPicks = params.guestPicks as Record<string, unknown> | undefined;
+  const rawGuestGuidance = params.guestGuidance as Record<string, unknown> | undefined;
+
+  // Time-of-day phrase parse — if the LLM didn't explicitly set
+  // guestPicks.window but the host used "morning/afternoon/evening", fill it
+  // in. Keeps the semantic anchored to the host's timezone at offer time.
+  const timePhrase = parseTimeOfDay(urgency)
+    || parseTimeOfDay(topic)
+    || parseTimeOfDay((params.rationale as string | undefined) || "");
+  let guestPicksOut: Record<string, unknown> | undefined;
+  if (rawGuestPicks && typeof rawGuestPicks === "object") {
+    guestPicksOut = { ...rawGuestPicks };
+    if (!guestPicksOut.window && timePhrase) guestPicksOut.window = timePhrase;
+  } else if (timePhrase) {
+    // Host used a time-of-day phrase without explicit deferral flags. The
+    // window alone is enough to clamp the offer — no guest-picks implied.
+    guestPicksOut = { window: timePhrase };
+  }
+
+  // Sanitize the guidance payload before it's persisted anywhere.
+  let guidanceOut: Record<string, unknown> | undefined;
+  if (rawGuestGuidance && typeof rawGuestGuidance === "object") {
+    const cleaned: Record<string, unknown> = {};
+    const sugSrc = rawGuestGuidance.suggestions as Record<string, unknown> | undefined;
+    if (sugSrc && typeof sugSrc === "object") {
+      const sug: Record<string, unknown> = {};
+      const locs = sanitizeSuggestionList(sugSrc.locations);
+      if (locs.length) sug.locations = locs;
+      if (Array.isArray(sugSrc.durations)) {
+        const durs = sugSrc.durations.filter((d): d is number => typeof d === "number" && d > 0);
+        if (durs.length) sug.durations = durs;
+      }
+      if (Object.keys(sug).length) cleaned.suggestions = sug;
+    }
+    if (typeof rawGuestGuidance.tone === "string") {
+      const result = sanitizeHostFlavor(rawGuestGuidance.tone);
+      if (result.rejected) {
+        console.warn(
+          `[create_link] host flavor rejected (${result.reason}) — raw: ${JSON.stringify(result.raw).slice(0, 200)}`
+        );
+      } else if (result.safe) {
+        cleaned.tone = result.safe;
+      }
+    }
+    if (Object.keys(cleaned).length) guidanceOut = cleaned;
+  }
+
   const linkRules = normalizeLinkRules({
     ...rules,
     ...(format ? { format } : {}),
@@ -496,7 +550,11 @@ async function handleCreateLink(
     ...(preferredDays ? { preferredDays } : {}),
     ...(dateRange ? { dateRange } : {}),
     ...(location ? { location } : {}),
+    ...(guestPicksOut ? { guestPicks: guestPicksOut } : {}),
+    ...(guidanceOut ? { guestGuidance: guidanceOut } : {}),
   });
+  // Silence unused-import warnings for constants referenced only in playbooks.
+  void TIME_OF_DAY_WINDOWS;
 
   const link = await prisma.negotiationLink.create({
     data: {

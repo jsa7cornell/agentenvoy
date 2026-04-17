@@ -16,6 +16,7 @@ import {
   formatStretchDays,
   humanTimezoneLabel,
   formatLabel,
+  buildOpenWindowGreeting,
 } from "@/lib/greeting-template";
 import {
   buildGuestGreeting,
@@ -624,56 +625,94 @@ export async function POST(req: NextRequest) {
 
     const isVip = !!(linkRules.isVip);
 
-    // 3. Schedule block — compact time windows with optional dual timezone.
-    let scheduleBlock: string;
-    if (windows.lines.length > 0) {
-      const header = guestTzDiffers
-        ? `Here are some good options (${guestTimezoneLabel}, ${hostFirstName}'s time in parens):`
-        : `Here are some good options (${hostTimezoneLabel}):`;
-      const body = windows.lines.join("\n");
-      const legend = windows.hasPreferred
-        ? `\n★ = best fit with ${hostFirstName}'s schedule`
-        : "";
-      const moreNote = windows.wasTruncated ? "\n\nMore times are available in the calendar →" : "";
-      // VIP one-liner: surface stretch days so the guest knows more can open up.
-      let stretchNote = "";
-      if (isVip) {
-        const stretchDays = formatStretchDays(
-          filteredSlots,
-          hostTimezone,
-          new Date(),
-          guestTzDiffers ? effectiveGuestTz : undefined,
-        );
-        if (stretchDays) {
-          stretchNote = `\n\nIf none of those work, I can also make ${stretchDays} available — just ask.`;
+    // guestPicks branch (2026-04-17): when the host deferred details to the
+    // guest, skip the day-bullet windows list entirely and render the
+    // open-window variant. Preserves the host's ambiguity instead of
+    // artificially pinning a narrow offer.
+    const guestPicks = (linkRules as Record<string, unknown>).guestPicks as
+      | { window?: { startHour: number; endHour: number }; date?: boolean; duration?: boolean | number[]; location?: boolean }
+      | undefined;
+    const guestGuidance = (linkRules as Record<string, unknown>).guestGuidance as
+      | { suggestions?: { locations?: string[]; durations?: number[] }; tone?: string }
+      | undefined;
+    const hasGuestPicks =
+      !!guestPicks &&
+      !!(guestPicks.window || guestPicks.date || guestPicks.duration || guestPicks.location);
+
+    if (hasGuestPicks) {
+      // Anchor date: use the earliest filteredSlot's host-tz date as the "when"
+      // when the host specified one (e.g., "this afternoon" → today). Null
+      // when guestPicks.date is true so the greeting reads "any day that works".
+      const anchorIso = !guestPicks!.date && filteredSlots.length > 0
+        ? new Intl.DateTimeFormat("en-CA", { timeZone: hostTimezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(filteredSlots[0].start))
+        : null;
+      greeting = buildOpenWindowGreeting({
+        hostFirstName,
+        inviteeName,
+        topic,
+        hostTimezone,
+        guestTimezone: guestTzDiffers ? effectiveGuestTz : undefined,
+        window: guestPicks!.window,
+        anchorDate: anchorIso,
+        picks: {
+          date: guestPicks!.date,
+          duration: guestPicks!.duration,
+          location: guestPicks!.location,
+        },
+        guidance: guestGuidance,
+      });
+    } else {
+      // 3. Schedule block — compact time windows with optional dual timezone.
+      let scheduleBlock: string;
+      if (windows.lines.length > 0) {
+        const header = guestTzDiffers
+          ? `Here are some good options (${guestTimezoneLabel}, ${hostFirstName}'s time in parens):`
+          : `Here are some good options (${hostTimezoneLabel}):`;
+        const body = windows.lines.join("\n");
+        const legend = windows.hasPreferred
+          ? `\n★ = best fit with ${hostFirstName}'s schedule`
+          : "";
+        const moreNote = windows.wasTruncated ? "\n\nMore times are available in the calendar →" : "";
+        // VIP one-liner: surface stretch days so the guest knows more can open up.
+        let stretchNote = "";
+        if (isVip) {
+          const stretchDays = formatStretchDays(
+            filteredSlots,
+            hostTimezone,
+            new Date(),
+            guestTzDiffers ? effectiveGuestTz : undefined,
+          );
+          if (stretchDays) {
+            stretchNote = `\n\nIf none of those work, I can also make ${stretchDays} available — just ask.`;
+          }
         }
+        scheduleBlock = `${header}\n\n${body}${legend}${moreNote}${stretchNote}`;
+      } else {
+        scheduleBlock = `I don't have open times to show right now — tell me what generally works and I'll find a match.`;
       }
-      scheduleBlock = `${header}\n\n${body}${legend}${moreNote}${stretchNote}`;
-    } else {
-      scheduleBlock = `I don't have open times to show right now — tell me what generally works and I'll find a match.`;
-    }
 
-    // 3. Closing — ask for what's still needed, keep it tight.
-    const needed: string[] = [];
-    if (!topic) needed.push("what it's about");
-    if (!inviteeName) needed.push("your name");
-    if (!link.inviteeEmail) needed.push("your email");
-    let closing: string;
-    if (needed.length === 0) {
-      closing = "Pick a time and I'll get it booked! 🤝";
-    } else {
-      const joined =
-        needed.length === 1
-          ? needed[0]
-          : needed.length === 2
-          ? `${needed[0]} and ${needed[1]}`
-          : `${needed.slice(0, -1).join(", ")}, and ${needed[needed.length - 1]}`;
-      closing = `Pick a time and let me know ${joined} — I'll get it booked! 🤝`;
-    }
+      // 3. Closing — ask for what's still needed, keep it tight.
+      const needed: string[] = [];
+      if (!topic) needed.push("what it's about");
+      if (!inviteeName) needed.push("your name");
+      if (!link.inviteeEmail) needed.push("your email");
+      let closing: string;
+      if (needed.length === 0) {
+        closing = "Pick a time and I'll get it booked! 🤝";
+      } else {
+        const joined =
+          needed.length === 1
+            ? needed[0]
+            : needed.length === 2
+            ? `${needed[0]} and ${needed[1]}`
+            : `${needed.slice(0, -1).join(", ")}, and ${needed[needed.length - 1]}`;
+        closing = `Pick a time and let me know ${joined} — I'll get it booked! 🤝`;
+      }
 
-    // Assemble — three tight blocks.
-    const parts: string[] = [intro, scheduleBlock, closing];
-    greeting = parts.join("\n\n");
+      // Assemble — three tight blocks.
+      const parts: string[] = [intro, scheduleBlock, closing];
+      greeting = parts.join("\n\n");
+    }
   }
 
   // Save the greeting message

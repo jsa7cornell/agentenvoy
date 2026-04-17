@@ -175,6 +175,27 @@ export async function GET(req: NextRequest) {
     const now = new Date();
     slots = slots.filter((s) => new Date(s.start) > now);
 
+    // guestPicks.window clamp (2026-04-17): when the host said "afternoon"
+    // etc., the link-rule window is a hard floor on offerable hours. Evaluate
+    // in the HOST's timezone so "afternoon" means what the host meant — not
+    // what the guest's TZ converts it to.
+    if (!selfMode) {
+      const guestPicks = (linkRules as Record<string, unknown>).guestPicks as
+        | { window?: { startHour?: number; endHour?: number } }
+        | undefined;
+      const win = guestPicks?.window;
+      if (
+        win &&
+        typeof win.startHour === "number" &&
+        typeof win.endHour === "number" &&
+        win.endHour > win.startHour
+      ) {
+        const { slotStartInWindow } = await import("@/lib/time-of-day");
+        const clampWindow = { startHour: win.startHour, endHour: win.endHour };
+        slots = slots.filter((s) => slotStartInWindow(s.start, clampWindow, timezone));
+      }
+    }
+
     // Duration filtering AFTER score filter. Now the consecutive-slot chain
     // only walks through offerable slots — a 3:30 PM start for a 3-hour meeting
     // is correctly rejected if 4:00–6:00 PM slots aren't also offered.
