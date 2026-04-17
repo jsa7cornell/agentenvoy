@@ -21,7 +21,7 @@ AI_GATEWAY_API_KEY=op://Secrets/AI_GATEWAY_API_KEY/credential
 
 # ─── Email (AWS SES) ───────────────────────────────────────
 AWS_SES_ACCESS_KEY_ID=op://Private/AWS Access Key/username
-AWS_SES_SECRET_ACCESS_KEY=op://Private/AWS Access Key/credential
+AWS_SES_SECRET_ACCESS_KEY=op://Private/AWS Access Key/secret access key
 AWS_SES_REGION=us-west-2
 
 # ─── Side-effect dispatcher ────────────────────────────────
