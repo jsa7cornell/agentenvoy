@@ -145,6 +145,7 @@ export async function POST(req: NextRequest) {
       topic: link.topic,
       inviteeName: link.inviteeName,
       format: (link.rules as Record<string, unknown>)?.format ?? null,
+      location: (link.rules as Record<string, unknown>)?.location ?? null,
     };
 
     // --- GROUP MODE: each visitor gets their own session ---
@@ -748,6 +749,7 @@ export async function POST(req: NextRequest) {
       inviteeName: link.inviteeName,
       format: (link.rules as Record<string, unknown>)?.format ?? null,
       duration: (link.rules as Record<string, unknown>)?.duration ?? null,
+      location: (link.rules as Record<string, unknown>)?.location ?? null,
     },
     isHost,
     isGuest,

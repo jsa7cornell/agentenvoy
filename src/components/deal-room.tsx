@@ -49,6 +49,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   } | null>(null);
   const [topic, setTopic] = useState("");
   const [linkFormat, setLinkFormat] = useState("");
+  const [linkLocation, setLinkLocation] = useState<string | null>(null);
   const [inviteeName, setInviteeName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -418,6 +419,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         }
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
+        setLinkLocation(typeof data.link?.location === "string" && data.link.location.trim() ? data.link.location.trim() : null);
         setInviteeName(data.link?.inviteeName || "");
         setSessionStatus(data.status || "active");
         setSessionStatusLabel(data.statusLabel || "");
@@ -634,6 +636,30 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     return "Meeting";
   }
 
+  // --- Meeting emoji picker ---
+  // Priority: venue keyword (from location) > format (video/phone/in-person) > fallback.
+  // Keep the list short + additive — overly specific matches create noise.
+  function getMeetingEmoji(format: string | null | undefined, location: string | null | undefined): string {
+    const loc = (location ?? "").toLowerCase();
+    if (loc) {
+      if (/\b(cafe|café|coffee|starbucks|blue bottle|philz|peets|peet's)\b/.test(loc)) return "☕";
+      if (/\b(restaurant|bistro|dinner|lunch|brunch|grill|kitchen|tavern)\b/.test(loc)) return "🍽️";
+      if (/\b(bar|pub|cocktail|lounge|brewery)\b/.test(loc)) return "🍸";
+      if (/\b(park|garden|outdoor|trail|hike|hiking|walk)\b/.test(loc)) return "🌳";
+      if (/\b(gym|fitness|yoga|studio)\b/.test(loc)) return "🏋️";
+      if (/\b(airport|terminal|flight)\b/.test(loc)) return "✈️";
+      if (/\b(hotel|lobby|lobbies|inn|suite)\b/.test(loc)) return "🏨";
+      if (/\b(office|hq|headquarters|workspace|coworking|wework)\b/.test(loc)) return "🏢";
+      if (/\b(home|house|my place|apartment|apt)\b/.test(loc)) return "🏠";
+      // Zoom / Meet / Teams URLs land here when location is the meet link
+      if (/\b(zoom\.us|meet\.google|teams\.microsoft|webex)\b/.test(loc)) return "📹";
+    }
+    if (format === "phone") return "📞";
+    if (format === "video") return "📹";
+    if (format === "in-person") return "🤝";
+    return "📅";
+  }
+
   // --- Archived state ---
   if (archivedData) {
     return (
@@ -750,7 +776,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     : latestProposal ? String(latestProposal.duration) : String(slotDuration || 30);
   const eventLocation = confirmed && confirmData
     ? (confirmData.location as string | null)
-    : latestProposal?.location ?? null;
+    : latestProposal?.location ?? linkLocation ?? null;
   const eventMeetLink = confirmed && confirmData
     ? (confirmData.meetLink as string | undefined)
     : undefined;
@@ -814,9 +840,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
         {/* Row 2: Details */}
         <div className="flex flex-wrap gap-x-4 gap-y-0.5 ml-5 text-xs text-secondary">
-          {eventFormat && (
-            <span>{eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat} &middot; {eventDuration} min</span>
-          )}
+          {eventFormat && (() => {
+            const formatEmoji = getMeetingEmoji(eventFormat, null);
+            const formatText = eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat;
+            return <span>{formatEmoji} {formatText} &middot; {eventDuration} min</span>;
+          })()}
           {eventDateTime && (() => {
             const dt = new Date(eventDateTime);
             const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -833,35 +861,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               {eventMeetLink.replace("https://", "").split("/").slice(0, 2).join("/")}
             </a>
           )}
-          {eventLocation && <span className="truncate max-w-[200px]">{eventLocation}</span>}
+          {eventLocation && (
+            <span className="truncate max-w-[200px]" title={eventLocation}>
+              {getMeetingEmoji(null, eventLocation)} {eventLocation}
+            </span>
+          )}
         </div>
 
-        {/* Add participant button — host only, non-confirmed */}
-        {isHost && !confirmed && eventStatus !== "cancelled" && (
-          <div className="ml-5 mt-1.5">
-            <button
-              onClick={async () => {
-                if (!sessionId) return;
-                try {
-                  const res = await fetch("/api/negotiate/upgrade", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId }),
-                  });
-                  if (res.ok) {
-                    setIsGroupEvent(true);
-                  }
-                } catch {}
-              }}
-              className={`text-xs transition ${isGroupEvent ? "text-muted cursor-default" : "text-indigo-400 hover:text-indigo-300"}`}
-              disabled={isGroupEvent}
-            >
-              {isGroupEvent ? "Group link active — share link to add people" : "+ Add participant (make group link)"}
-            </button>
-          </div>
-        )}
-
-        {/* Row 3: Actions */}
+        {/* Row 3: Actions (confirmed / cancelled only) */}
         {(confirmed || eventStatus === "cancelled") && (
           <div className="flex items-center gap-3 ml-5 mt-2.5">
             {eventStatus !== "cancelled" && (
@@ -930,9 +937,31 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         )}
 
-        {/* Host management row — GCal status + Cancel/Archive */}
+        {/* Host management row — Add participant (non-confirmed) + GCal status (confirmed) + Archive/Cancel */}
         {isHost && eventStatus !== "cancelled" && (
           <div className="ml-5 mt-2.5 flex items-center gap-3 flex-wrap">
+            {/* Add participant / group-link toggle — non-confirmed only */}
+            {!confirmed && (
+              <button
+                onClick={async () => {
+                  if (!sessionId) return;
+                  try {
+                    const res = await fetch("/api/negotiate/upgrade", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ sessionId }),
+                    });
+                    if (res.ok) {
+                      setIsGroupEvent(true);
+                    }
+                  } catch {}
+                }}
+                className={`text-[11px] transition ${isGroupEvent ? "text-muted cursor-default" : "text-indigo-400 hover:text-indigo-300"}`}
+                disabled={isGroupEvent}
+              >
+                {isGroupEvent ? "Group link active — share link to add people" : "+ Add participant (make group link)"}
+              </button>
+            )}
             {/* Google Calendar status badge — only when confirmed */}
             {confirmed && gcalStatus && gcalStatus.eventExists && (
               <span className="flex items-center gap-1.5 text-[11px] text-muted">
