@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { LogoFull } from "./logo";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
+import { PublicHeader } from "./public-header";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
 
 interface DelegateSpeaker {
@@ -53,7 +54,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [inviteeName, setInviteeName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [archivedData, setArchivedData] = useState<{ hostEmail: string | null; hostName: string | null } | null>(null);
+  const [archivedData, setArchivedData] = useState<{ hostEmail: string | null; hostName: string | null; hostMeetSlug: string | null } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -107,6 +108,26 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [signupUpsellDismissed, setSignupUpsellDismissed] = useState(false);
   // Mobile chip CTA expanded state
   const [chipCtaExpanded, setChipCtaExpanded] = useState(false);
+  // Signup intro modal (shown when guest clicks "Create free account")
+  const [showSignupModal, setShowSignupModal] = useState(false);
+
+  // Direct-confirm flow (2026-04-17): when a guest clicks a slot chip we skip
+  // the Envoy round-trip entirely and render a proposal card locally. Once
+  // they click Confirm, the card expands to collect name / email / reminder
+  // opt-in and posts straight to /api/negotiate/confirm.
+  const [pendingProposal, setPendingProposal] = useState<{
+    dateTime: string;
+    duration: number;
+    format: string;
+    location: string | null;
+  } | null>(null);
+  const [confirmFormExpanded, setConfirmFormExpanded] = useState(false);
+  const [formGuestName, setFormGuestName] = useState("");
+  const [formGuestEmail, setFormGuestEmail] = useState("");
+  const [formWantsReminder, setFormWantsReminder] = useState(true);
+  // Triggers a longer celebratory glow on the top event card right after
+  // confirm. Kept separate from statusAnimating (1.5s, existing status pulse).
+  const [justConfirmedGlow, setJustConfirmedGlow] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -277,13 +298,42 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     }
   }
 
+  // Resolve a slot click into a local pendingProposal. Uses session-scoped
+  // defaults (linkFormat, linkLocation, slotDuration) so a guest's chip click
+  // goes straight to a proposal card instead of round-tripping through Envoy.
+  function proposeFromSlot(slot: { start: string; end: string }) {
+    const startMs = new Date(slot.start).getTime();
+    const endMs = new Date(slot.end).getTime();
+    const durationFromRange = Math.max(15, Math.round((endMs - startMs) / 60000));
+    // Prefer host-set meeting duration from link.rules (slotDuration); fall
+    // back to the chip's own range if the link didn't specify one.
+    const duration = slotDuration && slotDuration > 0 ? slotDuration : durationFromRange;
+    const format = linkFormat || "video";
+    setPendingProposal({
+      dateTime: slot.start,
+      duration,
+      format,
+      location: linkLocation,
+    });
+    // Collapse the form initially — one click to expand into name/email.
+    setConfirmFormExpanded(false);
+    setConfirmError(null);
+    // Seed form inputs from whatever we know already.
+    if (!formGuestName && (guestUser?.name || inviteeName)) {
+      setFormGuestName(guestUser?.name || inviteeName);
+    }
+    if (!formGuestEmail && (guestUser?.email || guestEmail)) {
+      setFormGuestEmail(guestUser?.email || guestEmail);
+    }
+  }
+
   async function handleConfirm(proposal: {
     dateTime: string;
     duration: number;
     format: string;
     location: string | null;
     timezone?: string;
-  }) {
+  }, opts?: { guestName?: string; guestEmail?: string; wantsReminder?: boolean }) {
     if (!sessionId || isConfirming) return;
     setIsConfirming(true);
     setConfirmError(null);
@@ -299,10 +349,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           format: proposal.format,
           location: proposal.location,
           timezone: proposal.timezone,
-          // Client-side fallback: if save_guest_info was called before this
-          // turn, guestEmail is already in DB. If not, this ensures the
-          // confirm route still has the email to add to the calendar invite.
-          guestEmail: guestEmail || undefined,
+          guestName: opts?.guestName ?? formGuestName ?? undefined,
+          guestEmail: opts?.guestEmail ?? formGuestEmail ?? guestEmail ?? undefined,
+          wantsReminder: opts?.wantsReminder ?? formWantsReminder,
         }),
       });
       const data = await res.json();
@@ -320,6 +369,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       setConfirmed(true);
       setSessionStatus("agreed");
       setSessionStatusLabel("");
+      setPendingProposal(null);
+      setConfirmFormExpanded(false);
+      // Celebratory glow on the top event card — stronger than the existing
+      // 1.5s status pulse, runs 3s so users can see where to look.
+      setJustConfirmedGlow(true);
+      setTimeout(() => setJustConfirmedGlow(false), 3000);
       if (data.emailSent === false) {
         setEmailWarning("Meeting confirmed, but the confirmation email failed to send.");
       }
@@ -400,7 +455,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (!res.ok) {
           const data = await res.json();
           if (data.error === "archived") {
-            setArchivedData({ hostEmail: data.hostEmail, hostName: data.hostName });
+            setArchivedData({ hostEmail: data.hostEmail, hostName: data.hostName, hostMeetSlug: data.hostMeetSlug ?? null });
             setIsLoading(false);
             return;
           }
@@ -425,6 +480,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setLinkFormat(data.link?.format || "");
         setLinkLocation(typeof data.link?.location === "string" && data.link.location.trim() ? data.link.location.trim() : null);
         setInviteeName(data.link?.inviteeName || "");
+        // Pre-fill the confirm-card form from any info we already have so the
+        // guest doesn't have to retype their name/email if Envoy captured it.
+        if (data.session?.guestName && !formGuestName) setFormGuestName(data.session.guestName);
+        else if (data.link?.inviteeName && !formGuestName) setFormGuestName(data.link.inviteeName);
+        if (data.session?.guestEmail && !formGuestEmail) setFormGuestEmail(data.session.guestEmail);
+        else if (data.link?.inviteeEmail && !formGuestEmail) setFormGuestEmail(data.link.inviteeEmail);
         setSessionStatus(data.status || "active");
         setSessionStatusLabel(data.statusLabel || "");
         if (data.isGroupEvent) setIsGroupEvent(true);
@@ -666,27 +727,50 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   // --- Archived state ---
   if (archivedData) {
+    const hostFirst = archivedData.hostName?.split(" ")[0] || "the host";
+    const genericUrl = archivedData.hostMeetSlug
+      ? `/meet/${archivedData.hostMeetSlug}`
+      : null;
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <div className="w-16 h-16 mx-auto mb-5 rounded-full bg-surface-secondary border border-DEFAULT flex items-center justify-center">
-            <svg className="w-7 h-7 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-            </svg>
-          </div>
-          <h1 className="text-xl font-bold text-primary mb-2">Meeting Unavailable</h1>
-          <p className="text-sm text-muted mb-4">
-            This meeting isn&rsquo;t available right now.
-          </p>
-          {archivedData.hostEmail && (
-            <p className="text-sm text-secondary">
-              Contact{" "}
-              <a href={`mailto:${archivedData.hostEmail}`} className="text-indigo-400 hover:text-indigo-300">
-                {archivedData.hostEmail}
-              </a>{" "}
-              if you need to reconnect.
+      <div className="min-h-screen bg-surface flex flex-col">
+        <PublicHeader />
+        <div className="flex-1 flex items-center justify-center px-6 py-12">
+          <div className="text-center max-w-md">
+            <div className="w-16 h-16 mx-auto mb-5 rounded-full bg-surface-secondary border border-DEFAULT flex items-center justify-center">
+              <svg className="w-7 h-7 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+              </svg>
+            </div>
+            <h1 className="text-xl font-bold text-primary mb-2">Meeting Unavailable</h1>
+            <p className="text-sm text-muted mb-6">
+              This meeting isn&rsquo;t available right now.
             </p>
-          )}
+            {genericUrl && (
+              <div className="mb-6 p-5 rounded-xl bg-surface-secondary border border-DEFAULT text-left">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2">
+                  Book time with {hostFirst}
+                </div>
+                <p className="text-sm text-secondary mb-4">
+                  You can still set up a meeting using {hostFirst}&rsquo;s booking link.
+                </p>
+                <a
+                  href={genericUrl}
+                  className="block w-full text-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition"
+                >
+                  Book a time with {hostFirst}
+                </a>
+              </div>
+            )}
+            {archivedData.hostEmail && (
+              <p className="text-xs text-muted">
+                Or email{" "}
+                <a href={`mailto:${archivedData.hostEmail}`} className="text-indigo-400 hover:text-indigo-300">
+                  {archivedData.hostEmail}
+                </a>
+                .
+              </p>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -695,11 +779,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // --- Error state ---
   if (error) {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-4xl mb-4">&#128533;</div>
-          <h1 className="text-xl font-bold text-primary mb-2">Link not found</h1>
-          <p className="text-muted">{error}</p>
+      <div className="min-h-screen bg-surface flex flex-col">
+        <PublicHeader />
+        <div className="flex-1 flex items-center justify-center px-6 py-12">
+          <div className="text-center">
+            <div className="text-4xl mb-4">&#128533;</div>
+            <h1 className="text-xl font-bold text-primary mb-2">Link not found</h1>
+            <p className="text-muted">{error}</p>
+          </div>
         </div>
       </div>
     );
@@ -743,8 +830,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   }
 
   // --- Sticky event card (shows in all states) ---
-  // Determine the latest proposal from messages (for "Proposed" state)
+  // Determine the latest proposal from messages (for "Proposed" state). Local
+  // pendingProposal (from a chip click) takes precedence so the top card
+  // updates instantly even when Envoy hasn't been round-tripped.
   const latestProposal = (() => {
+    if (pendingProposal) return pendingProposal;
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "administrator") {
         const { proposal } = parseConfirmationProposal(messages[i].content);
@@ -813,7 +903,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   const eventCard = (
     <div className={`z-10 px-4 sm:px-5 pt-3 sm:pt-4 pb-2 bg-surface/95 backdrop-blur-sm flex-shrink-0 transition-all duration-500`}>
-      <div className={`max-w-3xl rounded-xl border ${statusConfig.border} bg-black/[0.02] dark:bg-white/[0.03] px-4 py-3 transition-all duration-500 ${statusAnimating ? "ring-1 " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-500/40 bg-amber-500/5") : ""}`}>
+      <div className={`max-w-3xl rounded-xl border ${statusConfig.border} bg-black/[0.02] dark:bg-white/[0.03] px-4 py-3 transition-all duration-700 ${
+        justConfirmedGlow
+          ? "ring-2 ring-emerald-400/60 bg-emerald-500/10 shadow-[0_0_24px_rgba(16,185,129,0.35)] scale-[1.01]"
+          : statusAnimating
+            ? "ring-1 " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-500/40 bg-amber-500/5")
+            : ""
+      }`}>
         {/* Row 1: Title + status */}
         <div className="flex items-center gap-2.5 mb-1.5">
           <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />
@@ -860,6 +956,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             return <span>{datePart} {localTime}{hostTime ? ` (${hostTime})` : ""}</span>;
           })()}
           {!eventDateTime && !eventFormat && <span>Meeting details pending</span>}
+          {confirmed && (formGuestName || formGuestEmail) && (
+            <span className="text-muted" title="Guest">
+              👤 {[formGuestName, formGuestEmail].filter(Boolean).join(" · ")}
+            </span>
+          )}
           {eventMeetLink && (
             <a href={eventMeetLink} className="text-indigo-400 hover:text-indigo-300 truncate max-w-[200px]" target="_blank" rel="noopener noreferrer">
               {eventMeetLink.replace("https://", "").split("/").slice(0, 2).join("/")}
@@ -1175,7 +1276,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               msg.role === "administrator"
                 ? parseConfirmationProposal(msg.content)
                 : { text: msg.content, proposal: null, proposalWarning: undefined };
-            const { proposal, proposalWarning } = parsed;
+            const { proposal } = parsed;
             // Once the meeting is confirmed, Envoy's original proposal
             // message still contains call-to-action text like "Click confirm
             // to lock it in!" — strip those trailing CTA lines so the history
@@ -1300,7 +1401,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                         bilateralByDay={bilateralByDay}
                         primaryTimezone={slotTimezone}
                         counterpartyTimezone={slotTimezone === "America/Los_Angeles" ? undefined : "America/Los_Angeles"}
-                        onSelectSlot={({ start, color }) => {
+                        onSelectSlot={({ start, end, color }) => {
+                          // "both" chips are available on both calendars →
+                          // skip the Envoy round-trip and pop the confirm card.
+                          // Other colors (guest-only, near-miss) still route
+                          // through chat so Envoy can negotiate the gap.
+                          if (color === "both" && !confirmed) {
+                            proposeFromSlot({ start, end });
+                            return;
+                          }
                           const d = new Date(start);
                           const day = d.toLocaleDateString("en-US", {
                             weekday: "long",
@@ -1314,10 +1423,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                             timeZone: slotTimezone,
                           });
                           const hostFirst = hostName ? hostName.split(" ")[0] : "you";
-                          const template =
-                            color === "both"
-                              ? `Let's go with ${day} at ${time}.`
-                              : `Any chance ${day} at ${time} could work for ${hostFirst}? It's close — let me know if we can make it happen.`;
+                          const template = `Any chance ${day} at ${time} could work for ${hostFirst}? It's close — let me know if we can make it happen.`;
                           setInput(template);
                           document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
                         }}
@@ -1326,57 +1432,119 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   </div>
                 </div>
 
-                {proposal && confirmed && (
-                  <div className="flex justify-start mt-2">
-                    <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-3">
-                      <p className="text-sm text-emerald-400 font-medium">Meeting confirmed!</p>
-                      <p className="text-xs text-muted mt-1">You can view and manage details at the top of this page.</p>
-                    </div>
-                  </div>
-                )}
-
-                {proposal && !confirmed && (
-                  <div className="flex justify-start mt-2">
-                    <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Proposed meeting</div>
-                      <div className="space-y-1 text-sm text-primary">
-                        <p>&#128197; {new Date(proposal.dateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
-                        <p>&#128336; {new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} ({proposal.duration} min)</p>
-                        <p>&#128241; {proposal.format.charAt(0).toUpperCase() + proposal.format.slice(1)}</p>
-                        {proposal.location && <p>&#128205; {proposal.location}</p>}
-                      </div>
-                      {proposalWarning && (
-                        <p className="text-xs text-amber-400 mt-1">{proposalWarning}</p>
-                      )}
-                      <button
-                        onClick={() => handleConfirm(proposal)}
-                        disabled={isConfirming || (proposalWarning?.includes("in the past") ?? false)}
-                        className="w-full mt-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
-                      >
-                        {isConfirming ? "Confirming..." : "Confirm this time"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setInput("That\u2019s close, but could we ");
-                          document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-                        }}
-                        className="w-full text-center text-xs text-muted hover:text-secondary transition mt-1"
-                      >
-                        Suggest a change
-                      </button>
-                      {confirmError && (
-                        <p className="mt-2 text-xs text-red-400">{confirmError}</p>
-                      )}
-                      {emailWarning && (
-                        <p className="mt-2 text-xs text-amber-400">{emailWarning}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {/* Per-message proposal/confirmed cards removed 2026-04-17.
+                    The proposal + confirm form lives in a standalone block
+                    below the messages list so there's exactly one card and
+                    it's anchored near the composer, not buried mid-scroll. */}
               </div>
             );
           })
         )}
+
+        {/* Single proposal + confirm card (direct-confirm flow, 2026-04-17).
+            Reads local pendingProposal first (set on chip click) then falls
+            back to Envoy's most recent CONFIRMATION_PROPOSAL message. Shows
+            only when there's something to confirm and the session isn't
+            already agreed. */}
+        {!confirmed && !isHost && latestProposal && (() => {
+          const effective = latestProposal;
+          const dt = new Date(effective.dateTime);
+          const inPast = dt.getTime() <= Date.now();
+          const nameOk = formGuestName.trim().length > 0;
+          const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formGuestEmail.trim());
+          const canSubmit = !inPast && nameOk && emailOk;
+          const clickConfirmButton = () => {
+            if (!confirmFormExpanded) {
+              setConfirmFormExpanded(true);
+              return;
+            }
+            if (!canSubmit) return;
+            handleConfirm(
+              { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effective.location },
+              { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), wantsReminder: formWantsReminder }
+            );
+          };
+          return (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                  {pendingProposal ? "Your pick" : "Proposed meeting"}
+                </div>
+                <div className="space-y-1 text-sm text-primary">
+                  <p>&#128197; {dt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: slotTimezone })}</p>
+                  <p>&#128336; {dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: slotTimezone })} ({effective.duration} min)</p>
+                  <p>&#128241; {effective.format.charAt(0).toUpperCase() + effective.format.slice(1)}</p>
+                  {effective.location && <p>&#128205; {effective.location}</p>}
+                </div>
+                {inPast && (
+                  <p className="text-xs text-amber-400">This time is in the past. Pick another from the calendar.</p>
+                )}
+                {confirmFormExpanded && (
+                  <div className="space-y-2 pt-2 border-t border-emerald-700/30">
+                    <div>
+                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Your name</label>
+                      <input
+                        type="text"
+                        value={formGuestName}
+                        onChange={(e) => setFormGuestName(e.target.value)}
+                        autoComplete="name"
+                        className="w-full px-3 py-2 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500"
+                        placeholder="Jane Doe"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Your email</label>
+                      <input
+                        type="email"
+                        value={formGuestEmail}
+                        onChange={(e) => setFormGuestEmail(e.target.value)}
+                        autoComplete="email"
+                        className="w-full px-3 py-2 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500"
+                        placeholder="jane@example.com"
+                      />
+                    </div>
+                    <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={formWantsReminder}
+                        onChange={(e) => setFormWantsReminder(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-emerald-500"
+                      />
+                      <span className="text-xs text-secondary">Send me a reminder email before the meeting</span>
+                    </label>
+                  </div>
+                )}
+                <button
+                  onClick={clickConfirmButton}
+                  disabled={isConfirming || inPast || (confirmFormExpanded && !canSubmit)}
+                  className="w-full mt-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+                >
+                  {isConfirming ? "Confirming..." : confirmFormExpanded ? "Confirm" : "Confirm this time"}
+                </button>
+                <button
+                  onClick={() => {
+                    if (pendingProposal) {
+                      setPendingProposal(null);
+                      setConfirmFormExpanded(false);
+                    } else {
+                      setInput("That\u2019s close, but could we ");
+                      document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                    }
+                  }}
+                  className="w-full text-center text-xs text-muted hover:text-secondary transition mt-1"
+                >
+                  {pendingProposal ? "Pick a different time" : "Suggest a change"}
+                </button>
+                {confirmError && (
+                  <p className="mt-2 text-xs text-red-400">{confirmError}</p>
+                )}
+                {emailWarning && (
+                  <p className="mt-2 text-xs text-amber-400">{emailWarning}</p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Post-confirm signup upsell (client-only, not persisted) */}
         {confirmed && !isHost && !isGuest && !signupUpsellDismissed && (
@@ -1392,19 +1560,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 Want your own AI scheduling negotiator? Get instant meeting summaries, one-click rescheduling, and calendar sync — all automated for you.
               </div>
               <div className="flex gap-2">
-                <a
-                  href={`/api/auth/signin?callbackUrl=${encodeURIComponent(
-                    typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"
-                  )}`}
+                <button
+                  type="button"
+                  onClick={() => setShowSignupModal(true)}
                   className="flex-1 px-3 py-2 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition text-center"
                 >
                   Create free account
-                </a>
-                <button
-                  onClick={() => setSignupUpsellDismissed(true)}
-                  className="px-3 py-2 text-xs font-medium text-secondary border border-secondary hover:border-DEFAULT rounded-lg transition"
-                >
-                  No thanks
                 </button>
               </div>
             </div>
@@ -1625,9 +1786,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 currentLocation={slotLocation}
                 duration={slotDuration}
                 minDuration={slotMinDuration}
-                onSelectSlot={!isHost ? (msg) => {
-                  setInput(msg);
-                  document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                onSelectSlot={!isHost && !confirmed ? (_msg, slot) => {
+                  if (slot) proposeFromSlot(slot);
                 } : undefined}
                 onTimezoneClick={() => {
                   setInput("I\u2019m actually in a different timezone \u2014 ");
@@ -1726,9 +1886,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             currentLocation={slotLocation}
             duration={slotDuration}
             minDuration={slotMinDuration}
-            onSelectSlot={!isHost ? (msg) => {
-              setInput(msg);
-              document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+            onSelectSlot={!isHost && !confirmed ? (_msg, slot) => {
+              if (slot) proposeFromSlot(slot);
             } : undefined}
             onTimezoneClick={() => {
               setInput("I\u2019m actually in a different timezone \u2014 ");
@@ -1794,6 +1953,69 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       {detailsModal}
       {/* Cancel modal */}
       {cancelModal}
+      {/* Signup intro modal — opens from the post-confirm upsell's CTA.
+          Plain-text walkthrough so guests know what "create free account"
+          actually does before being bounced to Google. */}
+      {showSignupModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onClick={() => setShowSignupModal(false)}
+        >
+          <div
+            className="relative max-w-md w-full bg-surface border border-DEFAULT rounded-2xl p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setShowSignupModal(false)}
+              aria-label="Close"
+              className="absolute top-3 right-3 text-muted hover:text-primary transition"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">
+              Your own AI scheduler
+            </div>
+            <h2 className="text-xl font-semibold text-primary leading-tight">
+              Let Envoy run point on your calendar, too.
+            </h2>
+            <ol className="space-y-2.5 text-sm text-secondary">
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-indigo-500/15 text-indigo-400 text-xs font-semibold flex items-center justify-center">1</span>
+                <span>Sign in with Google — we never see your password.</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-indigo-500/15 text-indigo-400 text-xs font-semibold flex items-center justify-center">2</span>
+                <span>Connect your calendar so Envoy knows when you&rsquo;re really free.</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-indigo-500/15 text-indigo-400 text-xs font-semibold flex items-center justify-center">3</span>
+                <span>Share your own link &mdash; Envoy handles the back-and-forth.</span>
+              </li>
+            </ol>
+            <a
+              href={`/api/auth/signin?callbackUrl=${encodeURIComponent(
+                typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"
+              )}`}
+              className="block w-full text-center px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition"
+            >
+              Connect with Google to begin
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                setSignupUpsellDismissed(true);
+                setShowSignupModal(false);
+              }}
+              className="block w-full text-center text-xs text-muted hover:text-secondary transition"
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

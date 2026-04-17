@@ -13,7 +13,7 @@ interface Slot {
 interface AvailabilityCalendarProps {
   slotsByDay: Record<string, Slot[]>;
   timezone: string;
-  onSelectSlot?: (formattedTime: string) => void;
+  onSelectSlot?: (formattedTime: string, slot: { start: string; end: string }) => void;
   currentLocation?: { label: string; until?: string } | null;
   onClearLocation?: () => void;
   view?: "month" | "week";
@@ -105,7 +105,7 @@ function SlotPills({
   slots: Slot[];
   dateStr: string;
   timezone: string;
-  onSelectSlot?: (msg: string) => void;
+  onSelectSlot?: (msg: string, slot: { start: string; end: string }) => void;
   duration?: number;
   minDuration?: number;
 }) {
@@ -125,7 +125,7 @@ function SlotPills({
         return (
           <button
             key={i}
-            onClick={() => clickable && onSelectSlot?.(formatSlotMessage(slot, dateStr, timezone))}
+            onClick={() => clickable && onSelectSlot?.(formatSlotMessage(slot, dateStr, timezone), { start: slot.start, end: slot.end })}
             disabled={!clickable}
             title={tooltipText}
             className={`px-2 py-1 bg-surface-secondary border rounded-md text-xs transition

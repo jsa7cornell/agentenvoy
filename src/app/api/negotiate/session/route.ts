@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
       if (match.status !== "active" || isExpired || isPaused) {
         // Paused or expired — surface the same "unavailable" copy as archived sessions.
         return NextResponse.json(
-          { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
+          { error: "archived", hostEmail: user.email || null, hostName: user.name || null, hostMeetSlug: user.meetSlug || null },
           { status: 410 },
         );
       }
@@ -182,7 +182,7 @@ export async function POST(req: NextRequest) {
 
         if (existingSession.archived || existingSession.status === "expired") {
           return NextResponse.json(
-            { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
+            { error: "archived", hostEmail: user.email || null, hostName: user.name || null, hostMeetSlug: user.meetSlug || null },
             { status: 410 }
           );
         }
@@ -260,7 +260,7 @@ export async function POST(req: NextRequest) {
       if (existingSession) {
         if (existingSession.archived || existingSession.status === "expired") {
           return NextResponse.json(
-            { error: "archived", hostEmail: user.email || null, hostName: user.name || null },
+            { error: "archived", hostEmail: user.email || null, hostName: user.name || null, hostMeetSlug: user.meetSlug || null },
             { status: 410 }
           );
         }

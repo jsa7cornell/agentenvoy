@@ -135,14 +135,20 @@ model NegotiationSession {
   /// Saved on confirmation so cancel can delete it cleanly.
   calendarEventId String?
   guestEmail     String?
+  /// Guest's display name, captured on the confirm card. Session-scoped so a
+  /// single generic link can host many named guests without overwriting
+  /// link.inviteeName. Used in the confirmed event card, calendar invite
+  /// attendee name, and reminder emails.
+  guestName      String?
   /// IANA timezone captured from the guest's browser on first visit
   /// (Intl.DateTimeFormat().resolvedOptions().timeZone). First-write-wins —
   /// not overwritten on subsequent visits. Null when the guest visited
   /// before we started capturing, or when detection failed.
   guestTimezone String?
   /// Whether to send the guest a 24h-ahead reminder email. Default true (opt-in).
-  /// The daily cron scans sessions where this is true + status=agreed + agreedTime
-  /// falls in the now+23h..now+25h window. Idempotency via SideEffectLog.
+  /// Set on the confirm card via the reminder checkbox. The daily cron scans
+  /// sessions where this is true + status=agreed + agreedTime falls in the
+  /// now+23h..now+25h window. Idempotency via SideEffectLog.
   wantsReminder Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
