@@ -628,10 +628,8 @@ export async function POST(req: NextRequest) {
     let scheduleBlock: string;
     if (windows.lines.length > 0) {
       const header = guestTzDiffers
-        ? `Here are some times that work best for ${hostFirstName} (${guestTimezoneLabel}, ${hostFirstName}'s time in parens):`
-        : isVip
-        ? `Here are some times that work best for ${hostFirstName} (${hostTimezoneLabel}):`
-        : `Here are some times that work (${hostTimezoneLabel}):`;
+        ? `Here are some good options (${guestTimezoneLabel}, ${hostFirstName}'s time in parens):`
+        : `Here are some good options (${hostTimezoneLabel}):`;
       const body = windows.lines.join("\n");
       const legend = windows.hasPreferred
         ? `\n★ = best fit with ${hostFirstName}'s schedule`

@@ -164,20 +164,22 @@ export function formatAvailabilityWindows(
   }
   commit();
 
-  // Step 2: split any block wider than ~3 hours. With the input slot stream we
-  // can only split on time, not on calendar events — calendar events already
-  // force natural gaps (they're filtered out above). This cap applies to the
-  // rare "truly empty day" case so the greeting never shows "10 AM–6 PM".
+  // Step 2: split any block wider than the effective cap. For generic
+  // short meetings, cap at 3h so the greeting stays skimmable. For custom
+  // long meetings (duration > 3h), lift the cap to match the meeting length —
+  // an "afternoon together" invite should show its full afternoon window.
+  const effectiveMaxBlockMs = durationMin && durationMin > 180
+    ? durationMin * 60 * 1000
+    : MAX_BLOCK_MS;
   for (const [day, blocks] of Array.from(dayToBlocks.entries())) {
     const split: Block[] = [];
     for (const b of blocks) {
       const durationMs = b.end.getTime() - b.start.getTime();
-      if (durationMs <= MAX_BLOCK_MS) {
+      if (durationMs <= effectiveMaxBlockMs) {
         split.push(b);
       } else {
-        // Keep the first 3 hours. The agent can widen search on follow-up.
         wasTruncated = true;
-        const cutoff = new Date(b.start.getTime() + MAX_BLOCK_MS);
+        const cutoff = new Date(b.start.getTime() + effectiveMaxBlockMs);
         split.push({
           start: b.start,
           end: cutoff,
