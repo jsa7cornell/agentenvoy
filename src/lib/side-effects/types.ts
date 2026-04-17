@@ -17,13 +17,19 @@
  *   5. Document in handlers/README.md
  */
 export type SideEffect =
-  | EmailSendEffect;
+  | EmailSendEffect
+  | CalendarCreateEventEffect
+  | CalendarCreateHoldEffect
+  | CalendarDeleteEventEffect;
   // Future kinds land here:
-  // | CalendarCreateEventEffect  (Phase 2)
   // | McpCallbackEffect          (Phase 3)
   // | SmsSendEffect
   // | PaymentChargeEffect
   // | EmailBulkEffect
+
+// ─────────────────────────────────────────────────────────────────────────────
+// email.send
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface EmailSendEffect {
   kind: "email.send";
@@ -43,6 +49,52 @@ export interface EmailSendEffect {
    */
   context?: Record<string, unknown>;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// calendar.* — Google Calendar writes
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Create a real meeting event with attendees, optional Google Meet link, invitations sent. */
+export interface CalendarCreateEventEffect {
+  kind: "calendar.create_event";
+  userId: string; // host whose calendar we write to
+  summary: string;
+  description?: string;
+  startTime: Date;
+  endTime: Date;
+  attendeeEmails: string[];
+  addMeetLink?: boolean;
+  /** Embedded on the event so it can be matched back to its AgentEnvoy session. */
+  sessionId?: string;
+  /** Overrides CALENDAR_SEND_UPDATES env default. Rarely needed. */
+  sendUpdatesOverride?: "all" | "externalOnly" | "none";
+  context?: Record<string, unknown>;
+}
+
+/** Create a TENTATIVE event backing a Hold — no attendees, no notifications. */
+export interface CalendarCreateHoldEffect {
+  kind: "calendar.create_hold";
+  userId: string;
+  summary: string;
+  description?: string;
+  startTime: Date;
+  endTime: Date;
+  context?: Record<string, unknown>;
+}
+
+/** Delete an event by id. Silent on 404/410 (already gone). */
+export interface CalendarDeleteEventEffect {
+  kind: "calendar.delete_event";
+  userId: string;
+  eventId: string;
+  /** If true, attendees receive a cancellation notification. */
+  notifyAttendees?: boolean;
+  context?: Record<string, unknown>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Modes, statuses, results
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** A dispatched effect's kind, pulled from the union's discriminant. */
 export type EffectKind = SideEffect["kind"];
@@ -85,7 +137,29 @@ export interface EmailSendResult extends SideEffectResultBase {
   providerMessageId?: string;
 }
 
+export interface CalendarCreateEventResult extends SideEffectResultBase {
+  kind: "calendar.create_event";
+  /** Real event ID (live), synthetic `dryrun-...` (dryrun), or null (log/skipped/failed). */
+  eventId: string | null;
+  htmlLink: string | null;
+  /** Google Meet or Zoom URL when present; synthetic for dryrun. */
+  meetLink: string | null;
+}
+
+export interface CalendarCreateHoldResult extends SideEffectResultBase {
+  kind: "calendar.create_hold";
+  eventId: string | null;
+  htmlLink: string | null;
+}
+
+export interface CalendarDeleteEventResult extends SideEffectResultBase {
+  kind: "calendar.delete_event";
+}
+
 export type SideEffectResult<K extends EffectKind = EffectKind> = Extract<
-  EmailSendResult, // future: | CalendarCreateEventResult | McpCallbackResult | ...
+  | EmailSendResult
+  | CalendarCreateEventResult
+  | CalendarCreateHoldResult
+  | CalendarDeleteEventResult,
   { kind: K }
 >;

@@ -986,42 +986,25 @@ export async function createCalendarEvent(
     sessionId?: string;
   }
 ) {
-  const calendar = await getGoogleCalendarClient(userId);
-
-  const event = {
+  // Routed through the side-effect dispatcher — preview deploys return fake
+  // eventId / meetLink in dryrun mode, production sends for real.
+  // See src/lib/side-effects/dispatcher.ts + RISK-MANAGEMENT.md.
+  const { dispatch } = await import("@/lib/side-effects/dispatcher");
+  const result = await dispatch({
+    kind: "calendar.create_event",
+    userId,
     summary: params.summary,
     description: params.description,
-    start: { dateTime: params.startTime.toISOString() },
-    end: { dateTime: params.endTime.toISOString() },
-    attendees: params.attendeeEmails.map((email) => ({ email })),
-    // Embed the AgentEnvoy session ID so the GCal event can be matched back
-    // to its session even if our DB calendarEventId field is missing.
-    ...(params.sessionId && {
-      extendedProperties: { private: { agentenvoySessionId: params.sessionId } },
-    }),
-    ...(params.addMeetLink && {
-      conferenceData: {
-        createRequest: {
-          requestId: `agentenvoy-${Date.now()}`,
-          conferenceSolutionKey: { type: "hangoutsMeet" },
-        },
-      },
-    }),
-  };
-
-  const { data } = await calendar.events.insert({
-    calendarId: "primary",
-    requestBody: event,
-    conferenceDataVersion: params.addMeetLink ? 1 : 0,
-    sendUpdates: "all",
+    startTime: params.startTime,
+    endTime: params.endTime,
+    attendeeEmails: params.attendeeEmails,
+    addMeetLink: params.addMeetLink,
+    sessionId: params.sessionId,
   });
-
   return {
-    eventId: data.id,
-    htmlLink: data.htmlLink,
-    meetLink: data.conferenceData?.entryPoints?.find(
-      (e) => e.entryPointType === "video"
-    )?.uri,
+    eventId: result.eventId,
+    htmlLink: result.htmlLink,
+    meetLink: result.meetLink,
   };
 }
 
@@ -1049,22 +1032,18 @@ export async function createTentativeHoldEvent(
     endTime: Date;
   }
 ): Promise<{ eventId: string | null; htmlLink: string | null }> {
-  const calendar = await getGoogleCalendarClient(userId);
-  const { data } = await calendar.events.insert({
-    calendarId: "primary",
-    requestBody: {
-      summary: params.summary,
-      description: params.description,
-      start: { dateTime: params.startTime.toISOString() },
-      end: { dateTime: params.endTime.toISOString() },
-      status: "tentative",
-      transparency: "opaque",
-    },
-    sendUpdates: "none",
+  const { dispatch } = await import("@/lib/side-effects/dispatcher");
+  const result = await dispatch({
+    kind: "calendar.create_hold",
+    userId,
+    summary: params.summary,
+    description: params.description,
+    startTime: params.startTime,
+    endTime: params.endTime,
   });
   return {
-    eventId: data.id ?? null,
-    htmlLink: data.htmlLink ?? null,
+    eventId: result.eventId,
+    htmlLink: result.htmlLink,
   };
 }
 
@@ -1079,21 +1058,15 @@ export async function deleteCalendarEvent(
   eventId: string,
   opts: { notifyAttendees?: boolean } = {}
 ): Promise<void> {
-  try {
-    const calendar = await getGoogleCalendarClient(userId);
-    await calendar.events.delete({
-      calendarId: "primary",
-      eventId,
-      sendUpdates: opts.notifyAttendees ? "all" : "none",
-    });
-  } catch (e: unknown) {
-    const err = e as { code?: number; response?: { status?: number } };
-    const status = err?.code ?? err?.response?.status;
-    if (status === 404 || status === 410) {
-      // Already gone — treat as success.
-      return;
-    }
-    throw e;
+  const { dispatch } = await import("@/lib/side-effects/dispatcher");
+  const result = await dispatch({
+    kind: "calendar.delete_event",
+    userId,
+    eventId,
+    notifyAttendees: opts.notifyAttendees,
+  });
+  if (result.status === "failed") {
+    throw new Error(result.error || "Failed to delete calendar event");
   }
 }
 

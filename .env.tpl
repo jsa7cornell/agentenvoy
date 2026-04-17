@@ -30,8 +30,16 @@ AWS_SES_REGION=us-west-2
 # Vercel sets preview=log, production=live. See RISK-MANAGEMENT.md.
 EFFECT_MODE_EMAIL=log
 # Comma-separated domains allowed when EFFECT_MODE_EMAIL=allowlist.
-# Leave empty except during targeted allowlist testing.
 EFFECT_ALLOW_EMAIL_DOMAINS=agentenvoy.dev
+
+# Calendar: local/preview default to `dryrun` so the confirm flow gets a fake
+# meetLink + eventId and keeps working end-to-end without creating real events.
+# Production uses `live`. Covers create_event / create_hold / delete_event.
+EFFECT_MODE_CALENDAR=dryrun
+# Safety belt: when EFFECT_MODE_CALENDAR=live, this controls whether invitees
+# get real email notifications. Default `all` matches historical behavior in
+# production. Set to `none` on preview IF you ever flip it to live there.
+CALENDAR_SEND_UPDATES=all
 
 # ─── Dev Auth (non-secret, dev-only) ──────────────────────
 DEV_AUTH_SECRET=dev-test-secret-local-only
