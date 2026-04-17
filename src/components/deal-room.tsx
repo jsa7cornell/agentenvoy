@@ -7,10 +7,21 @@ import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
 
+interface DelegateSpeaker {
+  kind: "human_assistant" | "ai_agent" | "unknown";
+  name?: string;
+}
+
 interface Message {
   id: string;
   role: string;
   content: string;
+  // Per-message metadata — used for proxy attribution (Slice 9) and other
+  // per-message signals. Loose shape intentionally.
+  metadata?: {
+    delegateSpeaker?: DelegateSpeaker;
+    [key: string]: unknown;
+  } | null;
   createdAt?: string;
 }
 
@@ -430,10 +441,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           // Load message history so chat is visible below the event card
           if (data.messages?.length > 0) {
             setMessages(
-              data.messages.map((m: { id: string; role: string; content: string; createdAt?: string }) => ({
+              data.messages.map((m: { id: string; role: string; content: string; metadata?: unknown; createdAt?: string }) => ({
                 id: m.id,
                 role: m.role,
                 content: m.content,
+                metadata: (m.metadata as Message["metadata"]) ?? null,
                 createdAt: m.createdAt,
               }))
             );
@@ -444,10 +456,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         // If resuming an existing session, load full message history
         if (data.resumed && data.messages?.length > 0) {
           setMessages(
-            data.messages.map((m: { id: string; role: string; content: string; createdAt?: string }) => ({
+            data.messages.map((m: { id: string; role: string; content: string; metadata?: unknown; createdAt?: string }) => ({
               id: m.id,
               role: m.role,
               content: m.content,
+              metadata: (m.metadata as Message["metadata"]) ?? null,
               createdAt: m.createdAt,
             }))
           );
@@ -1228,6 +1241,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             const showChipsHere =
               isFirstGuestEnvoy && bilateralByDay && Object.keys(bilateralByDay).length > 0;
 
+            // Slice 9 — proxy attribution badge. Server writes
+            // metadata.delegateSpeaker when Envoy detects a proxy
+            // (ai_agent, human_assistant, or unknown). Render a small
+            // "via {name}" footer below the bubble so the host can
+            // tell at a glance that the message came through a proxy.
+            const delegateSpeaker = msg.metadata?.delegateSpeaker;
+            const delegateBadge = delegateSpeaker ? (
+              <div
+                className={`text-[10px] mt-1 italic ${rightAligned ? "text-right text-white/60" : "text-muted"}`}
+                data-testid="delegate-speaker-badge"
+              >
+                via {delegateSpeaker.name || (
+                  delegateSpeaker.kind === "ai_agent"
+                    ? "AI agent"
+                    : delegateSpeaker.kind === "human_assistant"
+                    ? "assistant"
+                    : "proxy"
+                )}
+              </div>
+            ) : null;
+
             return (
               <div key={msg.id}>
                 {dateSeparator}
@@ -1239,6 +1273,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       </div>
                     )}
                     <div className="whitespace-pre-wrap break-words">{text}</div>
+                    {delegateBadge}
                     {showChipsHere && bilateralByDay && (
                       <TimeChipList
                         bilateralByDay={bilateralByDay}

@@ -262,6 +262,20 @@ Sometimes the person typing in the deal room is NOT the invitee — they're a pr
 
 If signals are ambiguous (could be first-person or third-person), default to treating the speaker as the invitee and only shift if the proxy framing becomes explicit.
 
+**Proxy attribution marker (emit ONCE per distinct speaker):** when you first identify a proxy, include this structured block somewhere in your reply — it's stripped from the displayed text and attached as metadata to the guest message that triggered detection, so the UI can render a small "via {name}" badge:
+
+```
+[DELEGATE_SPEAKER]{"kind":"ai_agent","name":"OpenClaw"}[/DELEGATE_SPEAKER]
+```
+
+- `kind` must be `"human_assistant"`, `"ai_agent"`, or `"unknown"`.
+- `name` is optional — include when the proxy self-identifies (OpenClaw, Claude, ChatGPT, "Mike's EA"). Omit when you only know the kind, not the name.
+- Emit the block only once per distinct proxy. If the same speaker keeps talking, don't repeat — the metadata from the first emission is still attached.
+- Examples:
+  - "I'm Mike's assistant" → `[DELEGATE_SPEAKER]{"kind":"human_assistant","name":"Mike's assistant"}[/DELEGATE_SPEAKER]`
+  - OpenClaw-style agent message → `[DELEGATE_SPEAKER]{"kind":"ai_agent","name":"OpenClaw"}[/DELEGATE_SPEAKER]`
+  - Third-person pronouns without self-ID → `[DELEGATE_SPEAKER]{"kind":"unknown"}[/DELEGATE_SPEAKER]`
+
 ## Handling Responses
 
 **Guest picks a time:**
