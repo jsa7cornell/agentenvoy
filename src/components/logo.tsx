@@ -1,53 +1,70 @@
+"use client";
+
+import { useId } from "react";
+
+/**
+ * LogoIcon — twin-bubble mark with dual-gradient "energy transfer" treatment.
+ * Back bubble: indigo → cyan (cool, muted). Front bubble: indigo → purple (warm, bold).
+ * viewBox is 96×80 (1.2:1). `size` sets the height in px.
+ */
 export function LogoIcon({ size = 32, className = "" }: { size?: number; className?: string }) {
+  const uid = useId();
+  const back = `${uid}-back`;
+  const front = `${uid}-front`;
+  const width = size * (96 / 80);
   return (
     <svg
-      viewBox="0 0 80 80"
-      width={size}
+      viewBox="0 0 96 80"
+      width={width}
       height={size}
       className={className}
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
     >
-      {/* Bubble A */}
-      <rect x="2" y="8" width="46" height="34" rx="10" fill="currentColor" opacity="0.9" />
-      <polygon points="14,42 10,54 24,42" fill="currentColor" opacity="0.9" />
-      {/* Bubble B */}
-      <rect x="32" y="26" width="46" height="34" rx="10" fill="currentColor" opacity="0.4" />
-      <polygon points="64,60 68,72 54,60" fill="currentColor" opacity="0.4" />
+      <defs>
+        <linearGradient id={back} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#6366f1" />
+          <stop offset="100%" stopColor="#22d3ee" />
+        </linearGradient>
+        <linearGradient id={front} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#6366f1" />
+          <stop offset="100%" stopColor="#a855f7" />
+        </linearGradient>
+      </defs>
+      {/* Back bubble (cool gradient, muted) */}
+      <path
+        d="M40 18 H84 Q92 18 92 26 V54 Q92 62 84 62 H62 L54 70 L54 62 H40 Q32 62 32 54 V26 Q32 18 40 18 Z"
+        fill={`url(#${back})`}
+        opacity="0.5"
+      />
+      {/* Front bubble (warm gradient, bold) */}
+      <path
+        d="M12 6 H50 Q58 6 58 14 V36 Q58 44 50 44 H26 L18 52 L18 44 H12 Q4 44 4 36 V14 Q4 6 12 6 Z"
+        fill={`url(#${front})`}
+      />
     </svg>
   );
 }
 
+/**
+ * LogoFull — icon + "AgentEnvoy.ai" wordmark, flex-aligned.
+ * `height` is the icon height in px; text sizes proportionally.
+ */
 export function LogoFull({ height = 32, className = "" }: { height?: number; className?: string }) {
-  const width = (height / 72) * 420;
+  const fontSize = height * 0.62;
   return (
-    <svg
-      viewBox="0 0 420 72"
-      width={width}
-      height={height}
-      className={className}
-      xmlns="http://www.w3.org/2000/svg"
+    <span
+      className={`inline-flex items-center gap-2 leading-none ${className}`}
+      style={{ height }}
     >
-      {/* Bubble A */}
-      <rect x="2" y="8" width="42" height="32" rx="9" fill="currentColor" opacity="0.9" />
-      <polygon points="12,40 8,50 22,40" fill="currentColor" opacity="0.9" />
-      {/* Bubble B */}
-      <rect x="28" y="22" width="42" height="32" rx="9" fill="currentColor" opacity="0.4" />
-      <polygon points="58,54 62,64 48,54" fill="currentColor" opacity="0.4" />
-      {/* Text */}
-      <text
-        x="84"
-        y="49"
-        fill="currentColor"
-        fontFamily="var(--font-geist-sans), -apple-system, system-ui, sans-serif"
-        fontSize="36"
-        fontWeight="600"
-        letterSpacing="-0.5"
+      <LogoIcon size={height} />
+      <span
+        className="font-bold tracking-tight"
+        style={{ fontSize, letterSpacing: "-0.015em" }}
       >
         AgentEnvoy
-        <tspan fill="currentColor" opacity="0.4" fontWeight="300">
-          .ai
-        </tspan>
-      </text>
-    </svg>
+        <span className="font-light opacity-50">.ai</span>
+      </span>
+    </span>
   );
 }

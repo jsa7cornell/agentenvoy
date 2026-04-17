@@ -3,7 +3,8 @@
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { LogoIcon, LogoFull } from "@/components/logo";
+import { LogoFull } from "@/components/logo";
+import { TryItChat } from "@/components/tryit-chat";
 
 /* ── Google logo (color) ─────────────────────────────────── */
 function GoogleIcon({ className = "w-5 h-5" }: { className?: string }) {
@@ -17,25 +18,34 @@ function GoogleIcon({ className = "w-5 h-5" }: { className?: string }) {
   );
 }
 
-/* ── Section label ───────────────────────────────────────── */
+function ArrowRight({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 12h14M12 5l7 7-7 7"/>
+    </svg>
+  );
+}
+
 function SectionLabel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <p className={`text-xs font-semibold tracking-widest uppercase text-accent mb-3 ${className}`}>
+    <p className={`inline-flex items-center gap-2 text-[0.72rem] font-bold tracking-widest uppercase text-accent mb-3.5 ${className}`}>
+      <span className="w-4 h-0.5 rounded-full bg-accent" />
       {children}
     </p>
   );
 }
 
-/* ── Main page ───────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════ */
+
 export default function Home() {
-  const { status } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
 
   useEffect(() => {
     if (status === "authenticated") {
-      router.push("/dashboard");
+      router.push(session?.user?.onboardingComplete ? "/dashboard" : "/dashboard");
     }
-  }, [status, router]);
+  }, [status, session, router]);
 
   const handleSignIn = () => signIn("google", { callbackUrl: "/dashboard" });
 
@@ -43,80 +53,113 @@ export default function Home() {
 
   return (
     <>
-      {/* ── NAV ────────────────────────────────────────── */}
-      <nav className="sticky top-0 z-50 bg-surface/80 backdrop-blur-md border-b border-secondary">
-        <div className="max-w-[1120px] mx-auto px-6 h-14 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-2.5">
-            <LogoFull height={24} className="text-primary" />
+      {/* ── NAV ───────────────────────────────────────────── */}
+      <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-secondary">
+        <div className="max-w-[1160px] mx-auto px-6 h-14 flex items-center justify-between">
+          <a
+            href="/"
+            className="inline-flex items-center rounded-lg px-2 py-1 -ml-1 hover:bg-surface-secondary transition"
+            title="Home"
+          >
+            <LogoFull height={22} className="text-primary" />
           </a>
-          <div className="flex items-center gap-7">
+          <div className="flex items-center gap-6">
             <a href="#demo" className="hidden md:inline text-sm text-secondary hover:text-primary transition">Demo</a>
             <a href="#how-it-works" className="hidden md:inline text-sm text-secondary hover:text-primary transition">How It Works</a>
-            <a href="#features" className="hidden md:inline text-sm text-secondary hover:text-primary transition">Features</a>
+            <a href="/mcp" className="hidden md:inline text-sm text-secondary hover:text-primary transition">Developers</a>
             <button
               onClick={handleSignIn}
-              className="bg-accent hover:bg-accent-hover text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+              className="inline-flex items-center gap-2 bg-accent hover:bg-accent-hover text-white px-4 py-2 rounded-lg text-sm font-semibold transition shadow-accent-glow group"
             >
               Get Started
+              <ArrowRight className="w-3.5 h-3.5 transition group-hover:translate-x-0.5" />
             </button>
           </div>
         </div>
       </nav>
 
-      {/* ── HERO ───────────────────────────────────────── */}
-      <section className="min-h-[85vh] flex items-center justify-center text-center px-6 py-16 relative">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,#e8e8f0_0%,#ffffff_70%)] dark:bg-[radial-gradient(ellipse_at_50%_40%,#1a1a2e_0%,#0a0a0f_70%)]" />
-        <div className="relative z-10 max-w-[700px]">
-          <div className="flex justify-center mb-6">
-            <LogoIcon size={56} className="text-accent" />
+      {/* ── HERO ──────────────────────────────────────────── */}
+      <section className="relative overflow-hidden px-6 py-16 md:py-20">
+        <div
+          className="absolute inset-0 -z-10 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 900px 500px at 30% 20%, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 60%), radial-gradient(ellipse 600px 400px at 90% 60%, color-mix(in srgb, var(--accent-2) 12%, transparent) 0%, transparent 60%)",
+          }}
+        />
+        <div className="max-w-[1160px] mx-auto grid lg:grid-cols-[1.05fr_1fr] gap-14 items-center">
+          <div>
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent-surface text-accent text-xs font-semibold border border-accent/25 mb-6">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent3 animate-pulse-ring" />
+              OPEN STANDARD FOR AI SCHEDULING
+            </div>
+            <h1 className="text-4xl md:text-[3.5rem] lg:text-[4rem] font-extrabold leading-[1.05] tracking-[-0.03em] mb-5">
+              Scheduling, built for the{" "}
+              <span
+                className="bg-clip-text text-transparent"
+                style={{ backgroundImage: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
+              >
+                age of AI agents
+              </span>
+              .
+            </h1>
+            <p className="text-lg text-secondary leading-relaxed mb-8 max-w-lg">
+              AgentEnvoy is the neutral administrator that coordinates meetings between AI agents, humans, and everyone in between. Connect your Google Calendar. Point your agent at our API. Done.
+            </p>
+            <div className="flex flex-wrap gap-3.5 items-center">
+              <button
+                onClick={handleSignIn}
+                className="inline-flex items-center gap-2.5 bg-accent hover:bg-accent-hover text-white px-7 py-3.5 rounded-xl text-base font-semibold transition shadow-accent-glow-lg hover:-translate-y-0.5 group"
+              >
+                <GoogleIcon className="w-[18px] h-[18px]" />
+                Get Started with Google
+                <ArrowRight className="w-4 h-4 transition group-hover:translate-x-0.5" />
+              </button>
+              <a
+                href="/mcp"
+                className="inline-flex items-center gap-2 bg-transparent text-primary border border-DEFAULT hover:bg-surface-secondary hover:border-muted px-5 py-3.5 rounded-xl text-base font-medium transition"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+                </svg>
+                Point your agent at it
+              </a>
+            </div>
+            <p className="mt-5 text-xs text-muted flex items-center gap-1.5">
+              Free while in beta &middot; No credit card &middot; 30-second setup
+            </p>
           </div>
-          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight">
-            <span className="bg-gradient-to-r from-indigo-500 via-purple-400 to-indigo-500 bg-clip-text text-transparent animate-[shimmer_3s_ease_infinite] bg-[length:200%_200%]">
-              AgentEnvoy
-            </span>
-            <span className="text-muted font-light">.ai</span>
-          </h1>
-          <p className="mt-5 text-lg md:text-xl font-light text-secondary leading-relaxed">
-            From <strong className="font-medium text-primary">scheduling meetings</strong> to{" "}
-            <strong className="font-medium text-primary">navigating proposals</strong> — your AI
-            negotiates so you don&apos;t have to.
-          </p>
-          <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-            <button
-              onClick={handleSignIn}
-              className="inline-flex items-center justify-center gap-2.5 bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3.5 rounded-xl text-base font-medium transition shadow-lg shadow-indigo-500/20 hover:-translate-y-0.5"
-            >
-              <GoogleIcon />
-              Get Started with Google
-            </button>
-            <a
-              href="#demo"
-              className="inline-flex items-center justify-center gap-2 bg-surface-secondary hover:bg-surface-tertiary text-primary border border-DEFAULT px-7 py-3.5 rounded-xl text-base font-medium transition hover:-translate-y-0.5"
-            >
-              See It In Action
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 5v14M19 12l-7 7-7-7"/>
-              </svg>
-            </a>
+
+          {/* Try It chat */}
+          <div className="relative">
+            <TryItChat />
           </div>
         </div>
       </section>
 
-      {/* ── DEMO ───────────────────────────────────────── */}
+      {/* ── DEMO ──────────────────────────────────────────── */}
       <section id="demo" className="bg-[#0a0a0f] py-20 md:py-24 text-center px-6">
-        <div className="max-w-[1120px] mx-auto">
-          <SectionLabel className="!text-indigo-400">See It In Action</SectionLabel>
-          <h2 className="text-3xl md:text-4xl font-bold text-[#f4f4f5] mb-4">
+        <div className="max-w-[1160px] mx-auto">
+          <p className="inline-flex items-center gap-2 text-[0.72rem] font-bold tracking-widest uppercase mb-3.5" style={{ color: "#c084fc" }}>
+            <span className="w-4 h-0.5 rounded-full" style={{ background: "#c084fc" }} />
+            See It In Action
+          </p>
+          <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight text-zinc-100 mb-4">
             Watch how Envoy coordinates a meeting
           </h2>
-          <p className="text-base md:text-lg text-[#a1a1aa] max-w-xl mx-auto mb-12">
-            From the first request to a confirmed calendar invite — see the full experience in under two minutes.
+          <p className="text-base md:text-lg text-zinc-400 max-w-xl mx-auto mb-12">
+            From the first request to a confirmed calendar invite — the full flow in under two minutes.
           </p>
         </div>
-        <div className="relative max-w-[880px] mx-auto">
-          {/* Glow */}
-          <div className="absolute inset-0 -m-16 bg-[radial-gradient(ellipse,rgba(99,102,241,0.12)_0%,transparent_70%)] pointer-events-none" />
-          <div className="relative rounded-2xl overflow-hidden border border-[#2a2a3a] shadow-[0_20px_80px_rgba(0,0,0,0.5),inset_0_0_0_1px_rgba(255,255,255,0.05)]">
+        <div className="relative max-w-[920px] mx-auto">
+          <div
+            className="absolute -inset-12 pointer-events-none"
+            style={{
+              background: "radial-gradient(ellipse, rgba(129,140,248,0.15) 0%, transparent 65%)",
+              filter: "blur(30px)",
+            }}
+          />
+          <div className="relative rounded-[18px] overflow-hidden border border-[#2a2a3a] shadow-[0_30px_90px_rgba(0,0,0,0.55),inset_0_0_0_1px_rgba(255,255,255,0.04)]">
             <iframe
               src="/demo.html"
               title="AgentEnvoy Demo"
@@ -128,30 +171,30 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── HOW IT WORKS ───────────────────────────────── */}
+      {/* ── HOW IT WORKS ──────────────────────────────────── */}
       <section id="how-it-works" className="py-24 px-6 text-center">
-        <div className="max-w-[1120px] mx-auto">
+        <div className="max-w-[1160px] mx-auto">
           <SectionLabel>How It Works</SectionLabel>
-          <h2 className="text-3xl md:text-4xl font-bold text-primary mb-4">
+          <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight mb-4">
             Three steps to never schedule again
           </h2>
           <p className="text-base md:text-lg text-secondary max-w-xl mx-auto mb-14">
             Connect your calendar. Share a link. Envoy takes it from there.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-12 md:gap-12 text-center">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-12">
             {[
               {
                 num: "1",
                 title: "Connect your calendar",
-                desc: "Sign in with Google. Envoy learns your schedule, preferences, and how you like to meet — in a 5\u2011minute calibration chat.",
+                desc: "Sign in with Google. Envoy learns your schedule, preferences, and how you like to meet — in a quick calibration chat.",
               },
               {
                 num: "2",
                 title: "Share your link",
                 desc: (
                   <>
-                    Your personal link (<span className="text-accent font-mono text-sm">agentenvoy.ai/meet/you</span>) works for anyone. Or create event-specific links with custom rules.
+                    Your personal link works for anyone. Or create event-specific links with locked slots and custom rules.
                   </>
                 ),
               },
@@ -161,60 +204,70 @@ export default function Home() {
                 desc: "Envoy proposes times, negotiates preferences, and books the meeting. You get a calendar invite. Done.",
               },
             ].map((step) => (
-              <div key={step.num} className="relative">
-                <div className="inline-flex items-center justify-center w-13 h-13 rounded-full border-2 border-accent bg-accent-surface text-accent text-xl font-bold mb-5">
+              <div key={step.num}>
+                <div
+                  className="inline-flex items-center justify-center w-14 h-14 rounded-2xl text-white text-xl font-extrabold mb-5 shadow-accent-glow"
+                  style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
+                >
                   {step.num}
                 </div>
-                <h3 className="text-lg font-semibold text-primary mb-3">{step.title}</h3>
-                <p className="text-sm text-secondary leading-relaxed max-w-[300px] mx-auto">{step.desc}</p>
+                <h3 className="text-xl font-bold tracking-tight mb-2.5">{step.title}</h3>
+                <p className="text-[0.95rem] text-secondary leading-relaxed max-w-[300px] mx-auto">{step.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── CUSTOM LINKS SHOWCASE ──────────────────────── */}
+      {/* ── CUSTOM LINKS SHOWCASE ─────────────────────────── */}
       <section id="custom-links" className="py-24 px-6 bg-surface-inset">
-        <div className="max-w-[1000px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
-          {/* Text */}
+        <div className="max-w-[1080px] mx-auto grid md:grid-cols-2 gap-16 items-center">
           <div>
             <SectionLabel>The Killer Feature</SectionLabel>
-            <h2 className="text-3xl md:text-4xl font-bold text-primary mb-4">
+            <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight mb-4 leading-[1.15]">
               Every meeting gets its own link
             </h2>
             <p className="text-base text-secondary leading-relaxed mb-7">
-              Don&apos;t just share your calendar — tell Envoy <em>how</em> to schedule each meeting.
-              Lock specific time slots, set the format, add context. Every guest gets a link
-              pre-configured with your rules.
+              Don&apos;t just share your calendar — tell Envoy <em>how</em> to schedule each meeting. Lock specific time slots, set the format, add context. Every guest gets a link pre-configured with your rules.
             </p>
             <ul className="space-y-2">
               {[
                 ["Lock availability", "only offer the slots you want for this meeting"],
                 ["Set the format", "phone, video, coffee, dinner — Envoy enforces it"],
-                ["Add context", "\u201CThis is about Q2 planning, keep it to 30 min\u201D"],
+                ["Add context", "\u201Cabout Q2 planning, keep it to 30 min\u201D"],
                 ["Per-guest rules", "different priorities for different people"],
-                ["General link too", "a permanent link for your email signature that uses your default preferences"],
+                ["General link too", "a permanent link for your email signature"],
               ].map(([title, desc]) => (
-                <li key={title} className="flex items-start gap-2.5 text-sm text-secondary">
-                  <span className="text-accent font-bold mt-0.5 shrink-0">✓</span>
-                  <span><strong className="text-primary font-medium">{title}</strong> — {desc}</span>
+                <li key={title} className="flex items-start gap-3 text-[0.95rem] text-secondary leading-relaxed pl-0.5">
+                  <span
+                    className="shrink-0 w-4 h-4 rounded-full border border-accent flex items-center justify-center mt-1"
+                    style={{ background: "var(--accent-surface)" }}
+                  >
+                    <span className="block w-1 h-[7px] border-r-2 border-b-2 border-accent rotate-45 -translate-y-px" />
+                  </span>
+                  <span>
+                    <strong className="text-primary font-semibold">{title}</strong> — {desc}
+                  </span>
                 </li>
               ))}
             </ul>
           </div>
 
           {/* Mock link card */}
-          <div className="relative pb-4">
-            <div className="relative z-10 bg-surface-secondary border border-DEFAULT rounded-2xl overflow-hidden shadow-lg dark:shadow-[0_8px_40px_rgba(0,0,0,0.3)]">
-              {/* Header */}
-              <div className="px-5 py-3.5 border-b border-secondary flex items-center gap-2.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                <span className="font-mono text-xs text-muted flex-1">agentenvoy.ai/meet/john/q2-sarah</span>
+          <div className="relative">
+            <div className="relative z-10 bg-surface border border-DEFAULT rounded-3xl overflow-hidden shadow-[0_12px_48px_-8px_rgba(30,27,75,0.14)] dark:shadow-[0_12px_48px_-8px_rgba(0,0,0,0.5)]">
+              <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-secondary bg-surface-secondary">
+                <span
+                  className="w-2 h-2 rounded-full bg-emerald-500"
+                  style={{ boxShadow: "0 0 0 3px rgba(16,185,129,0.2)" }}
+                />
+                <span className="font-mono text-[0.78rem] text-muted flex-1 truncate">
+                  agentenvoy.ai/meet/john/q2-sarah
+                </span>
               </div>
-              {/* Body */}
               <div className="px-5 py-5">
-                <p className="font-semibold text-primary text-sm mb-0.5">Q2 Planning — Sarah Chen</p>
-                <p className="text-xs text-muted mb-5">Created 2 hours ago &middot; Expires Apr 18</p>
+                <p className="font-bold text-[1.02rem] text-primary mb-1 tracking-tight">Q2 Planning — Sarah Chen</p>
+                <p className="text-[0.78rem] text-muted mb-4">Created 2 hours ago &middot; Expires Apr 18</p>
 
                 {[
                   { icon: "📅", title: "Locked to Tue Apr 15", desc: "only 10am, 2pm, and 3:30pm offered" },
@@ -223,126 +276,68 @@ export default function Home() {
                   { icon: "📋", title: "Context:", desc: "\u201CReview Q2 marketing budget before Thursday board meeting\u201D" },
                 ].map((rule) => (
                   <div key={rule.title} className="flex items-start gap-3 py-2.5 border-t border-secondary">
-                    <span className="shrink-0 w-7 h-7 rounded-md bg-accent-surface flex items-center justify-center text-sm">{rule.icon}</span>
-                    <p className="text-sm text-secondary leading-snug">
-                      <strong className="text-primary font-medium">{rule.title}</strong> — {rule.desc}
+                    <span
+                      className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-sm border border-accent/15"
+                      style={{
+                        background:
+                          "linear-gradient(135deg, var(--accent-surface), color-mix(in srgb, var(--accent-2) 10%, transparent))",
+                      }}
+                    >
+                      {rule.icon}
+                    </span>
+                    <p className="text-[0.87rem] text-secondary leading-snug">
+                      <strong className="text-primary font-semibold">{rule.title}</strong> — {rule.desc}
                     </p>
                   </div>
                 ))}
               </div>
             </div>
-            {/* Stacked card behind */}
-            <div className="absolute bottom-0 left-3 right-3 h-14 bg-surface-tertiary border border-secondary rounded-b-2xl opacity-70 z-0" />
           </div>
         </div>
       </section>
 
-      {/* ── OFFICE HOURS SHOWCASE ──────────────────────── */}
-      <section id="office-hours" className="py-24 px-6">
-        <div className="max-w-[1000px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
-          {/* Text */}
-          <div>
-            <SectionLabel>New · Office Hours</SectionLabel>
-            <h2 className="text-3xl md:text-4xl font-bold text-primary mb-4">
-              One link. A recurring window. As many bookings as you want.
-            </h2>
-            <p className="text-base text-secondary leading-relaxed mb-7">
-              Declare a window once &mdash; &ldquo;Tuesdays 2&ndash;4pm, 20-min video calls&rdquo; &mdash;
-              and share a single URL. Anyone with the link can book an open slot without asking.
-              Envoy handles conflicts, double-booking, and the calendar invite.
-            </p>
-            <ul className="space-y-2">
-              {[
-                ["Plain-English setup", "type it like a rule: \u201Coffice hours Fridays 10\u2013noon, 30-min phone\u201D"],
-                ["One link, many guests", "each visitor books independently; already-taken slots disappear"],
-                ["Overrides soft blocks", "focus time and weekends don\u2019t hide office hours; real events still do"],
-                ["Lives with your rules", "pause, expire, or edit like any other availability rule"],
-              ].map(([title, desc]) => (
-                <li key={title} className="flex items-start gap-2.5 text-sm text-secondary">
-                  <span className="text-accent font-bold mt-0.5 shrink-0">✓</span>
-                  <span><strong className="text-primary font-medium">{title}</strong> &mdash; {desc}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Mock office hours card */}
-          <div className="relative">
-            <div className="bg-surface-secondary border border-DEFAULT rounded-2xl overflow-hidden shadow-lg dark:shadow-[0_8px_40px_rgba(0,0,0,0.3)]">
-              <div className="px-5 py-3.5 border-b border-secondary flex items-center gap-2.5">
-                <span className="w-2 h-2 rounded-full bg-accent" />
-                <span className="font-mono text-xs text-muted flex-1">agentenvoy.ai/meet/john/a7k2mp9q</span>
-              </div>
-              <div className="px-5 py-5">
-                <p className="font-semibold text-primary text-sm mb-0.5">Advising Office Hours</p>
-                <p className="text-xs text-muted mb-5">Tuesdays 2&ndash;4 PM &middot; 20-min video &middot; No end date</p>
-                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-accent mb-2">
-                  Open slots this week
-                </p>
-                <div className="grid grid-cols-3 gap-2">
-                  {["2:00 PM", "2:20 PM", "2:40 PM", "3:00 PM", "3:20 PM", "3:40 PM"].map((slot, i) => (
-                    <span
-                      key={slot}
-                      className={`text-xs font-medium rounded-lg px-2 py-1.5 text-center border ${
-                        i === 1
-                          ? "text-muted line-through border-DEFAULT bg-surface"
-                          : "text-primary border-accent bg-accent-surface"
-                      }`}
-                    >
-                      {slot}
-                    </span>
-                  ))}
-                </div>
-                <p className="text-[10px] text-muted mt-3 italic">2:20 already booked &mdash; Envoy won&rsquo;t offer it again</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── GROUP MEETINGS SHOWCASE ────────────────────── */}
+      {/* ── GROUP MEETINGS SHOWCASE ───────────────────────── */}
       <section id="groups" className="py-24 px-6">
-        <div className="max-w-[1000px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
-          {/* Mock group card (first on mobile, left on desktop) */}
-          <div className="order-first">
-            <div className="bg-surface-secondary border border-DEFAULT rounded-2xl overflow-hidden shadow-lg dark:shadow-[0_8px_40px_rgba(0,0,0,0.3)]">
-              {/* Header */}
-              <div className="px-5 py-4 border-b border-secondary">
-                <p className="font-semibold text-primary text-sm">Product Launch Sync</p>
-                <p className="text-xs text-muted">4 participants &middot; Finding overlap</p>
+        <div className="max-w-[1080px] mx-auto grid md:grid-cols-2 gap-16 items-center">
+          {/* Mock group card — first on mobile */}
+          <div className="order-first md:order-none">
+            <div className="bg-surface border border-DEFAULT rounded-3xl overflow-hidden shadow-[0_12px_48px_-8px_rgba(30,27,75,0.14)] dark:shadow-[0_12px_48px_-8px_rgba(0,0,0,0.5)]">
+              <div className="px-5 py-4 border-b border-secondary bg-surface-secondary">
+                <p className="font-bold text-[0.98rem] text-primary tracking-tight">Product Launch Sync</p>
+                <p className="text-[0.78rem] text-muted">4 participants &middot; Finding overlap</p>
               </div>
 
-              {/* Participants */}
               <div className="px-5 py-4 space-y-3">
                 {[
-                  { initials: "JA", name: "John (host)", status: "12 slots available this week", badge: "Host", badgeClass: "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400", gradient: "from-indigo-500 to-indigo-400" },
-                  { initials: "SC", name: "Sarah Chen", status: "Confirmed — prefers mornings", badge: "Confirmed", badgeClass: "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400", gradient: "from-emerald-500 to-emerald-400" },
+                  { initials: "JA", name: "John (host)", status: "12 slots available this week", badge: "Host", badgeClass: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400", gradient: "from-indigo-500 to-purple-500" },
+                  { initials: "SC", name: "Sarah Chen", status: "Confirmed — prefers mornings", badge: "Confirmed", badgeClass: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400", gradient: "from-emerald-500 to-emerald-400" },
                   { initials: "MR", name: "Marcus Rivera", status: "Chatting with Envoy now...", badge: "In Progress", badgeClass: "bg-accent-surface text-accent", gradient: "from-amber-500 to-amber-400" },
-                  { initials: "LP", name: "Lisa Park", status: "Link sent \u00b7 Not yet opened", badge: "Pending", badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400", gradient: "from-red-500 to-red-400" },
+                  { initials: "LP", name: "Lisa Park", status: "Link sent · Not yet opened", badge: "Pending", badgeClass: "bg-amber-500/10 text-amber-600 dark:text-amber-400", gradient: "from-red-500 to-red-400" },
                 ].map((p) => (
                   <div key={p.initials} className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${p.gradient} flex items-center justify-center text-xs font-semibold text-white shrink-0`}>
+                    <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${p.gradient} flex items-center justify-center text-[0.76rem] font-bold text-white shrink-0`}
+                      style={{ boxShadow: "0 2px 6px rgba(0,0,0,0.15)" }}
+                    >
                       {p.initials}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-primary">{p.name}</p>
-                      <p className="text-xs text-muted truncate">{p.status}</p>
+                      <p className="text-[0.87rem] font-semibold text-primary">{p.name}</p>
+                      <p className="text-[0.74rem] text-muted truncate">{p.status}</p>
                     </div>
-                    <span className={`text-[0.65rem] font-medium px-2 py-0.5 rounded-full shrink-0 ${p.badgeClass}`}>
+                    <span className={`text-[0.68rem] font-semibold px-2.5 py-0.5 rounded-full shrink-0 ${p.badgeClass}`}>
                       {p.badge}
                     </span>
                   </div>
                 ))}
               </div>
 
-              {/* Overlap */}
               <div className="px-5 py-4 border-t border-secondary bg-emerald-500/5">
-                <p className="text-[0.65rem] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-2">
+                <p className="text-[0.72rem] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-2">
                   Overlap found (3 of 4 confirmed)
                 </p>
                 <div className="flex gap-2 flex-wrap">
                   {["Tue 10:00 AM", "Wed 2:00 PM", "Thu 11:30 AM"].map((slot) => (
-                    <span key={slot} className="text-xs font-medium text-primary bg-surface border border-emerald-500 rounded-lg px-2.5 py-1">
+                    <span key={slot} className="text-[0.8rem] font-semibold text-primary bg-surface border-2 border-emerald-500 rounded-xl px-2.5 py-1">
                       {slot}
                     </span>
                   ))}
@@ -351,15 +346,13 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Text */}
           <div>
             <SectionLabel>Group Scheduling</SectionLabel>
-            <h2 className="text-3xl md:text-4xl font-bold text-primary mb-4">
+            <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight mb-4 leading-[1.15]">
               Coordinate across multiple people
             </h2>
             <p className="text-base text-secondary leading-relaxed mb-7">
-              Send each participant their own link. Everyone chats privately with Envoy — no reply-all
-              chains, no polling. Envoy finds the overlap and books it.
+              Send each participant their own link. Everyone chats privately with Envoy — no reply-all chains, no polling. Envoy finds the overlap and books it.
             </p>
             <ul className="space-y-2">
               {[
@@ -368,9 +361,13 @@ export default function Home() {
                 ["No account needed", "guests just click a link and chat"],
                 ["Scales naturally", "works for 2 people or 20"],
               ].map(([title, desc]) => (
-                <li key={title} className="flex items-start gap-2.5 text-sm text-secondary">
-                  <span className="text-emerald-500 font-bold mt-0.5 shrink-0">✓</span>
-                  <span><strong className="text-primary font-medium">{title}</strong> — {desc}</span>
+                <li key={title} className="flex items-start gap-3 text-[0.95rem] text-secondary leading-relaxed pl-0.5">
+                  <span className="shrink-0 w-4 h-4 rounded-full border border-emerald-500 flex items-center justify-center mt-1 bg-emerald-500/10">
+                    <span className="block w-1 h-[7px] border-r-2 border-b-2 border-emerald-500 rotate-45 -translate-y-px" />
+                  </span>
+                  <span>
+                    <strong className="text-primary font-semibold">{title}</strong> — {desc}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -378,70 +375,257 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── FEATURES GRID ──────────────────────────────── */}
-      <section id="features" className="py-24 px-6 text-center">
-        <div className="max-w-[1120px] mx-auto">
-          <SectionLabel>And More</SectionLabel>
-          <h2 className="text-3xl md:text-4xl font-bold text-primary mb-12">
+      {/* ── AGENTS NEGOTIATING VISION ──────────────────────── */}
+      <section className="relative py-24 px-6 text-center overflow-hidden bg-surface-inset">
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: "radial-gradient(ellipse 700px 300px at 50% 50%, color-mix(in srgb, var(--accent-2) 10%, transparent) 0%, transparent 70%)",
+          }}
+        />
+        <div className="relative max-w-[1080px] mx-auto">
+          <SectionLabel>The Vision</SectionLabel>
+          <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight mb-4">
+            Agents negotiating with agents
+          </h2>
+          <p className="text-base md:text-lg text-secondary max-w-2xl mx-auto mb-14 leading-relaxed">
+            When both sides have an AI, you don&apos;t need a scheduling link. The agents talk directly, negotiate per each person&apos;s preferences, and drop a calendar invite in both inboxes. It&apos;s what email should have been.
+          </p>
+
+          <div className="max-w-[900px] mx-auto grid md:grid-cols-[1fr_auto_1fr] gap-5 items-center">
+            <AgentNode icon="🧑‍💼" label="Your Agent" sub="Claude, ChatGPT, or any MCP client" />
+            <Connector />
+            <AgentNode icon="🤝" label="AgentEnvoy" sub="Neutral administrator" highlighted />
+          </div>
+          <div className="max-w-[900px] mx-auto grid md:grid-cols-[1fr_auto_1fr] gap-5 items-center -mt-3">
+            <div />
+            <Connector />
+            <AgentNode icon="👤" label="Their Agent" sub="Or a human on a link" />
+          </div>
+        </div>
+      </section>
+
+      {/* ── MCP TEASER ────────────────────────────────────── */}
+      <section className="py-24 px-6">
+        <div className="max-w-[1080px] mx-auto grid md:grid-cols-2 gap-16 items-center">
+          <div>
+            <SectionLabel>Open Standard</SectionLabel>
+            <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight mb-4 leading-[1.15]">
+              Point your agent at it
+            </h2>
+            <p className="text-base text-secondary leading-relaxed mb-6">
+              AgentEnvoy is an open scheduling protocol. Any agent that speaks MCP or REST can read your availability, propose times, and book meetings on your behalf — with your rules enforced.
+            </p>
+            <div className="flex flex-wrap gap-2 mb-6">
+              <TechBadge color="accent">MCP</TechBadge>
+              <TechBadge color="accent2">REST API</TechBadge>
+              <TechBadge color="accent3">Open Spec</TechBadge>
+            </div>
+            <a
+              href="/mcp"
+              className="inline-flex items-center gap-2 bg-transparent text-primary border border-DEFAULT hover:bg-surface-secondary hover:border-muted px-5 py-3 rounded-xl text-[0.95rem] font-medium transition"
+            >
+              Read the developer docs
+              <ArrowRight className="w-3.5 h-3.5" />
+            </a>
+          </div>
+
+          {/* Code block */}
+          <div className="rounded-2xl overflow-hidden border border-DEFAULT shadow-[0_12px_48px_-8px_rgba(30,27,75,0.18)] font-mono" style={{ background: "#0c0c14" }}>
+            <div className="px-4 py-3 flex items-center gap-2 border-b border-white/5" style={{ background: "rgba(255,255,255,0.03)" }}>
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+              <span className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+              <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
+              <span className="flex-1 text-center text-[0.78rem] text-zinc-400">my-agent.py</span>
+            </div>
+            <pre className="px-5 py-5 text-[0.82rem] leading-[1.7] text-zinc-200 overflow-x-auto">
+<span className="text-zinc-500 italic"># Point any MCP client at AgentEnvoy</span>
+{"\n"}<span className="text-purple-300">from</span> mcp <span className="text-purple-300">import</span> Client
+
+envoy = Client(<span className="text-emerald-300">&quot;https://agentenvoy.ai/mcp&quot;</span>)
+
+<span className="text-zinc-500 italic"># Your agent, scheduling on your behalf</span>
+{"\n"}result = envoy.<span className="text-blue-300">schedule_meeting</span>(
+  <span className="text-yellow-300">with_</span>=<span className="text-emerald-300">&quot;sarah@acme.com&quot;</span>,
+  <span className="text-yellow-300">context</span>=<span className="text-emerald-300">&quot;Q2 review, keep it to 30 min&quot;</span>,
+  <span className="text-yellow-300">format</span>=<span className="text-emerald-300">&quot;phone&quot;</span>,
+)
+
+<span className="text-zinc-500 italic"># → Envoy negotiates with Sarah, books it,</span>
+{"\n"}<span className="text-zinc-500 italic">#   and drops the invite in both calendars.</span>
+            </pre>
+          </div>
+        </div>
+      </section>
+
+      {/* ── FEATURES ──────────────────────────────────────── */}
+      <section id="features" className="py-24 px-6 text-center bg-surface-inset">
+        <div className="max-w-[1160px] mx-auto">
+          <SectionLabel>Under the Hood</SectionLabel>
+          <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight mb-12">
             Built for real scheduling
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 text-left">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-left">
             {[
               { icon: "📅", title: "Calendar Intelligence", desc: "Real-time Google Calendar sync. Understands declined invites, tentative holds, focus time, and recurring events." },
-              { icon: "🔒", title: "Privacy First", desc: "Guests never see your calendar. Envoy shares only what it needs to negotiate. Your schedule stays private." },
-              { icon: "🤖", title: "Agent-Native API", desc: "Your AI agent talks to Envoy via REST or MCP. No human in the loop for routine scheduling." },
+              { icon: "🔒", title: "Privacy First", desc: "Guests never see your calendar. Envoy shares only what it needs. Your schedule stays private." },
+              { icon: "🔌", title: "MCP + REST", desc: "Point any AI agent at our open API. MCP server, REST endpoints, and a published spec." },
               { icon: "⚡", title: "Scoring Engine", desc: "Every slot gets a protection score. Deterministic, <10ms, no AI calls. Consistent and explainable." },
             ].map((f) => (
-              <div key={f.title} className="bg-surface-secondary border border-secondary rounded-2xl p-6 hover:border-DEFAULT hover:-translate-y-0.5 transition-all">
-                <span className="text-2xl mb-3 block">{f.icon}</span>
-                <h3 className="text-sm font-semibold text-primary mb-1.5">{f.title}</h3>
-                <p className="text-xs text-secondary leading-relaxed">{f.desc}</p>
+              <div key={f.title} className="bg-surface border border-DEFAULT rounded-2xl p-6 transition hover:border-accent hover:-translate-y-0.5 hover:shadow-accent-glow">
+                <div
+                  className="inline-flex w-10 h-10 rounded-xl items-center justify-center mb-3.5 text-lg border border-accent/10"
+                  style={{
+                    background: "linear-gradient(135deg, var(--accent-surface), color-mix(in srgb, var(--accent-2) 10%, transparent))",
+                  }}
+                >
+                  {f.icon}
+                </div>
+                <h3 className="text-[1rem] font-bold tracking-tight mb-1.5">{f.title}</h3>
+                <p className="text-[0.85rem] text-secondary leading-relaxed">{f.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── TRUST BAR ──────────────────────────────────── */}
-      <section className="py-16 px-6 bg-accent-surface text-center">
+      {/* ── TRUST BAR ─────────────────────────────────────── */}
+      <section
+        className="py-16 px-6 text-center border-t border-b border-secondary"
+        style={{
+          background:
+            "linear-gradient(135deg, var(--accent-surface), color-mix(in srgb, var(--accent-2) 12%, transparent))",
+        }}
+      >
         <div className="max-w-[720px] mx-auto">
-          <h3 className="text-base font-semibold text-primary mb-3 flex items-center justify-center gap-2">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
+          <h3 className="text-lg font-bold tracking-tight mb-3.5 inline-flex items-center gap-2.5">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
             Your data, your rules
           </h3>
-          <p className="text-sm text-secondary leading-relaxed mb-5">
-            Envoy reads your calendar to understand your schedule — but never shares event details with guests.
-            Preferences are stored as structured data, not sent to third parties. No training on your data. Delete anytime.
+          <p className="text-[0.95rem] text-secondary leading-relaxed mb-5">
+            Envoy reads your calendar to understand your schedule — but never shares event details with guests. Preferences are stored as structured data. No training on your data. Delete anytime.
           </p>
-          <div className="flex justify-center gap-6">
-            <a href="/privacy" className="text-sm text-accent font-medium hover:underline">Read our Privacy Policy &rarr;</a>
-            <a href="/faq#under-the-hood" className="text-sm text-accent font-medium hover:underline">See How Scoring Works &rarr;</a>
+          <div className="flex justify-center gap-7 flex-wrap">
+            <a href="/privacy" className="text-sm text-accent font-semibold hover:underline">Privacy Policy &rarr;</a>
+            <a href="/terms" className="text-sm text-accent font-semibold hover:underline">Terms &rarr;</a>
+            <a href="/mcp" className="text-sm text-accent font-semibold hover:underline">Developer Docs &rarr;</a>
           </div>
         </div>
       </section>
 
-      {/* ── FINAL CTA ──────────────────────────────────── */}
-      <section id="cta" className="py-28 md:py-32 px-6 text-center relative">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_60%,#e8e8f0_0%,#ffffff_70%)] dark:bg-[radial-gradient(ellipse_at_50%_60%,#1a1a2e_0%,#0a0a0f_70%)]" />
-        <div className="relative z-10 max-w-[600px] mx-auto">
-          <h2 className="text-3xl md:text-4xl font-bold text-primary mb-4">
+      {/* ── FINAL CTA ─────────────────────────────────────── */}
+      <section id="cta" className="relative py-28 md:py-32 px-6 text-center overflow-hidden">
+        <div
+          className="absolute inset-0 -z-10 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 700px 400px at 50% 60%, color-mix(in srgb, var(--accent) 16%, transparent) 0%, transparent 70%), radial-gradient(ellipse 500px 300px at 80% 20%, color-mix(in srgb, var(--accent-2) 12%, transparent) 0%, transparent 70%)",
+          }}
+        />
+        <div className="max-w-[620px] mx-auto">
+          <h2 className="text-4xl md:text-[2.75rem] font-extrabold tracking-[-0.03em] mb-4">
             Ready to stop scheduling?
           </h2>
-          <p className="text-base md:text-lg text-secondary mb-10">
+          <p className="text-base md:text-lg text-secondary mb-9">
             Connect your Google Calendar and let Envoy handle the back-and-forth.
           </p>
-          <button
-            onClick={handleSignIn}
-            className="inline-flex items-center justify-center gap-2.5 bg-indigo-600 hover:bg-indigo-500 text-white px-10 py-4 rounded-xl text-lg font-medium transition shadow-lg shadow-indigo-500/20 hover:-translate-y-0.5"
-          >
-            <GoogleIcon className="w-5 h-5" />
-            Get Started with Google
-          </button>
-          <p className="text-xs text-muted mt-4">Free while in beta. No credit card required.</p>
+          <div className="inline-flex gap-3.5 items-center flex-wrap justify-center">
+            <button
+              onClick={handleSignIn}
+              className="inline-flex items-center gap-2.5 bg-accent hover:bg-accent-hover text-white px-9 py-4 rounded-xl text-lg font-semibold transition shadow-accent-glow-lg hover:-translate-y-0.5 group"
+            >
+              <GoogleIcon className="w-5 h-5" />
+              Get Started with Google
+              <ArrowRight className="w-4 h-4 transition group-hover:translate-x-0.5" />
+            </button>
+            <a
+              href="/mcp"
+              className="inline-flex items-center gap-2 bg-transparent text-primary border border-DEFAULT hover:bg-surface-secondary px-6 py-4 rounded-xl text-base font-medium transition"
+            >
+              View developer docs
+            </a>
+          </div>
+          <p className="text-xs text-muted mt-5">Free while in beta &middot; No credit card required</p>
         </div>
       </section>
     </>
+  );
+}
+
+/* ── Sub-components ──────────────────────────────────────── */
+
+function AgentNode({
+  icon,
+  label,
+  sub,
+  highlighted,
+}: {
+  icon: string;
+  label: string;
+  sub: string;
+  highlighted?: boolean;
+}) {
+  if (highlighted) {
+    return (
+      <div
+        className="rounded-3xl p-6 text-center text-white shadow-accent-glow-lg"
+        style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }}
+      >
+        <div className="inline-flex w-14 h-14 rounded-2xl items-center justify-center text-2xl mb-3 bg-white/20">
+          {icon}
+        </div>
+        <div className="text-[0.95rem] font-bold tracking-tight mb-0.5">{label}</div>
+        <div className="text-[0.78rem] opacity-80">{sub}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="bg-surface border border-DEFAULT rounded-3xl p-6 text-center shadow-[0_8px_32px_-8px_rgba(30,27,75,0.12)] dark:shadow-[0_8px_32px_-8px_rgba(0,0,0,0.4)]">
+      <div
+        className="inline-flex w-14 h-14 rounded-2xl items-center justify-center text-2xl mb-3"
+        style={{ background: "var(--accent-surface)" }}
+      >
+        {icon}
+      </div>
+      <div className="text-[0.95rem] font-bold tracking-tight mb-0.5">{label}</div>
+      <div className="text-[0.78rem] text-muted">{sub}</div>
+    </div>
+  );
+}
+
+function Connector() {
+  return (
+    <div className="flex justify-center md:block">
+      <div
+        className="relative h-0.5 w-20 rounded overflow-hidden md:rotate-0 rotate-90"
+        style={{ background: "linear-gradient(90deg, var(--accent), var(--accent-2))" }}
+      >
+        <div
+          className="absolute top-0 h-full w-[30%] animate-flow-line"
+          style={{
+            background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.8), transparent)",
+            left: "-30%",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TechBadge({ children, color }: { children: React.ReactNode; color: "accent" | "accent2" | "accent3" }) {
+  const styles = {
+    accent: { bg: "var(--accent-surface)", fg: "var(--accent)", border: "color-mix(in srgb, var(--accent) 25%, transparent)" },
+    accent2: { bg: "color-mix(in srgb, var(--accent-2) 12%, transparent)", fg: "var(--accent-2)", border: "color-mix(in srgb, var(--accent-2) 30%, transparent)" },
+    accent3: { bg: "color-mix(in srgb, var(--accent-3) 12%, transparent)", fg: "var(--accent-3)", border: "color-mix(in srgb, var(--accent-3) 35%, transparent)" },
+  }[color];
+  return (
+    <span
+      className="text-[0.7rem] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full border"
+      style={{ background: styles.bg, color: styles.fg, borderColor: styles.border }}
+    >
+      {children}
+    </span>
   );
 }
