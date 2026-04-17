@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
             duration: existingSession.duration,
             meetLink: existingSession.meetLink,
             messages: existingSession.messages.map((m) => ({
-              id: m.id, role: m.role, content: m.content, createdAt: m.createdAt.toISOString(),
+              id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),
             host: { name: user.name },
             link: linkPayload,
@@ -227,7 +227,7 @@ export async function POST(req: NextRequest) {
             statusLabel: existingSession.statusLabel,
             greeting: existingSession.messages[0].content,
             messages: existingSession.messages.map((m) => ({
-              id: m.id, role: m.role, content: m.content, createdAt: m.createdAt.toISOString(),
+              id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),
             resumed: true,
             host: { name: user.name },
@@ -283,7 +283,7 @@ export async function POST(req: NextRequest) {
             duration: existingSession.duration,
             meetLink: existingSession.meetLink,
             messages: existingSession.messages.map((m) => ({
-              id: m.id, role: m.role, content: m.content, createdAt: m.createdAt.toISOString(),
+              id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),
             host: { name: user.name },
             link: linkPayload,
@@ -302,7 +302,7 @@ export async function POST(req: NextRequest) {
             statusLabel: existingSession.statusLabel,
             greeting: existingSession.messages[0].content,
             messages: existingSession.messages.map((m) => ({
-              id: m.id, role: m.role, content: m.content, createdAt: m.createdAt.toISOString(),
+              id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),
             resumed: true,
             host: { name: user.name },

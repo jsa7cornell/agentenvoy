@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { AgentContext, extractAvailabilitySummary } from "@/agent/administrator";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import type { CalendarContext } from "@/lib/calendar";
@@ -25,6 +26,40 @@ function parseStatusUpdate(content: string): { status: string; label: string } |
 
 function stripStatusUpdate(content: string): string {
   return content.replace(/\s*\[STATUS_UPDATE\].*?\[\/STATUS_UPDATE\]\s*/g, "").trim();
+}
+
+// Slice 9 — Proxy attribution (Layer 2 of the proxy framework). When Envoy
+// detects a proxy via Layer 1's conversational signals, it emits one of
+// these blocks inline:
+//
+//   [DELEGATE_SPEAKER]{"kind":"ai_agent","name":"OpenClaw"}[/DELEGATE_SPEAKER]
+//   [DELEGATE_SPEAKER]{"kind":"human_assistant","name":"Sarah's EA"}[/DELEGATE_SPEAKER]
+//   [DELEGATE_SPEAKER]{"kind":"unknown"}[/DELEGATE_SPEAKER]
+//
+// The block attaches to the most recent GUEST-role message (the one that
+// triggered detection) via message.metadata.delegateSpeaker. The UI reads
+// that metadata and renders a small "via {name}" badge. Envoy emits once
+// per distinct speaker — subsequent messages from the same proxy don't
+// need to repeat the block.
+const VALID_DELEGATE_KINDS = new Set(["human_assistant", "ai_agent", "unknown"]);
+
+function parseDelegateSpeaker(content: string): { kind: string; name?: string } | null {
+  const match = content.match(/\[DELEGATE_SPEAKER\](.*?)\[\/DELEGATE_SPEAKER\]/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (typeof parsed?.kind !== "string" || !VALID_DELEGATE_KINDS.has(parsed.kind)) return null;
+    const name = typeof parsed.name === "string" && parsed.name.length > 0 && parsed.name.length <= 80
+      ? parsed.name
+      : undefined;
+    return { kind: parsed.kind, name };
+  } catch {
+    return null;
+  }
+}
+
+function stripDelegateSpeaker(content: string): string {
+  return content.replace(/\s*\[DELEGATE_SPEAKER\].*?\[\/DELEGATE_SPEAKER\]\s*/g, "").trim();
 }
 
 // POST /api/negotiate/message
@@ -216,10 +251,44 @@ export async function POST(req: NextRequest) {
         const statusUpdate = parseStatusUpdate(displayText);
         displayText = stripStatusUpdate(displayText);
 
+        // Parse delegate-speaker attribution if present (Slice 9). Writes
+        // to the most recent guest message's metadata so the UI can render
+        // a "via {name}" badge next to it. Stripped from displayText like
+        // STATUS_UPDATE so the block never shows in the UI.
+        const delegateSpeaker = parseDelegateSpeaker(displayText);
+        displayText = stripDelegateSpeaker(displayText);
+
         // Save the response (stripped of all blocks)
         await prisma.message.create({
           data: { sessionId, role: "administrator", content: displayText },
         });
+
+        if (delegateSpeaker) {
+          try {
+            const targetGuestMsg = await prisma.message.findFirst({
+              where: { sessionId, role: "guest" },
+              orderBy: { createdAt: "desc" },
+              select: { id: true, metadata: true },
+            });
+            if (targetGuestMsg) {
+              const prev = (targetGuestMsg.metadata as Record<string, unknown> | null) ?? {};
+              await prisma.message.update({
+                where: { id: targetGuestMsg.id },
+                data: {
+                  metadata: {
+                    ...prev,
+                    delegateSpeaker,
+                  } as unknown as Prisma.InputJsonValue,
+                },
+              });
+              console.log(
+                `[negotiate/message] delegate-speaker attached | session=${sessionId} | kind=${delegateSpeaker.kind}${delegateSpeaker.name ? ` name=${delegateSpeaker.name}` : ""}`,
+              );
+            }
+          } catch (e) {
+            console.error("[negotiate/message] delegate-speaker write failed:", e);
+          }
+        }
 
         // Update session status from AI block, or fall back to thread status heuristic
         if (statusUpdate && VALID_STATUSES.includes(statusUpdate.status)) {
