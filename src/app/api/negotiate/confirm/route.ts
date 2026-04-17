@@ -7,7 +7,6 @@ import { getUserTimezone } from "@/lib/timezone";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { logRouteError } from "@/lib/route-error";
 import { buildGuestConfirmationEmail } from "@/lib/emails/guest-confirmation";
-import { buildHostBookingConfirmedEmail } from "@/lib/emails/host-booking-confirmed";
 
 // POST /api/negotiate/confirm
 // Confirm an agreed-upon time — creates calendar events, sends emails.
@@ -379,34 +378,12 @@ export async function POST(req: NextRequest) {
         })
       : Promise.resolve(null);
 
-    // Task F: host email context — upcoming + pending sessions.
-    // Fetched in-parallel so they're ready for fire-and-forget dispatch below.
-    const taskHostEmailData = (async () => {
-      const now = new Date();
-      const [upcoming, pending] = await Promise.all([
-        prisma.negotiationSession.findMany({
-          where: { hostId: session.hostId, status: "agreed", archived: false, agreedTime: { gte: now }, id: { not: sessionId } },
-          orderBy: { agreedTime: "asc" },
-          take: 5,
-          select: { agreedTime: true, duration: true, agreedFormat: true, format: true, link: { select: { inviteeName: true } } },
-        }),
-        prisma.negotiationSession.findMany({
-          where: { hostId: session.hostId, status: "active", archived: false },
-          orderBy: { updatedAt: "desc" },
-          take: 4,
-          select: { link: { select: { inviteeName: true, topic: true } }, updatedAt: true },
-        }),
-      ]);
-      return { upcoming, pending };
-    })();
-
-    const [, , holdResult, allMessages, , hostEmailData] = await Promise.all([
+    const [, , holdResult, allMessages] = await Promise.all([
       taskFinalizeSession,
       taskInvalidate,
       taskHoldCleanup,
       taskMessages,
       taskParticipants,
-      taskHostEmailData,
     ]);
     const tParMs = Date.now() - tParStart;
 
@@ -489,78 +466,41 @@ export async function POST(req: NextRequest) {
       })()
     );
 
-    // === Guest confirmation email (critical path — guests expect it instantly) ===
+    // === Meeting confirmation email — sent to both host and guest ===
     const tEmailStart = Date.now();
     const guestTz = session.guestTimezone || null;
 
-    const guestRecipients = isGroupEvent
+    // Build the recipient list: host always gets it; guest added when known.
+    const confirmRecipients = isGroupEvent
       ? attendeeEmails
-      : guestEmail ? [guestEmail] : [];
+      : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
 
-    let emailSent = false;
-    if (guestRecipients.length > 0) {
-      const { subject: guestSubject, html: guestHtml } = buildGuestConfirmationEmail({
-        hostName: session.host.name || "The organizer",
-        guestName: session.link.inviteeName || undefined,
-        topic: session.link.topic || undefined,
-        dateTime: startTime,
-        duration: durationMin,
-        format: meetingFormat,
-        location: effectiveLocation || undefined,
-        meetLink,
-        hostTimezone,
-        guestTimezone: guestTz,
-        dealRoomUrl,
-      });
-      const emailResult = await dispatch({
-        kind: "email.send",
-        to: guestRecipients,
-        subject: guestSubject,
-        html: guestHtml,
-        context: { sessionId: session.id, hostId: session.hostId, purpose: "guest_confirmation" },
-      });
-      emailSent = emailResult.status === "sent";
-      if (emailResult.status === "failed") {
-        console.error("[confirm] guest confirmation email failed:", emailResult.error);
-      }
-    }
-
-    // === Host booking-confirmed email (fire-and-forget — host is never blocking) ===
-    const hostFirst = session.host.name?.split(/\s+/)[0] ?? null;
-    const { subject: hostSubject, html: hostHtml } = buildHostBookingConfirmedEmail({
-      hostFirstName: hostFirst,
-      guestName: session.link.inviteeName || null,
-      guestEmail: guestEmail,
-      topic: session.link.topic || null,
+    const { subject: confirmSubject, html: confirmHtml } = buildGuestConfirmationEmail({
+      hostName: session.host.name || "The organizer",
+      guestName: session.link.inviteeName || undefined,
+      topic: session.link.topic || undefined,
       dateTime: startTime,
       duration: durationMin,
       format: meetingFormat,
-      location: effectiveLocation || null,
+      location: effectiveLocation || undefined,
       meetLink,
       hostTimezone,
       guestTimezone: guestTz,
       dealRoomUrl,
-      upcoming: hostEmailData.upcoming.map((s) => ({
-        agreedTime: s.agreedTime!,
-        guestDisplay: s.link.inviteeName || "Guest",
-        duration: s.duration || 30,
-        format: s.agreedFormat || s.format || "video",
-      })),
-      pending: hostEmailData.pending.map((s) => ({
-        guestDisplay: s.link.inviteeName || "Guest",
-        topic: s.link.topic,
-        updatedAt: s.updatedAt,
-      })),
     });
-    dispatch({
+
+    let emailSent = false;
+    const emailResult = await dispatch({
       kind: "email.send",
-      to: hostEmail,
-      subject: hostSubject,
-      html: hostHtml,
-      context: { sessionId: session.id, hostId: session.hostId, purpose: "host_booking_confirmed" },
-    }).catch((e) => {
-      console.error("[confirm] host_booking_confirmed email failed:", e);
+      to: confirmRecipients,
+      subject: confirmSubject,
+      html: confirmHtml,
+      context: { sessionId: session.id, hostId: session.hostId, purpose: "meeting_confirmed" },
     });
+    emailSent = emailResult.status === "sent";
+    if (emailResult.status === "failed") {
+      console.error("[confirm] meeting confirmation email failed:", emailResult.error);
+    }
 
     const tEmailMs = Date.now() - tEmailStart;
 
