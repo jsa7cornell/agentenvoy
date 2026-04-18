@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   HOUR_START,
   HOUR_END,
@@ -121,6 +121,27 @@ export function WeeklyCalendar({
     return result;
   }, [weekStart]);
 
+  // Live "now" tick — drives the today-bubble, past-day shading, and the
+  // red current-time indicator line. Updates every 60s so the line moves
+  // and today flips at midnight without a page reload.
+  const [now, setNow] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Today's YYYY-MM-DD in the calendar's display timezone — so "today"
+  // matches what the grid actually labels, not the viewer's server tz.
+  const todayStr = useMemo(() => toDayStr(now.toISOString(), timezone), [now, timezone]);
+
+  // Current-time offset in minutes-since-midnight (display timezone).
+  // Used to position the red line within today's column.
+  const nowMinutesInDay = useMemo(
+    () => toMinutesInDay(now.toISOString(), timezone),
+    [now, timezone]
+  );
+  const todayIndex = days.indexOf(todayStr); // -1 if this week doesn't include today
+
   // Index slots by day+time for quick lookup
   const slotIndex = useMemo(() => {
     const idx: Record<string, TunerSlot> = {};
@@ -201,15 +222,39 @@ export function WeeklyCalendar({
       {/* Scrollable calendar area */}
       <div className="flex-1 overflow-auto">
         <div className="min-w-[700px]">
-          {/* Header row: day labels + locations */}
+          {/* Header row: day labels + locations.
+              For the current day, render the date number in a filled
+              circle — same visual pattern Google Calendar uses so it's
+              unambiguous which column the red time line belongs to. */}
           <div className="grid sticky top-0 z-20 bg-surface border-b border-secondary"
             style={{ gridTemplateColumns: "56px repeat(7, minmax(0, 1fr))" }}>
             <div className="p-2" /> {/* gutter */}
             {days.map((day) => {
               const loc = locationByDay[day];
+              const isToday = day === todayStr;
+              const isPast = day < todayStr;
+              const d = new Date(day + "T12:00:00");
+              const weekdayLabel = d.toLocaleDateString("en-US", { weekday: "short" });
+              const dayNum = d.getDate();
               return (
-                <div key={day} className="px-1 py-2 text-center border-l border-secondary">
-                  <div className="text-xs font-medium text-primary">{formatDayHeader(day)}</div>
+                <div
+                  key={day}
+                  className={`px-1 py-2 text-center border-l border-secondary ${isPast ? "opacity-60" : ""}`}
+                >
+                  <div className={`text-[10px] uppercase tracking-wider ${isToday ? "text-indigo-400 font-semibold" : "text-muted"}`}>
+                    {weekdayLabel}
+                  </div>
+                  <div className="mt-0.5 flex justify-center">
+                    {isToday ? (
+                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-indigo-500 text-white text-sm font-semibold">
+                        {dayNum}
+                      </span>
+                    ) : (
+                      <span className={`text-sm font-medium ${isPast ? "text-muted" : "text-primary"}`}>
+                        {dayNum}
+                      </span>
+                    )}
+                  </div>
                   {loc && (
                     <div className="mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] bg-surface-secondary text-secondary border border-DEFAULT">
                       {loc}
@@ -229,8 +274,12 @@ export function WeeklyCalendar({
               </div>
               {days.map((day) => {
                 const allDayEvents = allDayByDay[day] || [];
+                const isPast = day < todayStr;
                 return (
-                  <div key={day} className="border-l border-secondary px-1 py-1 flex flex-col gap-0.5 min-h-[28px]">
+                  <div
+                    key={day}
+                    className={`border-l border-secondary px-1 py-1 flex flex-col gap-0.5 min-h-[28px] ${isPast ? "opacity-60" : ""}`}
+                  >
                     {allDayEvents.map((e) => (
                       <div
                         key={e.id}
@@ -264,10 +313,20 @@ export function WeeklyCalendar({
             </div>
 
             {/* Day columns */}
-            {days.map((day) => (
+            {days.map((day) => {
+              const isToday = day === todayStr;
+              const isPast = day < todayStr;
+              // Red current-time line — only on today's column, and only when
+              // the current minute falls inside the visible grid range.
+              const nowTop = ((nowMinutesInDay - gridStartMin) / 30) * ROW_HEIGHT;
+              const showNowLine =
+                isToday &&
+                nowMinutesInDay >= gridStartMin &&
+                nowMinutesInDay <= HOUR_END * 60;
+              return (
               <div
                 key={day}
-                className="relative border-l border-secondary"
+                className={`relative border-l border-secondary ${isPast ? "opacity-60" : ""}`}
                 style={{ height: TOTAL_ROWS * ROW_HEIGHT }}
               >
                 {/* Slot backgrounds */}
@@ -345,8 +404,38 @@ export function WeeklyCalendar({
                     </div>
                   );
                 })}
+
+                {/* Red "now" line — Google Calendar–style horizontal marker
+                    at the current minute inside today's column. The knob on
+                    the left edge helps eye-track which column it belongs to
+                    even when the viewer scrolls. Lives ABOVE opacity so the
+                    past-day fade on other columns never applies here. */}
+                {showNowLine && (
+                  <div
+                    className="absolute inset-x-0 z-20 pointer-events-none"
+                    style={{ top: nowTop - 1 }}
+                  >
+                    <div className="relative">
+                      <div className="h-[2px] bg-red-500" />
+                      <div className="absolute -left-1 -top-1 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-surface" />
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
+            {/* Horizontal "now" rule spanning the full grid width — faint,
+                runs across past days too so the viewer can see "everything
+                above here already happened." Uses a lower z-index than
+                the solid today line so they stack cleanly. */}
+            {todayIndex !== -1 && nowMinutesInDay >= gridStartMin && nowMinutesInDay <= HOUR_END * 60 && (
+              <div
+                className="absolute left-0 right-0 z-10 pointer-events-none"
+                style={{ top: ((nowMinutesInDay - gridStartMin) / 30) * ROW_HEIGHT }}
+              >
+                <div className="h-px bg-red-500/20" />
+              </div>
+            )}
           </div>
         </div>
       </div>
