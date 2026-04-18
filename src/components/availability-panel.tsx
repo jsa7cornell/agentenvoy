@@ -489,26 +489,35 @@ export function AvailabilityPanel({
       {showControls && (
         <div className="ml-auto flex items-center gap-2">
           {/* Calendar picker — "Calendars" label + small colored boxes, Google-style */}
-          <div className="relative">
+          <div className="relative flex items-center gap-1.5 px-1.5 py-0.5 text-[10px] text-muted">
             <button
               onClick={() => setCalPickerOpen((o) => !o)}
-              className="flex items-center gap-1.5 px-1.5 py-0.5 text-[10px] text-muted hover:text-primary transition"
-              title="Calendars"
+              className="hover:text-primary transition"
+              title="Manage calendars"
             >
-              <span>Calendars</span>
-              <span className="flex items-center gap-[3px]">
-                {sortedCalendars.slice(0, 6).map((c) => (
-                  <span
-                    key={c.id}
-                    className={`w-2 h-2 rounded-sm border ${isCalendarActive(c.id) ? "" : "opacity-25"}`}
-                    style={{
-                      backgroundColor: c.backgroundColor || "#6366f1",
-                      borderColor: c.backgroundColor || "#6366f1",
-                    }}
-                  />
-                ))}
-              </span>
-              <span>▾</span>
+              Calendars
+            </button>
+            <span className="flex items-center gap-[3px]">
+              {sortedCalendars.slice(0, 6).map((c) => (
+                <button
+                  key={c.id}
+                  onClick={(e) => { e.stopPropagation(); toggleCalendarActive(c.id); }}
+                  disabled={savingCalendarFilter}
+                  title={`${c.name}${c.primary ? " (primary)" : ""} — click to ${isCalendarActive(c.id) ? "hide" : "show"}`}
+                  className={`w-2 h-2 rounded-sm border cursor-pointer hover:scale-125 transition disabled:opacity-50 ${isCalendarActive(c.id) ? "" : "opacity-25"}`}
+                  style={{
+                    backgroundColor: c.backgroundColor || "#6366f1",
+                    borderColor: c.backgroundColor || "#6366f1",
+                  }}
+                />
+              ))}
+            </span>
+            <button
+              onClick={() => setCalPickerOpen((o) => !o)}
+              className="hover:text-primary transition"
+              title="Manage calendars"
+            >
+              ▾
             </button>
             {calPickerOpen && (
               <>

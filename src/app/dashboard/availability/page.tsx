@@ -3,8 +3,8 @@
 import { useSession, signIn } from "next-auth/react";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calendar";
-import { DayView } from "@/components/day-view";
 import { AvailabilityRules } from "@/components/availability-rules";
+import { AvailabilityPanel } from "@/components/availability-panel";
 import Link from "next/link";
 
 type SessionSummary = {
@@ -591,25 +591,9 @@ export default function AvailabilityPage() {
         </div>
       </div>
 
-      {/* ── Mobile: rules then calendar ── */}
-      <div className="flex md:hidden flex-1 flex-col overflow-y-auto">
-        <AvailabilityRules onSaved={fetchSchedule} />
-        <CalendarFilterPanel {...calendarPanelProps} />
-
-        <div className="border-t border-secondary">
-          {weekNav}
-          <div className="h-[480px] shrink-0">
-            <DayView
-              events={events}
-              slots={slots}
-              locationByDay={locationByDay}
-              timezone={timezone}
-              weekStart={weekStart}
-              primaryCalendar={calendars[0]}
-              onEventClick={handleEventClick}
-            />
-          </div>
-        </div>
+      {/* ── Mobile: calendar-primary, rules + calendar-picker as modals ── */}
+      <div className="flex md:hidden flex-1 flex-col overflow-hidden">
+        <AvailabilityPanel forceMobile />
       </div>
 
       {/* Event detail modal */}
