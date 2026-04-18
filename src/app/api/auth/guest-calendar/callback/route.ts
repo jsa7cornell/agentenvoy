@@ -4,6 +4,7 @@ import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import type { ScoredSlot } from "@/lib/scoring";
+import { dispatchGuestFlowWelcomeEmailOnce } from "@/lib/emails/guest-flow-welcome";
 
 // GET /api/auth/guest-calendar/callback?code=xxx&state=xxx
 //
@@ -198,6 +199,22 @@ export async function GET(req: NextRequest) {
         console.log(
           `[guest-calendar] created new user ${user.id} (${guestEmail}) via guest_flow`
         );
+        // Fire-and-forget welcome email. The dispatch is idempotent via
+        // SideEffectLog (PLAYBOOK Rule 13), so repeat OAuth returns don't
+        // re-email. Look up the triggering host name so the email can say
+        // "while connecting your calendar to schedule with Mike...".
+        try {
+          const sessionRow = await prisma.negotiationSession.findUnique({
+            where: { id: state.sessionId },
+            select: { host: { select: { name: true } } },
+          });
+          await dispatchGuestFlowWelcomeEmailOnce(user.id, {
+            triggeringHostName: sessionRow?.host?.name ?? null,
+          });
+        } catch (e) {
+          console.error("[guest-calendar] welcome email dispatch failed:", e);
+          // Non-blocking — account already exists, session cookie is set.
+        }
       }
     } catch (e) {
       console.error("[guest-calendar] user/account/session upsert failed:", e);
