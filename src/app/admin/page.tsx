@@ -40,6 +40,12 @@ const TOOLS: Tool[] = [
     description: "On-demand schema drift check. Returns JSON — open in browser to see if Prisma and Supabase are in sync.",
     tag: "database",
   },
+  {
+    href: "/admin/repair",
+    label: "Data Repair",
+    description: "One-off data-repair surfaces. Today: re-dispatch confirmed meetings that landed with dryrun-* eventIds from the EFFECT_MODE_CALENDAR config miss.",
+    tag: "database",
+  },
 ];
 
 const TAG_COLORS: Record<string, string> = {
