@@ -291,7 +291,14 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     status: "active",
     title: "Q2 Planning — Sarah",
     archived: false,
-    link: { inviteeName: "Sarah", topic: "Q2 Planning" },
+    linkId: "link-1",
+    link: {
+      id: "link-1",
+      type: "contextual",
+      inviteeName: "Sarah",
+      topic: "Q2 Planning",
+      rules: { format: "video", duration: 30 },
+    },
     ...overrides,
   };
 }
@@ -614,6 +621,64 @@ describe("executeActions", () => {
         expect.objectContaining({ where: { id: "session-1" } })
       );
     });
+
+    // Regression — 2026-04-18 Danboy case.
+    // Dashboard said "Updated format to in-person"; deal room still showed
+    // video because link.rules.format beat session.format in the greeting
+    // template's precedence chain. Dual-write is the fix.
+    it("writes format to BOTH session.format AND link.rules for contextual links", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
+
+      const results = await executeActions(
+        [{ action: "update_format", params: { sessionId: "session-1", format: "in-person" } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      // Session row updated
+      expect(mockPrisma.negotiationSession.update).toHaveBeenCalledWith({
+        where: { id: "session-1" },
+        data: { format: "in-person" },
+      });
+      // Link rules mirrored — this was the missing piece
+      expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
+        where: { id: "link-1" },
+        data: { rules: expect.objectContaining({ format: "in-person" }) },
+      });
+      // Thread system message so deal-room history reflects the change
+      expect(mockPrisma.message.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          sessionId: "session-1",
+          role: "system",
+          content: expect.stringContaining("in-person"),
+        }),
+      });
+    });
+
+    it("does NOT write to link.rules for generic links (many sessions share the link)", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeSession({
+          link: {
+            id: "link-generic",
+            type: "generic",
+            inviteeName: null,
+            topic: null,
+            rules: { format: "video" },
+          },
+        })
+      );
+
+      const results = await executeActions(
+        [{ action: "update_format", params: { sessionId: "session-1", format: "phone" } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(mockPrisma.negotiationSession.update).toHaveBeenCalled();
+      // Generic link rules untouched — per-session change must not leak
+      // to every future guest on the same shared link.
+      expect(mockPrisma.negotiationLink.update).not.toHaveBeenCalled();
+    });
   });
 
   // --- Update Time ---
@@ -670,6 +735,32 @@ describe("executeActions", () => {
       expect(results[0].success).toBe(false);
       expect(results[0].message).toContain("Invalid dateTime");
     });
+
+    // Regression — 2026-04-18. Duration follows the same precedence rules as
+    // format/location; missing the link.rules mirror made "make it 45 min"
+    // stick in the DB but not in the greeting or confirm card.
+    it("writes duration to link.rules for contextual links when provided", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
+      mockPrisma.user.findUnique.mockResolvedValue({ preferences: {} });
+
+      const results = await executeActions(
+        [{
+          action: "update_time",
+          params: {
+            sessionId: "session-1",
+            dateTime: "2026-04-22T10:00:00-07:00",
+            duration: 45,
+          },
+        }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
+        where: { id: "link-1" },
+        data: { rules: expect.objectContaining({ duration: 45 }) },
+      });
+    });
   });
 
   // --- Update Location ---
@@ -702,6 +793,23 @@ describe("executeActions", () => {
 
       expect(results[0].success).toBe(false);
       expect(results[0].message).toContain("Missing location");
+    });
+
+    // Regression — 2026-04-18. Same precedence-mismatch story as update_format.
+    // Confirm route reads link.rules.location; session-only write was invisible.
+    it("writes location to link.rules for contextual links", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
+
+      const results = await executeActions(
+        [{ action: "update_location", params: { sessionId: "session-1", location: "Blue Bottle, Palo Alto" } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
+        where: { id: "link-1" },
+        data: { rules: expect.objectContaining({ location: "Blue Bottle, Palo Alto" }) },
+      });
     });
   });
 

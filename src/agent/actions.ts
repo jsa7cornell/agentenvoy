@@ -151,13 +151,23 @@ async function executeAction(
 
 // --- Authorization helper ---
 
-async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; title: string | null; link: { inviteeName: string | null; topic: string | null } } }> {
+async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; title: string | null; linkId: string; link: { id: string; type: string; inviteeName: string | null; topic: string | null; rules: unknown } } }> {
   if (!sessionId || typeof sessionId !== "string") {
     return { success: false, message: "Missing or invalid sessionId" };
   }
   const session = await prisma.negotiationSession.findUnique({
     where: { id: sessionId },
-    include: { link: { select: { inviteeName: true, topic: true } } },
+    include: {
+      link: {
+        select: {
+          id: true,
+          type: true,
+          inviteeName: true,
+          topic: true,
+          rules: true,
+        },
+      },
+    },
   });
   if (!session) return { success: false, message: `Session not found: ${sessionId}` };
   if (session.hostId !== userId) return { success: false, message: "Not authorized for this session" };
@@ -166,6 +176,37 @@ async function getAuthorizedSession(sessionId: unknown, userId: string): Promise
 
 function resolveSessionId(params: Record<string, unknown>, contextSessionId?: string): string | undefined {
   return (params.sessionId as string) || contextSessionId || undefined;
+}
+
+/**
+ * Patch link.rules with a partial change — ONLY for contextual links
+ * (one link = one session, so the update is intent-aligned). For generic
+ * links (one link, many sessions) we skip the write so a dashboard tweak
+ * for one guest doesn't retroactively change every future guest's
+ * experience on the same shared link.
+ *
+ * Historical bug (pre-2026-04-18): update_format / update_location /
+ * update_time handlers only mutated NegotiationSession.* fields, but the
+ * greeting template + confirm route read from `link.rules.*` FIRST. The
+ * result: dashboard chat said "Updated format to in-person" and the deal
+ * room kept showing the original video format. This helper exists to
+ * keep the two fields in lockstep going forward.
+ */
+async function patchLinkRulesForContextual(
+  link: { id: string; type: string; rules: unknown },
+  changes: Record<string, unknown>,
+): Promise<void> {
+  if (link.type !== "contextual") return;
+  const existing = (link.rules as Record<string, unknown>) || {};
+  const next: Record<string, unknown> = { ...existing };
+  for (const [k, v] of Object.entries(changes)) {
+    if (v === null || v === undefined) delete next[k];
+    else next[k] = v;
+  }
+  await prisma.negotiationLink.update({
+    where: { id: link.id },
+    data: { rules: next as Parameters<typeof prisma.negotiationLink.update>[0]["data"]["rules"] },
+  });
 }
 
 // --- Action Handlers ---
@@ -289,9 +330,25 @@ async function handleUpdateFormat(
     return { success: false, message: `Invalid format: ${format}. Use "phone", "video", or "in-person".` };
   }
 
+  // Dual-write: session.format for parity with the existing session row,
+  // AND link.rules.format (for contextual links) so the greeting template
+  // and confirm route actually see the change. See patchLinkRulesForContextual
+  // for the historical bug this fixes.
   await prisma.negotiationSession.update({
     where: { id: session.id },
     data: { format },
+  });
+  await patchLinkRulesForContextual(session.link, { format });
+
+  // Post a system message so the thread reflects what the dashboard did —
+  // previously only update_time / update_location did this, so update_format
+  // changes were invisible to anyone reading the deal-room history.
+  await prisma.message.create({
+    data: {
+      sessionId: session.id,
+      role: "system",
+      content: `Format updated to ${format}`,
+    },
   });
 
   return {
@@ -339,6 +396,14 @@ async function handleUpdateTime(
     where: { id: session.id },
     data: updateData as Parameters<typeof prisma.negotiationSession.update>[0]["data"],
   });
+  // Mirror duration into link.rules.duration for contextual links so the
+  // greeting template + confirm card reflect it. Same reason as format /
+  // location — link.rules wins the precedence chain.
+  if (params.duration) {
+    await patchLinkRulesForContextual(session.link, {
+      duration: Number(params.duration),
+    });
+  }
 
   // Save a system message so the guest sees the proposal
   const durationStr = params.duration ? ` (${params.duration} min)` : "";
@@ -381,13 +446,19 @@ async function handleUpdateLocation(
     return { success: false, message: "Missing location parameter" };
   }
 
-  // Update the link's rules with the new location
+  // Dual-write: statusLabel for the host-facing dashboard and a system
+  // message for the thread history, AND link.rules.location for contextual
+  // links so the confirm card + GCal event actually use the new location.
+  // Previously this only wrote statusLabel + a system message, leaving
+  // link.rules.location untouched — the confirm route reads link.rules.location
+  // and so silently ignored the update.
   await prisma.negotiationSession.update({
     where: { id: session.id },
     data: {
       statusLabel: `Location updated to ${location}`,
     },
   });
+  await patchLinkRulesForContextual(session.link, { location });
 
   await prisma.message.create({
     data: {
