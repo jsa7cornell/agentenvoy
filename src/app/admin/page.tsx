@@ -41,6 +41,12 @@ const TOOLS: Tool[] = [
     tag: "database",
   },
   {
+    href: "/api/admin/env-health",
+    label: "Env Health",
+    description: "On-demand production env-var sanity check. Returns JSON listing any critical/warn findings. Cron runs this daily.",
+    tag: "database",
+  },
+  {
     href: "/admin/repair",
     label: "Data Repair",
     description: "One-off data-repair surfaces. Today: re-dispatch confirmed meetings that landed with dryrun-* eventIds from the EFFECT_MODE_CALENDAR config miss.",

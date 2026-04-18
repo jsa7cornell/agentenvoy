@@ -25,6 +25,7 @@ import { prisma } from "@/lib/prisma";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { deleteCalendarEvent } from "@/lib/calendar";
 import { checkSchemaDrift, formatDriftSummary } from "@/lib/schema-drift";
+import { checkEnvDrift, formatEnvDriftSummary } from "@/lib/env-drift";
 import { logRouteError } from "@/lib/route-error";
 import { buildDevStatsEmail } from "@/lib/emails/dev-stats";
 import { gatherDevStats } from "@/lib/emails/dev-stats-gather";
@@ -56,16 +57,20 @@ export async function GET(req: NextRequest) {
   // ───────── Phase 2: schema drift ─────────
   const schemaResult = await runSchemaDriftCheck();
 
-  // ───────── Phase 3: daily dev-stats digest ─────────
+  // ───────── Phase 3: env drift ─────────
+  const envResult = await runEnvDriftCheck();
+
+  // ───────── Phase 4: daily dev-stats digest ─────────
   const statsResult = await runDevStats(windowStart, ranAt);
 
-  // ───────── Phase 4: 24h meeting reminders ─────────
+  // ───────── Phase 5: 24h meeting reminders ─────────
   const remindersResult = await runMeetingReminders(ranAt);
 
   return NextResponse.json({
     ranAt: ranAt.toISOString(),
     holds: holdsResult,
     schemaHealth: schemaResult,
+    envDrift: envResult,
     devStats: statsResult,
     reminders: remindersResult,
   });
@@ -214,7 +219,131 @@ async function runSchemaDriftCheck(): Promise<{
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 3 — daily dev-stats digest
+// Phase 3 — env-drift check
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ENV_ALERT_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+
+async function runEnvDriftCheck(): Promise<{
+  ok: boolean;
+  critical: number;
+  warn: number;
+  alertDispatched: boolean;
+  error?: string;
+}> {
+  try {
+    const report = checkEnvDrift();
+    if (report.ok) {
+      return { ok: true, critical: 0, warn: 0, alertDispatched: false };
+    }
+
+    const critical = report.findings.filter((f) => f.severity === "critical").length;
+    const warn = report.findings.filter((f) => f.severity === "warn").length;
+    const summary = formatEnvDriftSummary(report);
+
+    logRouteError({
+      route: "/api/cron/daily",
+      method: "GET",
+      statusCode: 500,
+      error: Object.assign(new Error(summary), { name: "EnvDrift" }),
+      context: {
+        phase: "env-drift",
+        findings: report.findings.map((f) => ({
+          name: f.name,
+          severity: f.severity,
+          reason: f.reason,
+        })),
+      },
+    });
+
+    // Only email when something is critical — warns go into /admin/failures
+    // but don't page.
+    let alertDispatched = false;
+    if (critical > 0) {
+      const cutoff = new Date(Date.now() - ENV_ALERT_COOLDOWN_MS);
+      const recentAlert = await prisma.sideEffectLog.findFirst({
+        where: {
+          kind: "email.send",
+          status: { in: ["sent", "suppressed", "dryrun"] },
+          createdAt: { gte: cutoff },
+          contextJson: { path: ["purpose"], equals: "env_drift" },
+        },
+        select: { id: true },
+      });
+
+      if (!recentAlert) {
+        const recipient = process.env.ADMIN_EMAIL || "jsa7cornell@gmail.com";
+        await dispatch({
+          kind: "email.send",
+          to: recipient,
+          subject: `⚠ AgentEnvoy env drift — ${critical} critical env var issue(s)`,
+          html: buildEnvDriftAlertHtml(report, summary),
+          context: {
+            purpose: "env_drift",
+            critical,
+            warn,
+            names: report.findings.map((f) => f.name),
+          },
+        });
+        alertDispatched = true;
+      }
+    }
+
+    return { ok: false, critical, warn, alertDispatched };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    logRouteError({
+      route: "/api/cron/daily",
+      method: "GET",
+      statusCode: 500,
+      error: e,
+      context: { phase: "env-drift-check-failed" },
+    });
+    return { ok: false, critical: 0, warn: 0, alertDispatched: false, error };
+  }
+}
+
+function buildEnvDriftAlertHtml(
+  report: ReturnType<typeof checkEnvDrift>,
+  summary: string,
+): string {
+  const rows = report.findings
+    .map(
+      (f) => `
+      <tr>
+        <td style="padding:6px 10px;border-bottom:1px solid #27272a;font-family:monospace;font-size:12px;">${escapeHtml(f.name)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #27272a;font-size:12px;color:${f.severity === "critical" ? "#f87171" : "#fbbf24"};font-weight:600;">${f.severity}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #27272a;font-size:12px;">${escapeHtml(f.reason)}</td>
+      </tr>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html><body style="margin:0;font-family:-apple-system,sans-serif;background:#09090b;color:#e4e4e7;padding:24px;">
+  <div style="max-width:640px;margin:0 auto;background:#0c0c10;border:1px solid #27272a;border-radius:12px;padding:20px;">
+    <div style="font-size:18px;font-weight:700;color:#fbbf24;margin-bottom:8px;">AgentEnvoy — env drift detected</div>
+    <div style="font-size:13px;color:#a1a1aa;margin-bottom:16px;">
+      The daily cron's env-drift sweep found one or more production env var
+      issues. Fix in Vercel → Settings → Environment Variables. Alerts are
+      rate-limited to once per 4 hours.
+    </div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #3f3f46;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#71717a;">Var</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #3f3f46;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#71717a;">Severity</th>
+          <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #3f3f46;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#71717a;">Reason</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <pre style="background:#09090b;border:1px solid #27272a;border-radius:8px;padding:12px;font-size:11px;color:#a1a1aa;overflow:auto;">${escapeHtml(summary)}</pre>
+  </div>
+</body></html>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4 — daily dev-stats digest
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function runDevStats(
