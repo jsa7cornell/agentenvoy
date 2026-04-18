@@ -225,13 +225,20 @@ export default function AvailabilityPage() {
   const [protectionSaving, setProtectionSaving] = useState(false);
   // Local optimistic override score for the clicked event (synced from event.protectionOverride)
   const [localProtection, setLocalProtection] = useState<number | null | undefined>(undefined);
+  // Staged-but-not-submitted selection. Separate from localProtection so the
+  // user can preview options and only persist via Submit. Mirror of
+  // localProtection's type. When pending !== local, the Close button flips
+  // to "Submit".
+  const [pendingProtection, setPendingProtection] = useState<number | null | undefined>(undefined);
 
   async function handleEventClick(ev: TunerEvent) {
     setClickedEvent(ev);
     setClickedSession(undefined); // loading
     setConfirmingCancel(false);
     // Seed local protection from what the schedule API already surfaced
-    setLocalProtection(ev.protectionOverride !== undefined ? ev.protectionOverride : null);
+    const seed = ev.protectionOverride !== undefined ? ev.protectionOverride : null;
+    setLocalProtection(seed);
+    setPendingProtection(seed);
     try {
       const res = await fetch(`/api/negotiate/by-calendar-event?eventId=${encodeURIComponent(ev.id)}&eventStart=${encodeURIComponent(ev.start)}`);
       const data = res.ok ? await res.json() : null;
@@ -670,13 +677,19 @@ export default function AvailabilityPage() {
                     return 5;
                   }
 
-                  // Visual selection: override if set, otherwise auto-mapped
-                  const visualScore: 0 | 3 | 5 =
-                    hasOverride
+                  // Visual selection prefers the staged (pending) choice so
+                  // buttons reflect what the user just clicked, falling back
+                  // to the persisted override, then the engine's auto score.
+                  const hasPending = pendingProtection !== null && pendingProtection !== undefined;
+                  const effectiveScore =
+                    hasPending
+                      ? (pendingProtection as 0 | 3 | 5)
+                      : hasOverride
                       ? (localProtection as 0 | 3 | 5)
                       : autoScore !== null
                       ? mapToLevel(autoScore)
-                      : 0; // fallback: show Open
+                      : 0;
+                  const visualScore: 0 | 3 | 5 = effectiveScore;
 
                   const options: {
                     label: string;
@@ -725,7 +738,7 @@ export default function AvailabilityPage() {
                             <button
                               key={label}
                               disabled={protectionSaving}
-                              onClick={() => handleProtectionChange(clickedEvent.id, score)}
+                              onClick={() => setPendingProtection(score)}
                               className={`px-2 py-2.5 rounded-lg text-[11px] transition disabled:opacity-50 ${
                                 isActive ? activeClass : inactiveClass
                               }`}
@@ -740,15 +753,17 @@ export default function AvailabilityPage() {
                         {protectionSaving ? "Saving…" : activeOption.desc}
                       </p>
 
-                      {/* Reset to auto — only shown when an override is active */}
-                      {hasOverride && (
+                      {/* Let Envoy decide — stages a reset to engine-auto,
+                          persisted on Submit. Only shown when the CURRENT
+                          state (saved or staged) is an override. */}
+                      {(hasOverride || hasPending) && (
                         <p className="text-[10px] text-muted mt-1.5">
                           <button
                             disabled={protectionSaving}
-                            onClick={() => handleProtectionChange(clickedEvent.id, null)}
+                            onClick={() => setPendingProtection(null)}
                             className="underline hover:text-secondary transition disabled:opacity-50"
                           >
-                            Reset to auto
+                            Let Envoy decide.
                           </button>
                           {autoLevelLabel && (
                             <span className="ml-1">(engine would pick: {autoLevelLabel})</span>
@@ -784,12 +799,43 @@ export default function AvailabilityPage() {
               </div>
             ) : (
               <div className="flex gap-2 mt-1">
-                <button
-                  onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); }}
-                  className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition"
-                >
-                  Close
-                </button>
+                {(() => {
+                  // The Open/Protected/Blocked/Let-Envoy-decide picker stages
+                  // changes into pendingProtection. If it differs from the
+                  // persisted value, the primary button flips to "Submit" and
+                  // saves on click. Otherwise it's just a dismiss.
+                  const hasUnsaved =
+                    clickedEvent !== null &&
+                    pendingProtection !== localProtection;
+                  const onPrimary = hasUnsaved && clickedEvent
+                    ? async () => {
+                        await handleProtectionChange(
+                          clickedEvent.id,
+                          (pendingProtection as 0 | 3 | 5 | null)
+                        );
+                        setClickedEvent(null);
+                        setClickedSession(undefined);
+                        setConfirmingCancel(false);
+                      }
+                    : () => {
+                        setClickedEvent(null);
+                        setClickedSession(undefined);
+                        setConfirmingCancel(false);
+                      };
+                  return (
+                    <button
+                      onClick={onPrimary}
+                      disabled={protectionSaving}
+                      className={
+                        hasUnsaved
+                          ? "flex-1 px-3 py-2 text-xs font-semibold bg-indigo-500/90 hover:bg-indigo-500 text-white rounded-lg transition disabled:opacity-50"
+                          : "flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50"
+                      }
+                    >
+                      {protectionSaving ? "Saving…" : hasUnsaved ? "Submit" : "Close"}
+                    </button>
+                  );
+                })()}
                 {clickedSession && !clickedSession.archived && clickedSession.status !== "cancelled" && (
                   <button
                     onClick={() => setConfirmingCancel(true)}
