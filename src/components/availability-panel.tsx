@@ -2,18 +2,20 @@
 
 /**
  * Self-contained weekly availability panel. Owns schedule fetch, week
- * navigation, and the event-click override modal. Used by the standalone
- * /dashboard/availability page (as its right column) and embedded into the
- * main dashboard as a toggleable right-side accordion.
+ * navigation, timezone picker, calendar filter (swatch strip + popover),
+ * rules-management modal, and the event-click override modal.
  *
- * Intentionally does NOT render the Rules or Calendar Filter panels — those
- * stay on the dedicated availability page only.
+ * Used by the standalone /dashboard/availability page (as its right column)
+ * and embedded into the main dashboard as the primary right pane.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { signIn } from "next-auth/react";
 import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calendar";
 import { DayView } from "@/components/day-view";
+import { AvailabilityRules } from "@/components/availability-rules";
+import { TIMEZONE_TABLE, shortTimezoneLabel, getTimezoneEntry } from "@/lib/timezone";
 
 type SessionSummary = {
   id: string;
@@ -29,6 +31,13 @@ type SessionSummary = {
   dealRoomUrl: string;
 };
 
+type GoogleCalendar = {
+  id: string;
+  name: string;
+  primary: boolean;
+  backgroundColor: string | null;
+};
+
 export function getSunday(d: Date): string {
   const date = new Date(d);
   const day = date.getDay();
@@ -36,41 +45,76 @@ export function getSunday(d: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function formatWeekRange(weekStart: string): string {
+function formatWeekRange(weekStart: string, days: number): string {
   const start = new Date(weekStart + "T12:00:00");
   const end = new Date(start);
-  end.setDate(start.getDate() + 6);
+  end.setDate(start.getDate() + Math.max(0, days - 1));
   const fmt = (d: Date) =>
     d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   return `${fmt(start)} \u2013 ${fmt(end)}, ${start.getFullYear()}`;
 }
 
+// Responsive day count — based on the panel's content width (not the viewport),
+// so embeds in different hosts behave correctly.
+function computeDaysToShow(width: number): number {
+  if (width >= 780) return 7;
+  if (width >= 560) return 5;
+  return 3;
+}
+
 interface AvailabilityPanelProps {
-  /** When true, render the mobile DayView instead of the full WeeklyCalendar.
-   *  Used in narrow embeds (e.g. dashboard accordion on small screens) and
-   *  on the mobile layout of /dashboard/availability. */
+  /** When true, force the mobile DayView instead of the WeeklyCalendar.
+   *  Used in narrow embeds and on the mobile layout of /dashboard/availability. */
   forceMobile?: boolean;
-  /** Header slot — rendered to the left of the week navigation controls.
-   *  Used by the dashboard accordion to show a close button. */
+  /** Header slot rendered to the left of week-nav controls. */
   headerSlot?: React.ReactNode;
   /** Optional className on the outer wrapper. */
   className?: string;
+  /** Show the inline "Calendars" swatch strip + "Rules" button. Default true. */
+  showControls?: boolean;
 }
 
 export function AvailabilityPanel({
   forceMobile = false,
   headerSlot,
   className = "",
+  showControls = true,
 }: AvailabilityPanelProps) {
   const [weekStart, setWeekStart] = useState(() => getSunday(new Date()));
   const [events, setEvents] = useState<TunerEvent[]>([]);
   const [slots, setSlots] = useState<TunerSlot[]>([]);
   const [locationByDay, setLocationByDay] = useState<Record<string, string | null>>({});
   const [timezone, setTimezone] = useState("America/Los_Angeles");
+  const [tzSaving, setTzSaving] = useState(false);
   const [connected, setConnected] = useState(false);
   const [calendars, setCalendars] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Responsive — measure panel content width, pick 3/5/7 day view.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [daysToShow, setDaysToShow] = useState(7);
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const el = containerRef.current;
+    const ro = new ResizeObserver(() => {
+      setDaysToShow(computeDaysToShow(el.clientWidth));
+    });
+    ro.observe(el);
+    setDaysToShow(computeDaysToShow(el.clientWidth));
+    return () => ro.disconnect();
+  }, []);
+
+  // Anchor for the grid: when showing all 7 days, use Sunday (week start).
+  // When < 7, anchor to today so the visible days are "today + next N-1".
+  const gridStart = useMemo(() => {
+    if (daysToShow >= 7) return weekStart;
+    const today = new Date();
+    return today.toISOString().slice(0, 10);
+  }, [weekStart, daysToShow]);
+
+  // Rules modal
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   // Event click modal state
   const [clickedEvent, setClickedEvent] = useState<TunerEvent | null>(null);
@@ -105,6 +149,110 @@ export function AvailabilityPanel({
     setIsLoading(true);
     fetchSchedule();
   }, [fetchSchedule]);
+
+  // Timezone picker
+  async function handleTimezoneChange(tz: string) {
+    const previous = timezone;
+    setTimezone(tz);
+    setTzSaving(true);
+    try {
+      const res = await fetch("/api/tuner/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ timezone: tz }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      await fetchSchedule();
+    } catch {
+      setTimezone(previous);
+    } finally {
+      setTzSaving(false);
+    }
+  }
+
+  // Calendar picker
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendar[]>([]);
+  const [activeCalendarIds, setActiveCalendarIds] = useState<string[]>([]);
+  const [calendarsLoading, setCalendarsLoading] = useState(false);
+  const [calendarsError, setCalendarsError] = useState<
+    | null
+    | { kind: "reconnect"; message: string }
+    | { kind: "generic"; message: string }
+  >(null);
+  const [savingCalendarFilter, setSavingCalendarFilter] = useState(false);
+  const [calPickerOpen, setCalPickerOpen] = useState(false);
+
+  const loadCalendars = useCallback(async () => {
+    setCalendarsLoading(true);
+    setCalendarsError(null);
+    try {
+      const res = await fetch("/api/connections/google-calendars");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 401 && data?.error === "reconnect_required") {
+          setCalendarsError({
+            kind: "reconnect",
+            message: "Your Google connection has expired. Sign in again to restore calendar access.",
+          });
+        } else {
+          setCalendarsError({
+            kind: "generic",
+            message: data?.detail || data?.error || `Request failed (${res.status})`,
+          });
+        }
+        return;
+      }
+      if (Array.isArray(data?.calendars)) {
+        setGoogleCalendars(data.calendars);
+      }
+    } catch (err) {
+      setCalendarsError({
+        kind: "generic",
+        message: err instanceof Error ? err.message : "Network error",
+      });
+    } finally {
+      setCalendarsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Fetch active filter + calendar list on mount
+    fetch("/api/agent/knowledge")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.activeCalendarIds) setActiveCalendarIds(data.activeCalendarIds);
+      })
+      .catch(() => {});
+    loadCalendars();
+  }, [loadCalendars]);
+
+  async function toggleCalendarActive(id: string) {
+    const sorted = [...googleCalendars].map((c) => c.id).sort();
+    const currentActive =
+      activeCalendarIds.length === 0 ? sorted : [...activeCalendarIds].sort();
+    const isActive = currentActive.includes(id);
+    const next = isActive ? currentActive.filter((x) => x !== id) : [...currentActive, id];
+    // Normalize: all selected → empty array (meaning "all").
+    const normalized = next.length === sorted.length ? [] : next;
+    setSavingCalendarFilter(true);
+    try {
+      await fetch("/api/connections/calendar-filter", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeCalendarIds: normalized }),
+      });
+      setActiveCalendarIds(normalized);
+      await fetch("/api/debug/force-resync", { method: "POST" });
+      await fetchSchedule();
+    } finally {
+      setSavingCalendarFilter(false);
+    }
+  }
+
+  function isCalendarActive(id: string): boolean {
+    if (activeCalendarIds.length === 0) return true; // all active
+    return activeCalendarIds.includes(id);
+  }
 
   async function handleEventClick(ev: TunerEvent) {
     setClickedEvent(ev);
@@ -183,7 +331,7 @@ export function AvailabilityPanel({
     }
   }
 
-  // Week navigation — allow 4 weeks back, 12 weeks forward
+  // Week navigation — 4 weeks back, 12 weeks forward
   const thisWeek = getSunday(new Date());
   const minWeekStart = (() => {
     const d = new Date(thisWeek + "T12:00:00");
@@ -221,7 +369,7 @@ export function AvailabilityPanel({
 
   if (isLoading) {
     return (
-      <div className={`flex-1 flex items-center justify-center ${className}`}>
+      <div ref={containerRef} className={`flex-1 flex items-center justify-center ${className}`}>
         <div className="text-muted text-sm">Loading...</div>
       </div>
     );
@@ -229,7 +377,7 @@ export function AvailabilityPanel({
 
   if (!connected) {
     return (
-      <div className={`flex-1 flex items-center justify-center ${className}`}>
+      <div ref={containerRef} className={`flex-1 flex items-center justify-center ${className}`}>
         <div className="text-center text-muted">
           <p className="text-sm">Calendar not connected.</p>
           <p className="text-xs mt-1">
@@ -244,8 +392,14 @@ export function AvailabilityPanel({
     );
   }
 
+  // Sort calendars: primary first, then alphabetical
+  const sortedCalendars = [...googleCalendars].sort(
+    (a, b) => (b.primary ? 1 : 0) - (a.primary ? 1 : 0),
+  );
+
+  // Top toolbar — week nav + controls
   const weekNav = (
-    <div className="flex items-center justify-between px-3 py-1.5 border-b border-secondary shrink-0">
+    <div className="flex items-center justify-between px-3 py-1.5 border-b border-secondary shrink-0 gap-2">
       <div className="flex items-center gap-1.5 min-w-0">
         {headerSlot}
         <button
@@ -256,7 +410,7 @@ export function AvailabilityPanel({
           &larr;
         </button>
         <span className="text-xs text-primary text-center font-medium truncate">
-          {formatWeekRange(weekStart)}
+          {formatWeekRange(gridStart, daysToShow)}
         </span>
         <button
           onClick={() => shiftWeek(1)}
@@ -275,6 +429,92 @@ export function AvailabilityPanel({
         )}
       </div>
       <div className="flex items-center gap-2">
+        {showControls && (
+          <>
+            {/* Calendar swatch strip — each pill is one calendar; click toggles active */}
+            <div className="relative">
+              <button
+                onClick={() => setCalPickerOpen((o) => !o)}
+                className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] text-muted hover:text-primary border border-secondary hover:border-DEFAULT rounded-md transition"
+                title="Calendars"
+              >
+                <span className="flex items-center gap-[3px]">
+                  {sortedCalendars.slice(0, 6).map((c) => (
+                    <span
+                      key={c.id}
+                      className={`w-1.5 h-3 rounded-sm ${isCalendarActive(c.id) ? "" : "opacity-25"}`}
+                      style={{ backgroundColor: c.backgroundColor || "#6366f1" }}
+                    />
+                  ))}
+                </span>
+                <span className="ml-1">▾</span>
+              </button>
+              {calPickerOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setCalPickerOpen(false)} />
+                  <div className="absolute right-0 mt-1 z-40 w-64 bg-surface-inset border border-DEFAULT rounded-lg shadow-xl p-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted px-1 pb-1.5">
+                      Calendars
+                    </p>
+                    {calendarsLoading ? (
+                      <p className="text-xs text-muted px-1 py-2">Loading…</p>
+                    ) : calendarsError?.kind === "reconnect" ? (
+                      <div className="px-1 py-2 space-y-1.5">
+                        <p className="text-[11px] text-muted">{calendarsError.message}</p>
+                        <button
+                          onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+                          className="w-full px-2 py-1 text-xs text-white bg-accent hover:bg-accent-hover rounded transition"
+                        >
+                          Reconnect
+                        </button>
+                      </div>
+                    ) : calendarsError ? (
+                      <p className="text-[11px] text-red-400 px-1 py-2">{calendarsError.message}</p>
+                    ) : (
+                      <ul className="max-h-64 overflow-y-auto">
+                        {sortedCalendars.map((c) => {
+                          const active = isCalendarActive(c.id);
+                          return (
+                            <li key={c.id}>
+                              <button
+                                onClick={() => toggleCalendarActive(c.id)}
+                                disabled={savingCalendarFilter}
+                                className="w-full flex items-center gap-2 px-1.5 py-1 text-xs text-primary rounded hover:bg-surface-secondary transition disabled:opacity-50"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={active}
+                                  readOnly
+                                  className="w-3.5 h-3.5 rounded accent-purple-500 flex-shrink-0"
+                                />
+                                <span
+                                  className="w-2 h-2 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: c.backgroundColor || "#6366f1" }}
+                                />
+                                <span className="truncate flex-1 text-left">
+                                  {c.name}
+                                  {c.primary && <span className="ml-1 text-[9px] text-muted">(primary)</span>}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button
+              onClick={() => setRulesOpen(true)}
+              className="px-2 py-1 text-xs text-secondary hover:text-primary border border-secondary hover:border-DEFAULT rounded-md transition"
+              title="Manage availability rules"
+            >
+              Rules
+            </button>
+          </>
+        )}
         <button
           onClick={handleRefresh}
           disabled={isRefreshing}
@@ -287,15 +527,53 @@ export function AvailabilityPanel({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
-          {isRefreshing && <span>Syncing...</span>}
         </button>
       </div>
     </div>
   );
 
+  // Second-row toolbar — left-aligned TZ picker + score legend.
+  // The TZ picker sits above the time gutter so it's on the "times" side
+  // of the calendar, per John's ask.
+  const legendBar = (
+    <div className="flex items-center gap-3 px-3 py-1.5 border-b border-secondary text-[10px] text-muted shrink-0 flex-wrap">
+      {/* TZ picker — first, aligned left */}
+      <div className="relative">
+        <select
+          value={timezone}
+          onChange={(e) => handleTimezoneChange(e.target.value)}
+          disabled={tzSaving}
+          className="appearance-none pl-1.5 pr-5 py-0.5 text-[10px] font-medium text-primary bg-surface-secondary/60 border border-DEFAULT/60 rounded hover:border-DEFAULT cursor-pointer focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
+          title={`Timezone: ${timezone}${tzSaving ? " (saving…)" : ""}`}
+        >
+          {TIMEZONE_TABLE.map((entry) => (
+            <option key={entry.iana} value={entry.iana}>
+              {shortTimezoneLabel(entry.iana)} — {entry.long}
+            </option>
+          ))}
+          {!getTimezoneEntry(timezone) && (
+            <option value={timezone}>{timezone} (custom)</option>
+          )}
+        </select>
+        <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[8px] text-muted">▾</span>
+      </div>
+
+      {/* Score legend */}
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-100 dark:bg-emerald-600/60 border border-emerald-500 dark:border-emerald-400" /> Available</span>
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-teal-100 dark:bg-teal-600/70 border border-teal-500 dark:border-teal-400" /> Office</span>
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-100 dark:bg-amber-600/50 border border-amber-500 dark:border-amber-400" /> Protected</span>
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-100 dark:bg-red-600/50 border border-red-600 dark:border-red-500" /> Blocked</span>
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-indigo-50 dark:bg-indigo-900/80 border border-indigo-500 dark:border-indigo-400" /> Event</span>
+    </div>
+  );
+
   return (
-    <div className={`flex-1 min-w-0 flex flex-col overflow-hidden ${className}`}>
+    <div
+      ref={containerRef}
+      className={`flex-1 min-w-0 flex flex-col overflow-hidden ${className}`}
+    >
       {weekNav}
+      {legendBar}
       <div className="flex-1 min-h-0 overflow-hidden">
         {forceMobile ? (
           <DayView
@@ -303,7 +581,7 @@ export function AvailabilityPanel({
             slots={slots}
             locationByDay={locationByDay}
             timezone={timezone}
-            weekStart={weekStart}
+            weekStart={gridStart}
             primaryCalendar={calendars[0]}
             onEventClick={handleEventClick}
           />
@@ -313,12 +591,43 @@ export function AvailabilityPanel({
             slots={slots}
             locationByDay={locationByDay}
             timezone={timezone}
-            weekStart={weekStart}
+            weekStart={gridStart}
+            daysToShow={daysToShow}
+            hideToolbar
             primaryCalendar={calendars[0]}
             onEventClick={handleEventClick}
           />
         )}
       </div>
+
+      {/* Rules modal — pops over everything. Uses the existing
+          AvailabilityRules component for full parity with the
+          availability page. */}
+      {rulesOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 overflow-y-auto"
+          onClick={() => setRulesOpen(false)}
+        >
+          <div
+            className="bg-surface-inset border border-DEFAULT rounded-2xl w-full max-w-2xl mx-4 my-8 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-secondary">
+              <h3 className="text-sm font-semibold text-primary">Availability rules</h3>
+              <button
+                onClick={() => setRulesOpen(false)}
+                className="text-muted hover:text-primary text-lg leading-none transition"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="max-h-[75vh] overflow-y-auto">
+              <AvailabilityRules onSaved={fetchSchedule} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Event detail modal */}
       {clickedEvent && (

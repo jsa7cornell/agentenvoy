@@ -17,13 +17,14 @@ export default function DashboardPage() {
   const [slotTimezone, setSlotTimezone] = useState("America/Los_Angeles");
   const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
 
-  // Desktop-only accordion: when open, replaces the mini-availability rail
-  // with a full weekly calendar on the right. Persisted in localStorage so
-  // the choice sticks across reloads.
-  const [panelOpen, setPanelOpen] = useState(false);
+  // Default the accordion OPEN. localStorage can force it closed; otherwise
+  // the panel is the canonical dashboard view per 2026-04-19.
+  const [panelOpen, setPanelOpen] = useState(true);
   useEffect(() => {
     try {
-      setPanelOpen(localStorage.getItem(PANEL_LS_KEY) === "1");
+      const stored = localStorage.getItem(PANEL_LS_KEY);
+      if (stored === "0") setPanelOpen(false);
+      else if (stored === "1") setPanelOpen(true);
     } catch {
       // ignore
     }
@@ -54,9 +55,18 @@ export default function DashboardPage() {
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* Feed — main content */}
-      <div className="flex-1 overflow-hidden min-h-0 min-w-0 flex flex-col">
-        {/* Desktop-only toolbar for panel toggle */}
+      {/* Chat column.
+          - When panel is open: chat gets a min/max width so the calendar
+            can flex to fill the rest. At narrow viewports the calendar's
+            internal responsive logic drops to 5 or 3 days.
+          - When panel is closed: chat takes the full remaining space. */}
+      <div
+        className={
+          panelOpen
+            ? "hidden md:flex flex-col flex-shrink-0 min-w-[380px] max-w-[480px] md:w-[420px] overflow-hidden"
+            : "flex-1 flex-col flex overflow-hidden min-w-0"
+        }
+      >
         <div className="hidden md:flex items-center justify-end px-3 py-1.5 border-b border-secondary shrink-0">
           <button
             onClick={togglePanel}
@@ -72,9 +82,16 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Right rail — desktop only. Swaps between mini-rail and full panel. */}
+      {/* Mobile-only: chat always, panel hidden */}
+      <div className="flex md:hidden flex-1 flex-col overflow-hidden min-w-0">
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <Feed />
+        </div>
+      </div>
+
+      {/* Right pane — desktop only. */}
       {panelOpen ? (
-        <div className="hidden md:flex w-[560px] flex-shrink-0 border-l border-secondary flex-col overflow-hidden">
+        <div className="hidden md:flex flex-1 flex-shrink border-l border-secondary flex-col overflow-hidden min-w-[520px]">
           <AvailabilityPanel
             headerSlot={
               <button

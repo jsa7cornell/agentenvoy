@@ -104,6 +104,15 @@ interface WeeklyCalendarProps {
   primaryCalendar?: string;
   onSlotClick?: (label: string) => void;
   onEventClick?: (event: TunerEvent) => void;
+  /** Number of consecutive days to render starting from weekStart.
+   *  Defaults to 7 (full week). When < 7, the grid still anchors to
+   *  weekStart so the week-nav still aligns; the panel caller can
+   *  shift weekStart to today to get a "today + N-1" view. */
+  daysToShow?: number;
+  /** Hide the built-in top toolbar (score legend + TZ chip).
+   *  When true, callers like AvailabilityPanel render their own
+   *  chrome and the calendar grid starts clean. */
+  hideToolbar?: boolean;
 }
 
 export function WeeklyCalendar({
@@ -115,18 +124,21 @@ export function WeeklyCalendar({
   primaryCalendar,
   onSlotClick,
   onEventClick,
+  daysToShow = 7,
+  hideToolbar = false,
 }: WeeklyCalendarProps) {
-  // Build array of 7 day strings
+  const dayCount = Math.max(1, Math.min(7, daysToShow));
+  // Build array of day strings
   const days = useMemo(() => {
     const result: string[] = [];
     const start = new Date(weekStart + "T12:00:00");
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < dayCount; i++) {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
       result.push(d.toISOString().slice(0, 10));
     }
     return result;
-  }, [weekStart]);
+  }, [weekStart, dayCount]);
 
   // Live "now" tick — drives the today-bubble, past-day shading, and the
   // red current-time indicator line. Updates every 60s so the line moves
@@ -212,29 +224,36 @@ export function WeeklyCalendar({
 
   const gridStartMin = HOUR_START * 60;
 
+  // Dynamic min-width: ~100px per day column + 56px gutter (so 3-day mode
+  // doesn't force horizontal scroll on narrow panels).
+  const gridMinWidth = 56 + dayCount * 100;
+  const gridCols = `56px repeat(${dayCount}, minmax(0, 1fr))`;
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Score legend + timezone badge */}
-      <div className="flex items-center gap-4 px-4 py-2 border-b border-secondary text-[11px] text-muted shrink-0">
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-100 dark:bg-emerald-600/60 border border-emerald-500 dark:border-emerald-400" /> Available</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-teal-100 dark:bg-teal-600/70 border border-teal-500 dark:border-teal-400" /> Office Hours</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-100 dark:bg-amber-600/50 border border-amber-500 dark:border-amber-400" /> Protected</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-100 dark:bg-red-600/50 border border-red-600 dark:border-red-500" /> Blocked</span>
-        <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-50 dark:bg-indigo-900/80 border border-indigo-500 dark:border-indigo-400" /> Calendar event</span>
-        <span className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-secondary/60 border border-DEFAULT/60 text-primary font-medium" title={timezone}>
-          {shortTimezoneLabel(timezone)}
-        </span>
-      </div>
+      {/* Score legend + timezone badge — hidden when the parent renders its own. */}
+      {!hideToolbar && (
+        <div className="flex items-center gap-4 px-4 py-2 border-b border-secondary text-[11px] text-muted shrink-0">
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-100 dark:bg-emerald-600/60 border border-emerald-500 dark:border-emerald-400" /> Available</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-teal-100 dark:bg-teal-600/70 border border-teal-500 dark:border-teal-400" /> Office Hours</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-100 dark:bg-amber-600/50 border border-amber-500 dark:border-amber-400" /> Protected</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-100 dark:bg-red-600/50 border border-red-600 dark:border-red-500" /> Blocked</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-50 dark:bg-indigo-900/80 border border-indigo-500 dark:border-indigo-400" /> Calendar event</span>
+          <span className="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-secondary/60 border border-DEFAULT/60 text-primary font-medium" title={timezone}>
+            {shortTimezoneLabel(timezone)}
+          </span>
+        </div>
+      )}
 
       {/* Scrollable calendar area */}
       <div className="flex-1 overflow-auto">
-        <div className="min-w-[700px]">
+        <div style={{ minWidth: gridMinWidth }}>
           {/* Header row: day labels + locations.
               For the current day, render the date number in a filled
               circle — same visual pattern Google Calendar uses so it's
               unambiguous which column the red time line belongs to. */}
           <div className="grid sticky top-0 z-20 bg-surface border-b border-secondary"
-            style={{ gridTemplateColumns: "56px repeat(7, minmax(0, 1fr))" }}>
+            style={{ gridTemplateColumns: gridCols }}>
             <div className="p-2" /> {/* gutter */}
             {days.map((day) => {
               const loc = locationByDay[day];
@@ -275,7 +294,7 @@ export function WeeklyCalendar({
           {/* All-day events row */}
           {hasAnyAllDay && (
             <div className="grid border-b border-secondary"
-              style={{ gridTemplateColumns: "56px repeat(7, minmax(0, 1fr))" }}>
+              style={{ gridTemplateColumns: gridCols }}>
               <div className="px-1 py-1.5 flex items-start justify-end">
                 <span className="text-[10px] text-muted">All day</span>
               </div>
@@ -305,7 +324,7 @@ export function WeeklyCalendar({
 
           {/* Time grid */}
           <div className="grid relative"
-            style={{ gridTemplateColumns: "56px repeat(7, minmax(0, 1fr))" }}>
+            style={{ gridTemplateColumns: gridCols }}>
             {/* Hour labels gutter */}
             <div className="relative" style={{ height: TOTAL_ROWS * ROW_HEIGHT }}>
               {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (
@@ -390,10 +409,18 @@ export function WeeklyCalendar({
                   const width = ev.totalCols > 1 ? `${Math.floor(90 / ev.totalCols)}%` : "90%";
                   const left = ev.totalCols > 1 ? `${5 + (ev.col / ev.totalCols) * 90}%` : "5%";
 
+                  // Hover tooltip text — summary, time range, calendar, location
+                  const timeLabel = `${formatTimeLabel(ev.start, timezone)} – ${formatTimeLabel(ev.end, timezone)}`;
+                  const tooltipParts = [ev.summary, timeLabel];
+                  if (ev.location) tooltipParts.push(ev.location);
+                  if (ev.calendar && ev.calendar !== primaryCalendar) tooltipParts.push(ev.calendar);
+                  const tooltip = tooltipParts.join(" · ");
+
                   return (
                     <div
                       key={ev.id}
                       onClick={() => onEventClick?.(ev)}
+                      title={tooltip}
                       className={`absolute rounded-sm border-l-2 ${getEventAccent(ev.responseStatus, ev.isTransparent)} ${getEventBg(ev.responseStatus, ev.isTransparent)} overflow-hidden z-10 ${onEventClick ? "cursor-pointer hover:brightness-110 transition-[filter]" : "pointer-events-none"}`}
                       style={{ top, height, width, left }}
                     >
