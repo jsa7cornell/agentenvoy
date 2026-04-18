@@ -18,3 +18,41 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npm run check
+
+  # Catches the class of incident where schema.prisma is edited but no
+  # matching migration file is committed — prod then breaks because the
+  # column doesn't exist in Supabase. Three incidents in April 2026 had
+  # this shape (guestTimezone, welcomeEmailSentAt, SideEffectLog). This
+  # job only runs on pull_request; direct-to-main pushes are trusted.
+  schema-migration-match:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for matching migration when schema.prisma changed
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          echo "Changed files:"
+          echo "$CHANGED"
+          echo "---"
+
+          SCHEMA_CHANGED=$(echo "$CHANGED" | grep -E '^prisma/schema\.prisma$' || true)
+          MIGRATION_CHANGED=$(echo "$CHANGED" | grep -E '^prisma/migrations/' || true)
+
+          if [ -n "$SCHEMA_CHANGED" ] && [ -z "$MIGRATION_CHANGED" ]; then
+            echo "::error::schema.prisma was modified but no file under prisma/migrations/ was added or changed."
+            echo "::error::Every schema change needs a matching prisma/migrations/<date>_<desc>.sql file committed in the same PR."
+            echo "::error::See PLAYBOOK Rule 12 + the External Configuration Checklist."
+            echo "::error::The SQL must also be run in Supabase SQL Editor BEFORE the Vercel deploy lands — but that is a separate, runtime-enforced step."
+            exit 1
+          fi
+
+          if [ -n "$SCHEMA_CHANGED" ]; then
+            echo "✓ schema.prisma changed and at least one migration file is present in this PR."
+          else
+            echo "✓ schema.prisma not modified; skipping check."
+          fi
