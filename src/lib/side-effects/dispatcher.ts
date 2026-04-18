@@ -234,11 +234,65 @@ async function runHandler(
  * Throws only for dispatcher-level problems (e.g. DB write for the log fails),
  * which are catastrophic and should surface.
  */
+/**
+ * Kinds that should ALWAYS run in `live` mode in production. If any of these
+ * resolve to a non-live mode while `NODE_ENV === "production"`, that's a
+ * config miss (missing `EFFECT_MODE_*` env var) — we log a RouteError so it
+ * surfaces on `/admin/failures` the first time it happens, instead of
+ * silently no-op'ing every confirmation for days. Throttled to one alert
+ * per kind per process lifetime so we don't spam the failure log.
+ *
+ * Incident context: 2026-04-17 EFFECT_MODE_CALENDAR was never set in Vercel
+ * production, so the dispatcher defaulted to `dryrun` and every confirmed
+ * meeting created a synthetic event instead of a real GCal invite. The
+ * miss went undetected for at least half a day. This guard catches that
+ * exact class of bug.
+ */
+const MUST_BE_LIVE_IN_PROD: EffectKind[] = [
+  "email.send",
+  "calendar.create_event",
+  "calendar.create_hold",
+  // calendar.delete_event intentionally omitted — `log` is the documented
+  // safe default; missing env var there is less catastrophic.
+];
+const prodModeAlertsFired = new Set<EffectKind>();
+
+function alertIfProdModeMisconfigured(kind: EffectKind, mode: EffectMode): void {
+  if (process.env.NODE_ENV !== "production") return;
+  if (!MUST_BE_LIVE_IN_PROD.includes(kind)) return;
+  if (mode === "live" || mode === "allowlist") return;
+  if (prodModeAlertsFired.has(kind)) return;
+  prodModeAlertsFired.add(kind);
+  const envVar = MODE_ENV_VAR[kind];
+  const message =
+    `[side-effects] CRITICAL: ${kind} is resolving to "${mode}" in production. ` +
+    `Set ${envVar}=live in Vercel Production env vars. All ${kind} calls are ` +
+    `currently no-op or synthetic — users are not receiving real side effects.`;
+  console.error(message);
+  // Fire-and-forget RouteError write so this surfaces on /admin/failures.
+  // Lazy import to avoid a circular dep between route-error.ts and dispatcher.ts.
+  import("@/lib/route-error")
+    .then(({ logRouteError }) => {
+      logRouteError({
+        route: "side-effects/dispatcher",
+        method: "dispatch",
+        statusCode: 500,
+        error: new Error(message),
+        context: { kind, mode, envVar: envVar ?? null },
+      });
+    })
+    .catch(() => {
+      // If even the route-error import fails, we already console.error'd —
+      // don't compound the problem.
+    });
+}
+
 export async function dispatch<K extends EffectKind>(
   effect: SideEffect & { kind: K },
 ): Promise<SideEffectResult<K>> {
   const kind: EffectKind = effect.kind;
   const mode = resolveMode(kind);
+  alertIfProdModeMisconfigured(kind, mode);
 
   let outcome: HandlerOutcomeBase;
   try {
