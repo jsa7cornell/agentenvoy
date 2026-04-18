@@ -67,23 +67,34 @@ export function DashboardHeader() {
           <LogoFull height={22} className="text-primary" />
         </Link>
 
-        {/* Meet link pill — desktop */}
+        {/* Meet link pill — desktop. Click copies; the arrow navigates to
+            the full "My Links" page for share + stats + office hours. */}
         {meetUrl && (
-          <button
-            onClick={copyLink}
-            className="hidden sm:flex items-center gap-2 bg-surface-secondary/60 border border-surface-tertiary/50 rounded-full px-3 py-1 hover:border-purple-500/40 transition group max-w-[240px]"
-          >
-            <code className="text-purple-400 font-mono text-xs truncate">
-              /meet/{meetSlug}
-            </code>
-            <span className="text-[10px] text-muted group-hover:text-secondary transition flex-shrink-0">
-              {copied ? (
-                <span className="text-emerald-400">Copied!</span>
-              ) : (
-                "Copy"
-              )}
-            </span>
-          </button>
+          <div className="hidden sm:flex items-center bg-surface-secondary/60 border border-surface-tertiary/50 rounded-full pl-3 pr-1 hover:border-purple-500/40 transition max-w-[280px]">
+            <button
+              onClick={copyLink}
+              className="flex items-center gap-2 group"
+              title="Copy link"
+            >
+              <code className="text-purple-400 font-mono text-xs truncate">
+                /meet/{meetSlug}
+              </code>
+              <span className="text-[10px] text-muted group-hover:text-secondary transition flex-shrink-0">
+                {copied ? (
+                  <span className="text-emerald-400">Copied!</span>
+                ) : (
+                  "Copy"
+                )}
+              </span>
+            </button>
+            <Link
+              href="/dashboard/my-links"
+              className="ml-1 w-6 h-6 rounded-full flex items-center justify-center text-muted hover:text-primary hover:bg-surface-tertiary/60 transition flex-shrink-0"
+              title="All my links"
+            >
+              →
+            </Link>
+          </div>
         )}
 
         {/* Mobile: copy icon */}
