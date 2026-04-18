@@ -38,6 +38,16 @@ export interface TimeChipListProps {
   onSelectSlot: (args: { start: string; end: string; color: "both" | "one" }) => void;
 }
 
+/**
+ * Curated-first layout:
+ * - Default view renders the first N "works for both" chips (curated picks)
+ *   from the earliest days, capped so the widget stays skimmable even when
+ *   there are dozens of matches.
+ * - "Show more times" expands into a per-day view, each day rendered as a
+ *   horizontally-scrollable row of chips.
+ */
+const CURATED_CAP = 6;
+
 export function TimeChipList({
   bilateralByDay,
   primaryTimezone,
@@ -45,6 +55,7 @@ export function TimeChipList({
   onSelectSlot,
 }: TimeChipListProps) {
   const [selectedStart, setSelectedStart] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const days = Object.keys(bilateralByDay).sort();
   if (days.length === 0) return null;
@@ -69,31 +80,76 @@ export function TimeChipList({
   const hasBoth = bothDays.some((d) => d.chips.length > 0);
   const hasOne = oneDays.some((d) => d.chips.length > 0);
 
+  // Flatten all "both" chips in order for the curated view. Total count
+  // drives whether we show the "show more" toggle at all.
+  const allBothChips: Array<{ chip: TimeChipData; dayLabel: string }> =
+    bothDays.flatMap((d) => d.chips.map((chip) => ({ chip, dayLabel: d.dayLabel })));
+  const curatedBothChips = allBothChips.slice(0, CURATED_CAP);
+  const hasMoreBoth = allBothChips.length > CURATED_CAP;
+
+  const renderChip = (chip: TimeChipData, dayLabel: string) => (
+    <TimeChip
+      key={chip.start}
+      chip={chip}
+      dayLabel={dayLabel}
+      primaryTz={primaryTimezone}
+      secondaryTz={showDualTz ? counterpartyTimezone! : undefined}
+      selected={chip.start === selectedStart}
+      onClick={() => {
+        setSelectedStart(chip.start);
+        onSelectSlot({ start: chip.start, end: chip.end, color: chip.color });
+      }}
+    />
+  );
+
   return (
     <div className="mt-3 space-y-3" data-testid="time-chip-list">
       {hasBoth && (
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-wider text-secondary mb-1.5">
-            Works for both of you
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {bothDays.flatMap((d) =>
-              d.chips.map((chip) => (
-                <TimeChip
-                  key={chip.start}
-                  chip={chip}
-                  dayLabel={d.dayLabel}
-                  primaryTz={primaryTimezone}
-                  secondaryTz={showDualTz ? counterpartyTimezone! : undefined}
-                  selected={chip.start === selectedStart}
-                  onClick={() => {
-                    setSelectedStart(chip.start);
-                    onSelectSlot({ start: chip.start, end: chip.end, color: chip.color });
-                  }}
-                />
-              )),
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-secondary">
+              {expanded ? "All matching times" : "Recommended"}
+            </div>
+            {hasMoreBoth && (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 transition uppercase tracking-wider"
+                data-testid="toggle-expand-chips"
+              >
+                {expanded
+                  ? "Show fewer"
+                  : `Browse all ${allBothChips.length} →`}
+              </button>
             )}
           </div>
+
+          {expanded ? (
+            // Per-day rows, each horizontally scrollable. Cap the widget height
+            // at 3 rows worth of chips visible by default (via CSS) — further
+            // days scroll vertically in the parent container.
+            <div className="space-y-2">
+              {bothDays.map((d) => (
+                <div key={d.dayLabel}>
+                  <div className="text-[10px] font-medium text-muted mb-1">{d.dayLabel}</div>
+                  <div
+                    className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1"
+                    style={{ scrollbarWidth: "thin" }}
+                  >
+                    {d.chips.map((chip) => (
+                      <div key={chip.start} className="flex-shrink-0">
+                        {renderChip(chip, d.dayLabel)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {curatedBothChips.map(({ chip, dayLabel }) => renderChip(chip, dayLabel))}
+            </div>
+          )}
         </div>
       )}
 
@@ -103,22 +159,7 @@ export function TimeChipList({
             Close — one side would need to shift
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {oneDays.flatMap((d) =>
-              d.chips.map((chip) => (
-                <TimeChip
-                  key={chip.start}
-                  chip={chip}
-                  dayLabel={d.dayLabel}
-                  primaryTz={primaryTimezone}
-                  secondaryTz={showDualTz ? counterpartyTimezone! : undefined}
-                  selected={chip.start === selectedStart}
-                  onClick={() => {
-                    setSelectedStart(chip.start);
-                    onSelectSlot({ start: chip.start, end: chip.end, color: chip.color });
-                  }}
-                />
-              )),
-            )}
+            {oneDays.flatMap((d) => d.chips.map((chip) => renderChip(chip, d.dayLabel)))}
           </div>
         </div>
       )}
