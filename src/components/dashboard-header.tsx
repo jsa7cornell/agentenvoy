@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
+import { useSession, signIn } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoFull } from "./logo";
@@ -14,8 +14,16 @@ interface ConnectionStatus {
   };
 }
 
-export function DashboardHeader() {
-  const { data: session } = useSession();
+/**
+ * Site header. Single component across every page — host dashboard, logged-in
+ * guest deal room, anonymous guest deal room. Layout stays identical (logo
+ * left, profile right); contents adapt to auth state.
+ *
+ * Never build a bespoke header for a single page. Inline banners below the
+ * header can vary freely, but the header itself is always this component.
+ */
+export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: string } = {}) {
+  const { data: session, status: sessionStatus } = useSession();
   const pathname = usePathname();
   const [copied, setCopied] = useState(false);
   const [connStatus, setConnStatus] = useState<ConnectionStatus | null>(null);
@@ -54,15 +62,45 @@ export function DashboardHeader() {
   const isMeetings = pathname.startsWith("/dashboard/meetings");
   const isAccount = pathname.startsWith("/dashboard/account");
   const isDashboard = pathname === "/dashboard" || pathname === "/dashboard/";
+  const isSignedIn = sessionStatus === "authenticated" && !!session?.user;
+
+  // Anonymous variant — same layout, but logo links home and the right side
+  // is a single Sign-in button that round-trips back to the current page.
+  if (!isSignedIn) {
+    return (
+      <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0">
+        <div className="px-4 sm:px-6 py-2.5 flex items-center gap-3">
+          <Link href="/" className="flex-shrink-0" title="AgentEnvoy">
+            <LogoFull height={22} className="text-primary" />
+          </Link>
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={() =>
+              signIn("google", {
+                callbackUrl: signInCallbackUrl || (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"),
+              })
+            }
+            className="text-xs text-muted hover:text-primary transition px-2 py-1"
+            data-testid="header-signin"
+          >
+            Sign in
+          </button>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0">
       <div className="px-4 sm:px-6 py-2.5 flex items-center gap-3">
-        {/* Logo → Dashboard */}
+        {/* Logo → home for the signed-in viewer. Points at /dashboard for the
+            primary account entry; the highlight state only applies when
+            they're actually on /dashboard. */}
         <Link
           href="/dashboard"
           className={`flex-shrink-0 transition ${isDashboard ? "opacity-100" : "opacity-60 hover:opacity-100"}`}
-          title="Dashboard"
+          title="AgentEnvoy"
         >
           <LogoFull height={22} className="text-primary" />
         </Link>

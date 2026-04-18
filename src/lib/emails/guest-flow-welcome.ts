@@ -32,7 +32,7 @@ export function buildGuestFlowWelcomeEmail(
   const greeting = params.firstName ? params.firstName : "there";
   const meetUrl = `${BASE_URL}/meet/${params.meetSlug}`;
   const meetLabel = `agentenvoy.ai/meet/${params.meetSlug}`;
-  const dashboardUrl = `${BASE_URL}/dashboard`;
+  const homeUrl = `${BASE_URL}/dashboard`;
   const linksUrl = `${BASE_URL}/dashboard/my-links`;
 
   const triggeredBy = params.triggeringHostName
@@ -68,7 +68,7 @@ export function buildGuestFlowWelcomeEmail(
       </p>
 
       <ul style="font-size: 14px; line-height: 1.7; margin: 0 0 22px 20px; padding: 0; color: #3a3a52;">
-        <li><a href="${dashboardUrl}" style="color: #6c5ce7; text-decoration: none; font-weight: 600;">Your dashboard</a> — set meeting length, buffers, and preferences (takes 60 seconds).</li>
+        <li><a href="${homeUrl}" style="color: #6c5ce7; text-decoration: none; font-weight: 600;">Your AgentEnvoy</a> — set meeting length, buffers, and preferences (takes 60 seconds).</li>
         <li><a href="${linksUrl}" style="color: #6c5ce7; text-decoration: none; font-weight: 600;">My Links</a> — share your scheduling link and see what's happening on it.</li>
       </ul>
 

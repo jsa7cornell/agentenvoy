@@ -12,7 +12,7 @@ import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availabili
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import {
-  formatAvailabilityWindows,
+  formatAvailabilitySlotList,
   formatStretchDays,
   humanTimezoneLabel,
   formatLabel,
@@ -561,16 +561,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Format availability. When the guest is in a different timezone, the
-  // template shows times primary in guest-local with host-local in parens,
-  // and groups by guest-local day — the guest should never have to translate.
-  const windows = formatAvailabilityWindows(
+  // Format availability as the V2 Danny-spec bullet list. Dual-timezone is
+  // inline ("6:00 AM PT / 9:00 AM ET"), same-timezone collapses to one label,
+  // days are bold markdown headers, cap 5 bullets per day.
+  const slotList = formatAvailabilitySlotList(
     filteredSlots,
     hostTimezone,
     new Date(),
     guestTzDiffers ? effectiveGuestTz : undefined,
     effectiveDuration ?? undefined,
-    effectiveMinDuration
+    effectiveMinDuration,
   );
 
   let greeting: string;
@@ -590,38 +590,43 @@ export async function POST(req: NextRequest) {
     const rawTopic = link.topic || null;
     const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
 
-    // 1. Intro — short and warm, includes format + duration up front.
-    const hello = inviteeName ? `👋 Hi ${inviteeName}!` : "👋 Hi there!";
+    // Greeting V2 (Danny spec, 2026-04-18). Structure:
+    //   👋 Hi {name}! I'm scheduling time with you and {host}.
+    //   {emoji} {duration}-min {format}
+    //   🕒 Times in your timezone: {viewerTz} · {host} is on {hostTz}
+    //
+    //   **Mon, Apr 27**
+    //   • 6:00 AM PT / 9:00 AM ET
+    //   ...
+    //
+    //   👉 Reply with a time that works for you, and I'll get it booked.
+    const greeteeName = inviteeName ? inviteeName.split(/\s+/)[0] : "there";
+    const hello = `👋 Hi ${greeteeName}! I'm scheduling time with you and ${hostFirstName}.`;
+
     // Format emoji: phone → 📞, video → 📹, in-person → 🤝, fallback → 📅
     const formatEmoji = effectiveFormat === "phone" ? "📞"
       : effectiveFormat === "video" ? "📹"
       : effectiveFormat === "in-person" ? "🤝"
       : "📅";
 
-    // 2. Build the intro sentence with format + duration up front.
     const fmtLabel = formatLabel(effectiveFormat);
     const durationLabel = (effectiveMinDuration && effectiveMinDuration < (effectiveDuration ?? 30))
       ? `${effectiveMinDuration}–${effectiveDuration}`
       : effectiveDuration
       ? `${effectiveDuration}`
       : null;
-    // "a 55-min phone call" / "a video call" / "a 30-min meeting" / "a meeting"
-    const meetingDesc = durationLabel && fmtLabel
-      ? `a ${durationLabel}-min ${fmtLabel}`
+    const meetingDescShort = durationLabel && fmtLabel
+      ? `${durationLabel}-min ${fmtLabel}`
       : fmtLabel
-      ? `a ${fmtLabel}`
+      ? fmtLabel
       : durationLabel
-      ? `a ${durationLabel}-min meeting`
-      : "a meeting";
-    // Optional venue/address tail. Pulled from link.rules.location when the
-    // host named a specific place in the create_link dialog (e.g. "at Coupa
-    // Cafe"). Show for in-person; show for other formats too when set
-    // (host may have pinned a specific address for a phone/video meeting).
+      ? `${durationLabel}-min meeting`
+      : "meeting";
+
+    // Optional venue/address. Shown as a fourth line when set.
     const linkLocation = typeof linkRules.location === "string" && linkRules.location.trim()
       ? linkRules.location.trim()
       : null;
-    const locationTail = linkLocation ? ` at ${linkLocation}` : "";
-    const intro = `${hello} ${formatEmoji} I'm scheduling ${meetingDesc} between you and ${hostFirstName}${locationTail}.`;
 
     const isVip = !!(linkRules.isVip);
 
@@ -666,19 +671,38 @@ export async function POST(req: NextRequest) {
         guidance: guestGuidance,
       });
     } else {
-      // 3. Schedule block — compact time windows with optional dual timezone.
-      let scheduleBlock: string;
-      if (windows.lines.length > 0) {
-        const header = guestTzDiffers
-          ? `Here are some good options (${guestTimezoneLabel}, ${hostFirstName}'s time in parens):`
-          : `Here are some good options (${hostTimezoneLabel}):`;
-        const body = windows.lines.join("\n");
-        const legend = windows.hasPreferred
-          ? `\n★ = best fit with ${hostFirstName}'s schedule`
-          : "";
-        const moreNote = windows.wasTruncated ? "\n\nMore times are available in the calendar →" : "";
-        // VIP one-liner: surface stretch days so the guest knows more can open up.
-        let stretchNote = "";
+      // V2 Danny-spec assembly (2026-04-18):
+      //   hello
+      //   formatLine   (📞 15-min phone call)
+      //   tzLine       (🕒 Times in your timezone: Pacific · Danny is on Eastern)
+      //   [locationLine]
+      //
+      //   **Mon, Apr 27**
+      //   • 6:00 AM PT / 9:00 AM ET
+      //   ...
+      //
+      //   closing      (👉 Reply with a time that works…)
+      const formatLine = `${formatEmoji} ${meetingDescShort}`;
+
+      // Timezone line. Dual-tz names the viewer's tz first, host's second.
+      // Same-tz collapses to one label.
+      let tzLine: string;
+      if (guestTzDiffers && guestTimezoneLabel) {
+        tzLine = `🕒 Times shown in your timezone: ${guestTimezoneLabel} · ${hostFirstName} is on ${hostTimezoneLabel}`;
+      } else {
+        tzLine = `🕒 Times shown in ${hostTimezoneLabel}`;
+      }
+
+      const locationLine = linkLocation ? `📍 ${linkLocation}` : null;
+
+      // Schedule body — the bulleted V2 list. If empty, fall back to an
+      // open-ended ask.
+      let scheduleBody: string;
+      if (slotList.lines.length > 0) {
+        scheduleBody = slotList.lines.join("\n");
+        if (slotList.hasPreferred) {
+          scheduleBody += `\n\n★ = best fit with ${hostFirstName}'s schedule`;
+        }
         if (isVip) {
           const stretchDays = formatStretchDays(
             filteredSlots,
@@ -687,22 +711,22 @@ export async function POST(req: NextRequest) {
             guestTzDiffers ? effectiveGuestTz : undefined,
           );
           if (stretchDays) {
-            stretchNote = `\n\nIf none of those work, I can also make ${stretchDays} available — just ask.`;
+            scheduleBody += `\n\nIf none of those work, I can also make ${stretchDays} available — just ask.`;
           }
         }
-        scheduleBlock = `${header}\n\n${body}${legend}${moreNote}${stretchNote}`;
       } else {
-        scheduleBlock = `I don't have open times to show right now — tell me what generally works and I'll find a match.`;
+        scheduleBody = `I don't have open times to show right now — tell me what generally works and I'll find a match.`;
       }
 
-      // 3. Closing — ask for what's still needed, keep it tight.
+      // Closing — V2 keeps it to one line. If we still need info, fold the
+      // ask into the same sentence rather than adding another block.
       const needed: string[] = [];
       if (!topic) needed.push("what it's about");
       if (!inviteeName) needed.push("your name");
       if (!link.inviteeEmail) needed.push("your email");
       let closing: string;
       if (needed.length === 0) {
-        closing = "Pick a time and I'll get it booked! 🤝";
+        closing = `👉 Reply with a time that works for you, and I'll get it booked.`;
       } else {
         const joined =
           needed.length === 1
@@ -710,12 +734,14 @@ export async function POST(req: NextRequest) {
             : needed.length === 2
             ? `${needed[0]} and ${needed[1]}`
             : `${needed.slice(0, -1).join(", ")}, and ${needed[needed.length - 1]}`;
-        closing = `Pick a time and let me know ${joined} — I'll get it booked! 🤝`;
+        closing = `👉 Reply with a time that works — plus ${joined} — and I'll get it booked.`;
       }
 
-      // Assemble — three tight blocks.
-      const parts: string[] = [intro, scheduleBlock, closing];
-      greeting = parts.join("\n\n");
+      const headerLines = [hello, formatLine, tzLine];
+      if (locationLine) headerLines.push(locationLine);
+      const header = headerLines.join("\n");
+
+      greeting = [header, scheduleBody, closing].join("\n\n");
     }
   }
 

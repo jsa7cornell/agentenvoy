@@ -540,7 +540,7 @@ export async function POST(req: NextRequest) {
               content:
                 `While I've got you — you now have your own AgentEnvoy account, ${firstName}. ` +
                 `Your meeting link is ${shareUrl} — anyone can book time with you. ` +
-                `Pop into ${dashUrl} when you have a minute to set your preferences (meeting length, buffers, etc.) and I'll be able to negotiate for you too.`,
+                `Open ${dashUrl} when you have a minute to set your preferences (meeting length, buffers, etc.) and I'll be able to negotiate for you too.`,
               metadata: {
                 kind: "guest_flow_nudge",
                 meetSlug: guestUser.meetSlug,

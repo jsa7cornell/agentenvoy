@@ -29,7 +29,7 @@ export function buildWelcomeEmail(params: WelcomeEmailParams): { subject: string
   const greeting = params.firstName ? params.firstName : "there";
   const meetUrl = `${BASE_URL}/meet/${params.meetSlug}`;
   const meetLabel = `agentenvoy.ai/meet/${params.meetSlug}`;
-  const dashboardUrl = `${BASE_URL}/dashboard`;
+  const homeUrl = `${BASE_URL}/dashboard`;
   const faqUrl = `${BASE_URL}/faq`;
 
   const subject = "Your AI negotiator is on duty";
@@ -56,8 +56,8 @@ export function buildWelcomeEmail(params: WelcomeEmailParams): { subject: string
       </p>
 
       <ul style="font-size: 14px; line-height: 1.7; margin: 0 0 22px 20px; padding: 0; color: #3a3a52;">
-        <li>Your <a href="${dashboardUrl}" style="color: #6c5ce7; text-decoration: none; font-weight: 600;">dashboard</a> shows every conversation I'm having on your behalf.</li>
-        <li><strong>Today's Insight</strong> (top of the dashboard) is my daily read of what's on your plate.</li>
+        <li>Open <a href="${homeUrl}" style="color: #6c5ce7; text-decoration: none; font-weight: 600;">AgentEnvoy</a> to see every conversation I'm having on your behalf.</li>
+        <li><strong>Today's Insight</strong> (top of the page) is my daily read of what's on your plate.</li>
         <li>The <a href="${faqUrl}" style="color: #6c5ce7; text-decoration: none; font-weight: 600;">FAQ</a> has the weird stuff — directives, office hours, VIP links.</li>
       </ul>
 

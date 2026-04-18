@@ -3,7 +3,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { LogoFull } from "./logo";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
 import { PublicHeader } from "./public-header";
@@ -1354,19 +1353,34 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       ? guestEnvoyStyle
                       : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
 
+            // Each Envoy is named after the human it represents. "Your Envoy"
+            // only for the viewer's own agent; counterparties always see the
+            // named form ("John's Envoy", "Danny's Envoy") so it's immediately
+            // clear which side is speaking.
+            const hostFirstForLabel = hostName ? hostName.split(" ")[0] : "Host";
+            const guestFirstForLabel = guestUser?.name
+              ? guestUser.name.split(" ")[0]
+              : inviteeName
+                ? inviteeName.split(" ")[0]
+                : null;
+
+            const administratorLabel = isHost
+              ? "Your Envoy"
+              : `${hostFirstForLabel}'s Envoy`;
+
             const guestEnvoyLabel = isGuest
               ? "Your Envoy"
-              : guestUser?.name
-                ? `${guestUser.name.split(" ")[0]}'s Envoy`
+              : guestFirstForLabel
+                ? `${guestFirstForLabel}'s Envoy`
                 : "Guest's Envoy";
 
             const senderLabel =
               msg.role === "host"
                 ? hostName || "Host"
                 : msg.role === "guest"
-                  ? "Guest"
+                  ? guestFirstForLabel || "Guest"
                   : msg.role === "administrator"
-                    ? "Envoy"
+                    ? administratorLabel
                     : msg.role === "guest_envoy"
                       ? guestEnvoyLabel
                       : null;
@@ -1732,50 +1746,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   return (
     <div className="fixed inset-0 bg-surface text-primary flex flex-col overflow-hidden z-20">
-      {/* Header — three branches:
-            host              → full dashboard chrome
-            logged-in guest   → their name + link back to their dashboard
-            anonymous guest   → minimal brand bar with "Sign in" that returns to this deal room */}
-      {isHost ? (
-        <DashboardHeader />
-      ) : isGuest ? (
-        <header className="border-b border-secondary px-6 py-3 flex items-center justify-between flex-shrink-0">
-          <a href="/">
-            <LogoFull height={24} className="text-primary" />
-          </a>
-          <div className="flex items-center gap-3">
-            {guestUser?.name && (
-              <span className="text-xs text-secondary" data-testid="guest-name">
-                {guestUser.name}
-              </span>
-            )}
-            <a
-              href="/dashboard"
-              className="text-xs text-muted hover:text-primary transition"
-              data-testid="guest-dashboard-link"
-            >
-              My Dashboard
-            </a>
-          </div>
-        </header>
-      ) : (
-        <header className="border-b border-secondary px-6 py-3 flex items-center justify-between flex-shrink-0">
-          <a href="/">
-            <LogoFull height={24} className="text-primary" />
-          </a>
-          <button
-            type="button"
-            onClick={() =>
-              signIn("google", {
-                callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
-              })
-            }
-            className="text-xs text-muted hover:text-primary transition"
-            data-testid="anonymous-signin-link"
-          >
-            Sign in
-          </button>
-        </header>
+      {/* Site header. Same component across host, logged-in guest, and
+          anonymous — contents adapt to auth state inside DashboardHeader.
+          Deal-room-specific affordances go in banners below, never in a
+          bespoke header. */}
+      <DashboardHeader
+        signInCallbackUrl={`/meet/${slug}${code ? `/${code}` : ""}`}
+      />
+      {isGuest && guestUser?.name && (
+        <span className="sr-only" data-testid="guest-name">
+          {guestUser.name}
+        </span>
       )}
 
       {/* Main area — chat + sidebar on desktop */}

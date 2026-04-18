@@ -350,6 +350,190 @@ export function formatAvailabilityWindows(
   return { lines, hasPreferred, wasTruncated };
 }
 
+// ─── Bulleted slot-list formatter (greeting V2, 2026-04-18) ─────────────────
+//
+// Danny-spec greeting format:
+//
+//   **Mon, Apr 27**
+//   • 6:00 AM PT / 9:00 AM ET
+//   • 7:30 AM PT / 10:30 AM ET
+//
+// Differences vs. formatAvailabilityWindows (the V1 block-range formatter):
+//   - One bullet per contiguous block's start time (not a collapsed range).
+//     "6–9 AM" becomes a single bullet "6:00 AM" — readers don't need the
+//     full range on the first read; they need a pickable start time.
+//   - Days are bold markdown headers, one per line.
+//   - Dual-timezone renders inline "H:MM AM ZZ / H:MM AM ZZ" (not parens).
+//   - Same-timezone collapses to a single label per bullet.
+//   - Max 5 bullets per day, max 5 days total; preferred-scored blocks rank
+//     first within a day so the guest sees host-favored times ahead of merely
+//     available ones.
+
+export interface FormattedSlotList {
+  /** Output lines ready to join with "\n". Day headers are bolded, bullets
+   *  are prefixed with "• ". No leading indent. */
+  lines: string[];
+  /** True if any shown bullet corresponds to a preferred slot (score ≤ -1). */
+  hasPreferred: boolean;
+  /** True if we truncated (more than maxSlotsPerDay blocks on some day, or
+   *  more than maxDays days in the offer window). */
+  hasMore: boolean;
+  /** True if the host timezone label was shown; identical to
+   *  `guestTimezone != null && guestTimezone !== hostTimezone`. Callers use
+   *  this to tailor header copy. */
+  isDualTimezone: boolean;
+}
+
+/** "6:00 AM PT" — always emits :00 for consistency with Danny-spec bullets. */
+function fmtSlotLabel(d: Date, timezone: string, tzShort: string): string {
+  const t = d
+    .toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: timezone,
+    });
+  return `${t} ${tzShort}`;
+}
+
+/**
+ * Render a Danny-spec availability list: bolded day headers + bulleted
+ * start times, dual- or single-timezone aware. See block comment above for
+ * the full format contract.
+ *
+ * Ranking within a day favors preferred slots (score ≤ -1) ahead of regular
+ * openness, tiebreak chronological. Days are sorted chronologically for
+ * display after selection.
+ */
+export function formatAvailabilitySlotList(
+  slots: ScoredSlot[],
+  hostTimezone: string,
+  now: Date = new Date(),
+  guestTimezone?: string,
+  durationMin?: number,
+  minDurationMin?: number,
+  opts?: { maxSlotsPerDay?: number; maxDays?: number },
+): FormattedSlotList {
+  const MAX_SLOTS_PER_DAY = opts?.maxSlotsPerDay ?? 5;
+  const MAX_DAYS_LOCAL = opts?.maxDays ?? MAX_DAYS;
+
+  const offerable = slots.filter((s) => {
+    const start = new Date(s.start);
+    return start > now && s.score <= 1;
+  });
+  const durationFiltered = durationMin
+    ? filterByDuration(offerable, durationMin, minDurationMin)
+    : offerable;
+  const good = durationFiltered.sort(
+    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
+  );
+  if (good.length === 0) {
+    return { lines: [], hasPreferred: false, hasMore: false, isDualTimezone: false };
+  }
+
+  const hasGuestTz = !!guestTimezone && guestTimezone !== hostTimezone;
+  const groupTz = hasGuestTz ? guestTimezone! : hostTimezone;
+
+  const dayFmt = (d: Date) =>
+    d.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      timeZone: groupTz,
+    });
+
+  // Build contiguous blocks grouped by day. Each block = one bullet.
+  interface Block {
+    start: Date;
+    end: Date;
+    hasPreferred: boolean;
+    preferredCount: number;
+  }
+  const dayToBlocks = new Map<string, Block[]>();
+  let current: Block | null = null;
+  let currentDay: string | null = null;
+  const commit = () => {
+    if (current && currentDay) {
+      if (!dayToBlocks.has(currentDay)) dayToBlocks.set(currentDay, []);
+      dayToBlocks.get(currentDay)!.push(current);
+    }
+  };
+  for (const slot of good) {
+    const start = new Date(slot.start);
+    const end = new Date(slot.end);
+    const dayLabel = dayFmt(start);
+    const isPreferred = slot.score <= -1;
+    if (
+      current &&
+      currentDay === dayLabel &&
+      start.getTime() === current.end.getTime()
+    ) {
+      current.end = end;
+      if (isPreferred) {
+        current.hasPreferred = true;
+        current.preferredCount += 1;
+      }
+    } else {
+      commit();
+      current = {
+        start,
+        end,
+        hasPreferred: isPreferred,
+        preferredCount: isPreferred ? 1 : 0,
+      };
+      currentDay = dayLabel;
+    }
+  }
+  commit();
+
+  // Rank days chronologically (list order), cap to maxDays.
+  const dayEntries = Array.from(dayToBlocks.entries()).map(([day, blocks]) => ({
+    day,
+    blocks,
+    firstStart: blocks[0].start,
+  }));
+  dayEntries.sort((a, b) => a.firstStart.getTime() - b.firstStart.getTime());
+  let hasMore = dayEntries.length > MAX_DAYS_LOCAL;
+  const pickedDays = dayEntries.slice(0, MAX_DAYS_LOCAL);
+
+  const hostShort = shortTimezoneLabel(hostTimezone, now);
+  const guestShort = hasGuestTz ? shortTimezoneLabel(guestTimezone!, now) : null;
+
+  const lines: string[] = [];
+  let hasPreferred = false;
+
+  for (let i = 0; i < pickedDays.length; i++) {
+    const entry = pickedDays[i];
+    if (i > 0) lines.push(""); // blank line between day groups
+    lines.push(`**${entry.day}**`);
+
+    // Pick up to N bullets: preferred-first, then chronological.
+    const sorted = entry.blocks.slice().sort((a, b) => {
+      if (a.hasPreferred !== b.hasPreferred) return a.hasPreferred ? -1 : 1;
+      return a.start.getTime() - b.start.getTime();
+    });
+    if (sorted.length > MAX_SLOTS_PER_DAY) hasMore = true;
+    const chosen = sorted.slice(0, MAX_SLOTS_PER_DAY);
+    // Re-sort chronologically for display.
+    chosen.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+    for (const block of chosen) {
+      const hostLabel = fmtSlotLabel(block.start, hostTimezone, hostShort);
+      if (hasGuestTz) {
+        const guestLabel = fmtSlotLabel(block.start, guestTimezone!, guestShort!);
+        const star = block.hasPreferred ? " ★" : "";
+        if (block.hasPreferred) hasPreferred = true;
+        lines.push(`• ${guestLabel} / ${hostLabel}${star}`);
+      } else {
+        const star = block.hasPreferred ? " ★" : "";
+        if (block.hasPreferred) hasPreferred = true;
+        lines.push(`• ${hostLabel}${star}`);
+      }
+    }
+  }
+
+  return { lines, hasPreferred, hasMore, isDualTimezone: hasGuestTz };
+}
+
 // ─── Stretch-day formatter ───────────────────────────────────────────────────
 
 /**
