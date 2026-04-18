@@ -30,10 +30,17 @@ export interface TunerEvent {
   responseStatus?: string;
   isAllDay: boolean;
   isRecurring: boolean;
+  /** Google's master eventId when this event is an instance of a recurring
+   *  series. Used by the override modal to offer a "this one" vs. "all
+   *  instances" scope choice. */
+  recurringEventId?: string;
   isTransparent?: boolean;
   eventType?: string;
   /** Host-set protection override score (0=Open, 3=Protected, 5=Blocked). Undefined = Auto. */
   protectionOverride?: number;
+  /** Scope of the current override, when one is set. "instance" = this event
+   *  only; "series" = all instances of the recurring series. */
+  protectionOverrideScope?: "instance" | "series";
 }
 
 export interface TunerSlot {

@@ -10,6 +10,7 @@ import {
   type LinkRules,
   type UserPreferences,
 } from "@/lib/scoring";
+import type { CalendarEvent } from "@/lib/calendar";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -341,5 +342,267 @@ describe("computeSchedule — v3 envelope + blockCost tagging", () => {
     });
     expect(weekendEdge).toBeDefined();
     expect(weekendEdge!.score).toBe(4);
+  });
+});
+
+// ── Event protection overrides — rule hierarchy (Danny bug, 2026-04-18) ────
+//
+// An "Open" override on an event must subtract that event's protection only.
+// Other rules (blocked_window, weekend hours-layer, other events) must still
+// stack. A "Protected" or "Blocked" override can only raise the slot's score,
+// never lower it.
+
+describe("computeSchedule — event protection overrides (rule hierarchy)", () => {
+  // Pick a Saturday several days in the future so we're past the "now" gate
+  // and comfortably inside the generation envelope. The computeSchedule
+  // internals snap to :00/:30 boundaries and filter past slots implicitly.
+  function nextSaturday1pm(): Date {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + ((6 - d.getUTCDay() + 7) % 7 || 7) + 7);
+    d.setUTCHours(20, 0, 0, 0); // 20:00 UTC ≈ 1 PM PDT / 12 PM PST
+    return d;
+  }
+  function nextMonday9am(): Date {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + ((1 - d.getUTCDay() + 7) % 7 || 7) + 7);
+    d.setUTCHours(16, 0, 0, 0); // 16:00 UTC ≈ 9 AM PDT
+    return d;
+  }
+
+  function allDayEvent(id: string, dateISO: string): CalendarEvent {
+    const start = new Date(dateISO + "T00:00:00.000Z");
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    return {
+      id,
+      summary: "Offsite (all day)",
+      start,
+      end,
+      calendar: "Primary",
+      provider: "google",
+      isAllDay: true,
+      isRecurring: false,
+      responseStatus: "accepted",
+    };
+  }
+
+  function timedEvent(id: string, start: Date, durationMin: number): CalendarEvent {
+    return {
+      id,
+      summary: "Untitled meeting",
+      start,
+      end: new Date(start.getTime() + durationMin * 60 * 1000),
+      calendar: "Primary",
+      provider: "google",
+      isAllDay: false,
+      isRecurring: false,
+      responseStatus: "accepted",
+    };
+  }
+
+  // Transparent event — scoreSlot returns score 1 ("FYI"). Useful for
+  // exercising 3/5-override raise semantics without the event itself
+  // already driving the score to 5.
+  function transparentEvent(id: string, start: Date, durationMin: number): CalendarEvent {
+    return {
+      id,
+      summary: "FYI reminder",
+      start,
+      end: new Date(start.getTime() + durationMin * 60 * 1000),
+      calendar: "Primary",
+      provider: "google",
+      isAllDay: false,
+      isRecurring: false,
+      isTransparent: true,
+      responseStatus: "accepted",
+    };
+  }
+
+  it("Open override on an all-day event does NOT wipe a blocked_window rule covering the same day", () => {
+    // Mon 9 AM, blocked window 00:00-10:00 strong preference (surfing).
+    // All-day event with override 0 covering that Monday.
+    const monday = nextMonday9am();
+    const dateStr = monday.toISOString().substring(0, 10);
+    const prefs: UserPreferences = {
+      explicit: {
+        timezone: "America/Los_Angeles",
+        businessHoursStart: 10,
+        businessHoursEnd: 18,
+        blockedWindows: [
+          { start: "00:00", end: "10:00", label: "surfing", blockCost: "preference", firmness: "strong" },
+        ],
+        eventProtectionOverrides: [{ eventId: "ev-allday", score: 0 }],
+      },
+    };
+    const slots = computeSchedule([allDayEvent("ev-allday", dateStr)], prefs, null, null);
+    const nineAm = slots.find((s) => Math.abs(new Date(s.start).getTime() - monday.getTime()) < 60_000);
+    expect(nineAm).toBeDefined();
+    // Blocked window should still apply (score 4 for preference:strong)
+    expect(nineAm!.score).toBe(4);
+    expect(nineAm!.kind).toBe("blocked_window");
+  });
+
+  it("Open override on an all-day event does NOT wipe weekend hours-layer protection", () => {
+    const saturday = nextSaturday1pm();
+    const dateStr = saturday.toISOString().substring(0, 10);
+    const prefs: UserPreferences = {
+      explicit: {
+        timezone: "America/Los_Angeles",
+        businessHoursStart: 10,
+        businessHoursEnd: 18,
+        eventProtectionOverrides: [{ eventId: "ev-sat", score: 0 }],
+      },
+    };
+    const slots = computeSchedule([allDayEvent("ev-sat", dateStr)], prefs, null, null);
+    const sat1pm = slots.find((s) => Math.abs(new Date(s.start).getTime() - saturday.getTime()) < 60_000);
+    expect(sat1pm).toBeDefined();
+    // Weekend daytime → score 3 from hours-layer (NOT 0)
+    expect(sat1pm!.score).toBe(3);
+    expect(sat1pm!.kind).toBe("weekend");
+  });
+
+  it("Open override on a timed event during biz hours DOES open the slot", () => {
+    const monday = nextMonday9am();
+    // Move to 11 AM PDT (18:00 UTC) — inside biz, no blocked window
+    const elevenAm = new Date(monday.getTime() + 2 * 60 * 60 * 1000);
+    const prefs: UserPreferences = {
+      explicit: {
+        timezone: "America/Los_Angeles",
+        businessHoursStart: 10,
+        businessHoursEnd: 18,
+        eventProtectionOverrides: [{ eventId: "ev-timed", score: 0 }],
+      },
+    };
+    const slots = computeSchedule([timedEvent("ev-timed", elevenAm, 30)], prefs, null, null);
+    const slot = slots.find((s) => Math.abs(new Date(s.start).getTime() - elevenAm.getTime()) < 60_000);
+    expect(slot).toBeDefined();
+    // With the event filtered out for scoring, this slot becomes plain open
+    expect(slot!.score).toBe(0);
+    expect(slot!.kind).toBe("open");
+  });
+
+  it("Protected (3) override on a transparent event raises its score from 1 to 3", () => {
+    const monday = nextMonday9am();
+    const elevenAm = new Date(monday.getTime() + 2 * 60 * 60 * 1000);
+    const prefs: UserPreferences = {
+      explicit: {
+        timezone: "America/Los_Angeles",
+        businessHoursStart: 10,
+        businessHoursEnd: 18,
+        eventProtectionOverrides: [{ eventId: "ev-timed", score: 3 }],
+      },
+    };
+    const slots = computeSchedule([transparentEvent("ev-timed", elevenAm, 30)], prefs, null, null);
+    const slot = slots.find((s) => Math.abs(new Date(s.start).getTime() - elevenAm.getTime()) < 60_000);
+    expect(slot).toBeDefined();
+    expect(slot!.score).toBe(3);
+    expect(slot!.reason).toBe("protected (host set)");
+  });
+
+  it("Protected (3) override does NOT lower a slot already scored higher by a rule", () => {
+    // Blocked window scores 4 (preference:strong). A 3-override must NOT soften it.
+    const monday = nextMonday9am();
+    const dateStr = monday.toISOString().substring(0, 10);
+    const prefs: UserPreferences = {
+      explicit: {
+        timezone: "America/Los_Angeles",
+        businessHoursStart: 10,
+        businessHoursEnd: 18,
+        blockedWindows: [
+          { start: "00:00", end: "10:00", label: "surfing", blockCost: "preference", firmness: "strong" },
+        ],
+        eventProtectionOverrides: [{ eventId: "ev-allday", score: 3 }],
+      },
+    };
+    const slots = computeSchedule([allDayEvent("ev-allday", dateStr)], prefs, null, null);
+    const nineAm = slots.find((s) => Math.abs(new Date(s.start).getTime() - monday.getTime()) < 60_000);
+    expect(nineAm).toBeDefined();
+    expect(nineAm!.score).toBe(4);
+    expect(nineAm!.kind).toBe("blocked_window");
+  });
+
+  it("series-scoped override on master id applies to instance events that share the recurringEventId", () => {
+    const monday = nextMonday9am();
+    const elevenAm = new Date(monday.getTime() + 2 * 60 * 60 * 1000);
+    const instance: CalendarEvent = {
+      id: "inst-abc_20260420T180000Z",
+      summary: "Weekly 1:1",
+      start: elevenAm,
+      end: new Date(elevenAm.getTime() + 30 * 60 * 1000),
+      calendar: "Primary",
+      provider: "google",
+      isAllDay: false,
+      isRecurring: true,
+      recurringEventId: "master-abc",
+      isTransparent: true, // force scoreSlot score=1 so override must raise
+      responseStatus: "accepted",
+    };
+    const prefs: UserPreferences = {
+      explicit: {
+        timezone: "America/Los_Angeles",
+        businessHoursStart: 10,
+        businessHoursEnd: 18,
+        // Override is keyed by the MASTER id — this is the series scope.
+        eventProtectionOverrides: [{ eventId: "master-abc", score: 5, scope: "series" }],
+      },
+    };
+    const slots = computeSchedule([instance], prefs, null, null);
+    const slot = slots.find((s) => Math.abs(new Date(s.start).getTime() - elevenAm.getTime()) < 60_000);
+    expect(slot).toBeDefined();
+    expect(slot!.score).toBe(5);
+    expect(slot!.reason).toBe("blocked (host set)");
+  });
+
+  it("instance-scoped override wins over a series-scoped override for the same event", () => {
+    const monday = nextMonday9am();
+    const elevenAm = new Date(monday.getTime() + 2 * 60 * 60 * 1000);
+    const instance: CalendarEvent = {
+      id: "inst-xyz_20260420T180000Z",
+      summary: "Weekly team sync",
+      start: elevenAm,
+      end: new Date(elevenAm.getTime() + 30 * 60 * 1000),
+      calendar: "Primary",
+      provider: "google",
+      isAllDay: false,
+      isRecurring: true,
+      recurringEventId: "master-xyz",
+      isTransparent: true,
+      responseStatus: "accepted",
+    };
+    const prefs: UserPreferences = {
+      explicit: {
+        timezone: "America/Los_Angeles",
+        businessHoursStart: 10,
+        businessHoursEnd: 18,
+        eventProtectionOverrides: [
+          // Series says Blocked, but this specific instance is Open.
+          { eventId: "master-xyz", score: 5, scope: "series" },
+          { eventId: "inst-xyz_20260420T180000Z", score: 0, scope: "instance" },
+        ],
+      },
+    };
+    const slots = computeSchedule([instance], prefs, null, null);
+    const slot = slots.find((s) => Math.abs(new Date(s.start).getTime() - elevenAm.getTime()) < 60_000);
+    expect(slot).toBeDefined();
+    // Instance=Open filtered the event out → transparent effect gone → score 0
+    expect(slot!.score).toBe(0);
+    expect(slot!.kind).toBe("open");
+  });
+
+  it("Blocked (5) override raises a transparent event's score from 1 to 5", () => {
+    const monday = nextMonday9am();
+    const elevenAm = new Date(monday.getTime() + 2 * 60 * 60 * 1000);
+    const prefs: UserPreferences = {
+      explicit: {
+        timezone: "America/Los_Angeles",
+        businessHoursStart: 10,
+        businessHoursEnd: 18,
+        eventProtectionOverrides: [{ eventId: "ev-timed", score: 5 }],
+      },
+    };
+    const slots = computeSchedule([transparentEvent("ev-timed", elevenAm, 30)], prefs, null, null);
+    const slot = slots.find((s) => Math.abs(new Date(s.start).getTime() - elevenAm.getTime()) < 60_000);
+    expect(slot).toBeDefined();
+    expect(slot!.score).toBe(5);
+    expect(slot!.reason).toBe("blocked (host set)");
   });
 });

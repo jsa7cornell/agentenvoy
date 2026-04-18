@@ -1771,8 +1771,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           {/* TZ recovery banner — appears when someone raced ahead of this
               human guest and the session's primary TZ differs from their
               browser TZ. Silent when they match or the banner was dismissed.
-              Hidden once the meeting is confirmed. */}
-          {(() => {
+              Hidden once the meeting is confirmed.
+              Disabled 2026-04-18 per John — too noisy on guest load. Widget
+              auto-detects browser TZ already; keep dormant until we revisit. */}
+          {(false as boolean) && (() => {
             if (confirmed) return null;
             if (tzBannerDismissed) return null;
             if (!sessionId || !sessionTimezone) return null;

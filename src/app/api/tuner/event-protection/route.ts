@@ -8,7 +8,11 @@ import { type EventProtectionOverride } from "@/lib/scoring";
 
 /**
  * PUT /api/tuner/event-protection
- * Body: { eventId: string; score: 0 | 3 | 5 | null }
+ * Body: {
+ *   eventId: string;           // when scope === "series", this is the master id
+ *   score: 0 | 3 | 5 | null;
+ *   scope?: "instance" | "series";   // default "instance"
+ * }
  *
  * score null  → remove override (Auto — revert to engine scoring)
  * score 0     → Open (treat as free even though event exists)
@@ -26,7 +30,7 @@ export async function PUT(req: NextRequest) {
   }
   const userId = authSession.user.id;
 
-  let body: { eventId?: string; score?: 0 | 3 | 5 | null };
+  let body: { eventId?: string; score?: 0 | 3 | 5 | null; scope?: "instance" | "series" };
   try {
     body = await req.json();
   } catch {
@@ -34,6 +38,7 @@ export async function PUT(req: NextRequest) {
   }
 
   const { eventId, score } = body;
+  const scope: "instance" | "series" = body.scope === "series" ? "series" : "instance";
   if (!eventId || typeof eventId !== "string") {
     return NextResponse.json({ error: "Missing eventId" }, { status: 400 });
   }
@@ -57,14 +62,16 @@ export async function PUT(req: NextRequest) {
   const explicit = (prefs.explicit as Record<string, unknown>) ?? {};
   const existing = (explicit.eventProtectionOverrides as EventProtectionOverride[]) ?? [];
 
+  // Overrides are keyed by (eventId, scope) — an instance override and a
+  // series override can coexist for different ids. Dedupe on that pair.
+  const matchesSame = (o: EventProtectionOverride) =>
+    o.eventId === eventId && (o.scope ?? "instance") === scope;
   let updated: EventProtectionOverride[];
   if (score === null || score === undefined) {
-    // Remove override (Auto)
-    updated = existing.filter((o) => o.eventId !== eventId);
+    updated = existing.filter((o) => !matchesSame(o));
   } else {
-    // Upsert override
-    const filtered = existing.filter((o) => o.eventId !== eventId);
-    updated = [...filtered, { eventId, score }];
+    const filtered = existing.filter((o) => !matchesSame(o));
+    updated = [...filtered, { eventId, score, scope }];
   }
 
   await prisma.user.update({
@@ -83,5 +90,5 @@ export async function PUT(req: NextRequest) {
   // Invalidate schedule cache so next fetch recomputes with new override
   await invalidateSchedule(userId);
 
-  return NextResponse.json({ ok: true, eventId, score: score ?? null });
+  return NextResponse.json({ ok: true, eventId, score: score ?? null, scope });
 }

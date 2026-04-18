@@ -25,6 +25,11 @@ export interface CalendarEvent {
   responseStatus?: string; // host's RSVP: "accepted", "declined", "tentative", "needsAction"
   isAllDay: boolean;
   isRecurring: boolean;
+  /** Google's master eventId for a recurring series, when this event is an
+   *  instance of one. Host-set "series" overrides match on this field so a
+   *  single override applies to every instance. Undefined for standalone
+   *  (non-recurring) events. */
+  recurringEventId?: string;
   isTransparent?: boolean; // "transparent" events don't block time (FYI only)
   eventType?: string; // "default", "workingLocation", "outOfOffice", etc.
 }
@@ -119,6 +124,7 @@ class GoogleCalendarProvider implements CalendarProvider {
               responseStatus: hostAttendee?.responseStatus || undefined,
               isAllDay,
               isRecurring: !!ev.recurringEventId,
+              recurringEventId: ev.recurringEventId || undefined,
               isTransparent: ev.transparency === "transparent",
             } as CalendarEvent;
           });
@@ -393,6 +399,7 @@ interface StoredCalendarEvent {
   responseStatus?: string;
   isAllDay: boolean;
   isRecurring: boolean;
+  recurringEventId?: string;
   isTransparent?: boolean;
   eventType?: string;
 }
@@ -594,6 +601,7 @@ async function fullSync(
         responseStatus: hostAttendee?.responseStatus || undefined,
         isAllDay,
         isRecurring: !!ev.recurringEventId,
+        recurringEventId: ev.recurringEventId || undefined,
         isTransparent: ev.transparency === "transparent",
         eventType: evType,
       });

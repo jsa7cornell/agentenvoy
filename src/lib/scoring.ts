@@ -117,13 +117,24 @@ export interface BlockedWindow {
   firmness?: BlockFirmness;
 }
 
-/** A host-set protection override for a specific Google Calendar event.
+/** A host-set protection override for a Google Calendar event.
  *  score 0 = Open (treat as schedulable even though event exists)
  *  score 3 = Protected (harder to book, stretch-band)
- *  score 5 = Blocked (hard block, never offer) */
+ *  score 5 = Blocked (hard block, never offer)
+ *
+ *  `scope` controls how broadly the override applies:
+ *   - "instance" (default, back-compat): override applies only to the
+ *     specific event whose id matches `eventId`.
+ *   - "series": `eventId` holds the recurring *master* id. The override
+ *     applies to every instance whose `recurringEventId` matches, as well
+ *     as the master itself. Future instances — including ones Google
+ *     creates with a different id after a move — are covered automatically
+ *     so long as the master id stays the same.
+ */
 export interface EventProtectionOverride {
   eventId: string;
   score: 0 | 3 | 5;
+  scope?: "instance" | "series";
 }
 
 export interface UserPreferences {
@@ -1109,13 +1120,52 @@ export function computeSchedule(
   const horizon = new Date(now.getTime() + 56 * 24 * 60 * 60 * 1000); // 8 weeks
   const slots: ScoredSlot[] = [];
 
-  // Build event-protection override map once (eventId → score).
-  // Applied after scoreSlot + hoursProtectionLayer to give host-set
-  // overrides the final word on a slot's protection level.
+  // Build event-protection override map. Two semantics:
+  //   - Open (0): "this event doesn't protect this time." We filter the
+  //     event out of `scoringEvents` so scoreSlot never sees it — other
+  //     rules (blocked_window, office_hours, weekend/off-hours layer,
+  //     other events) still stack normally. This fixes the bug where an
+  //     all-day event marked Open would wipe the whole day's rule-based
+  //     protection.
+  //   - Protected (3) / Blocked (5): applied AFTER scoreSlot as
+  //     max(existingScore, overrideScore) — the host wants at least this
+  //     much protection, but existing stronger rules still win.
   const rawOverrides = preferences.explicit?.eventProtectionOverrides ?? [];
-  const eventOverrideMap = new Map<string, 0 | 3 | 5>(
-    rawOverrides.map((o) => [o.eventId, o.score])
-  );
+  // Build per-event lookup from the override list. Series-scoped overrides
+  // match any event whose recurringEventId equals the override's eventId;
+  // instance-scoped (or legacy unscoped) overrides match only by id. An
+  // event's own score takes precedence over a series match, so an explicit
+  // "just this one" override on an instance wins over the series setting.
+  function findOverrideScoreForEvent(e: CalendarEvent): 0 | 3 | 5 | null {
+    let instanceHit: 0 | 3 | 5 | null = null;
+    let seriesHit: 0 | 3 | 5 | null = null;
+    for (const o of rawOverrides) {
+      if (o.eventId === e.id && (o.scope ?? "instance") === "instance") {
+        instanceHit = o.score;
+      } else if (o.scope === "series" && e.recurringEventId && o.eventId === e.recurringEventId) {
+        seriesHit = o.score;
+      } else if (o.scope === "series" && o.eventId === e.id) {
+        // Host clicked the master itself — series override applies to the
+        // master record too.
+        seriesHit = o.score;
+      }
+    }
+    return instanceHit ?? seriesHit;
+  }
+  const perEventOverride = new Map<string, 0 | 3 | 5>();
+  for (const e of events) {
+    const s = findOverrideScoreForEvent(e);
+    if (s !== null) perEventOverride.set(e.id, s);
+  }
+  const openOverrideIds = new Set<string>();
+  const strictenOverrideMap = new Map<string, 3 | 5>();
+  perEventOverride.forEach((s, id) => {
+    if (s === 0) openOverrideIds.add(id);
+    else strictenOverrideMap.set(id, s);
+  });
+  const scoringEvents = openOverrideIds.size > 0
+    ? events.filter((e) => !openOverrideIds.has(e.id))
+    : events;
 
   // Snap to next :00 or :30 boundary
   const current = new Date(now);
@@ -1151,7 +1201,7 @@ export function computeSchedule(
     const scored = scoreSlot(
       current,
       slotEnd,
-      events,
+      scoringEvents,
       blockedWindows,
       preferences,
       tz,
@@ -1174,12 +1224,15 @@ export function computeSchedule(
       }
     }
 
-    // Apply host-set per-event protection overrides. These take precedence
-    // over all other scoring — the host explicitly said "treat this event's
-    // time as X". Only applies when an overridden event overlaps this slot.
-    if (eventOverrideMap.size > 0) {
+    // Apply host-set "strengthen" overrides (Protected=3, Blocked=5).
+    // These raise a slot's protection to at least the override level —
+    // but never LOWER it. If an existing rule (blocked_window,
+    // office_hours, hours-layer, another event) already scored the slot
+    // higher, that wins. Open (0) overrides were already handled above
+    // by filtering the event out of `scoringEvents`.
+    if (strictenOverrideMap.size > 0) {
       const overriddenEvent = events.find((e) => {
-        if (!eventOverrideMap.has(e.id)) return false;
+        if (!strictenOverrideMap.has(e.id)) return false;
         const eStart = new Date(e.start);
         const eEnd = new Date(e.end);
         // Zero-duration events (reminders): match the slot they start in
@@ -1187,24 +1240,21 @@ export function computeSchedule(
         return eStart < slotEnd && eEnd > current;
       });
       if (overriddenEvent) {
-        const overrideScore = eventOverrideMap.get(overriddenEvent.id)!;
-        scored.score = overrideScore;
-        scored.eventSummary = overriddenEvent.summary;
-        if (overrideScore === 0) {
-          scored.reason = "open (host override)";
-          scored.kind = "open";
-          scored.blockCost = "none";
-          scored.firmness = undefined;
-        } else if (overrideScore <= 3) {
-          scored.reason = "protected (host set)";
-          scored.kind = "event";
-          scored.blockCost = "preference";
-          scored.firmness = "strong";
-        } else {
-          scored.reason = "blocked (host set)";
-          scored.kind = "event";
-          scored.blockCost = "commitment";
-          scored.firmness = "strong";
+        const overrideScore = strictenOverrideMap.get(overriddenEvent.id)!;
+        if (overrideScore > scored.score) {
+          scored.score = overrideScore;
+          scored.eventSummary = overriddenEvent.summary;
+          if (overrideScore === 3) {
+            scored.reason = "protected (host set)";
+            scored.kind = "event";
+            scored.blockCost = "preference";
+            scored.firmness = "strong";
+          } else {
+            scored.reason = "blocked (host set)";
+            scored.kind = "event";
+            scored.blockCost = "commitment";
+            scored.firmness = "strong";
+          }
         }
       }
     }
@@ -1239,7 +1289,10 @@ export function computeInputHash(
     //     tiers collapsed to binary isVip.
     // v3.1: all-day event overlap uses date comparison instead of UTC time
     //       range — fixes timezone bleed (Wed event showing Tue+Wed in EDT).
-    scheduleVersion: "v3.1",
+    // v3.2: per-event "Open" override subtracts (doesn't force score 0);
+    //       Protected/Blocked overrides apply as max(existing, override)
+    //       so structured rules retain their protection.
+    scheduleVersion: "v3.2",
     events: events.map((e) => ({
       id: e.id,
       start: e.start,
