@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { LogoFull } from "./logo";
@@ -109,6 +109,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [signupUpsellDismissed, setSignupUpsellDismissed] = useState(false);
   // Mobile chip CTA expanded state
   const [chipCtaExpanded, setChipCtaExpanded] = useState(false);
+  // Propose-changes UI: each click injects a synthetic Envoy text bubble +
+  // a fresh picker bubble into the thread. Client-only, never persisted.
+  // Incrementing triggers a re-render with one more (text, picker) pair at
+  // the bottom of the messages list.
+  const [proposeChangesCount, setProposeChangesCount] = useState(0);
   // Signup intro modal (shown when guest clicks "Create free account")
   const [showSignupModal, setShowSignupModal] = useState(false);
 
@@ -984,11 +989,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 </button>
               </>
             )}
-            {/* Propose changes */}
+            {/* Propose changes — injects synthetic Envoy bubbles so the
+                guest can re-pick without typing. Each click adds another
+                pair (text + picker) at the bottom of the thread. */}
             <button
               onClick={() => {
-                setInput("I'd like to propose a change to this meeting — ");
-                document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                setProposeChangesCount((n) => n + 1);
+                // Scroll to bottom shortly after render so the new picker is visible.
+                setTimeout(() => {
+                  document
+                    .querySelector<HTMLDivElement>("[data-messages-end]")
+                    ?.scrollIntoView({ behavior: "smooth" });
+                }, 50);
               }}
               className="text-xs text-indigo-400 hover:text-indigo-300 transition"
             >
@@ -1186,6 +1198,41 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   ) : null;
 
   // --- Main content ---
+  // Inline picker bubble — rendered as an Envoy "quick action" inside the
+  // message thread. Used (1) once after the first administrator message so
+  // guests see the picker without it floating above, and (2) every time the
+  // guest clicks "Propose changes" on a confirmed meeting.
+  const renderPickerBubble = (keyPrefix: string) => {
+    if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
+    return (
+      <div key={keyPrefix} className="flex justify-start md:hidden">
+        <div className="max-w-[95%] w-full min-w-0 rounded-2xl px-3 py-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
+          <div className="text-[10px] font-bold uppercase tracking-wider mb-2 text-emerald-400">
+            Envoy
+          </div>
+          <AvailabilityCalendar
+            view="week"
+            slotsByDay={slotsByDay || {}}
+            timezone={slotTimezone}
+            currentLocation={slotLocation}
+            duration={slotDuration}
+            minDuration={slotMinDuration}
+            onSelectSlot={!isHost ? (_msg, slot) => {
+              if (slot) proposeFromSlot(slot);
+            } : undefined}
+            onTimezoneClick={() => {
+              setInput("I\u2019m actually in a different timezone \u2014 ");
+              document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+            }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  // Find the first administrator message so the inline picker can follow it.
+  const firstAdminIdx = messages.findIndex((m) => m.role === "administrator");
+
   const chatContent = (
     <>
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-4">
@@ -1367,8 +1414,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               </div>
             ) : null;
 
+            const showPickerAfter = idx === firstAdminIdx;
+
             return (
-              <div key={msg.id}>
+              <React.Fragment key={msg.id}>
                 {dateSeparator}
                 <div className={`flex min-w-0 ${rightAligned ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 text-sm leading-relaxed ${messageStyle}`}>
@@ -1419,10 +1468,30 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                     The proposal + confirm form lives in a standalone block
                     below the messages list so there's exactly one card and
                     it's anchored near the composer, not buried mid-scroll. */}
-              </div>
+                {showPickerAfter && renderPickerBubble(`picker-after-${msg.id}`)}
+              </React.Fragment>
             );
           })
         )}
+
+        {/* Propose-changes synthetic bubbles. Each click on "Propose changes"
+            in the confirmed-event card pushes another (Envoy text + fresh
+            picker) pair here. Client-only; never posted to the server. */}
+        {Array.from({ length: proposeChangesCount }).map((_, i) => (
+          <React.Fragment key={`propose-changes-${i}`}>
+            <div className="flex min-w-0 justify-start">
+              <div className="max-w-[85%] min-w-0 rounded-2xl px-4 py-3 text-sm leading-relaxed bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
+                <div className="text-[10px] font-bold uppercase tracking-wider mb-1 text-emerald-400">
+                  Envoy
+                </div>
+                <div>Let me help you make changes — here&apos;s the availability picker right now.</div>
+              </div>
+            </div>
+            {renderPickerBubble(`picker-propose-${i}`)}
+          </React.Fragment>
+        ))}
+
+        <div data-messages-end />
 
         {/* Standalone bilateral chips (2026-04-17). Rendered outside the
             message stream so anonymous guests — who have no guest_envoy
@@ -1811,95 +1880,78 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             );
           })()}
 
-          {/* Concept B: Mobile calendar hero with inline chip CTA */}
-          {slotsByDay && Object.keys(slotsByDay).length > 0 && (
-            <div className="md:hidden border-b border-secondary flex-shrink-0 px-4 py-3 max-h-[50vh] overflow-y-auto">
-              <AvailabilityCalendar
-                view="week"
-                slotsByDay={slotsByDay || {}}
-                timezone={slotTimezone}
-                currentLocation={slotLocation}
-                duration={slotDuration}
-                minDuration={slotMinDuration}
-                onSelectSlot={!isHost && !confirmed ? (_msg, slot) => {
-                  if (slot) proposeFromSlot(slot);
-                } : undefined}
-                onTimezoneClick={() => {
-                  setInput("I\u2019m actually in a different timezone \u2014 ");
-                  document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-                }}
-                headerSlot={(() => {
-                  if (isHost) return null;
-                  if (isGuest) return null; // signed-in guests use their NextAuth calendar connection
-                  if (confirmed) return null;
-                  if (anonCalCtaDismissed) return null;
-                  if (!sessionId) return null;
-                  if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
+          {/* Mobile calendar-connect banner. The calendar picker itself is
+              rendered inline inside the first Envoy bubble (see
+              renderPickerBubble) — this banner only surfaces the
+              "Auto-match calendars" CTA for anonymous guests. */}
+          {(() => {
+            if (isHost || isGuest || confirmed || anonCalCtaDismissed || !sessionId) return null;
+            if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
+            if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
 
-                  const connect = () => {
-                    const returnUrl = `/meet/${slug}${code ? `/${code}` : ""}`;
-                    window.location.href = `/api/auth/guest-calendar?sessionId=${encodeURIComponent(sessionId)}&returnUrl=${encodeURIComponent(returnUrl)}`;
-                  };
+            const connect = () => {
+              const returnUrl = `/meet/${slug}${code ? `/${code}` : ""}`;
+              window.location.href = `/api/auth/guest-calendar?sessionId=${encodeURIComponent(sessionId)}&returnUrl=${encodeURIComponent(returnUrl)}`;
+            };
 
-                  if (!chipCtaExpanded) {
-                    return (
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setChipCtaExpanded(true)}
-                          className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition"
-                        >
-                          🗓️ Auto-match calendars
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAnonCalCtaDismissed(true);
-                            try {
-                              if (typeof window !== "undefined") {
-                                window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1");
-                              }
-                            } catch { /* ignore */ }
-                          }}
-                          className="text-muted hover:text-secondary transition text-xs"
-                          title="Dismiss"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    );
-                  }
+            if (!chipCtaExpanded) {
+              return (
+                <div className="md:hidden border-b border-secondary flex-shrink-0 px-4 py-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setChipCtaExpanded(true)}
+                    className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition"
+                  >
+                    🗓️ Auto-match calendars
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAnonCalCtaDismissed(true);
+                      try {
+                        if (typeof window !== "undefined") {
+                          window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1");
+                        }
+                      } catch { /* ignore */ }
+                    }}
+                    className="text-muted hover:text-secondary transition text-xs"
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            }
 
-                  return (
-                    <div className="mb-3 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 space-y-2">
-                      <div className="text-xs font-medium text-blue-200">
-                        Want me to find the best time automatically?
-                      </div>
-                      <p className="text-xs text-secondary leading-snug">
-                        Connect your calendar (read-only, ~5 seconds). I&apos;ll show you times that work for both of you.
-                      </p>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={connect}
-                          className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500 hover:bg-blue-600 text-white transition"
-                        >
-                          Connect
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setChipCtaExpanded(false)}
-                          className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium text-secondary border border-secondary hover:border-DEFAULT transition"
-                        >
-                          Not now
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })()}
-              />
-            </div>
-          )}
+            return (
+              <div className="md:hidden border-b border-secondary flex-shrink-0 px-4 py-3">
+                <div className="p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 space-y-2">
+                  <div className="text-xs font-medium text-blue-200">
+                    Want me to find the best time automatically?
+                  </div>
+                  <p className="text-xs text-secondary leading-snug">
+                    Connect your calendar (read-only, ~5 seconds). I&apos;ll show you times that work for both of you.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={connect}
+                      className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500 hover:bg-blue-600 text-white transition"
+                    >
+                      Connect
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChipCtaExpanded(false)}
+                      className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium text-secondary border border-secondary hover:border-DEFAULT transition"
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
             {chatContent}
           </div>
         </div>

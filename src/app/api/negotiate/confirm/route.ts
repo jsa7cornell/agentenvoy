@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createCalendarEvent, deleteCalendarEvent, invalidateSchedule } from "@/lib/calendar";
 import { extractLearnings } from "@/agent/administrator";
@@ -306,6 +307,26 @@ export async function POST(req: NextRequest) {
       }
       eventLink = result.htmlLink || undefined;
       confirmedCalendarEventId = result.eventId || undefined;
+
+      // Guard: in production, a synthetic (dryrun/log) or missing event ID
+      // means `EFFECT_MODE_CALENDAR` isn't set to `live`. The session UI will
+      // show "confirmed" but no real GCal event exists. Surface loudly via
+      // /admin/failures so config drift can't silently break bookings.
+      const isSynthetic =
+        !confirmedCalendarEventId || confirmedCalendarEventId.startsWith("dryrun-");
+      if (isSynthetic && process.env.NODE_ENV === "production") {
+        attemptOutcome = "gcal_failed";
+        attemptError = `Calendar effect returned no real eventId (got ${confirmedCalendarEventId ?? "null"}). Check EFFECT_MODE_CALENDAR=live in Vercel env.`;
+        logRouteError({
+          route: "/api/negotiate/confirm",
+          method: "POST",
+          statusCode: 200,
+          error: new Error(attemptError),
+          context: { sessionId, eventId: confirmedCalendarEventId ?? null },
+          userAgent,
+        });
+        console.error(`[confirm] ${attemptError}`);
+      }
     } catch (e) {
       console.error("[confirm] Failed to create calendar event:", e);
       // Continue — calendar is not strictly required. We still mark the
@@ -490,6 +511,59 @@ export async function POST(req: NextRequest) {
         }
       })()
     );
+
+    // === Guest-flow onboarding nudge ===
+    // When the guest signed in via the deal-room calendar-connect CTA, they
+    // skipped the normal onboarding flow. Now that the meeting is locked in,
+    // drop a friendly message into the deal-room thread pointing them at
+    // the dashboard to finish setup. Email nudge TODO (would live in
+    // src/lib/emails/).
+    try {
+      if (session.guestId && session.guestId !== session.hostId) {
+        const guestUser = await prisma.user.findUnique({
+          where: { id: session.guestId },
+          select: { preferences: true, meetSlug: true, name: true },
+        });
+        const guestPrefs = (guestUser?.preferences as Record<string, unknown> | null) || {};
+        const guestExplicit =
+          (guestPrefs.explicit as Record<string, unknown> | undefined) || {};
+        const signupSource = guestExplicit.signupSource;
+        const nudgeAlreadySent = guestExplicit.guestFlowNudgeSentAt;
+        if (signupSource === "guest_flow" && !nudgeAlreadySent && guestUser?.meetSlug) {
+          const firstName = guestUser.name?.split(" ")[0] || "there";
+          const dashUrl = `${baseUrl}/dashboard`;
+          const shareUrl = `${baseUrl}/meet/${guestUser.meetSlug}`;
+          await prisma.message.create({
+            data: {
+              sessionId,
+              role: "administrator",
+              content:
+                `While I've got you — you now have your own AgentEnvoy account, ${firstName}. ` +
+                `Your meeting link is ${shareUrl} — anyone can book time with you. ` +
+                `Pop into ${dashUrl} when you have a minute to set your preferences (meeting length, buffers, etc.) and I'll be able to negotiate for you too.`,
+              metadata: {
+                kind: "guest_flow_nudge",
+                meetSlug: guestUser.meetSlug,
+              } as unknown as Prisma.InputJsonValue,
+            },
+          });
+          await prisma.user.update({
+            where: { id: session.guestId },
+            data: {
+              preferences: {
+                ...guestPrefs,
+                explicit: {
+                  ...guestExplicit,
+                  guestFlowNudgeSentAt: new Date().toISOString(),
+                },
+              } as Prisma.InputJsonValue,
+            },
+          });
+        }
+      }
+    } catch (e) {
+      console.error("[confirm] guest-flow nudge failed (non-blocking):", e);
+    }
 
     // === Meeting confirmation email — sent to both host and guest ===
     const tEmailStart = Date.now();
