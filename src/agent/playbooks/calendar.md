@@ -210,6 +210,24 @@ When a guest suggests a location ("how about somewhere in Woodside?", "can we me
 - If the guest mentions their location, check whether the host will be nearby that day and suggest adjacent times.
 - If the host is in a different city/country from the guest, say so and suggest phone/video instead: "John is in Baja this week, so in-person won't work until he's back."
 
+## Relative-Time Phrases
+
+Colloquial time references are a trap — "next week" and "this week" sound precise but carry real ambiguity. Map them from the DATE REFERENCE block at the top of your context (TODAY / THIS WEEK / NEXT WEEK are pre-computed for you), never by computing.
+
+- **"This week"** — the THIS WEEK range in the DATE REFERENCE (Monday → Sunday containing today). Mid-week speakers mean the remaining days; Friday-afternoon speakers often effectively mean "before the weekend." Treat both as the same range, propose the remaining weekdays.
+- **"Next week"** — the NEXT WEEK range in the DATE REFERENCE (the following Monday → Sunday). Monday-through-Saturday speakers always mean the upcoming Monday onwards. **This is unambiguous — do NOT silently pick "the week after next."** Failing here means booking someone a meeting 8+ days later than they expected (we saw this 2026-04-18).
+- **"Next week" on a Sunday** — **AMBIGUOUS. STOP AND CONFIRM.** The upcoming Monday could mean "tomorrow" (first weekday ahead) OR "the following full week" (8 days out). People honestly differ. The DATE REFERENCE will include an explicit ambiguity note when today is Sunday — when you see it, ask: "Just to check — by 'next week' do you mean this upcoming Monday (tomorrow), or the week after?" Never pick one yourself.
+- **"The week of [date]"** — use the Monday-Sunday range that contains that date. Unambiguous; no need to confirm.
+- **"End of the week"** — Thursday afternoon / Friday. For personal events (dinner, weekend plans), may include Saturday. Ask if the guest is vague.
+- **"Early next week"** — Monday/Tuesday of NEXT WEEK. Propose both and let the guest pick.
+- **"Late next week"** — Thursday/Friday of NEXT WEEK.
+- **"This weekend"** — the upcoming Saturday–Sunday (even when said Monday). If today IS Saturday or Sunday, it means the day the speaker is currently in and the one after.
+- **"Next weekend"** — **AMBIGUOUS most of the week.** Often means the Sat–Sun 8–14 days out, but sometimes the imminent one. Confirm if the date matters.
+- **"Tomorrow," "the day after tomorrow"** — unambiguous; map to the DATE REFERENCE entry that matches.
+- **"Monday," "Tuesday," etc. without a qualifier** — defaults to the NEXT occurrence of that day. Said on Tuesday, "Friday" = this coming Friday. Said on Friday afternoon, "Monday" = next Monday. Said on Sunday, "Monday" = tomorrow.
+
+Rule of thumb: if you'd have to compute the date to answer, STOP and look at the DATE REFERENCE. If the DATE REFERENCE doesn't have an entry for what the speaker means, ASK instead of guessing. A quick "do you mean [date] or [date]?" is cheaper than a meeting booked on the wrong day.
+
 ## Time Intelligence
 
 - **Host-stated availability overrides defaults.** When the host explicitly offers a day or time window (e.g., "anytime tomorrow," "Saturday works"), treat that as authoritative — even if it falls outside business hours or on a weekend. The host knows their own schedule. Default business hours only apply when inferring availability from calendar gaps.

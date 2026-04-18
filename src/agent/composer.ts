@@ -3,6 +3,7 @@ import { join } from "path";
 import type { CalendarContext, CalendarEvent } from "@/lib/calendar";
 import { getUserTimezone } from "@/lib/timezone";
 import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
+import { computeWeekAnchors, formatWeekAnchorsForPrompt } from "@/lib/week-anchors";
 
 // --- Playbook cache (read once per cold start) ---
 
@@ -436,9 +437,11 @@ export function formatCalendarContext(ctx: CalendarContext): string {
     `[GROUND TRUTH] Host's calendar (${tzLabel}, UTC offset: ${utcOffset}, IANA: ${tz}), calendars checked: ${ctx.calendars.join(", ")}.`,
     ``,
     `[GROUND TRUTH] DATE REFERENCE (system-computed, ALWAYS correct — includes year):`,
+    formatWeekAnchorsForPrompt(computeWeekAnchors(new Date(), tz)),
     ...(dateMappingLines.length > 0 ? dateMappingLines.map(d => `  ${d}`) : [`  (no events in range)`]),
     ``,
     `CRITICAL: When referring to ANY date, copy the day-of-week AND year from the DATE REFERENCE above. NEVER compute day-of-week or year yourself — LLMs get this wrong. If you write "Tuesday, Apr 15" but the reference says "Wed, Apr 15, 2026", you are WRONG. Always check the reference before writing any date.`,
+    `RELATIVE WEEKS: "this week" = THIS WEEK range above; "next week" = NEXT WEEK range above. Map phrases to these ranges, never compute your own. If the ambiguity note is present (today is Sunday), confirm scope with the user before proposing — do NOT silently pick one interpretation.`,
     ``,
     `You decide what's available based on these events + the host knowledge base. No pre-computed slots — reason holistically.`,
     `When building a CONFIRMATION_PROPOSAL, use UTC offset "${utcOffset}" and timezone "${tz}" — e.g., "2026-04-03T16:00:00${utcOffset}".`,
@@ -555,9 +558,11 @@ export function formatComputedSchedule(
     `[GROUND TRUTH] Schedule (${tzLabel}, ${utcOffset}):`,
     ``,
     `[GROUND TRUTH] DATE REFERENCE (system-computed, ALWAYS correct — includes year):`,
+    formatWeekAnchorsForPrompt(computeWeekAnchors(new Date(), tz)),
     ...(dateMappingLines.length > 0 ? dateMappingLines.map(d => `  ${d}`) : [`  (no slots)`]),
     ``,
     `CRITICAL: When referring to ANY date, copy the day-of-week AND year from the DATE REFERENCE above. NEVER compute day-of-week or year yourself — LLMs get this wrong. Always check the reference before writing any date.`,
+    `RELATIVE WEEKS: "this week" = THIS WEEK range above; "next week" = NEXT WEEK range above. If the ambiguity note is present (today is Sunday), confirm scope with the user before acting — do NOT silently pick one interpretation.`,
     ``,
     `[GROUND TRUTH] Use UTC offset "${utcOffset}" and timezone "${tz}" in CONFIRMATION_PROPOSAL — e.g., "2026-04-03T16:00:00${utcOffset}".`,
     `Protection scores: -2=exclusive (ONLY these), -1=preferred (offer first), 0=explicitly free, 1=open, 2=soft hold [low confidence], 3=moderate friction [low confidence], 4=protected (host only), 5=immovable.`,
@@ -757,9 +762,11 @@ export function formatOfferableSlots(
     `These are the times you may suggest to the guest. Do NOT invent or calculate other times.`,
     ``,
     `[GROUND TRUTH] DATE REFERENCE (system-computed, ALWAYS correct):`,
+    formatWeekAnchorsForPrompt(computeWeekAnchors(new Date(), tz)),
     ...dateMappingLines,
     ``,
     `CRITICAL: Copy day-of-week and year from DATE REFERENCE. NEVER compute them yourself.`,
+    `RELATIVE WEEKS: "this week" = THIS WEEK range above; "next week" = NEXT WEEK range above. If the ambiguity note is present (today is Sunday), confirm scope with the user before acting.`,
     `Use UTC offset "${utcOffset}" and timezone "${tz}" in CONFIRMATION_PROPOSAL.`,
     ``,
   ];
