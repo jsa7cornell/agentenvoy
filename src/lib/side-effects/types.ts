@@ -20,7 +20,8 @@ export type SideEffect =
   | EmailSendEffect
   | CalendarCreateEventEffect
   | CalendarCreateHoldEffect
-  | CalendarDeleteEventEffect;
+  | CalendarDeleteEventEffect
+  | CalendarUpdateEventEffect;
   // Future kinds land here:
   // | McpCallbackEffect          (Phase 3)
   // | SmsSendEffect
@@ -79,6 +80,27 @@ export interface CalendarCreateHoldEffect {
   description?: string;
   startTime: Date;
   endTime: Date;
+  context?: Record<string, unknown>;
+}
+
+/** Patch an existing confirmed meeting (location, time, or format). Ownership-gated. */
+export interface CalendarUpdateEventEffect {
+  kind: "calendar.update_event";
+  userId: string;
+  eventId: string;
+  /** Session ID used to verify AgentEnvoy ownership via extendedProperties. */
+  sessionId: string;
+  changes: {
+    summary?: string;
+    location?: string | null; // null = clear the field
+    startTime?: Date;
+    endTime?: Date;
+    description?: string;
+  };
+  /** If true, attendees receive an update notification. Defaults to false (host-only update). */
+  notifyAttendees?: boolean;
+  /** Overrides CALENDAR_SEND_UPDATES env default. */
+  sendUpdatesOverride?: "all" | "externalOnly" | "none";
   context?: Record<string, unknown>;
 }
 
@@ -156,10 +178,18 @@ export interface CalendarDeleteEventResult extends SideEffectResultBase {
   kind: "calendar.delete_event";
 }
 
+export interface CalendarUpdateEventResult extends SideEffectResultBase {
+  kind: "calendar.update_event";
+  /** Updated event ID (same as input; echoed for caller convenience). */
+  eventId: string | null;
+  htmlLink: string | null;
+}
+
 export type SideEffectResult<K extends EffectKind = EffectKind> = Extract<
   | EmailSendResult
   | CalendarCreateEventResult
   | CalendarCreateHoldResult
-  | CalendarDeleteEventResult,
+  | CalendarDeleteEventResult
+  | CalendarUpdateEventResult,
   { kind: K }
 >;

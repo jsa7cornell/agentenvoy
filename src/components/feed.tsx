@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import ThreadCard from "./thread-card";
 import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-status";
 import { QuickReplies } from "./onboarding/quick-replies";
+import { GcalUpdateCard } from "./gcal-update-card";
 import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
 
 interface ChannelMsg {
@@ -13,6 +14,7 @@ interface ChannelMsg {
   content: string;
   threadId?: string | null;
   createdAt: string;
+  metadata?: Record<string, unknown> | null;
   thread?: {
     id: string;
     title?: string;
@@ -597,6 +599,13 @@ export default function Feed() {
 
           // System message
           if (msg.role === "system") {
+            if (msg.metadata?.kind === "gcal_update_proposal") {
+              return (
+                <div key={msg.id} className="py-2">
+                  <GcalUpdateCard proposal={msg.metadata as unknown as Parameters<typeof GcalUpdateCard>[0]["proposal"]} />
+                </div>
+              );
+            }
             return (
               <div key={msg.id} className="text-center text-xs text-muted py-2">
                 {msg.content}

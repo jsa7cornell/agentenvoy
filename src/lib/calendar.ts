@@ -1093,6 +1093,72 @@ export interface GCalEventStatus {
  * Used by the gcal-status endpoint so the host can see whether the guest
  * has accepted the invite without leaving the deal room.
  */
+// ─────────────────────────────────────────────────────────────────────────────
+// AgentEnvoy-owned event guard + update
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Thrown when an event does not carry the expected agentenvoySessionId tag. */
+export class GcalOwnershipError extends Error {
+  constructor(eventId: string) {
+    super(`Event ${eventId} is not owned by this AgentEnvoy session`);
+    this.name = "GcalOwnershipError";
+  }
+}
+
+/**
+ * Fetch the event and verify it was created by AgentEnvoy for `expectedSessionId`.
+ * Throws GcalOwnershipError if the tag is absent or mismatched.
+ * Throws for 404/410 (event gone) or other GCal errors.
+ */
+export async function assertAgentEnvoyOwnedEvent(
+  userId: string,
+  eventId: string,
+  expectedSessionId: string,
+): Promise<void> {
+  const calendar = await getGoogleCalendarClient(userId);
+  const { data } = await calendar.events.get({
+    calendarId: "primary",
+    eventId,
+  });
+  const tag = data.extendedProperties?.private?.["agentenvoySessionId"];
+  if (tag !== expectedSessionId) {
+    throw new GcalOwnershipError(eventId);
+  }
+}
+
+/**
+ * Patch a confirmed GCal event through the side-effect dispatcher.
+ * Ownership check (`assertAgentEnvoyOwnedEvent`) MUST be called by the
+ * route before this function is invoked.
+ */
+export async function updateCalendarEvent(
+  userId: string,
+  eventId: string,
+  sessionId: string,
+  changes: {
+    summary?: string;
+    location?: string | null;
+    startTime?: Date;
+    endTime?: Date;
+    description?: string;
+  },
+  opts: {
+    notifyAttendees?: boolean;
+  } = {},
+): Promise<{ eventId: string | null; htmlLink: string | null }> {
+  const { dispatch } = await import("@/lib/side-effects/dispatcher");
+  const result = await dispatch({
+    kind: "calendar.update_event",
+    userId,
+    eventId,
+    sessionId,
+    changes,
+    notifyAttendees: opts.notifyAttendees ?? false,
+    context: { userId, sessionId, purpose: "update-confirmed-event" },
+  });
+  return { eventId: result.eventId ?? null, htmlLink: result.htmlLink ?? null };
+}
+
 export async function getCalendarEventStatus(
   userId: string,
   eventId: string,

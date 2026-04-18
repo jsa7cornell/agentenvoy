@@ -32,9 +32,11 @@ import {
   handleCalendarCreateEvent,
   handleCalendarCreateHold,
   handleCalendarDeleteEvent,
+  handleCalendarUpdateEvent,
   summarizeCalendarCreateEventTarget,
   summarizeCalendarCreateHoldTarget,
   summarizeCalendarDeleteEventTarget,
+  summarizeCalendarUpdateEventTarget,
   type CalendarHandlerOutcome,
 } from "./handlers/calendar";
 
@@ -56,6 +58,7 @@ const MODE_ENV_VAR: Partial<Record<EffectKind, string>> = {
   "calendar.create_event": "EFFECT_MODE_CALENDAR",
   "calendar.create_hold": "EFFECT_MODE_CALENDAR",
   "calendar.delete_event": "EFFECT_MODE_CALENDAR",
+  "calendar.update_event": "EFFECT_MODE_CALENDAR",
   // "mcp.callback":          "EFFECT_MODE_MCP_CALLBACK", (Phase 3)
 };
 
@@ -74,6 +77,8 @@ const DEFAULT_MODE: Partial<Record<EffectKind, EffectMode>> = {
   "calendar.create_hold": "dryrun",
   // Delete has no useful return — `log` is fine as the safe default.
   "calendar.delete_event": "log",
+  // Update defaults to `log` (not `dryrun`) — we don't synthesize a fake patched event.
+  "calendar.update_event": "log",
 };
 
 /** Universal safe fallback for kinds that haven't declared their own default. */
@@ -151,6 +156,23 @@ function scrubPayload(effect: SideEffect): Record<string, unknown> {
         notifyAttendees: !!effect.notifyAttendees,
       };
     }
+    case "calendar.update_event": {
+      return {
+        kind: "calendar.update_event",
+        userId: effect.userId,
+        eventId: effect.eventId,
+        sessionId: effect.sessionId,
+        changes: {
+          summary: effect.changes.summary,
+          location: effect.changes.location,
+          startTime: effect.changes.startTime?.toISOString(),
+          endTime: effect.changes.endTime?.toISOString(),
+          descriptionBytes: effect.changes.description?.length ?? 0,
+        },
+        notifyAttendees: !!effect.notifyAttendees,
+        sendUpdatesOverride: effect.sendUpdatesOverride ?? null,
+      };
+    }
     default:
       // Unimplemented kind — record the kind only for audit, strip the rest
       // (we don't know what's safe to log for an unknown shape).
@@ -168,6 +190,8 @@ function summarizeTarget(effect: SideEffect): string {
       return summarizeCalendarCreateHoldTarget(effect);
     case "calendar.delete_event":
       return summarizeCalendarDeleteEventTarget(effect);
+    case "calendar.update_event":
+      return summarizeCalendarUpdateEventTarget(effect);
     default:
       return `(unhandled kind: ${(effect as SideEffect).kind})`;
   }
@@ -212,6 +236,10 @@ async function runHandler(
       const outcome: CalendarHandlerOutcome = await handleCalendarDeleteEvent(effect, mode);
       return outcome;
     }
+    case "calendar.update_event": {
+      const outcome: CalendarHandlerOutcome = await handleCalendarUpdateEvent(effect, mode);
+      return outcome;
+    }
     default:
       // Kind is declared in types.ts but has no handler yet (Phase 2+ work).
       // Fail loudly in the return value — caller gets status:"failed" +
@@ -252,6 +280,7 @@ const MUST_BE_LIVE_IN_PROD: EffectKind[] = [
   "email.send",
   "calendar.create_event",
   "calendar.create_hold",
+  "calendar.update_event",
   // calendar.delete_event intentionally omitted — `log` is the documented
   // safe default; missing env var there is less catastrophic.
 ];
@@ -408,6 +437,7 @@ export type {
   CalendarCreateEventEffect,
   CalendarCreateHoldEffect,
   CalendarDeleteEventEffect,
+  CalendarUpdateEventEffect,
 } from "./types";
 /** Convenience alias — callers can do `dispatch({ kind: "email.send", ... })`. */
 export type DispatchInput = SideEffect;

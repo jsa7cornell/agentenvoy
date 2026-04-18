@@ -151,13 +151,20 @@ async function executeAction(
 
 // --- Authorization helper ---
 
-async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; title: string | null; linkId: string; link: { id: string; type: string; inviteeName: string | null; topic: string | null; rules: unknown } } }> {
+async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; title: string | null; linkId: string; calendarEventId: string | null; archived: boolean; link: { id: string; type: string; inviteeName: string | null; topic: string | null; rules: unknown } } }> {
   if (!sessionId || typeof sessionId !== "string") {
     return { success: false, message: "Missing or invalid sessionId" };
   }
   const session = await prisma.negotiationSession.findUnique({
     where: { id: sessionId },
-    include: {
+    select: {
+      id: true,
+      hostId: true,
+      status: true,
+      title: true,
+      linkId: true,
+      calendarEventId: true,
+      archived: true,
       link: {
         select: {
           id: true,
@@ -315,6 +322,42 @@ async function handleCancel(
   return { success: true, message: `Cancelled "${name}"`, data: { sessionId: session.id } };
 }
 
+/**
+ * For confirmed (agreed + calendarEventId) sessions, post a gcal_update_proposal
+ * channel message instead of writing directly. The host sees a GcalUpdateCard
+ * in the feed and must click Confirm before we touch GCal.
+ */
+async function postGcalUpdateProposal(
+  session: { id: string; hostId: string; calendarEventId: string | null },
+  userId: string,
+  proposed: Record<string, unknown>,
+): Promise<ActionResult> {
+  // Upsert the host's channel (mirrors confirm/route.ts pattern)
+  let channel = await prisma.channel.findUnique({ where: { userId } });
+  if (!channel) channel = await prisma.channel.create({ data: { userId } });
+
+  await prisma.channelMessage.create({
+    data: {
+      channelId: channel.id,
+      role: "system",
+      content: "Envoy is proposing an update to the confirmed meeting.",
+      threadId: session.id,
+      metadata: {
+        kind: "gcal_update_proposal",
+        sessionId: session.id,
+        eventId: session.calendarEventId,
+        proposed: proposed as Record<string, string | number | boolean | null>,
+      },
+    },
+  });
+
+  return {
+    success: true,
+    message: "Proposal posted — host must confirm in the feed before GCal is updated.",
+    data: { sessionId: session.id, pendingGcalUpdate: true },
+  };
+}
+
 async function handleUpdateFormat(
   params: Record<string, unknown>,
   userId: string,
@@ -328,6 +371,12 @@ async function handleUpdateFormat(
   const format = params.format as string;
   if (!format || !["phone", "video", "in-person"].includes(format)) {
     return { success: false, message: `Invalid format: ${format}. Use "phone", "video", or "in-person".` };
+  }
+
+  // For confirmed meetings already on GCal, propose the update via UI card
+  // instead of writing directly — the user must confirm before we patch GCal.
+  if (session.calendarEventId && session.status === "agreed" && !session.archived) {
+    return await postGcalUpdateProposal(session, userId, { format });
   }
 
   // Dual-write: session.format for parity with the existing session row,
@@ -376,6 +425,19 @@ async function handleUpdateTime(
   const parsed = new Date(dateTime);
   if (isNaN(parsed.getTime())) {
     return { success: false, message: `Invalid dateTime: ${dateTime}` };
+  }
+
+  // For confirmed meetings already on GCal, propose via UI card.
+  if (session.calendarEventId && session.status === "agreed" && !session.archived) {
+    const duration = params.duration ? Number(params.duration) : undefined;
+    const endTime = duration
+      ? new Date(parsed.getTime() + duration * 60 * 1000)
+      : undefined;
+    return await postGcalUpdateProposal(session, userId, {
+      startTime: parsed.toISOString(),
+      endTime: endTime?.toISOString(),
+      duration,
+    });
   }
 
   const updateData: Record<string, unknown> = {
@@ -444,6 +506,11 @@ async function handleUpdateLocation(
   const location = params.location as string;
   if (!location) {
     return { success: false, message: "Missing location parameter" };
+  }
+
+  // For confirmed meetings already on GCal, propose via UI card.
+  if (session.calendarEventId && session.status === "agreed" && !session.archived) {
+    return await postGcalUpdateProposal(session, userId, { location });
   }
 
   // Dual-write: statusLabel for the host-facing dashboard and a system

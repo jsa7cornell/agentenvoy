@@ -28,6 +28,7 @@ import type {
   CalendarCreateEventEffect,
   CalendarCreateHoldEffect,
   CalendarDeleteEventEffect,
+  CalendarUpdateEventEffect,
   EffectMode,
   EffectStatus,
 } from "../types";
@@ -250,4 +251,83 @@ export function summarizeCalendarCreateHoldTarget(effect: CalendarCreateHoldEffe
 
 export function summarizeCalendarDeleteEventTarget(effect: CalendarDeleteEventEffect): string {
   return `delete ${effect.eventId}${effect.notifyAttendees ? " (notify)" : ""}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// calendar.update_event
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function handleCalendarUpdateEvent(
+  effect: CalendarUpdateEventEffect,
+  mode: EffectMode,
+): Promise<CalendarHandlerOutcome> {
+  if (mode === "off") {
+    return { status: "skipped", effectiveMode: "off", eventId: null, htmlLink: null };
+  }
+
+  if (mode === "log") {
+    return { status: "suppressed", effectiveMode: "log", eventId: null, htmlLink: null };
+  }
+
+  if (mode === "dryrun") {
+    return {
+      status: "dryrun",
+      effectiveMode: "dryrun",
+      eventId: effect.eventId,
+      htmlLink: `https://calendar.google.com/calendar/r/eventedit/${effect.eventId}`,
+    };
+  }
+
+  try {
+    const calendar = await getGoogleCalendarClient(effect.userId);
+    const { changes } = effect;
+
+    // Build a sparse PATCH body — only include fields that are explicitly changing
+    const patch: Record<string, unknown> = {};
+    if (changes.summary !== undefined) patch.summary = changes.summary;
+    if (changes.description !== undefined) patch.description = changes.description;
+    if (changes.location !== undefined) {
+      // null means clear the field; Google API requires empty string for that
+      patch.location = changes.location ?? "";
+    }
+    if (changes.startTime !== undefined) {
+      patch.start = { dateTime: changes.startTime.toISOString() };
+    }
+    if (changes.endTime !== undefined) {
+      patch.end = { dateTime: changes.endTime.toISOString() };
+    }
+
+    const sendUpdates = effect.sendUpdatesOverride
+      || (effect.notifyAttendees ? sendUpdatesDefault() : "none");
+
+    const { data } = await calendar.events.patch({
+      calendarId: "primary",
+      eventId: effect.eventId,
+      requestBody: patch,
+      sendUpdates,
+    });
+
+    return {
+      status: "sent",
+      effectiveMode: mode,
+      eventId: data.id ?? null,
+      htmlLink: data.htmlLink ?? null,
+    };
+  } catch (err) {
+    return {
+      status: "failed",
+      effectiveMode: mode,
+      eventId: null,
+      htmlLink: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export function summarizeCalendarUpdateEventTarget(effect: CalendarUpdateEventEffect): string {
+  const parts: string[] = [`update ${effect.eventId}`];
+  if (effect.changes.startTime) parts.push(effect.changes.startTime.toISOString().slice(0, 16).replace("T", " ") + "Z");
+  if (effect.changes.location !== undefined) parts.push(`loc:${effect.changes.location ?? "(cleared)"}`);
+  if (effect.notifyAttendees) parts.push("notify");
+  return parts.join(" · ");
 }
