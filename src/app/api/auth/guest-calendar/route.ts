@@ -20,7 +20,8 @@ export async function GET(req: NextRequest) {
     client_id: clientId!,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: "https://www.googleapis.com/auth/calendar.readonly",
+    scope:
+      "openid email profile https://www.googleapis.com/auth/calendar.readonly",
     access_type: "online", // no refresh token needed — one-time read
     state,
     prompt: "consent",
