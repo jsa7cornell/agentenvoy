@@ -257,7 +257,13 @@ const MUST_BE_LIVE_IN_PROD: EffectKind[] = [
 ];
 const prodModeAlertsFired = new Set<EffectKind>();
 
-function alertIfProdModeMisconfigured(kind: EffectKind, mode: EffectMode): void {
+/** Test-only — reset the per-process alert dedupe so individual tests can
+ *  exercise the "alert fires once" behavior independently. */
+export function __resetProdModeAlertsForTests(): void {
+  prodModeAlertsFired.clear();
+}
+
+export function alertIfProdModeMisconfigured(kind: EffectKind, mode: EffectMode): void {
   if (process.env.NODE_ENV !== "production") return;
   if (!MUST_BE_LIVE_IN_PROD.includes(kind)) return;
   if (mode === "live" || mode === "allowlist") return;
