@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { inviteeEmail, inviteeName, topic, rules, prompt } = body;
+  const { inviteeEmail, inviteeName, inviteeTimezone, topic, rules, prompt } = body;
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -39,6 +39,24 @@ export async function POST(req: NextRequest) {
   const code = generateCode();
   const normalizedRules = normalizeLinkRules(parsedRules);
 
+  // Host-declared guest TZ. Body wins over prompt-parsed. Validate via Intl —
+  // reject invalid zones loudly so a client bug sending "EST" or "PDT" fails
+  // on submit rather than silently dropping to null and producing wrong-TZ
+  // greetings downstream.
+  const rawInviteeTz = inviteeTimezone ?? parsedRules.inviteeTimezone;
+  let validatedInviteeTimezone: string | null = null;
+  if (rawInviteeTz != null && rawInviteeTz !== "") {
+    if (typeof rawInviteeTz !== "string" || rawInviteeTz.length > 64) {
+      return NextResponse.json({ error: "Invalid inviteeTimezone" }, { status: 400 });
+    }
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: rawInviteeTz });
+      validatedInviteeTimezone = rawInviteeTz;
+    } catch {
+      return NextResponse.json({ error: "Invalid IANA inviteeTimezone" }, { status: 400 });
+    }
+  }
+
   const link = await prisma.negotiationLink.create({
     data: {
       userId,
@@ -47,6 +65,7 @@ export async function POST(req: NextRequest) {
       code,
       inviteeEmail: inviteeEmail || parsedRules.inviteeEmail || null,
       inviteeName: inviteeName || parsedRules.inviteeName || null,
+      inviteeTimezone: validatedInviteeTimezone,
       topic: topic || parsedRules.topic || null,
       rules: normalizedRules as Prisma.InputJsonValue,
     },
@@ -65,6 +84,7 @@ export async function POST(req: NextRequest) {
       code,
       inviteeEmail: link.inviteeEmail,
       inviteeName: link.inviteeName,
+      inviteeTimezone: link.inviteeTimezone,
       topic: link.topic,
       rules: link.rules,
     },

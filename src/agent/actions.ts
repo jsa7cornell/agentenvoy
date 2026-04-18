@@ -499,6 +499,19 @@ async function handleCreateLink(
   const code = generateCode();
   const inviteeName = (params.inviteeName as string) || null;
   const inviteeEmail = (params.inviteeEmail as string) || null;
+  // Host-declared guest TZ (e.g. "Sarah is on EST"). Validated via Intl —
+  // invalid zones silently drop to null rather than throw, so a bad LLM
+  // extraction doesn't block link creation.
+  let inviteeTimezone: string | null = null;
+  const rawInviteeTz = params.inviteeTimezone as string | undefined;
+  if (rawInviteeTz && typeof rawInviteeTz === "string" && rawInviteeTz.length <= 64) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: rawInviteeTz });
+      inviteeTimezone = rawInviteeTz;
+    } catch {
+      console.warn(`[create_link] invalid inviteeTimezone "${rawInviteeTz}" — dropping`);
+    }
+  }
   // Strip generic filler topics — LLMs often set "Meeting" or "Catch up" when
   // the host didn't specify a topic, which produces "about Meeting" in the greeting.
   const rawTopic = (params.topic as string) || null;
@@ -635,6 +648,7 @@ async function handleCreateLink(
       code,
       inviteeName,
       inviteeEmail,
+      inviteeTimezone,
       topic,
       rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
     },

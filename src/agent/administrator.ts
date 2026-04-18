@@ -115,6 +115,7 @@ export async function parsePreferences(
 - isVip: boolean — see VIP RULES below. Omit entirely if not VIP.
 - inviteeEmail: string or null
 - inviteeName: string or null
+- inviteeTimezone: IANA timezone string when the host declares where the invitee is (e.g. "Sarah is on EST" → "America/New_York", "she's in Tokyo" → "Asia/Tokyo"). Omit if not explicitly stated. This is a seed for the deal-room greeting — wrong values produce wrong times, so only emit when the host names a concrete location or zone.
 - topic: string or null
 - notes: string or null
 

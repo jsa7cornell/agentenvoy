@@ -397,11 +397,17 @@ export function AvailabilityPanel({
     (a, b) => (b.primary ? 1 : 0) - (a.primary ? 1 : 0),
   );
 
-  // Top toolbar — week nav + controls
+  // Top toolbar — 3-col grid so the week scroller stays centered regardless
+  // of what's on either side.
   const weekNav = (
-    <div className="flex items-center justify-between px-3 py-1.5 border-b border-secondary shrink-0 gap-2">
+    <div
+      className="grid items-center px-3 py-1.5 border-b border-secondary shrink-0 gap-2"
+      style={{ gridTemplateColumns: "1fr auto 1fr" }}
+    >
       <div className="flex items-center gap-1.5 min-w-0">
         {headerSlot}
+      </div>
+      <div className="flex items-center justify-center gap-1.5">
         <button
           onClick={() => shiftWeek(-1)}
           disabled={!canGoPrev}
@@ -428,93 +434,7 @@ export function AvailabilityPanel({
           </button>
         )}
       </div>
-      <div className="flex items-center gap-2">
-        {showControls && (
-          <>
-            {/* Calendar swatch strip — each pill is one calendar; click toggles active */}
-            <div className="relative">
-              <button
-                onClick={() => setCalPickerOpen((o) => !o)}
-                className="flex items-center gap-0.5 px-1.5 py-1 text-[10px] text-muted hover:text-primary border border-secondary hover:border-DEFAULT rounded-md transition"
-                title="Calendars"
-              >
-                <span className="flex items-center gap-[3px]">
-                  {sortedCalendars.slice(0, 6).map((c) => (
-                    <span
-                      key={c.id}
-                      className={`w-1.5 h-3 rounded-sm ${isCalendarActive(c.id) ? "" : "opacity-25"}`}
-                      style={{ backgroundColor: c.backgroundColor || "#6366f1" }}
-                    />
-                  ))}
-                </span>
-                <span className="ml-1">▾</span>
-              </button>
-              {calPickerOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setCalPickerOpen(false)} />
-                  <div className="absolute right-0 mt-1 z-40 w-64 bg-surface-inset border border-DEFAULT rounded-lg shadow-xl p-2">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted px-1 pb-1.5">
-                      Calendars
-                    </p>
-                    {calendarsLoading ? (
-                      <p className="text-xs text-muted px-1 py-2">Loading…</p>
-                    ) : calendarsError?.kind === "reconnect" ? (
-                      <div className="px-1 py-2 space-y-1.5">
-                        <p className="text-[11px] text-muted">{calendarsError.message}</p>
-                        <button
-                          onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
-                          className="w-full px-2 py-1 text-xs text-white bg-accent hover:bg-accent-hover rounded transition"
-                        >
-                          Reconnect
-                        </button>
-                      </div>
-                    ) : calendarsError ? (
-                      <p className="text-[11px] text-red-400 px-1 py-2">{calendarsError.message}</p>
-                    ) : (
-                      <ul className="max-h-64 overflow-y-auto">
-                        {sortedCalendars.map((c) => {
-                          const active = isCalendarActive(c.id);
-                          return (
-                            <li key={c.id}>
-                              <button
-                                onClick={() => toggleCalendarActive(c.id)}
-                                disabled={savingCalendarFilter}
-                                className="w-full flex items-center gap-2 px-1.5 py-1 text-xs text-primary rounded hover:bg-surface-secondary transition disabled:opacity-50"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={active}
-                                  readOnly
-                                  className="w-3.5 h-3.5 rounded accent-purple-500 flex-shrink-0"
-                                />
-                                <span
-                                  className="w-2 h-2 rounded-full flex-shrink-0"
-                                  style={{ backgroundColor: c.backgroundColor || "#6366f1" }}
-                                />
-                                <span className="truncate flex-1 text-left">
-                                  {c.name}
-                                  {c.primary && <span className="ml-1 text-[9px] text-muted">(primary)</span>}
-                                </span>
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            <button
-              onClick={() => setRulesOpen(true)}
-              className="px-2 py-1 text-xs text-secondary hover:text-primary border border-secondary hover:border-DEFAULT rounded-md transition"
-              title="Manage availability rules"
-            >
-              Rules
-            </button>
-          </>
-        )}
+      <div className="flex items-center justify-end gap-2">
         <button
           onClick={handleRefresh}
           disabled={isRefreshing}
@@ -532,38 +452,130 @@ export function AvailabilityPanel({
     </div>
   );
 
-  // Second-row toolbar — left-aligned TZ picker + score legend.
-  // The TZ picker sits above the time gutter so it's on the "times" side
-  // of the calendar, per John's ask.
+  // TZ chip — rendered into the day-header gutter of WeeklyCalendar so it
+  // sits on the "times" side of the grid. Subtle but clickable.
+  const tzChip = (
+    <div className="relative">
+      <select
+        value={timezone}
+        onChange={(e) => handleTimezoneChange(e.target.value)}
+        disabled={tzSaving}
+        className="appearance-none pl-1 pr-3 py-0 text-[10px] font-medium text-muted hover:text-primary bg-transparent border-0 cursor-pointer focus:outline-none transition disabled:opacity-50"
+        title={`Timezone: ${timezone}${tzSaving ? " (saving…)" : ""}`}
+      >
+        {TIMEZONE_TABLE.map((entry) => (
+          <option key={entry.iana} value={entry.iana}>
+            {shortTimezoneLabel(entry.iana)} — {entry.long}
+          </option>
+        ))}
+        {!getTimezoneEntry(timezone) && (
+          <option value={timezone}>{timezone} (custom)</option>
+        )}
+      </select>
+      <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[8px] text-muted">▾</span>
+    </div>
+  );
+
+  // Second-row toolbar — score legend + (right-aligned) calendar picker & rules.
   const legendBar = (
     <div className="flex items-center gap-3 px-3 py-1.5 border-b border-secondary text-[10px] text-muted shrink-0 flex-wrap">
-      {/* TZ picker — first, aligned left */}
-      <div className="relative">
-        <select
-          value={timezone}
-          onChange={(e) => handleTimezoneChange(e.target.value)}
-          disabled={tzSaving}
-          className="appearance-none pl-1.5 pr-5 py-0.5 text-[10px] font-medium text-primary bg-surface-secondary/60 border border-DEFAULT/60 rounded hover:border-DEFAULT cursor-pointer focus:outline-none focus:border-indigo-500 transition disabled:opacity-50"
-          title={`Timezone: ${timezone}${tzSaving ? " (saving…)" : ""}`}
-        >
-          {TIMEZONE_TABLE.map((entry) => (
-            <option key={entry.iana} value={entry.iana}>
-              {shortTimezoneLabel(entry.iana)} — {entry.long}
-            </option>
-          ))}
-          {!getTimezoneEntry(timezone) && (
-            <option value={timezone}>{timezone} (custom)</option>
-          )}
-        </select>
-        <span className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-[8px] text-muted">▾</span>
-      </div>
-
       {/* Score legend */}
       <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-100 dark:bg-emerald-600/60 border border-emerald-500 dark:border-emerald-400" /> Available</span>
       <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-teal-100 dark:bg-teal-600/70 border border-teal-500 dark:border-teal-400" /> Office</span>
       <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-100 dark:bg-amber-600/50 border border-amber-500 dark:border-amber-400" /> Protected</span>
       <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-100 dark:bg-red-600/50 border border-red-600 dark:border-red-500" /> Blocked</span>
       <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-indigo-50 dark:bg-indigo-900/80 border border-indigo-500 dark:border-indigo-400" /> Event</span>
+
+      {showControls && (
+        <div className="ml-auto flex items-center gap-2">
+          {/* Calendar picker — "Calendars" label + small colored boxes, Google-style */}
+          <div className="relative">
+            <button
+              onClick={() => setCalPickerOpen((o) => !o)}
+              className="flex items-center gap-1.5 px-1.5 py-0.5 text-[10px] text-muted hover:text-primary transition"
+              title="Calendars"
+            >
+              <span>Calendars</span>
+              <span className="flex items-center gap-[3px]">
+                {sortedCalendars.slice(0, 6).map((c) => (
+                  <span
+                    key={c.id}
+                    className={`w-2 h-2 rounded-sm border ${isCalendarActive(c.id) ? "" : "opacity-25"}`}
+                    style={{
+                      backgroundColor: c.backgroundColor || "#6366f1",
+                      borderColor: c.backgroundColor || "#6366f1",
+                    }}
+                  />
+                ))}
+              </span>
+              <span>▾</span>
+            </button>
+            {calPickerOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setCalPickerOpen(false)} />
+                <div className="absolute right-0 mt-1 z-40 w-64 bg-surface-inset border border-DEFAULT rounded-lg shadow-xl p-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted px-1 pb-1.5">
+                    Calendars
+                  </p>
+                  {calendarsLoading ? (
+                    <p className="text-xs text-muted px-1 py-2">Loading…</p>
+                  ) : calendarsError?.kind === "reconnect" ? (
+                    <div className="px-1 py-2 space-y-1.5">
+                      <p className="text-[11px] text-muted">{calendarsError.message}</p>
+                      <button
+                        onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+                        className="w-full px-2 py-1 text-xs text-white bg-accent hover:bg-accent-hover rounded transition"
+                      >
+                        Reconnect
+                      </button>
+                    </div>
+                  ) : calendarsError ? (
+                    <p className="text-[11px] text-red-400 px-1 py-2">{calendarsError.message}</p>
+                  ) : (
+                    <ul className="max-h-64 overflow-y-auto">
+                      {sortedCalendars.map((c) => {
+                        const active = isCalendarActive(c.id);
+                        return (
+                          <li key={c.id}>
+                            <button
+                              onClick={() => toggleCalendarActive(c.id)}
+                              disabled={savingCalendarFilter}
+                              className="w-full flex items-center gap-2 px-1.5 py-1 text-xs text-primary rounded hover:bg-surface-secondary transition disabled:opacity-50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={active}
+                                readOnly
+                                className="w-3.5 h-3.5 rounded accent-purple-500 flex-shrink-0"
+                              />
+                              <span
+                                className="w-2 h-2 rounded-sm flex-shrink-0"
+                                style={{ backgroundColor: c.backgroundColor || "#6366f1" }}
+                              />
+                              <span className="truncate flex-1 text-left">
+                                {c.name}
+                                {c.primary && <span className="ml-1 text-[9px] text-muted">(primary)</span>}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          <button
+            onClick={() => setRulesOpen(true)}
+            className="px-1.5 py-0.5 text-[10px] text-muted hover:text-primary transition"
+            title="Manage availability rules"
+          >
+            Rules
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -594,6 +606,7 @@ export function AvailabilityPanel({
             weekStart={gridStart}
             daysToShow={daysToShow}
             hideToolbar
+            headerGutterSlot={tzChip}
             primaryCalendar={calendars[0]}
             onEventClick={handleEventClick}
           />

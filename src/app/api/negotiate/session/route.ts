@@ -12,6 +12,10 @@ import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availabili
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import {
+  resolveSeedGuestTimezoneForCreate,
+  resolveEffectiveGuestTimezone,
+} from "@/lib/guest-timezone-seed";
+import {
   formatAvailabilitySlotList,
   formatStretchDays,
   humanTimezoneLabel,
@@ -370,8 +374,21 @@ export async function POST(req: NextRequest) {
     });
     // First-write-wins backfills: guestTimezone and guestId both follow the
     // same rule — only write if unset so we never overwrite an earlier claim.
+    // Guards on guestTimezone:
+    //   - Never land host's browser TZ (isHost guard): a host previewing
+    //     from a travel laptop shouldn't corrupt the guest-facing greeting.
+    //   - If the link has an `inviteeTimezone` declaration, that's the
+    //     authoritative seed — the session row should have been created with
+    //     it already. Don't let observed browser TZ sneak in as a backfill
+    //     and undermine the declared soft-lock.
     const backfillData: Prisma.NegotiationSessionUpdateInput = {};
-    if (session && !session.guestTimezone && guestTimezone) {
+    if (
+      session &&
+      !session.guestTimezone &&
+      guestTimezone &&
+      !isHost &&
+      !link.inviteeTimezone
+    ) {
       backfillData.guestTimezone = guestTimezone;
     }
     if (session && !session.guestId && guestIdForCreate) {
@@ -396,7 +413,11 @@ export async function POST(req: NextRequest) {
           status: "active",
           title: buildSessionTitle(link.topic, link.inviteeName, hostFirstName),
           statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
-          guestTimezone: guestTimezone || null,
+          guestTimezone: resolveSeedGuestTimezoneForCreate({
+          linkInviteeTimezone: link.inviteeTimezone,
+          observedBrowserTimezone: guestTimezone,
+          isHost,
+        }),
           duration: (lr.duration as number) || 30,
           format: (lr.format as string) || null,
         },
@@ -414,7 +435,11 @@ export async function POST(req: NextRequest) {
         status: "active",
         title: buildSessionTitle(link.topic, link.inviteeName, hostFirstName),
         statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
-        guestTimezone: guestTimezone || null,
+        guestTimezone: resolveSeedGuestTimezoneForCreate({
+          linkInviteeTimezone: link.inviteeTimezone,
+          observedBrowserTimezone: guestTimezone,
+          isHost,
+        }),
         duration: (lr.duration as number) || 30,
         format: (lr.format as string) || null,
       },
@@ -423,11 +448,18 @@ export async function POST(req: NextRequest) {
 
   console.log(`[negotiate/session] created | session=${session.id} | duration=${session.duration} | format=${session.format} | topic=${link.topic || "none"}`);
 
-  // Effective guest timezone used for downstream formatting. Prefer the
-  // persisted value (first-observed) over what the current request provided
-  // — they're usually the same, but a re-visit from a different browser
-  // shouldn't flip the greeting's timezone mid-conversation.
-  const effectiveGuestTz = session.guestTimezone || guestTimezone || undefined;
+  // Effective guest timezone used for downstream formatting. Priority:
+  //   1. link.inviteeTimezone — host-declared ("Sarah is on EST")
+  //   2. session.guestTimezone — first-observed browser TZ
+  //   3. guestTimezone (current request) — host-preview fallback, never persisted
+  // Declared wins so a host previewing from a travel laptop still sees
+  // greetings in the invitee's TZ. Acts as a soft-lock until the greeting
+  // re-render path ships (see proposals/2026-04-18_link-invitee-timezone-seed).
+  const effectiveGuestTz = resolveEffectiveGuestTimezone({
+    linkInviteeTimezone: link.inviteeTimezone,
+    sessionGuestTimezone: session.guestTimezone,
+    observedBrowserTimezone: guestTimezone,
+  });
 
   // For group links, create a SessionParticipant row
   if (isGroupEvent) {

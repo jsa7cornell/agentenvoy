@@ -113,6 +113,10 @@ interface WeeklyCalendarProps {
    *  When true, callers like AvailabilityPanel render their own
    *  chrome and the calendar grid starts clean. */
   hideToolbar?: boolean;
+  /** Optional content to render in the gutter cell of the day-header row
+   *  (above the time labels, left of the day columns). Used by
+   *  AvailabilityPanel to put the TZ picker on the "times" side. */
+  headerGutterSlot?: React.ReactNode;
 }
 
 export function WeeklyCalendar({
@@ -126,6 +130,7 @@ export function WeeklyCalendar({
   onEventClick,
   daysToShow = 7,
   hideToolbar = false,
+  headerGutterSlot,
 }: WeeklyCalendarProps) {
   const dayCount = Math.max(1, Math.min(7, daysToShow));
   // Build array of day strings
@@ -254,7 +259,7 @@ export function WeeklyCalendar({
               unambiguous which column the red time line belongs to. */}
           <div className="grid sticky top-0 z-20 bg-surface border-b border-secondary"
             style={{ gridTemplateColumns: gridCols }}>
-            <div className="p-2" /> {/* gutter */}
+            <div className="p-2 flex items-end justify-end">{headerGutterSlot}</div>
             {days.map((day) => {
               const loc = locationByDay[day];
               const isToday = day === todayStr;
