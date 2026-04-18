@@ -117,6 +117,10 @@ interface WeeklyCalendarProps {
    *  (above the time labels, left of the day columns). Used by
    *  AvailabilityPanel to put the TZ picker on the "times" side. */
   headerGutterSlot?: React.ReactNode;
+  /** Optional strip rendered directly below the sticky day-chip row
+   *  (above the all-day row and time grid). Used to place the score
+   *  legend under the day chips on mobile. */
+  legendSlot?: React.ReactNode;
 }
 
 export function WeeklyCalendar({
@@ -131,6 +135,7 @@ export function WeeklyCalendar({
   daysToShow = 7,
   hideToolbar = false,
   headerGutterSlot,
+  legendSlot,
 }: WeeklyCalendarProps) {
   const dayCount = Math.max(1, Math.min(7, daysToShow));
   // Build array of day strings
@@ -295,6 +300,8 @@ export function WeeklyCalendar({
               );
             })}
           </div>
+
+          {legendSlot}
 
           {/* All-day events row */}
           {hasAnyAllDay && (

@@ -26,6 +26,9 @@ interface DayViewProps {
   weekStart: string;
   primaryCalendar?: string;
   onEventClick?: (event: TunerEvent) => void;
+  /** Strip rendered directly below the day-chip row. Used to place the
+   *  score legend under the day chips on mobile. */
+  legendSlot?: React.ReactNode;
 }
 
 const DAY_LABELS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -42,6 +45,7 @@ export function DayView({
   weekStart,
   primaryCalendar,
   onEventClick,
+  legendSlot,
 }: DayViewProps) {
   const todayStr = toDateStr(new Date());
   const [selectedDay, setSelectedDay] = useState<string>(todayStr);
@@ -170,6 +174,8 @@ export function DayView({
           })}
         </div>
       </div>
+
+      {legendSlot}
 
       {/* Selected day header */}
       <div className="px-3 py-1.5 border-b border-secondary shrink-0 flex items-center justify-between">

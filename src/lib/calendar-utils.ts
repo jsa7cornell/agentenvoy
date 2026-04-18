@@ -1,7 +1,7 @@
 // Shared calendar display utilities used by WeeklyCalendar and DayView
 
-export const HOUR_START = 7;
-export const HOUR_END = 21;
+export const HOUR_START = 6;
+export const HOUR_END = 19;
 export const TOTAL_ROWS = (HOUR_END - HOUR_START) * 2;
 export const ROW_HEIGHT = 28; // px per 30-min row
 

@@ -90,6 +90,8 @@ export function AvailabilityPanel({
   const [calendars, setCalendars] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Mobile view toggle — day vs. M-F workweek. Only used when forceMobile.
+  const [mobileView, setMobileView] = useState<"day" | "week">("day");
 
   // Responsive — measure panel content width, pick 3/5/7 day view.
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -476,10 +478,21 @@ export function AvailabilityPanel({
     </div>
   );
 
-  // Second-row toolbar — score legend + (right-aligned) calendar picker & rules.
+  // Score-legend chips — reused as the sub-day-chip strip on mobile and as
+  // the left side of the desktop legendBar.
+  const legendChips = (
+    <div className="flex items-center gap-3 px-3 py-1 border-b border-secondary text-[10px] text-muted shrink-0 flex-wrap">
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-100 dark:bg-emerald-600/60 border border-emerald-500 dark:border-emerald-400" /> Available</span>
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-teal-100 dark:bg-teal-600/70 border border-teal-500 dark:border-teal-400" /> Office</span>
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-100 dark:bg-amber-600/50 border border-amber-500 dark:border-amber-400" /> Protected</span>
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-100 dark:bg-red-600/50 border border-red-600 dark:border-red-500" /> Blocked</span>
+      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-indigo-50 dark:bg-indigo-900/80 border border-indigo-500 dark:border-indigo-400" /> Event</span>
+    </div>
+  );
+
+  // Desktop second-row toolbar — legend chips + right-aligned calendar picker & rules.
   const legendBar = (
     <div className="flex items-center gap-3 px-3 py-1.5 border-b border-secondary text-[10px] text-muted shrink-0 flex-wrap">
-      {/* Score legend */}
       <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-100 dark:bg-emerald-600/60 border border-emerald-500 dark:border-emerald-400" /> Available</span>
       <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-teal-100 dark:bg-teal-600/70 border border-teal-500 dark:border-teal-400" /> Office</span>
       <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-100 dark:bg-amber-600/50 border border-amber-500 dark:border-amber-400" /> Protected</span>
@@ -588,24 +601,165 @@ export function AvailabilityPanel({
     </div>
   );
 
+  // Monday of the current weekStart (for mobile workweek M-F view)
+  const mondayAnchor = (() => {
+    const d = new Date(weekStart + "T12:00:00");
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  // Mobile three-feature action row — Day/Week toggle, Calendars, Rules.
+  // Replaces the desktop legendBar on narrow layouts; legend chips move
+  // under the day-chip header (passed to the calendar via legendSlot).
+  const mobileActionBar = showControls ? (
+    <div className="grid grid-cols-3 items-stretch gap-1.5 px-3 py-1.5 border-b border-secondary text-xs shrink-0">
+      {/* a) Day | Week toggle — segmented */}
+      <div className="flex items-stretch rounded-md border border-DEFAULT overflow-hidden text-[11px] font-medium">
+        <button
+          onClick={() => setMobileView("day")}
+          className={`flex-1 px-2 py-1.5 transition ${
+            mobileView === "day"
+              ? "bg-indigo-500 text-white"
+              : "text-secondary hover:text-primary"
+          }`}
+        >
+          Day
+        </button>
+        <button
+          onClick={() => setMobileView("week")}
+          className={`flex-1 px-2 py-1.5 transition border-l border-DEFAULT ${
+            mobileView === "week"
+              ? "bg-indigo-500 text-white"
+              : "text-secondary hover:text-primary"
+          }`}
+        >
+          Week
+        </button>
+      </div>
+
+      {/* b) Calendars — popover opens below (portal-ish positioning with top-full) */}
+      <div className="relative">
+        <button
+          onClick={() => setCalPickerOpen((o) => !o)}
+          className="w-full h-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md border border-DEFAULT text-[11px] font-medium text-secondary hover:text-primary transition"
+        >
+          <span>Calendars</span>
+          <span className="flex items-center gap-[3px]">
+            {sortedCalendars.slice(0, 3).map((c) => (
+              <span
+                key={c.id}
+                className={`w-2 h-2 rounded-sm border ${isCalendarActive(c.id) ? "" : "opacity-25"}`}
+                style={{
+                  backgroundColor: c.backgroundColor || "#6366f1",
+                  borderColor: c.backgroundColor || "#6366f1",
+                }}
+              />
+            ))}
+          </span>
+          <span className="text-[10px]">▾</span>
+        </button>
+        {calPickerOpen && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setCalPickerOpen(false)} />
+            <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-40 w-64 max-w-[calc(100vw-1rem)] bg-surface-inset border border-DEFAULT rounded-lg shadow-xl p-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted px-1 pb-1.5">
+                Calendars
+              </p>
+              {calendarsLoading ? (
+                <p className="text-xs text-muted px-1 py-2">Loading…</p>
+              ) : calendarsError?.kind === "reconnect" ? (
+                <div className="px-1 py-2 space-y-1.5">
+                  <p className="text-[11px] text-muted">{calendarsError.message}</p>
+                  <button
+                    onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+                    className="w-full px-2 py-1 text-xs text-white bg-accent hover:bg-accent-hover rounded transition"
+                  >
+                    Reconnect
+                  </button>
+                </div>
+              ) : calendarsError ? (
+                <p className="text-[11px] text-red-400 px-1 py-2">{calendarsError.message}</p>
+              ) : (
+                <ul className="max-h-64 overflow-y-auto">
+                  {sortedCalendars.map((c) => {
+                    const active = isCalendarActive(c.id);
+                    return (
+                      <li key={c.id}>
+                        <button
+                          onClick={() => toggleCalendarActive(c.id)}
+                          disabled={savingCalendarFilter}
+                          className="w-full flex items-center gap-2 px-1.5 py-1 text-xs text-primary rounded hover:bg-surface-secondary transition disabled:opacity-50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            readOnly
+                            className="w-3.5 h-3.5 rounded accent-purple-500 flex-shrink-0"
+                          />
+                          <span
+                            className="w-2 h-2 rounded-sm flex-shrink-0"
+                            style={{ backgroundColor: c.backgroundColor || "#6366f1" }}
+                          />
+                          <span className="truncate flex-1 text-left">
+                            {c.name}
+                            {c.primary && <span className="ml-1 text-[9px] text-muted">(primary)</span>}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* c) Rules */}
+      <button
+        onClick={() => setRulesOpen(true)}
+        className="w-full h-full px-2 py-1.5 rounded-md border border-DEFAULT text-[11px] font-medium text-secondary hover:text-primary transition"
+      >
+        Rules
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div
       ref={containerRef}
       className={`flex-1 min-w-0 flex flex-col overflow-hidden ${className}`}
     >
       {weekNav}
-      {legendBar}
+      {forceMobile ? mobileActionBar : legendBar}
       <div className="flex-1 min-h-0 overflow-hidden">
         {forceMobile ? (
-          <DayView
-            events={events}
-            slots={slots}
-            locationByDay={locationByDay}
-            timezone={timezone}
-            weekStart={gridStart}
-            primaryCalendar={calendars[0]}
-            onEventClick={handleEventClick}
-          />
+          mobileView === "week" ? (
+            <WeeklyCalendar
+              events={events}
+              slots={slots}
+              locationByDay={locationByDay}
+              timezone={timezone}
+              weekStart={mondayAnchor}
+              daysToShow={5}
+              hideToolbar
+              headerGutterSlot={tzChip}
+              legendSlot={legendChips}
+              primaryCalendar={calendars[0]}
+              onEventClick={handleEventClick}
+            />
+          ) : (
+            <DayView
+              events={events}
+              slots={slots}
+              locationByDay={locationByDay}
+              timezone={timezone}
+              weekStart={gridStart}
+              legendSlot={legendChips}
+              primaryCalendar={calendars[0]}
+              onEventClick={handleEventClick}
+            />
+          )
         ) : (
           <WeeklyCalendar
             events={events}
