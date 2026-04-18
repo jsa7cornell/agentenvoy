@@ -9,14 +9,18 @@
 
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "jsa7cornell@gmail.com";
 
-/** Use in server components — calls notFound() on failure. */
-export async function requireAdminPage(): Promise<string> {
+/** Use in server components — redirects to sign-in if not authenticated,
+ *  404s if authenticated but wrong account. */
+export async function requireAdminPage(callbackUrl?: string): Promise<string> {
   const session = await getServerSession(authOptions);
-  if (session?.user?.email !== ADMIN_EMAIL) notFound();
+  if (!session?.user?.email) {
+    redirect(`/api/auth/signin${callbackUrl ? `?callbackUrl=${encodeURIComponent(callbackUrl)}` : ""}`);
+  }
+  if (session.user.email !== ADMIN_EMAIL) notFound();
   return session.user.email;
 }
 
