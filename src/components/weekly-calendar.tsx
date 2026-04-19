@@ -163,12 +163,29 @@ export function WeeklyCalendar({
   // matches what the grid actually labels, not the viewer's server tz.
   const todayStr = useMemo(() => toDayStr(now.toISOString(), timezone), [now, timezone]);
 
-  // Block-reason popover state — which slot's "?" indicator the viewer
+  // Block-reason popover state — which slot's info indicator the viewer
   // tapped. Null when closed. One open at a time across all days.
   const [openBlockInfo, setOpenBlockInfo] = useState<{
     day: string;
     row: number;
   } | null>(null);
+
+  // Close the popover when the user clicks anywhere else on the page, taps
+  // Escape, or scrolls the grid. Critical on mobile where there's no hover
+  // and the popover otherwise stays stuck until you tap the exact icon.
+  useEffect(() => {
+    if (!openBlockInfo) return;
+    const close = () => setOpenBlockInfo(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [openBlockInfo]);
 
   // Current-time offset in minutes-since-midnight (display timezone).
   // Used to position the red line within today's column.
@@ -418,32 +435,46 @@ export function WeeklyCalendar({
                       {slot && slot.score >= 2 && (
                         <div className={`absolute left-0 top-0 bottom-0 w-0.5 ${scoreBorder}`} />
                       )}
-                      {/* Block-reason indicator — tiny "?" on the top of
-                          each contiguous blocked/protected run. Click to
+                      {/* Block-reason indicator — tiny info icon on the top
+                          of each contiguous blocked/protected run. Click to
                           reveal the reason + a link to the rules panel. */}
                       {isRunStart && (
                         <button
                           type="button"
                           aria-label="Why is this blocked?"
+                          onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => {
                             e.stopPropagation();
                             setOpenBlockInfo(infoOpen ? null : { day, row });
                           }}
-                          className="absolute top-0.5 right-0.5 w-3.5 h-3.5 rounded-full bg-surface/80 hover:bg-surface text-[9px] leading-none text-secondary hover:text-primary flex items-center justify-center border border-DEFAULT/60 z-[5]"
+                          className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-surface hover:bg-surface text-secondary hover:text-primary flex items-center justify-center border border-DEFAULT shadow-sm z-[5]"
                         >
-                          ?
+                          <svg
+                            viewBox="0 0 16 16"
+                            width="10"
+                            height="10"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
+                            <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                            <circle cx="8" cy="4.5" r="1" />
+                            <rect x="7.15" y="6.5" width="1.7" height="5.5" rx="0.6" />
+                          </svg>
                         </button>
                       )}
-                      {/* Click-to-reveal popover with full reason + manage link. */}
+                      {/* Click-to-reveal popover with full reason + manage link.
+                          Flips above the slot when near the bottom of the grid
+                          so it never renders off-screen. */}
                       {isRunStart && infoOpen && slot && (
                         <div
-                          className="absolute top-4 right-0 z-30 w-52 rounded-md bg-surface-secondary border border-DEFAULT shadow-lg p-2 text-[11px] text-primary"
+                          className={`absolute ${row > TOTAL_ROWS - 6 ? "bottom-4" : "top-4"} right-0 z-40 w-56 rounded-md bg-surface border-2 border-DEFAULT shadow-2xl p-2.5 text-[11px] text-primary`}
                           onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
                         >
-                          <div className="font-semibold mb-0.5">
+                          <div className="font-semibold mb-1 text-primary">
                             {slotTierLabel(slot.score)}
                           </div>
-                          <div className="text-muted leading-relaxed mb-2">
+                          <div className="text-secondary leading-relaxed mb-2">
                             {slot.reason}
                             {slot.blockCost && slot.blockCost !== "none" && (
                               <> · {slot.blockCost}{slot.firmness ? `:${slot.firmness}` : ""}</>
@@ -451,7 +482,7 @@ export function WeeklyCalendar({
                           </div>
                           <a
                             href="/dashboard/availability"
-                            className="block text-indigo-400 hover:text-indigo-300 transition text-[10px] font-medium"
+                            className="block text-indigo-500 dark:text-indigo-400 hover:text-indigo-400 dark:hover:text-indigo-300 transition text-[10px] font-medium"
                           >
                             Manage rules &rarr;
                           </a>
@@ -460,9 +491,9 @@ export function WeeklyCalendar({
                       {/* Hover tooltip — still there for quick scan when the
                           viewer isn't looking for the full popover. */}
                       {slot && !infoOpen && (
-                        <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-surface-secondary border border-DEFAULT text-[10px] text-primary whitespace-nowrap shadow-lg pointer-events-none">
+                        <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-surface border border-DEFAULT text-[10px] text-primary whitespace-nowrap shadow-xl pointer-events-none">
                           <div className="font-semibold">{slotTierLabel(slot.score)}</div>
-                          <div className="text-muted">
+                          <div className="text-secondary">
                             score {slot.score} · {slot.reason}
                             {slot.blockCost && slot.blockCost !== "none" && (
                               <> · {slot.blockCost}{slot.firmness ? `:${slot.firmness}` : ""}</>

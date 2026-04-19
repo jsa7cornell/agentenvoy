@@ -245,9 +245,9 @@ export function DayView({
                   )}
                   {/* Tooltip — surfaces tier + block intrinsics */}
                   {slot && (
-                    <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-surface-secondary border border-DEFAULT text-[10px] text-primary whitespace-nowrap shadow-lg pointer-events-none">
+                    <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-surface border border-DEFAULT text-[10px] text-primary whitespace-nowrap shadow-xl pointer-events-none">
                       <div className="font-semibold">{slotTierLabel(slot.score)}</div>
-                      <div className="text-muted">
+                      <div className="text-secondary">
                         score {slot.score} · {slot.reason}
                         {slot.blockCost && slot.blockCost !== "none" && (
                           <> · {slot.blockCost}{slot.firmness ? `:${slot.firmness}` : ""}</>
