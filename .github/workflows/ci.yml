@@ -20,10 +20,12 @@ jobs:
       - run: npm run check
 
   # Catches the class of incident where schema.prisma is edited but no
-  # matching migration file is committed — prod then breaks because the
-  # column doesn't exist in Supabase. Three incidents in April 2026 had
-  # this shape (guestTimezone, welcomeEmailSentAt, SideEffectLog). This
-  # job only runs on pull_request; direct-to-main pushes are trusted.
+  # matching migration file is committed. Three incidents in April 2026 had
+  # this shape (guestTimezone, welcomeEmailSentAt, inviteeTimezone).
+  # Note: Vercel's buildCommand now runs `prisma migrate deploy` before
+  # `next build`, so the migration SQL is applied automatically at deploy
+  # time — manual Supabase SQL Editor runs are no longer required.
+  # This job only runs on pull_request; direct-to-main pushes are trusted.
   schema-migration-match:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -47,7 +49,7 @@ jobs:
             echo "::error::schema.prisma was modified but no file under prisma/migrations/ was added or changed."
             echo "::error::Every schema change needs a matching prisma/migrations/<date>_<desc>.sql file committed in the same PR."
             echo "::error::See PLAYBOOK Rule 12 + the External Configuration Checklist."
-            echo "::error::The SQL must also be run in Supabase SQL Editor BEFORE the Vercel deploy lands — but that is a separate, runtime-enforced step."
+            echo "::error::Vercel's buildCommand runs 'prisma migrate deploy' automatically — add the migration SQL file and the deploy will apply it."
             exit 1
           fi
 

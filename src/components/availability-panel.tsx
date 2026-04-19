@@ -90,11 +90,9 @@ export function AvailabilityPanel({
   const [calendars, setCalendars] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  // Mobile view toggle — day / 3-day midweek / full Sun-Sat week. Only used
-  // when forceMobile. Midweek is the default because it's the best
-  // compromise on a phone: enough context to see what's coming up without
-  // cramming 7 columns into a narrow screen.
-  const [mobileView, setMobileView] = useState<"day" | "midweek" | "week">("midweek");
+  // Mobile view toggle — Day / Work week (Mon–Fri) / Week (Sun–Sat). Only
+  // used when forceMobile. Work week is the default.
+  const [mobileView, setMobileView] = useState<"day" | "workweek" | "week">("workweek");
   // Desktop week-range toggle — full Sun-Sat vs. Mon-Fri workweek. Default full.
   const [weekRange, setWeekRange] = useState<"full" | "workweek">("full");
 
@@ -663,8 +661,7 @@ export function AvailabilityPanel({
   // under the day-chip header (passed to the calendar via legendSlot).
   const mobileActionBar = showControls ? (
     <div className="grid grid-cols-3 items-stretch gap-1.5 px-3 py-1.5 border-b border-secondary text-xs shrink-0">
-      {/* a) Day | Midweek | Week toggle — segmented. Midweek is default:
-          3 days anchored to today, the best fit for a narrow screen. */}
+      {/* a) Day | Work week (Mon–Fri) | Week (Sun–Sat) toggle */}
       <div className="flex items-stretch rounded-md border border-DEFAULT overflow-hidden text-[11px] font-medium">
         <button
           onClick={() => setMobileView("day")}
@@ -677,14 +674,14 @@ export function AvailabilityPanel({
           Day
         </button>
         <button
-          onClick={() => setMobileView("midweek")}
+          onClick={() => setMobileView("workweek")}
           className={`flex-1 px-2 py-1.5 transition border-l border-DEFAULT ${
-            mobileView === "midweek"
+            mobileView === "workweek"
               ? "bg-indigo-500 text-white"
               : "text-secondary hover:text-primary"
           }`}
         >
-          3-day
+          Work week
         </button>
         <button
           onClick={() => setMobileView("week")}
@@ -813,17 +810,16 @@ export function AvailabilityPanel({
               primaryCalendar={calendars[0]}
               onEventClick={handleEventClick}
             />
-          ) : mobileView === "midweek" ? (
-            // 3-day view anchored to today — "today + next 2". Uses
-            // todayAnchor (not gridStart) so the anchor stays on today
-            // regardless of responsive daysToShow state drift.
+          ) : mobileView === "workweek" ? (
+            // Work week — Mon through Fri (5 days), anchored to Monday of
+            // the selected week.
             <WeeklyCalendar
               events={events}
               slots={slots}
               locationByDay={locationByDay}
               timezone={timezone}
-              weekStart={todayAnchor}
-              daysToShow={3}
+              weekStart={mondayAnchor}
+              daysToShow={5}
               hideToolbar
               headerGutterSlot={tzChip}
               legendSlot={legendChips}
