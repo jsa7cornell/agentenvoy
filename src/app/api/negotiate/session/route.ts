@@ -38,6 +38,21 @@ function isGenericTopic(topic: string): boolean {
   return GENERIC_TOPICS.has(topic.trim().toLowerCase());
 }
 
+/**
+ * Pick the greeting from a session's messages. The greeting is the first
+ * administrator-role message (written when the session is created). Earlier
+ * indices may be "system" update rows (Format updated, Location updated)
+ * or "host_note" rows that got inserted before the guest ever arrived; those
+ * must NOT be surfaced as the greeting — that was Bug 3b in the 2026-04-20
+ * dashboard-channel-grounding proposal.
+ */
+function pickGreeting(messages: Array<{ role: string; content: string }>): string {
+  const administratorMsg = messages.find((m) => m.role === "administrator");
+  if (administratorMsg) return administratorMsg.content;
+  // Defensive fallback — preserves prior behavior for legacy rows.
+  return messages[0]?.content ?? "";
+}
+
 function buildSessionTitle(
   topic: string | null,
   inviteeName: string | null,
@@ -249,7 +264,7 @@ export async function POST(req: NextRequest) {
             sessionId: existingSession.id,
             status: existingSession.status,
             statusLabel: existingSession.statusLabel,
-            greeting: existingSession.messages[0].content,
+            greeting: pickGreeting(existingSession.messages),
             messages: existingSession.messages.map((m) => ({
               id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),
@@ -324,7 +339,7 @@ export async function POST(req: NextRequest) {
             sessionId: existingSession.id,
             status: existingSession.status,
             statusLabel: existingSession.statusLabel,
-            greeting: existingSession.messages[0].content,
+            greeting: pickGreeting(existingSession.messages),
             messages: existingSession.messages.map((m) => ({
               id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),

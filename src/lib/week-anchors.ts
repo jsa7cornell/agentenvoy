@@ -43,6 +43,9 @@ export interface WeekAnchors {
    *  very next day OR a week later. Playbook uses this to know when to
    *  confirm. */
   nextWeekUnambiguous: boolean;
+  /** Which week-start convention these anchors use. Affects the wording
+   *  of the ambiguity hint so it matches the actual calendar math. */
+  convention?: "iso" | "sun_start";
 }
 
 /**
@@ -122,6 +125,67 @@ export function computeWeekAnchors(now: Date, tz: string): WeekAnchors {
     // the upcoming Monday could be "tomorrow" or "first day of next week,"
     // and people honestly differ. Ask. Every other weekday is unambiguous.
     nextWeekUnambiguous: todayDow !== 0,
+    convention: "iso",
+  };
+}
+
+/**
+ * Host-side variant: Sunday-start week, matching how John talks about
+ * "this week" in the dashboard (US convention: Sun = start of week). On
+ * Sunday, "this week" = today (Sun) through next Saturday — unambiguously
+ * the upcoming 7 days. "Next week" on Sunday is slightly ambiguous (the
+ * following Sunday vs. the following ISO-Monday) but less so than the
+ * Monday-start version, which interpreted Sunday's "this week" as the
+ * just-passed week.
+ *
+ * Applied only to the dashboard channel (`/api/channel/chat`). Deal-room
+ * and guest-facing paths stay on Monday-start to not surprise guests
+ * from ISO-8601 cultures.
+ */
+export function computeWeekAnchorsHostSide(now: Date, tz: string): WeekAnchors {
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekdayShort = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    timeZone: tz,
+  }).format(now);
+  const todayDow = DOW.indexOf(weekdayShort);
+
+  // Sunday-start: days since Sunday = todayDow.
+  const daysSinceSunday = todayDow === -1 ? 0 : todayDow;
+
+  const partsFmt = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: tz,
+  });
+  const parts = partsFmt.formatToParts(now);
+  const y = Number(parts.find((p) => p.type === "year")?.value ?? "1970");
+  const m = Number(parts.find((p) => p.type === "month")?.value ?? "1");
+  const d = Number(parts.find((p) => p.type === "day")?.value ?? "1");
+  const utcNoon = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const addDays = (base: Date, n: number): Date =>
+    new Date(base.getTime() + n * 24 * 60 * 60 * 1000);
+
+  const thisWeekStartDate = addDays(utcNoon, -daysSinceSunday);
+  const thisWeekEndDate = addDays(thisWeekStartDate, 6);
+  const nextWeekStartDate = addDays(thisWeekStartDate, 7);
+  const nextWeekEndDate = addDays(nextWeekStartDate, 6);
+
+  return {
+    timezone: tz,
+    today: formatDayFull(utcNoon, tz),
+    todayWeekday: formatWeekdayShort(utcNoon, tz),
+    thisWeekStart: formatDayFull(thisWeekStartDate, tz),
+    thisWeekEnd: formatDayFull(thisWeekEndDate, tz),
+    nextWeekStart: formatDayFull(nextWeekStartDate, tz),
+    nextWeekEnd: formatDayFull(nextWeekEndDate, tz),
+    // Sunday-start convention: "this week" on Sunday = today→next Saturday,
+    // unambiguous. "Next week" on Sunday is slightly ambiguous (Sun-start
+    // following week vs. ISO Mon-start following week), so keep the
+    // confirm-before-acting hint for that case.
+    nextWeekUnambiguous: todayDow !== 0,
+    convention: "sun_start",
   };
 }
 
@@ -137,9 +201,19 @@ export function formatWeekAnchorsForPrompt(a: WeekAnchors): string {
     `  NEXT WEEK: ${a.nextWeekStart} – ${a.nextWeekEnd}`,
   ];
   if (!a.nextWeekUnambiguous) {
-    lines.push(
-      `  (Today is ${a.todayWeekday} — "next week" is AMBIGUOUS: user may mean the very next day or a full week later. Confirm with them before acting.)`,
-    );
+    if (a.convention === "sun_start") {
+      // Sunday-start (host-side dashboard): "this week" = today→next
+      // Saturday (unambiguous). "Next week" is slightly ambiguous: Sun-start
+      // next week vs. ISO Mon-start next week — usually only 1 day apart,
+      // but worth confirming on edge phrasings.
+      lines.push(
+        `  (Today is ${a.todayWeekday} — "this week" means the upcoming ${a.thisWeekStart} – ${a.thisWeekEnd} span. "Next week" is slightly ambiguous; confirm if the guest's phrasing is edge-case before acting.)`,
+      );
+    } else {
+      lines.push(
+        `  (Today is ${a.todayWeekday} — "next week" is AMBIGUOUS: user may mean the very next day or a full week later. Confirm with them before acting.)`,
+      );
+    }
   }
   return lines.join("\n");
 }

@@ -162,10 +162,13 @@ You maintain two knowledge layers:
 1. **Persistent Preferences** — durable patterns, preferences, identity. Rarely changes. Examples: "prefers mornings for calls", "needs 30 min travel buffer for in-person", "likes to stack meetings on MWF".
 2. **Situational Context** — near-term overrides, upcoming events, temporary rules. Changes frequently, can expire. Examples: "in Mexico next week", "training for a race this month".
 
+CRITICAL — DO NOT record specific booked meetings (e.g. "Meeting booked: Thu at 8 AM with Alex"). The user's calendar is the single source of truth for booked meetings; the system already injects live calendar events into every prompt via a separate "computed schedule" section. Writing booked-meeting lines here duplicates the calendar into a free-text field that goes stale the moment a meeting is cancelled or rescheduled, poisoning future prompts. Record patterns ("books most calls in the morning") and declared context ("traveling next week"), never specific events.
+
 You receive the existing content of both layers plus a negotiation transcript. Your job:
 - Extract any new observations from the transcript
 - Merge them into the appropriate layer (persistent vs situational)
 - Remove expired situational items
+- Remove any stale "Meeting booked:" / "now booked" / "just confirmed" lines from the existing situational text (they should never have been there)
 - Deduplicate — don't repeat what's already there
 - Keep each layer under 500 words
 - Return as JSON: {"persistent": "...", "situational": "..."}
@@ -178,15 +181,32 @@ Return ONLY valid JSON, no markdown or explanation.`,
   try {
     const parsed = JSON.parse(text);
     return {
-      persistent: parsed.persistent || existingPersistent || "",
-      situational: parsed.situational || existingSituational || "",
+      persistent: stripBookedMeetingLines(parsed.persistent || existingPersistent || ""),
+      situational: stripBookedMeetingLines(parsed.situational || existingSituational || ""),
     };
   } catch {
     return {
-      persistent: existingPersistent || "",
-      situational: existingSituational || "",
+      persistent: stripBookedMeetingLines(existingPersistent || ""),
+      situational: stripBookedMeetingLines(existingSituational || ""),
     };
   }
+}
+
+/**
+ * Belt-and-suspenders filter: drop any line that records a specific booked
+ * meeting. The user's calendar is the single source of truth — duplicating
+ * events into free-text goes stale on cancel/reschedule and poisons future
+ * prompts. Prompt-level guidance in extractLearnings forbids this, but the
+ * LLM occasionally regresses; this regex catches the regression.
+ */
+function stripBookedMeetingLines(text: string): string {
+  if (!text) return text;
+  const DROP = /(meeting booked|now booked|just confirmed|just booked)/i;
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !DROP.test(line))
+    .join("\n")
+    .trim();
 }
 
 /**

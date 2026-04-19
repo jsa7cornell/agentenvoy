@@ -397,6 +397,7 @@ async function handleUpdateFormat(
       sessionId: session.id,
       role: "system",
       content: `Format updated to ${format}`,
+      metadata: { kind: "host_update", field: "format" },
     },
   });
 
@@ -532,6 +533,7 @@ async function handleUpdateLocation(
       sessionId: session.id,
       role: "system",
       content: `Location updated: ${location}`,
+      metadata: { kind: "host_update", field: "location" },
     },
   });
 

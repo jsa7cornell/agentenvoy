@@ -1299,6 +1299,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               return null;
             }
 
+            // host_update system messages: internal accounting when the host
+            // changes meeting params via dashboard. The guest has no context
+            // for "Format updated to phone" (they never saw the previous
+            // format), so hide from guest view. Host still sees them for
+            // continuity.
+            if (
+              msg.role === "system" &&
+              (msg.metadata as Record<string, unknown> | null)?.kind === "host_update" &&
+              !isHost
+            ) {
+              return null;
+            }
+
             // Host notes — only visible to host
             if (msg.role === "host_note") {
               if (!isHost) return null;

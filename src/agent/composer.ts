@@ -3,7 +3,7 @@ import { join } from "path";
 import type { CalendarContext, CalendarEvent } from "@/lib/calendar";
 import { getUserTimezone } from "@/lib/timezone";
 import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
-import { computeWeekAnchors, formatWeekAnchorsForPrompt } from "@/lib/week-anchors";
+import { computeWeekAnchors, computeWeekAnchorsHostSide, formatWeekAnchorsForPrompt } from "@/lib/week-anchors";
 
 // --- Playbook cache (read once per cold start) ---
 
@@ -499,7 +499,8 @@ export function formatComputedSchedule(
   slots: ScoredSlot[],
   tz: string,
   canWrite: boolean,
-  linkRules?: LinkRules
+  linkRules?: LinkRules,
+  opts?: { weekConvention?: "iso" | "sun_start" }
 ): string {
   const tzLabel = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
     .formatToParts(new Date())
@@ -558,7 +559,11 @@ export function formatComputedSchedule(
     `[GROUND TRUTH] Schedule (${tzLabel}, ${utcOffset}):`,
     ``,
     `[GROUND TRUTH] DATE REFERENCE (system-computed, ALWAYS correct — includes year):`,
-    formatWeekAnchorsForPrompt(computeWeekAnchors(new Date(), tz)),
+    formatWeekAnchorsForPrompt(
+      opts?.weekConvention === "sun_start"
+        ? computeWeekAnchorsHostSide(new Date(), tz)
+        : computeWeekAnchors(new Date(), tz),
+    ),
     ...(dateMappingLines.length > 0 ? dateMappingLines.map(d => `  ${d}`) : [`  (no slots)`]),
     ``,
     `CRITICAL: When referring to ANY date, copy the day-of-week AND year from the DATE REFERENCE above. NEVER compute day-of-week or year yourself — LLMs get this wrong. Always check the reference before writing any date.`,
