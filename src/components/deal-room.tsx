@@ -129,6 +129,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [formGuestName, setFormGuestName] = useState("");
   const [formGuestEmail, setFormGuestEmail] = useState("");
   const [formWantsReminder, setFormWantsReminder] = useState(true);
+  const [formGuestNote, setFormGuestNote] = useState("");
   // Triggers a longer celebratory glow on the top event card right after
   // confirm. Kept separate from statusAnimating (1.5s, existing status pulse).
   const [justConfirmedGlow, setJustConfirmedGlow] = useState(false);
@@ -337,7 +338,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     format: string;
     location: string | null;
     timezone?: string;
-  }, opts?: { guestName?: string; guestEmail?: string; wantsReminder?: boolean }) {
+  }, opts?: { guestName?: string; guestEmail?: string; wantsReminder?: boolean; guestNote?: string }) {
     if (!sessionId || isConfirming) return;
     setIsConfirming(true);
     setConfirmError(null);
@@ -356,6 +357,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           guestName: opts?.guestName ?? formGuestName ?? undefined,
           guestEmail: opts?.guestEmail ?? formGuestEmail ?? guestEmail ?? undefined,
           wantsReminder: opts?.wantsReminder ?? formWantsReminder,
+          guestNote: opts?.guestNote ?? (formGuestNote.trim() || undefined),
         }),
       });
       const data = await res.json();
@@ -1602,7 +1604,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (!canSubmit) return;
             handleConfirm(
               { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effective.location },
-              { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), wantsReminder: formWantsReminder }
+              { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), wantsReminder: formWantsReminder, guestNote: formGuestNote.trim() || undefined }
             );
           };
           return (
@@ -1642,6 +1644,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                         autoComplete="email"
                         className="w-full px-3 py-2 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500"
                         placeholder="jane@example.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">
+                        Anything else to share? <span className="text-muted font-normal normal-case tracking-normal">(optional)</span>
+                      </label>
+                      <textarea
+                        value={formGuestNote}
+                        onChange={(e) => setFormGuestNote(e.target.value)}
+                        rows={2}
+                        maxLength={500}
+                        className="w-full px-3 py-2 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500 resize-none"
+                        placeholder="Dial-in number, agenda notes, anything the other person should know…"
                       />
                     </div>
                     <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   HOUR_START,
   HOUR_END,
@@ -165,10 +166,24 @@ export function WeeklyCalendar({
 
   // Block-reason popover state — which slot's info indicator the viewer
   // tapped. Null when closed. One open at a time across all days.
+  // x/y are viewport-relative coords of the ⓘ button used to position
+  // the popover via `position: fixed` (escapes overflow clipping).
   const [openBlockInfo, setOpenBlockInfo] = useState<{
     day: string;
     row: number;
+    x: number;
+    y: number;
   } | null>(null);
+
+  // Hover tooltip state — tracks the slot being hovered + viewport position
+  // so we can render via a portal at `position: fixed`, escaping the
+  // overflow:hidden/auto ancestors that clipped the old absolute tooltip.
+  const [hoverTooltip, setHoverTooltip] = useState<{
+    slot: TunerSlot;
+    x: number;
+    y: number;
+  } | null>(null);
+  const hoverTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Close the popover when the user clicks anywhere else on the page, taps
   // Escape, or scrolls the grid. Critical on mobile where there's no hover
@@ -420,10 +435,19 @@ export function WeeklyCalendar({
                   return (
                     <div
                       key={row}
-                      className={`absolute inset-x-0 ${scoreColor} ${isHourBoundary ? "border-t border-DEFAULT/60" : ""} cursor-pointer hover:brightness-125 transition-all group`}
+                      className={`absolute inset-x-0 ${scoreColor} ${isHourBoundary ? "border-t border-DEFAULT/60" : ""} cursor-pointer hover:brightness-125 transition-all`}
                       style={{ top: row * ROW_HEIGHT, height: ROW_HEIGHT }}
-                      title={slot ? slotTooltip(slot) : "No data"}
+                      onMouseEnter={(e) => {
+                        if (!slot) return;
+                        if (hoverTimeout.current) clearTimeout(hoverTimeout.current);
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setHoverTooltip({ slot, x: r.left + r.width / 2, y: r.top });
+                      }}
+                      onMouseLeave={() => {
+                        hoverTimeout.current = setTimeout(() => setHoverTooltip(null), 80);
+                      }}
                       onClick={() => {
+                        setHoverTooltip(null);
                         if (onSlotClick && slot) {
                           const dayLabel = formatDayHeader(day);
                           const timeLabel = formatTimeLabel(slot.start, timezone);
@@ -437,7 +461,9 @@ export function WeeklyCalendar({
                       )}
                       {/* Block-reason indicator — tiny info icon on the top
                           of each contiguous blocked/protected run. Click to
-                          reveal the reason + a link to the rules panel. */}
+                          reveal the reason + a link to the rules panel.
+                          Popover is rendered via portal at fixed coords so
+                          it escapes overflow:hidden/auto clipping. */}
                       {isRunStart && (
                         <button
                           type="button"
@@ -445,7 +471,13 @@ export function WeeklyCalendar({
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setOpenBlockInfo(infoOpen ? null : { day, row });
+                            setHoverTooltip(null);
+                            if (infoOpen) {
+                              setOpenBlockInfo(null);
+                            } else {
+                              const r = e.currentTarget.getBoundingClientRect();
+                              setOpenBlockInfo({ day, row, x: r.right, y: r.bottom });
+                            }
                           }}
                           className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-surface hover:bg-surface text-secondary hover:text-primary flex items-center justify-center border border-DEFAULT shadow-sm z-[5]"
                         >
@@ -461,46 +493,6 @@ export function WeeklyCalendar({
                             <rect x="7.15" y="6.5" width="1.7" height="5.5" rx="0.6" />
                           </svg>
                         </button>
-                      )}
-                      {/* Click-to-reveal popover with full reason + manage link.
-                          Flips above the slot when near the bottom of the grid
-                          so it never renders off-screen. */}
-                      {isRunStart && infoOpen && slot && (
-                        <div
-                          className={`absolute ${row > TOTAL_ROWS - 6 ? "bottom-4" : "top-4"} right-0 z-40 w-56 rounded-md bg-surface border-2 border-DEFAULT shadow-2xl p-2.5 text-[11px] text-primary`}
-                          onClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                        >
-                          <div className="font-semibold mb-1 text-primary">
-                            {slotTierLabel(slot.score)}
-                          </div>
-                          <div className="text-secondary leading-relaxed mb-2">
-                            {slot.reason}
-                            {slot.blockCost && slot.blockCost !== "none" && (
-                              <> · {slot.blockCost}{slot.firmness ? `:${slot.firmness}` : ""}</>
-                            )}
-                          </div>
-                          <a
-                            href="/dashboard/availability"
-                            className="block text-indigo-500 dark:text-indigo-400 hover:text-indigo-400 dark:hover:text-indigo-300 transition text-[10px] font-medium"
-                          >
-                            Manage rules &rarr;
-                          </a>
-                        </div>
-                      )}
-                      {/* Hover tooltip — still there for quick scan when the
-                          viewer isn't looking for the full popover. */}
-                      {slot && !infoOpen && (
-                        <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-surface border border-DEFAULT text-[10px] text-primary whitespace-nowrap shadow-xl pointer-events-none">
-                          <div className="font-semibold">{slotTierLabel(slot.score)}</div>
-                          <div className="text-secondary">
-                            score {slot.score} · {slot.reason}
-                            {slot.blockCost && slot.blockCost !== "none" && (
-                              <> · {slot.blockCost}{slot.firmness ? `:${slot.firmness}` : ""}</>
-                            )}
-                            {slot.eventSummary && <> · {slot.eventSummary}</>}
-                          </div>
-                        </div>
                       )}
                     </div>
                   );
@@ -581,6 +573,73 @@ export function WeeklyCalendar({
           </div>
         </div>
       </div>
+
+      {/* ── Portal tooltips — rendered at document.body so they escape
+           overflow:hidden / overflow:auto ancestors that clip absolute
+           children. Both use position:fixed anchored to viewport coords
+           captured at mouse/click time. ── */}
+
+      {/* Hover tooltip */}
+      {hoverTooltip && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed z-[9999] px-2.5 py-1.5 rounded-md bg-surface border border-DEFAULT text-[11px] text-primary shadow-2xl pointer-events-none"
+          style={{
+            left: hoverTooltip.x,
+            top: hoverTooltip.y - 6,
+            transform: "translate(-50%, -100%)",
+            maxWidth: "280px",
+          }}
+        >
+          <div className="font-semibold">{slotTierLabel(hoverTooltip.slot.score)}</div>
+          <div className="text-secondary whitespace-nowrap">
+            score {hoverTooltip.slot.score} · {hoverTooltip.slot.reason}
+            {hoverTooltip.slot.blockCost && hoverTooltip.slot.blockCost !== "none" && (
+              <> · {hoverTooltip.slot.blockCost}{hoverTooltip.slot.firmness ? `:${hoverTooltip.slot.firmness}` : ""}</>
+            )}
+            {hoverTooltip.slot.eventSummary && <> · {hoverTooltip.slot.eventSummary}</>}
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* Click popover (block-reason detail) */}
+      {openBlockInfo && (() => {
+        const s = slotIndex[`${openBlockInfo.day}-${HOUR_START * 60 + openBlockInfo.row * 30}`];
+        if (!s) return null;
+        // Flip left if popover would overflow right edge of viewport
+        const popW = 224; // w-56
+        const flipLeft = openBlockInfo.x + popW > window.innerWidth - 8;
+        // Flip up if popover would overflow bottom edge
+        const popH = 110; // approx
+        const flipUp = openBlockInfo.y + popH > window.innerHeight - 8;
+        return typeof document !== "undefined" && createPortal(
+          <div
+            className="fixed z-[9999] w-56 rounded-md bg-surface border-2 border-DEFAULT shadow-2xl p-2.5 text-[11px] text-primary"
+            style={{
+              left: flipLeft ? openBlockInfo.x - popW : openBlockInfo.x,
+              top: flipUp ? openBlockInfo.y - popH - 4 : openBlockInfo.y + 4,
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div className="font-semibold mb-1 text-primary">
+              {slotTierLabel(s.score)}
+            </div>
+            <div className="text-secondary leading-relaxed mb-2">
+              {s.reason}
+              {s.blockCost && s.blockCost !== "none" && (
+                <> · {s.blockCost}{s.firmness ? `:${s.firmness}` : ""}</>
+              )}
+            </div>
+            <a
+              href="/dashboard/availability"
+              className="block text-indigo-500 dark:text-indigo-400 hover:text-indigo-400 dark:hover:text-indigo-300 transition text-[10px] font-medium"
+            >
+              Manage rules &rarr;
+            </a>
+          </div>,
+          document.body,
+        );
+      })()}
     </div>
   );
 }

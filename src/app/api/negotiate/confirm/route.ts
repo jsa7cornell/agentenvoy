@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
       guestEmail: bodyGuestEmail,
       guestName: bodyGuestName,
       wantsReminder: bodyWantsReminder,
+      guestNote: bodyGuestNote,
     } = body;
 
     if (!sessionId || !dateTime) {
@@ -277,6 +278,10 @@ export async function POST(req: NextRequest) {
     let eventLink: string | undefined;
     let confirmedCalendarEventId: string | undefined;
 
+    const guestNoteStr = typeof bodyGuestNote === "string" && bodyGuestNote.trim()
+      ? bodyGuestNote.trim().slice(0, 500)
+      : null;
+
     const tGcalStart = Date.now();
     try {
       const descriptionLines = [
@@ -284,6 +289,7 @@ export async function POST(req: NextRequest) {
         `Format: ${meetingFormat}`,
         ...(effectiveLocation ? [`Location: ${effectiveLocation}`] : []),
         ...(isGroupEvent ? [`Participants: ${attendeeEmails.length}`] : []),
+        ...(guestNoteStr ? ["", `Note from ${guestName || "guest"}:`, guestNoteStr] : []),
         "",
         `Need to change or cancel? ${dealRoomUrl}`,
       ];
@@ -586,6 +592,7 @@ export async function POST(req: NextRequest) {
       hostTimezone,
       guestTimezone: guestTz,
       dealRoomUrl,
+      guestNote: guestNoteStr || undefined,
     });
 
     let emailSent = false;

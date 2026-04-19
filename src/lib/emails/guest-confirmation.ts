@@ -25,6 +25,9 @@ export interface GuestConfirmationEmailParams {
   /** Guest's IANA timezone captured from their browser, if available. */
   guestTimezone?: string | null;
   dealRoomUrl?: string | null;
+  /** Free-text note from the guest at confirm time ("anything else to share").
+   *  Shown in both the confirmation email and the calendar event description. */
+  guestNote?: string | null;
 }
 
 export function buildGuestConfirmationEmail(
@@ -78,6 +81,11 @@ export function buildGuestConfirmationEmail(
         ${p.location ? `<p style="margin:0 0 8px 0;color:#444;font-size:14px;">📍 ${escapeHtml(p.location)}</p>` : ""}
         ${p.meetLink ? `<p style="margin:0;font-size:14px;"><a href="${escapeHtml(p.meetLink)}" style="color:#6c5ce7;font-weight:600;text-decoration:none;">${escapeHtml(p.meetLink)}</a></p>` : ""}
       </div>
+
+      ${p.guestNote ? `<div style="background:#fafaf9;border:1px solid #e5e1fb;border-radius:10px;padding:14px 18px;margin:0 0 22px 0;">
+        <p style="margin:0 0 6px 0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#888;">Note from ${escapeHtml(p.guestName || "guest")}</p>
+        <p style="margin:0;font-size:14px;color:#333;white-space:pre-wrap;">${escapeHtml(p.guestNote)}</p>
+      </div>` : ""}
 
       ${joinButton}
       ${dealRoomLine}
