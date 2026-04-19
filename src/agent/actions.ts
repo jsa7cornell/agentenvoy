@@ -1200,6 +1200,29 @@ async function handleExpandLink(
       });
       if (latest) resolvedSessionIdForLink = latest.id;
     }
+    // Fallback (narration-hygiene-v2, 2026-04-20): if `code` didn't resolve
+    // but the caller supplied a sessionId context AND the LLM might have
+    // fabricated/mistyped the code, try the session's linkId before
+    // returning "Link not found". Root cause of 2026-04-20 host-feed update
+    // failure: LLM reached for update_link on a bike-ride link but emitted
+    // a code that didn't match.
+    if (!link && rawSessionIdParam) {
+      const fallbackSessionId = await resolveSessionId(params, userId);
+      if (fallbackSessionId) {
+        const fallbackSession = await prisma.negotiationSession.findUnique({
+          where: { id: fallbackSessionId },
+          select: {
+            hostId: true,
+            link: { select: { id: true, userId: true, rules: true, inviteeName: true, code: true } },
+          },
+        });
+        if (fallbackSession && fallbackSession.hostId === userId && fallbackSession.link) {
+          link = fallbackSession.link;
+          resolvedSessionIdForLink = fallbackSessionId;
+          console.log(`[expand_link] code lookup miss for "${code}" → resolved via sessionId fallback`);
+        }
+      }
+    }
   } else if (sessionId) {
     const session = await prisma.negotiationSession.findUnique({
       where: { id: sessionId },

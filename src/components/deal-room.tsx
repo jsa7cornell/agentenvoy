@@ -1440,11 +1440,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 ? inviteeName.split(" ")[0]
                 : null;
 
-            // Host's-side Envoy is always labeled "Your Envoy" — from both
-            // the host's view (it represents them) and the guest's view (it's
-            // helping them book the meeting). The "{host}'s Envoy" possessive
-            // was confusing for guests; per UX 2026-04-18 we drop it.
-            const administratorLabel = "Your Envoy";
+            // Host's-side Envoy: "Your Envoy" only when the viewer IS the host.
+            // Guests (esp. bilateral, where the guest has their own Envoy too)
+            // see it named after the host — "{host}'s Envoy" — so it's clear
+            // which side is speaking. Reverts the 2026-04-18 blanket "Your
+            // Envoy" rule, which confused guests whose own Envoy was also
+            // labeled the same.
+            const hostFirstForLabel = hostName ? hostName.split(" ")[0] : "";
+            const administratorLabel = isHost
+              ? "Your Envoy"
+              : hostFirstForLabel
+                ? `${hostFirstForLabel}'s Envoy`
+                : "Host's Envoy";
 
             const guestEnvoyLabel = isGuest
               ? "Your Envoy"

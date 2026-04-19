@@ -21,7 +21,7 @@ import {
   humanTimezoneLabel,
   formatLabel,
   buildOpenWindowGreeting,
-  formatHostNoteLine,
+  computeCanonicalWeekLabel,
 } from "@/lib/greeting-template";
 import {
   buildGuestGreeting,
@@ -708,10 +708,27 @@ export async function POST(req: NextRequest) {
         : null;
     const durationForOpener =
       typeof linkRules.duration === "number" ? linkRules.duration : (effectiveDuration ?? null);
-    const timingLabel =
+    const rawTimingLabel =
       typeof linkRules.timingLabel === "string" && linkRules.timingLabel.trim()
         ? linkRules.timingLabel.trim().slice(0, 80)
         : null;
+
+    // Week-label hygiene (narration-hygiene-v2 S1, 2026-04-20). The host's
+    // LLM sometimes parrots ambiguous host phrasing into `timingLabel`
+    // (e.g., host said "next week" on a Sunday meaning the week *after*
+    // this one, but create_link wrote "next week" meaning Mon–Fri
+    // starting tomorrow). When the authored label says "this week" /
+    // "next week" / "the week of …", compute the canonical label from the
+    // actual filtered slots and override if they disagree. No external
+    // date library — first-slot date vs today, both normalized to the
+    // host's timezone, bucketed by the Monday-starting week.
+    const canonicalWeekLabel = computeCanonicalWeekLabel(filteredSlots, hostTimezone);
+    const timingLabelLooksLikeWeek =
+      rawTimingLabel && /\b(this|next)\s+week\b|\bthe\s+week\s+of\b/i.test(rawTimingLabel);
+    const timingLabel =
+      timingLabelLooksLikeWeek && canonicalWeekLabel
+        ? canonicalWeekLabel
+        : rawTimingLabel;
 
     const openerTimingClause = timingLabel ? ` for ${timingLabel}` : "";
 
@@ -746,10 +763,10 @@ export async function POST(req: NextRequest) {
       return null;
     };
 
-    let proposalSentence = buildProposalSentence();
-    // When the host shared a hostNote, the flavor flows through formatHostNoteLine
-    // — drop the proposal sentence to avoid dupe.
-    if (link.hostNote) proposalSentence = null;
+    const proposalSentence = buildProposalSentence();
+    // Note: hostNote is no longer rendered verbatim (narration-hygiene-v2,
+    // 2026-04-20), so the proposal sentence is now always safe to include
+    // when we have structured fields — no dupe risk with a pass-through line.
     const hello = `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}${openerTimingClause}.${
       proposalSentence ? ` ${proposalSentence}` : ""
     }`;
@@ -868,28 +885,22 @@ export async function POST(req: NextRequest) {
       // Closing — V3 keeps it to one line and NEVER asks for email up front
       // (the confirmation card collects it when the guest locks a time). If
       // we're missing name/topic, fold just those into the sentence.
-      const needed: string[] = [];
-      if (!topic) needed.push("what it's about");
-      if (!inviteeName) needed.push("your name");
-      let closing: string;
-      if (needed.length === 0) {
-        closing = `Reply or choose a slot from the calendar below to get it booked.`;
-      } else {
-        const joined =
-          needed.length === 1
-            ? needed[0]
-            : `${needed.slice(0, -1).join(", ")} and ${needed[needed.length - 1]}`;
-        closing = `Reply with a time that works — plus ${joined} — or choose a slot from the calendar below to get it booked.`;
-      }
+      const closing = `Choose a slot from the calendar below or reply to me with your preference to get it booked.`;
 
-      // Host-supplied framing — verbatim, sanitized at create_link time.
-      const hostNoteLine = formatHostNoteLine({ hostFirstName, hostNote: link.hostNote });
+      // Host-supplied flavor (hostNote) is NO LONGER rendered verbatim in
+      // the guest greeting (narration-hygiene-v2, 2026-04-20). Root cause:
+      // hosts write hostNote as *context to Envoy* ("next week — he's back
+      // from London"), but the 2026-04-18 pass-through ship rendered it as
+      // a literal guest-facing line ("💬 John: next week — he's back from
+      // London"). That leaked host-to-Envoy context into the guest view.
+      // hostNote now stays in the DB as context for the create_link LLM to
+      // inform structured fields (timingLabel, activity, etc.) but is never
+      // displayed verbatim to guests.
 
       // V4: Proposal bar is gone; header is just the prose hello + optional
-      // tz/hostNote lines. Scheduled body and closing follow with blank lines.
+      // tz line. Scheduled body and closing follow with blank lines.
       const headerLines = [hello];
       if (tzLine) headerLines.push(tzLine);
-      if (hostNoteLine) headerLines.push(hostNoteLine);
       const header = headerLines.join("\n");
 
       greeting = [header, scheduleBody, closing].join("\n\n");

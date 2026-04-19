@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { generateText, streamText } from "ai";
+import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
 import { getUserTimezone } from "@/lib/timezone";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
+import type { ActionResult } from "@/agent/actions";
+import { narrateFailures, narrateTimeout, narrateFinalizeError } from "@/agent/action-narration";
 import { sanitizeHistory } from "@/lib/conversation";
 import { needsActionEmissionRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
 import { readFileSync } from "fs";
@@ -260,17 +262,40 @@ export async function POST(req: NextRequest) {
   const modelId = "claude-sonnet-4-6";
 
 
-  // Action-parsing + DB-write logic, hoisted out of onFinish so the
-  // emission-retry path (below) can run it on the COMBINED text (original
-  // stream + retry's appended action block). If we left it in onFinish it
-  // would fire on the first text alone, and a retry-emitted action would
-  // never hit the DB.
-  const finalizeResponse = async (text: string) => {
+  // Action-parsing + DB-write logic. Runs server-side BEFORE any bytes go to
+  // the client (always-buffer mode, narration-hygiene-v2 proposal decided
+  // 2026-04-20). Returns the display text to enqueue; the caller writes it
+  // to the stream in one shot.
+  //
+  // On any action failure, the LLM's drafted narration is replaced by a
+  // deterministic template (see action-narration.ts) — the original LLM
+  // draft is preserved in ChannelMessage.metadata.overriddenNarration for
+  // debug/forensics but never shown to the user.
+  //
+  // 15-second cap on action execution. If executeActions exceeds that, we
+  // emit a "still working" template and let the action finish in background;
+  // we prefer a predictable user-visible message over a hung request.
+  const ACTION_TIMEOUT_MS = 15_000;
+  const finalizeResponse = async (text: string): Promise<string> => {
     try {
       const actions = parseActions(text);
-      let actionResults: Awaited<ReturnType<typeof executeActions>> = [];
+      let actionResults: ActionResult[] = [];
+      let timedOut = false;
       if (actions.length > 0) {
-        actionResults = await executeActions(actions, safeUser.id, { meetSlug: safeUser.meetSlug || undefined });
+        const execPromise = executeActions(actions, safeUser.id, { meetSlug: safeUser.meetSlug || undefined });
+        const timeoutPromise = new Promise<"__TIMEOUT__">((resolve) =>
+          setTimeout(() => resolve("__TIMEOUT__"), ACTION_TIMEOUT_MS),
+        );
+        const raced = await Promise.race([execPromise, timeoutPromise]);
+        if (raced === "__TIMEOUT__") {
+          timedOut = true;
+          // Don't await — let it finish in background. Log when it settles.
+          execPromise
+            .then((r) => console.warn(`[channel/chat] late action completion user=${safeUser.id} results=${r.map(x => x.success ? "ok" : "fail").join(",")}`))
+            .catch((e) => console.error(`[channel/chat] late action error user=${safeUser.id}:`, e));
+        } else {
+          actionResults = raced;
+        }
       }
 
       let displayText = stripActionBlocks(text);
@@ -280,29 +305,41 @@ export async function POST(req: NextRequest) {
       // messages or rare model regressions don't leak raw JSON into the UI).
       displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
 
-      // Narration hygiene: if any action failed, the LLM's prose may already
-      // claim success. Prepend a visible correction so the user isn't misled.
-      // Minimum bar — don't silently narrate success when the bus rejected.
-      const failedResults = actionResults.filter((r) => !r.success);
-      if (failedResults.length > 0) {
-        const failNote = failedResults
-          .map((r) => `⚠️ That didn't go through: ${r.message}`)
-          .join("\n");
-        displayText = displayText ? `${failNote}\n\n${displayText}` : failNote;
+      // Narration hygiene v2: if any action failed, REPLACE the LLM's draft
+      // with a deterministic template (not prepend — the prepend-only approach
+      // in bcf2ec1 left the LLM's misleading success text visible below the
+      // warning). Preserve the original draft in metadata.overriddenNarration
+      // for forensics.
+      let overriddenNarration: string | null = null;
+      if (timedOut) {
+        overriddenNarration = displayText || null;
+        displayText = narrateTimeout();
+      } else {
+        const failedResults = actionResults.filter((r) => !r.success);
+        if (failedResults.length > 0) {
+          overriddenNarration = displayText || null;
+          displayText = narrateFailures(actions, actionResults, displayText);
+        }
       }
+
+      const metadata = overriddenNarration
+        ? { overriddenNarration }
+        : undefined;
 
       const createLinkResult = actionResults.find((r) => r.success && r.data?.url);
       if (createLinkResult?.data) {
         const d = createLinkResult.data;
+        const envoyText = displayText || createLinkResult.message;
         await prisma.channelMessage.create({
           data: {
             channelId: safeChannel.id,
             role: "envoy",
-            content: displayText || createLinkResult.message,
+            content: envoyText,
             threadId: d.sessionId as string,
+            ...(metadata ? { metadata } : {}),
           },
         });
-        return;
+        return envoyText;
       }
 
       // For non-create actions that mutated a specific session (update_*, expand_link,
@@ -327,6 +364,7 @@ export async function POST(req: NextRequest) {
             role: "envoy",
             content: envoyText,
             threadId: sid,
+            ...(metadata ? { metadata } : {}),
           },
         });
         if (summary && displayText) {
@@ -334,7 +372,7 @@ export async function POST(req: NextRequest) {
             data: { channelId: safeChannel.id, role: "system", content: summary },
           });
         }
-        return;
+        return envoyText;
       }
 
       if (actionResults.length > 0) {
@@ -352,31 +390,48 @@ export async function POST(req: NextRequest) {
 
       const finalText = displayText || text || "Done.";
       await prisma.channelMessage.create({
-        data: { channelId: safeChannel.id, role: "envoy", content: finalText },
+        data: {
+          channelId: safeChannel.id,
+          role: "envoy",
+          content: finalText,
+          ...(metadata ? { metadata } : {}),
+        },
       });
+      return finalText;
     } catch (e) {
       console.error("[channel/chat] finalizeResponse error:", e);
+      // Last-resort: deterministic line; persist so the feed has *something*.
+      const fallback = narrateFinalizeError();
+      try {
+        await prisma.channelMessage.create({
+          data: { channelId: safeChannel.id, role: "envoy", content: fallback },
+        });
+      } catch {
+        // swallow — already in an error path
+      }
+      return fallback;
     }
   }
 
-  // Stream to the client while buffering. If the LLM described a
-  // state-change without emitting an action block, fire one retry and
-  // append its output. finalizeResponse then runs on the combined text.
+  // Always-buffer mode (narration-hygiene-v2, decided 2026-04-20). Previously
+  // we streamed the LLM's text token-by-token to the client, then ran actions
+  // in onFinish — which meant the LLM's drafted narration (potentially
+  // claiming success before the tool ran) was on screen before we could
+  // correct it. Now: generate the full text server-side, run actions, compute
+  // the final display text (with deterministic failure rewrite when needed),
+  // and enqueue it in one shot. Costs ~200–800ms of perceived latency on
+  // action turns; justified by removing the narration/outcome mismatch.
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        const first = streamText({
+        const first = await generateText({
           model: envoyModel(modelId),
           maxOutputTokens: 1024,
           system,
           messages,
         });
-        let fullText = "";
-        for await (const chunk of first.textStream) {
-          controller.enqueue(encoder.encode(chunk));
-          fullText += chunk;
-        }
+        let fullText = first.text;
 
         if (needsActionEmissionRetry(fullText)) {
           console.warn(
@@ -393,14 +448,22 @@ export async function POST(req: NextRequest) {
             ],
           });
           if (retry.text.trim()) {
-            controller.enqueue(encoder.encode("\n\n" + retry.text));
             fullText += "\n\n" + retry.text;
           }
         }
+
+        const clientText = await finalizeResponse(fullText);
+        controller.enqueue(encoder.encode(clientText));
         controller.close();
-        await finalizeResponse(fullText);
       } catch (e) {
-        controller.error(e);
+        console.error("[channel/chat] stream start error:", e);
+        // Deterministic fallback to client; never propagate raw error.
+        try {
+          controller.enqueue(encoder.encode(narrateFinalizeError()));
+          controller.close();
+        } catch {
+          try { controller.error(e); } catch { /* already closed */ }
+        }
       }
     },
   });

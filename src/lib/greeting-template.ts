@@ -854,10 +854,11 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
 
   const askLine = `Pick ${pickClause}, and I'll get it booked. 🤝${locHint}`;
 
-  const hostNoteLine = formatHostNoteLine({ hostFirstName, hostNote });
-  const blocks = [intro];
-  if (hostNoteLine) blocks.push(hostNoteLine);
-  blocks.push(anchorLine + toneSuffix, askLine);
+  // hostNote is NOT rendered verbatim anymore (narration-hygiene-v2,
+  // 2026-04-20). It stays in the DB as context-to-Envoy; see comment in
+  // /api/negotiate/session/route.ts for rationale.
+  void hostNote;
+  const blocks = [intro, anchorLine + toneSuffix, askLine];
   return blocks.join("\n\n");
 }
 
@@ -888,8 +889,12 @@ export function alternateFormatsLabel(
 
 /**
  * Format the host-note line surfaced verbatim in the greeting header.
- * Returns null when there's no note. Sanitization happens upstream at
- * create_link time (see sanitizeHostFlavor); this function only formats.
+ *
+ * DEPRECATED 2026-04-20 — narration-hygiene-v2 dropped the verbatim guest-
+ * facing render. hostNote now stays in the DB only as context-to-Envoy,
+ * feeding create_link's structured-field extraction. This function is kept
+ * for back-compat with existing imports/tests but is no longer called from
+ * the greeting assembly paths. Delete when all call sites are gone.
  *
  * Shape: `💬 {hostFirstName}: {hostNote}` — colon attribution mirrors the
  * existing emoji-prefix pattern (🕒, 📞, 📍).
@@ -902,4 +907,66 @@ export function formatHostNoteLine(input: {
   if (!note) return null;
   const who = input.hostFirstName?.trim() || "Host";
   return `💬 ${who}: ${note}`;
+}
+
+// ─── Canonical week label (narration-hygiene-v2 S1, 2026-04-20) ──────────
+
+/**
+ * Given the actual filtered slots being offered and the host's timezone,
+ * return a canonical "this week" / "next week" label if the slots fall
+ * entirely within one of those buckets (Monday-to-Sunday, relative to
+ * today in the host's tz). Returns null when the range is wider or
+ * ambiguous — caller falls back to the LLM-authored label.
+ *
+ * Why: the create_link LLM sometimes parrots ambiguous host phrasing
+ * ("next week" said on a Sunday, meaning the week after) into
+ * `linkRules.timingLabel`. The greeting template used to echo that string
+ * verbatim, which leaked the ambiguity into the guest greeting. This helper
+ * lets the greeting override the LLM when we can *prove* what week is being
+ * offered by inspecting the actual slots.
+ */
+export function computeCanonicalWeekLabel(
+  slots: Array<{ start: number | Date | string }>,
+  hostTimezone: string,
+  now: Date = new Date(),
+): "this week" | "next week" | null {
+  if (!slots || slots.length === 0) return null;
+
+  const weekStartOf = (d: Date): Date => {
+    // Monday-starting week in the host's tz.
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: hostTimezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "short",
+    }).formatToParts(d);
+    const y = Number(parts.find((p) => p.type === "year")?.value);
+    const m = Number(parts.find((p) => p.type === "month")?.value);
+    const day = Number(parts.find((p) => p.type === "day")?.value);
+    const wk = parts.find((p) => p.type === "weekday")?.value || "Mon";
+    const weekdayIdx = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(wk);
+    const base = new Date(Date.UTC(y, m - 1, day));
+    base.setUTCDate(base.getUTCDate() - (weekdayIdx < 0 ? 0 : weekdayIdx));
+    return base;
+  };
+
+  const sameWeek = (a: Date, b: Date) => a.getTime() === b.getTime();
+  const nowWeek = weekStartOf(now);
+  const nextWeek = new Date(nowWeek);
+  nextWeek.setUTCDate(nextWeek.getUTCDate() + 7);
+
+  const toDate = (v: number | Date | string): Date =>
+    v instanceof Date ? v : new Date(v);
+  const firstStart = toDate(slots[0].start);
+  const lastStart = toDate(slots[slots.length - 1].start);
+
+  const firstWeek = weekStartOf(firstStart);
+  const lastWeek = weekStartOf(lastStart);
+
+  // Only emit a canonical label when all slots fall in the same week.
+  if (!sameWeek(firstWeek, lastWeek)) return null;
+  if (sameWeek(firstWeek, nowWeek)) return "this week";
+  if (sameWeek(firstWeek, nextWeek)) return "next week";
+  return null;
 }
