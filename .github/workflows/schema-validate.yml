@@ -1,8 +1,16 @@
 name: Schema migration validator
 
-# Runs on every PR that touches prisma/ — catches the class of incident where
-# a migration file has invalid SQL or leaves the DB out of sync with schema.prisma.
+# Runs on every PR that touches prisma/ AND every push to main that touches
+# prisma/ — catches the class of incident where a migration file has invalid
+# SQL or leaves the DB out of sync with schema.prisma.
 # Uses a throwaway Postgres service container so no Supabase plan is needed.
+#
+# 2026-04-20: added `push: main` trigger. Previously PR-only, which meant a
+# direct-to-main push could bypass it. Incident bcf2ec1 (create_link outage)
+# was exactly that shape. With `push: main` enabled, Vercel's Ignored Build
+# Step checks this workflow's status via scripts/vercel-ignore-build.sh — a
+# failing validate run stops the deploy. See the schema-drift-recurrence
+# proposal (2026-04-20) for the decision.
 #
 # Checks performed:
 #   1. prisma migrate deploy  — all migration SQL runs cleanly on a fresh DB
@@ -11,6 +19,11 @@ name: Schema migration validator
 
 on:
   pull_request:
+    branches: [main]
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+  push:
     branches: [main]
     paths:
       - "prisma/schema.prisma"

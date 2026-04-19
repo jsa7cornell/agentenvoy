@@ -3,3 +3,27 @@ if git diff --cached --name-only | grep -q '\.env\.local$'; then
   echo "ERROR: .env.local is staged for commit. Unstage it with: git reset HEAD .env.local"
   exit 1
 fi
+
+# R6 (schema-drift-recurrence proposal, 2026-04-20): warn when prisma/schema.prisma
+# is staged but no file under prisma/migrations/ is. This is the author-time
+# mirror of the `schema-migration-match` CI job. Warns (does not block) — there
+# are legitimate cases (comment-only edits, rename a field with no column
+# change). But the warning is loud enough that the typical "I forgot the
+# migration" class gets caught before it lands on main.
+STAGED=$(git diff --cached --name-only)
+SCHEMA_STAGED=$(echo "$STAGED" | grep -E '^app/prisma/schema\.prisma$|^prisma/schema\.prisma$' || true)
+MIGRATION_STAGED=$(echo "$STAGED" | grep -E '^app/prisma/migrations/|^prisma/migrations/' || true)
+
+if [ -n "$SCHEMA_STAGED" ] && [ -z "$MIGRATION_STAGED" ]; then
+  echo ""
+  echo "⚠  WARNING — schema.prisma is staged but no prisma/migrations/ file is."
+  echo ""
+  echo "    Every schema change needs a matching prisma/migrations/<date>_<desc>/migration.sql"
+  echo "    committed alongside AND applied to prod via Supabase SQL Editor (PLAYBOOK Rule 12)."
+  echo ""
+  echo "    If this is a comment-only or cosmetic edit, proceed. Otherwise: add the migration file,"
+  echo "    run the SQL against prod, then re-commit. See the external-config checklist in PLAYBOOK."
+  echo ""
+  echo "    (The schema-validate GH Action will fail on push if a real drift reaches main.)"
+  echo ""
+fi

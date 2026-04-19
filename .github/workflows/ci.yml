@@ -20,14 +20,17 @@ jobs:
       - run: npm run check
 
   # Catches the class of incident where schema.prisma is edited but no
-  # matching migration file is committed. Three incidents in April 2026 had
-  # this shape (guestTimezone, welcomeEmailSentAt, inviteeTimezone).
-  # Note: Vercel's buildCommand now runs `prisma migrate deploy` before
-  # `next build`, so the migration SQL is applied automatically at deploy
-  # time — manual Supabase SQL Editor runs are no longer required.
-  # This job only runs on pull_request; direct-to-main pushes are trusted.
+  # matching migration file is committed. Four incidents in April 2026 had
+  # this shape (guestTimezone, welcomeEmailSentAt, inviteeTimezone, hashSalt).
+  #
+  # 2026-04-20 update (schema-drift-recurrence proposal): this job now runs
+  # on `push: main` as well as `pull_request`. The incident that prompted
+  # the update was a direct-to-main push that bypassed the PR-only guard.
+  # The old comment here claimed Vercel's buildCommand ran
+  # `prisma migrate deploy` — that was reverted in 8d01afb and never
+  # re-enabled. Migrations still apply via Supabase SQL Editor per
+  # PLAYBOOK Rule 12 until Track A (deploy-time migrate) ships.
   schema-migration-match:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,8 +38,19 @@ jobs:
           fetch-depth: 0
       - name: Check for matching migration when schema.prisma changed
         run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+            # First push to branch — github.event.before is all-zeros;
+            # diff against the empty tree so we compare everything in HEAD.
+            if [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              BASE=$(git hash-object -t tree /dev/null)
+            fi
+          fi
+
           CHANGED=$(git diff --name-only "$BASE" "$HEAD")
           echo "Changed files:"
           echo "$CHANGED"
@@ -47,14 +61,14 @@ jobs:
 
           if [ -n "$SCHEMA_CHANGED" ] && [ -z "$MIGRATION_CHANGED" ]; then
             echo "::error::schema.prisma was modified but no file under prisma/migrations/ was added or changed."
-            echo "::error::Every schema change needs a matching prisma/migrations/<date>_<desc>.sql file committed in the same PR."
+            echo "::error::Every schema change needs a matching prisma/migrations/<date>_<desc>/migration.sql file committed alongside."
             echo "::error::See PLAYBOOK Rule 12 + the External Configuration Checklist."
-            echo "::error::Vercel's buildCommand runs 'prisma migrate deploy' automatically — add the migration SQL file and the deploy will apply it."
+            echo "::error::Apply the SQL via Supabase SQL Editor before this deploy goes live (Vercel does NOT auto-run migrations)."
             exit 1
           fi
 
           if [ -n "$SCHEMA_CHANGED" ]; then
-            echo "✓ schema.prisma changed and at least one migration file is present in this PR."
+            echo "✓ schema.prisma changed and at least one migration file is present."
           else
             echo "✓ schema.prisma not modified; skipping check."
           fi
