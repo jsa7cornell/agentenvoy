@@ -2,11 +2,11 @@
  * Post-stream validator for Envoy's chat responses.
  *
  * Failure mode we're defending against: the LLM writes prose like "link ready"
- * or "I've set it up" but forgets to emit the matching agentenvoy-action
+ * or "I've set it up" but forgets to emit the matching [ACTION]{...}[/ACTION]
  * block. The user sees the message but nothing actually happened. See
- * dashboard/chat + channel/chat for context.
+ * channel/chat for context.
  *
- * Usage pattern (see dashboard/chat/route.ts):
+ * Usage pattern (see channel/chat/route.ts):
  *   const stream = streamText({...});
  *   let fullText = "";
  *   for await (const chunk of stream.textStream) {
@@ -16,7 +16,7 @@
  *   if (needsActionEmissionRetry(fullText)) {
  *     const retry = await generateText({ ..., messages: [...messages,
  *       { role: "assistant", content: fullText },
- *       { role: "user", content: ACTION_RETRY_PROMPT },
+ *       { role: "user", content: ACTION_EMISSION_RETRY_PROMPT },
  *     ] });
  *     enqueueToClient("\n\n" + retry.text);
  *   }
@@ -30,9 +30,11 @@
  */
 export function needsActionEmissionRetry(text: string): boolean {
   if (!text) return false;
-  // Already has an action block — no retry.
-  if (/```\s*agentenvoy-action/i.test(text)) return false;
+  // Already has an action block — no retry. The [ACTION] check is the live
+  // path; the agentenvoy-action fence check is a belt-and-suspenders fallback
+  // in case a stale prompt regresses (see proposals/2026-04-18_action-emission-reliability).
   if (/\[ACTION\]/i.test(text)) return false;
+  if (/```\s*agentenvoy-action/i.test(text)) return false;
 
   // Past-tense or ready-state claims of completion. Patterns are anchored to
   // reduce false positives on exploratory text. Each pattern is a distinct
@@ -64,4 +66,4 @@ export function needsActionEmissionRetry(text: string): boolean {
  * the user sees one coherent message (their UI strips the action block).
  */
 export const ACTION_EMISSION_RETRY_PROMPT =
-  "You just described an action but didn't emit the corresponding agentenvoy-action block. Emit the block now — ONLY the block, no conversational text, no preamble. If multiple actions apply, emit multiple blocks. Use the exact format and fields documented in the system prompt.";
+  "You just described an action but didn't emit the corresponding `[ACTION]{...}[/ACTION]` block. Emit the block now — ONLY the block, no conversational text, no preamble. If multiple actions apply, emit multiple blocks. Use the exact format and fields documented in the system prompt.";

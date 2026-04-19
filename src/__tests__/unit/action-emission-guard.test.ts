@@ -69,4 +69,15 @@ describe("needsActionEmissionRetry", () => {
   it("catches curly-apostrophe variants of 'I've'", () => {
     expect(needsActionEmissionRetry("I\u2019ve created the thread.")).toBe(true);
   });
+
+  // Reviewer B2 regression: the canonical channel.md example opens with "Set up a 30-min
+  // video call with Bob..." which matches the line-49 opener regex. It's saved from
+  // retry only by the [ACTION]-present short-circuit (line 35). If anyone moves the
+  // [ACTION] block below the prose — or deletes the short-circuit — this test catches it.
+  it("B2 regression: canonical channel.md example (block FIRST, then 'Set up a' prose) returns false", () => {
+    const canonical =
+      '[ACTION]{"action":"create_link","params":{"inviteeName":"Bob","format":"video","duration":30,"rules":{"preferredDays":["Tue","Wed","Thu"]}}}[/ACTION]\n\n' +
+      "Set up a 30-min video call with Bob. I'm offering Tue and Wed mornings, plus Thu afternoon PT. Share his email if you want me to send it — or copy the link below and send it yourself. Let me know any tweaks.";
+    expect(needsActionEmissionRetry(canonical)).toBe(false);
+  });
 });
