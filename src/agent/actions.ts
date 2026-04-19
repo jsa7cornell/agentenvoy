@@ -269,7 +269,7 @@ async function handleArchive(
   params: Record<string, unknown>,
   userId: string
 ): Promise<ActionResult> {
-  const auth = await getAuthorizedSession(params.sessionId, userId);
+  const auth = await getAuthorizedSession(await resolveSessionId(params, userId), userId);
   if (!("session" in auth)) return auth;
   const { session } = auth;
 
@@ -321,7 +321,7 @@ async function handleUnarchive(
   params: Record<string, unknown>,
   userId: string
 ): Promise<ActionResult> {
-  const auth = await getAuthorizedSession(params.sessionId, userId);
+  const auth = await getAuthorizedSession(await resolveSessionId(params, userId), userId);
   if (!("session" in auth)) return auth;
   const { session } = auth;
 
@@ -338,7 +338,7 @@ async function handleCancel(
   params: Record<string, unknown>,
   userId: string
 ): Promise<ActionResult> {
-  const sessionId = params.sessionId as string;
+  const sessionId = await resolveSessionId(params, userId);
   const auth = await getAuthorizedSession(sessionId, userId);
   if (!("session" in auth)) return auth;
   const { session } = auth;
@@ -1131,7 +1131,13 @@ async function handleExpandLink(
   userId: string
 ): Promise<ActionResult> {
   const code = (params.code as string) || null;
-  const sessionId = (params.sessionId as string) || null;
+  // Resolve placeholder sessionIds (e.g. "LAST_CREATED") before lookup.
+  // expand_link uses sessionId as an alternative key to reach the link —
+  // same placeholder risk as update_format/update_time (fixed 2026-04-19).
+  const resolvedSessionId = !code
+    ? await resolveSessionId(params, userId)
+    : null;
+  const sessionId = code ? null : (resolvedSessionId ?? null);
 
   if (!code && !sessionId) {
     return {
@@ -1257,7 +1263,7 @@ async function handleHoldSlot(
   params: Record<string, unknown>,
   userId: string
 ): Promise<ActionResult> {
-  const sessionId = params.sessionId as string | undefined;
+  const sessionId = await resolveSessionId(params, userId);
   const slotStartRaw = params.slotStart as string | undefined;
   const slotEndRaw = params.slotEnd as string | undefined;
   const ttlHours = typeof params.ttlHours === "number" && params.ttlHours > 0
@@ -1383,7 +1389,7 @@ async function handleReleaseHold(
   params: Record<string, unknown>,
   userId: string
 ): Promise<ActionResult> {
-  const sessionId = params.sessionId as string | undefined;
+  const sessionId = await resolveSessionId(params, userId);
   const slotStartRaw = params.slotStart as string | undefined;
 
   if (!sessionId) {
