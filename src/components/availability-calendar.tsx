@@ -370,6 +370,7 @@ function WeekView({
               month: "short",
               day: "numeric",
             })}
+            , {duration}-min meeting
           </div>
           <SlotPills
             slots={selectedSlots}
@@ -387,12 +388,9 @@ function WeekView({
         <LocationNotice currentLocation={currentLocation} onClearLocation={onClearLocation} />
       )}
 
-      {/* Timezone + Disclaimer */}
-      <div className="mt-2 space-y-1">
+      {/* Timezone */}
+      <div className="mt-2">
         <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />
-        <p className="text-[10px] text-muted leading-tight">
-          Times are approximate. Envoy may have additional preferences.
-        </p>
       </div>
     </div>
   );
@@ -552,6 +550,7 @@ function MonthView({
               month: "short",
               day: "numeric",
             })}
+            , {duration}-min meeting
           </div>
           <SlotPills
             slots={selectedSlots}
@@ -569,12 +568,9 @@ function MonthView({
         <LocationNotice currentLocation={currentLocation} onClearLocation={onClearLocation} />
       )}
 
-      {/* Timezone + Disclaimer */}
-      <div className="mt-3 space-y-1">
+      {/* Timezone */}
+      <div className="mt-3">
         <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />
-        <p className="text-[10px] text-muted leading-tight">
-          Times are approximate. Envoy may have additional preferences.
-        </p>
       </div>
     </div>
   );

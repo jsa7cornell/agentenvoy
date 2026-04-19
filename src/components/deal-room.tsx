@@ -64,7 +64,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [isArchiving, setIsArchiving] = useState(false);
   const [gcalStatus, setGcalStatus] = useState<{
     eventExists: boolean;
     guestOnInvite: boolean;
@@ -1021,27 +1020,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         {/* Host management row — Add participant (non-confirmed) + GCal status (confirmed) + Archive/Cancel */}
         {isHost && eventStatus !== "cancelled" && (
           <div className="ml-5 mt-2.5 flex items-center gap-3 flex-wrap">
-            {/* Add participant / group-link toggle — non-confirmed only */}
-            {!confirmed && (
-              <button
-                onClick={async () => {
-                  if (!sessionId) return;
-                  try {
-                    const res = await fetch("/api/negotiate/upgrade", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ sessionId }),
-                    });
-                    if (res.ok) {
-                      setIsGroupEvent(true);
-                    }
-                  } catch {}
-                }}
-                className={`text-[11px] transition ${isGroupEvent ? "text-muted cursor-default" : "text-indigo-400 hover:text-indigo-300"}`}
-                disabled={isGroupEvent}
-              >
-                {isGroupEvent ? "Group link active — share link to add people" : "+ Add participant (make group link)"}
-              </button>
+            {/* Group-link active indicator — non-confirmed only */}
+            {!confirmed && isGroupEvent && (
+              <span className="text-[11px] text-muted">
+                Group link active — share link to add people
+              </span>
             )}
             {/* Google Calendar status badge — only when confirmed */}
             {confirmed && gcalStatus && gcalStatus.eventExists && (
@@ -1079,28 +1062,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
             {/* Spacer to push buttons to the right when badge is present */}
             <span className="flex-1" />
-
-            {/* Archive button — all non-cancelled sessions */}
-            <button
-              onClick={async () => {
-                if (!sessionId || isArchiving) return;
-                setIsArchiving(true);
-                try {
-                  await fetch("/api/negotiate/archive", {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sessionId, archived: true }),
-                  });
-                  window.location.href = "/dashboard";
-                } catch {
-                  setIsArchiving(false);
-                }
-              }}
-              disabled={isArchiving}
-              className="text-[11px] text-zinc-500 hover:text-zinc-300 transition disabled:opacity-50"
-            >
-              {isArchiving ? "Archiving…" : "Archive"}
-            </button>
 
             {/* Cancel button — confirmed sessions only */}
             {confirmed && (
@@ -1205,7 +1166,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
     return (
       <div key={keyPrefix} className="flex justify-start md:hidden">
-        <div className="max-w-[95%] w-full min-w-0 rounded-2xl px-3 py-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
+        <div className="max-w-[85%] w-full min-w-0 rounded-2xl px-3 py-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
           <div className="text-[10px] font-bold uppercase tracking-wider mb-2 text-emerald-400">
             Envoy
           </div>
@@ -1357,16 +1318,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             // only for the viewer's own agent; counterparties always see the
             // named form ("John's Envoy", "Danny's Envoy") so it's immediately
             // clear which side is speaking.
-            const hostFirstForLabel = hostName ? hostName.split(" ")[0] : "Host";
             const guestFirstForLabel = guestUser?.name
               ? guestUser.name.split(" ")[0]
               : inviteeName
                 ? inviteeName.split(" ")[0]
                 : null;
 
-            const administratorLabel = isHost
-              ? "Your Envoy"
-              : `${hostFirstForLabel}'s Envoy`;
+            // Host's-side Envoy is always labeled "Your Envoy" — from both
+            // the host's view (it represents them) and the guest's view (it's
+            // helping them book the meeting). The "{host}'s Envoy" possessive
+            // was confusing for guests; per UX 2026-04-18 we drop it.
+            const administratorLabel = "Your Envoy";
 
             const guestEnvoyLabel = isGuest
               ? "Your Envoy"

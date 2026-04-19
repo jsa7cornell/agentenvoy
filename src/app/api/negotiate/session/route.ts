@@ -733,14 +733,13 @@ export async function POST(req: NextRequest) {
       //   closing      (👉 Reply with a time that works…)
       const formatLine = `${formatEmoji} ${meetingDescShort}`;
 
-      // Timezone line. Dual-tz names the viewer's tz first, host's second.
-      // Same-tz collapses to one label.
-      let tzLine: string;
-      if (guestTzDiffers && guestTimezoneLabel) {
-        tzLine = `🕒 Times shown in your timezone: ${guestTimezoneLabel} · ${hostFirstName} is on ${hostTimezoneLabel}`;
-      } else {
-        tzLine = `🕒 Times shown in ${hostTimezoneLabel}`;
-      }
+      // Timezone line. Only render when guest's tz differs — when they match,
+      // the slot times themselves already include the tz abbreviation, so the
+      // line is redundant noise.
+      const tzLine: string | null =
+        guestTzDiffers && guestTimezoneLabel
+          ? `🕒 Times shown in your timezone: ${guestTimezoneLabel} · ${hostFirstName} is on ${hostTimezoneLabel}`
+          : null;
 
       const locationLine = linkLocation ? `📍 ${linkLocation}` : null;
 
@@ -774,8 +773,11 @@ export async function POST(req: NextRequest) {
       if (!inviteeName) needed.push("your name");
       if (!link.inviteeEmail) needed.push("your email");
       let closing: string;
+      const onlyNeedsEmail = needed.length === 1 && !link.inviteeEmail && topic && inviteeName;
       if (needed.length === 0) {
-        closing = `👉 Reply with a time that works for you, and I'll get it booked.`;
+        closing = `👉 Select or reply with the time that works, and I'll get it booked.`;
+      } else if (onlyNeedsEmail) {
+        closing = `👉 Select or reply with the time that works, and I'll get it booked — we can grab your email on the confirmation card.`;
       } else {
         const joined =
           needed.length === 1
@@ -786,7 +788,8 @@ export async function POST(req: NextRequest) {
         closing = `👉 Reply with a time that works — plus ${joined} — and I'll get it booked.`;
       }
 
-      const headerLines = [hello, formatLine, tzLine];
+      const headerLines = [hello, formatLine];
+      if (tzLine) headerLines.push(tzLine);
       if (locationLine) headerLines.push(locationLine);
       const header = headerLines.join("\n");
 
