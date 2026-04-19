@@ -131,6 +131,23 @@ export async function POST(req: NextRequest) {
       where: { slug, code },
     });
     if (!link) {
+      // Extra diagnostics — we've had a few "dashboard shows confirmed but
+      // deal-room says link not found" reports (e.g. hvn5p2 on 2026-04-18).
+      // Log whether the slug exists at all (user does exist) and whether
+      // ANY link with that code exists under a different slug (shouldn't,
+      // code is unique — but let's know).
+      const byCode = await prisma.negotiationLink.findUnique({
+        where: { code },
+        select: { slug: true, userId: true, createdAt: true },
+      });
+      const hasSessions = await prisma.negotiationSession.count({
+        where: { link: { code } },
+      });
+      console.error(
+        `[negotiate/session] Link not found: slug="${slug}" code="${code}". ` +
+        `byCode: ${byCode ? `exists-slug="${byCode.slug}"-userId=${byCode.userId}` : "null"}. ` +
+        `sessions-referencing-code: ${hasSessions}`
+      );
       return NextResponse.json({ error: "Link not found" }, { status: 404 });
     }
 
