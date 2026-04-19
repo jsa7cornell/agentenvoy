@@ -92,6 +92,8 @@ export function AvailabilityPanel({
   const [isRefreshing, setIsRefreshing] = useState(false);
   // Mobile view toggle — day vs. M-F workweek. Only used when forceMobile.
   const [mobileView, setMobileView] = useState<"day" | "week">("day");
+  // Desktop week-range toggle — full Sun-Sat vs. Mon-Fri workweek. Default full.
+  const [weekRange, setWeekRange] = useState<"full" | "workweek">("full");
 
   // Responsive — measure panel content width, pick 3/5/7 day view.
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -114,6 +116,19 @@ export function AvailabilityPanel({
     const today = new Date();
     return today.toISOString().slice(0, 10);
   }, [weekStart, daysToShow]);
+
+  // Monday of the current week — used by mobile-week and desktop workweek
+  // toggle to anchor a Mon–Fri view.
+  const mondayAnchor = useMemo(() => {
+    const d = new Date(weekStart + "T12:00:00");
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  }, [weekStart]);
+
+  // Desktop: user-selected week-range (full Sun-Sat vs. Mon-Fri workweek)
+  // takes precedence over the responsive 3/5/7-day logic.
+  const desktopAnchor = weekRange === "full" ? weekStart : mondayAnchor;
+  const desktopDays = weekRange === "full" ? 7 : 5;
 
   // Rules modal
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -418,7 +433,10 @@ export function AvailabilityPanel({
           &larr;
         </button>
         <span className="text-xs text-primary text-center font-medium truncate">
-          {formatWeekRange(gridStart, daysToShow)}
+          {formatWeekRange(
+            forceMobile ? gridStart : desktopAnchor,
+            forceMobile ? daysToShow : desktopDays,
+          )}
         </span>
         <button
           onClick={() => shiftWeek(1)}
@@ -437,6 +455,33 @@ export function AvailabilityPanel({
         )}
       </div>
       <div className="flex items-center justify-end gap-2">
+        {/* Desktop week-range toggle — Full (Sun-Sat) vs. Workweek (Mon-Fri) */}
+        {!forceMobile && (
+          <div className="hidden md:flex items-stretch rounded-md border border-DEFAULT overflow-hidden text-[10px] font-medium">
+            <button
+              onClick={() => setWeekRange("full")}
+              className={`px-2 py-0.5 transition ${
+                weekRange === "full"
+                  ? "bg-indigo-500 text-white"
+                  : "text-secondary hover:text-primary"
+              }`}
+              title="Sunday through Saturday"
+            >
+              Full week
+            </button>
+            <button
+              onClick={() => setWeekRange("workweek")}
+              className={`px-2 py-0.5 transition border-l border-DEFAULT ${
+                weekRange === "workweek"
+                  ? "bg-indigo-500 text-white"
+                  : "text-secondary hover:text-primary"
+              }`}
+              title="Monday through Friday"
+            >
+              Workweek
+            </button>
+          </div>
+        )}
         <button
           onClick={handleRefresh}
           disabled={isRefreshing}
@@ -601,13 +646,6 @@ export function AvailabilityPanel({
     </div>
   );
 
-  // Monday of the current weekStart (for mobile workweek M-F view)
-  const mondayAnchor = (() => {
-    const d = new Date(weekStart + "T12:00:00");
-    d.setDate(d.getDate() + 1);
-    return d.toISOString().slice(0, 10);
-  })();
-
   // Mobile three-feature action row — Day/Week toggle, Calendars, Rules.
   // Replaces the desktop legendBar on narrow layouts; legend chips move
   // under the day-chip header (passed to the calendar via legendSlot).
@@ -766,8 +804,8 @@ export function AvailabilityPanel({
             slots={slots}
             locationByDay={locationByDay}
             timezone={timezone}
-            weekStart={gridStart}
-            daysToShow={daysToShow}
+            weekStart={desktopAnchor}
+            daysToShow={desktopDays}
             hideToolbar
             headerGutterSlot={tzChip}
             primaryCalendar={calendars[0]}

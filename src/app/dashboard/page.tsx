@@ -10,7 +10,7 @@ export default function DashboardPage() {
           can flex to fill the rest. At narrow viewports the calendar's
           internal responsive logic drops to 5 or 3 days; below md the
           panel hides entirely and chat takes the full viewport. */}
-      <div className="hidden md:flex flex-col flex-shrink-0 min-w-[460px] max-w-[580px] md:w-[505px] overflow-hidden">
+      <div className="hidden md:flex flex-col flex-shrink-0 min-w-[560px] max-w-[700px] md:w-[610px] overflow-hidden">
         <div className="flex-1 min-h-0 overflow-hidden">
           <Feed />
         </div>
