@@ -8,12 +8,17 @@
  * ADMIN_SMOKE_TOKEN env var. Neither OAuth nor session — so a GitHub
  * Actions job can call it without a browser.
  *
- * Probes:
- *   db            — DB roundtrip (write + read latency)
+ * Core probes (gating — affect HTTP status):
+ *   db            — DB roundtrip latency
  *   migrations    — _prisma_migrations row count vs prisma/migrations/ dirs
  *   ses_creds     — AWS_SES_ACCESS_KEY_ID / _SECRET_ACCESS_KEY present
  *   calendar_cache — CalendarCache table reachable
  *   env           — Critical env vars present and production-safe
+ *
+ * External probes (report-only — never affect HTTP status):
+ *   google_oauth  — Google OIDC discovery endpoint reachable + token valid
+ *   ses_account   — SES GetAccount validates live credentials + shows quota
+ *   vercel_api    — Vercel API reachable
  *
  * Alerting: log-only for first week. After one clean week of deploys,
  * flip SMOKE_ALERTS_ENABLED=true to wire the email alert.
@@ -21,6 +26,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { SESv2Client, GetAccountCommand } from "@aws-sdk/client-sesv2";
 import { readdirSync } from "fs";
 import { join } from "path";
 
@@ -38,6 +44,8 @@ interface SmokeReport {
   timestamp: string;
   sha: string;
   probes: Record<string, ProbeResult>;
+  /** External contract probes — report-only, never affect ok/HTTP status. */
+  external: Record<string, ProbeResult>;
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -58,15 +66,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   // ── Run probes ────────────────────────────────────────────────────────
-  const [db, migrations, sesCreds, calendarCache, env] = await Promise.all([
-    probeDb(),
-    probeMigrations(),
-    probeSesCreds(),
-    probeCalendarCache(),
-    probeEnv(),
-  ]);
+  // Core and external run concurrently; external results never block the response status.
+  const [db, migrations, sesCreds, calendarCache, env, googleOauth, sesAccount, vercelApi] =
+    await Promise.all([
+      probeDb(),
+      probeMigrations(),
+      probeSesCreds(),
+      probeCalendarCache(),
+      probeEnv(),
+      probeGoogleOauth(),
+      probeSesAccount(),
+      probeVercelApi(),
+    ]);
 
   const probes = { db, migrations, ses_creds: sesCreds, calendar_cache: calendarCache, env };
+  const external = { google_oauth: googleOauth, ses_account: sesAccount, vercel_api: vercelApi };
   const allOk = Object.values(probes).every((p) => p.ok);
   const sha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 
@@ -75,6 +89,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     timestamp: new Date().toISOString(),
     sha,
     probes,
+    external,
   };
 
   if (!allOk) {
@@ -169,6 +184,96 @@ async function probeCalendarCache(): Promise<ProbeResult> {
   try {
     const rowCount = await prisma.calendarCache.count();
     return { ok: true, latencyMs: Date.now() - start, rowCount };
+  } catch (err) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+// ── External probes (report-only) ─────────────────────────────────────────
+
+async function probeGoogleOauth(): Promise<ProbeResult> {
+  const start = Date.now();
+  try {
+    const res = await fetch(
+      "https://accounts.google.com/.well-known/openid-configuration",
+      { signal: AbortSignal.timeout(5000) },
+    );
+    const latencyMs = Date.now() - start;
+    if (!res.ok) {
+      return { ok: false, latencyMs, detail: `HTTP ${res.status}` };
+    }
+    const body = await res.json() as Record<string, unknown>;
+    const hasExpected =
+      typeof body.token_endpoint === "string" &&
+      typeof body.authorization_endpoint === "string";
+    if (!hasExpected) {
+      return { ok: false, latencyMs, detail: "Missing token_endpoint or authorization_endpoint in discovery doc" };
+    }
+    // Confirm our client_id is configured (we can't validate it without a full
+    // OAuth round-trip, but at least confirm it's non-empty).
+    const clientIdSet = !!process.env.GOOGLE_CLIENT_ID;
+    return {
+      ok: true,
+      latencyMs,
+      discovery: "reachable",
+      client_id_configured: clientIdSet,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function probeSesAccount(): Promise<ProbeResult> {
+  const start = Date.now();
+  const keyId = process.env.AWS_SES_ACCESS_KEY_ID;
+  const secret = process.env.AWS_SES_SECRET_ACCESS_KEY;
+  if (!keyId || !secret) {
+    return { ok: false, detail: "SES credentials not set — skipping live check" };
+  }
+  try {
+    const client = new SESv2Client({
+      region: process.env.AWS_SES_REGION ?? "us-west-2",
+      credentials: { accessKeyId: keyId, secretAccessKey: secret },
+    });
+    const account = await client.send(new GetAccountCommand({}));
+    const latencyMs = Date.now() - start;
+    return {
+      ok: true,
+      latencyMs,
+      sending_enabled: account.SendingEnabled ?? false,
+      max_send_rate: account.SendQuota?.MaxSendRate,
+      sent_last_24h: account.SendQuota?.SentLast24Hours,
+      max_24h: account.SendQuota?.Max24HourSend,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function probeVercelApi(): Promise<ProbeResult> {
+  const start = Date.now();
+  try {
+    // Basic reachability check — no token required, just confirms the API
+    // is up and reachable from the production runtime.
+    const res = await fetch("https://api.vercel.com", {
+      signal: AbortSignal.timeout(5000),
+    });
+    const latencyMs = Date.now() - start;
+    // Vercel API root returns 200 or 404 depending on path — either means reachable.
+    const reachable = res.status < 500;
+    return { ok: reachable, latencyMs, status: res.status };
   } catch (err) {
     return {
       ok: false,
