@@ -241,6 +241,7 @@ describe("stripActionBlocks", () => {
 const mockPrisma = vi.hoisted(() => ({
   negotiationSession: {
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
     create: vi.fn(),
@@ -620,6 +621,47 @@ describe("executeActions", () => {
       expect(mockPrisma.negotiationSession.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: "session-1" } })
       );
+    });
+
+    // Regression — 2026-04-20 Danny case.
+    // LLM emitted update_format right after create_link with sessionId =
+    // "LAST_CREATED" (a placeholder it invented — the real cuid wasn't in
+    // context). Action failed silently; the narration claimed success.
+    // Fix: resolveSessionId falls back to the most recent session for the
+    // host when the sessionId is missing or obviously placeholder-shaped.
+    it("falls back to latest session when LLM emits a placeholder sessionId", async () => {
+      mockPrisma.negotiationSession.findFirst.mockResolvedValue({ id: "session-1" });
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
+
+      const results = await executeActions(
+        [{ action: "update_format", params: { sessionId: "LAST_CREATED", format: "phone" } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(mockPrisma.negotiationSession.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { hostId: HOST_USER_ID, archived: false },
+          orderBy: { createdAt: "desc" },
+        })
+      );
+      expect(mockPrisma.negotiationSession.update).toHaveBeenCalledWith({
+        where: { id: "session-1" },
+        data: { format: "phone" },
+      });
+    });
+
+    it("falls back to latest session when sessionId is completely omitted", async () => {
+      mockPrisma.negotiationSession.findFirst.mockResolvedValue({ id: "session-1" });
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
+
+      const results = await executeActions(
+        [{ action: "update_format", params: { format: "phone" } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(mockPrisma.negotiationSession.findFirst).toHaveBeenCalled();
     });
 
     // Regression — 2026-04-18 Danboy case.

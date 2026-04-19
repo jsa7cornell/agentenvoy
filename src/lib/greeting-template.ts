@@ -384,7 +384,7 @@ export interface FormattedSlotList {
   isDualTimezone: boolean;
 }
 
-/** "6:00 AM PT" — always emits :00 for consistency with Danny-spec bullets. */
+/** "6:00 AM PT" — single-slot label. */
 function fmtSlotLabel(d: Date, timezone: string, tzShort: string): string {
   const t = d
     .toLocaleTimeString("en-US", {
@@ -393,6 +393,41 @@ function fmtSlotLabel(d: Date, timezone: string, tzShort: string): string {
       timeZone: timezone,
     });
   return `${t} ${tzShort}`;
+}
+
+/**
+ * Range label for a merged contiguous block — "7:00 AM – 4:00 PM PT".
+ *
+ * Regression fix 2026-04-20: the Danny-spec V2 greeting (shipped 2026-04-18)
+ * emitted only the block's start time. For a day with 7 AM–4 PM wide open,
+ * the guest saw `• 7:00 AM PT` and reasonably read that as "one 30-min slot
+ * at 7 AM" when it was actually "9 hours of wide-open availability." The
+ * pre-V2 greeting did show ranges ("10 AM–1 PM EDT") — we're restoring that
+ * for multi-slot blocks while keeping single-slot labels bare.
+ */
+function fmtBlockLabel(
+  start: Date,
+  end: Date,
+  timezone: string,
+  tzShort: string,
+): string {
+  const startStr = start.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: timezone,
+  });
+  // A "single-slot block" is one 30-min slot wide (≤30 min). Anything larger
+  // is a merged block and deserves a range so the guest understands the span.
+  const spanMin = (end.getTime() - start.getTime()) / 60000;
+  if (spanMin <= 30) {
+    return `${startStr} ${tzShort}`;
+  }
+  const endStr = end.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: timezone,
+  });
+  return `${startStr} – ${endStr} ${tzShort}`;
 }
 
 /**
@@ -517,9 +552,9 @@ export function formatAvailabilitySlotList(
     chosen.sort((a, b) => a.start.getTime() - b.start.getTime());
 
     for (const block of chosen) {
-      const hostLabel = fmtSlotLabel(block.start, hostTimezone, hostShort);
+      const hostLabel = fmtBlockLabel(block.start, block.end, hostTimezone, hostShort);
       if (hasGuestTz) {
-        const guestLabel = fmtSlotLabel(block.start, guestTimezone!, guestShort!);
+        const guestLabel = fmtBlockLabel(block.start, block.end, guestTimezone!, guestShort!);
         const star = block.hasPreferred ? " ★" : "";
         if (block.hasPreferred) hasPreferred = true;
         lines.push(`• ${guestLabel} / ${hostLabel}${star}`);

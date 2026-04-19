@@ -181,8 +181,55 @@ async function getAuthorizedSession(sessionId: unknown, userId: string): Promise
   return { session };
 }
 
-function resolveSessionId(params: Record<string, unknown>, contextSessionId?: string): string | undefined {
-  return (params.sessionId as string) || contextSessionId || undefined;
+/**
+ * Placeholder strings the LLM invents when it doesn't have a real session ID
+ * in context (e.g. right after a create_link in the same turn, the cuid wasn't
+ * returned to the model yet). Observed 2026-04-20: Envoy emitted
+ * `"sessionId":"LAST_CREATED"` for update_format/update_time, the action
+ * failed with "Session not found: LAST_CREATED", but the narration claimed
+ * success — DB was unchanged.
+ *
+ * Rather than forbidding this in the playbook (fragile) we resolve it
+ * server-side: any placeholder (or missing sessionId) on an update_* action
+ * falls back to the most recently created non-archived session for this host.
+ * That's almost always what the model meant when it just ran create_link or
+ * is following up on the last thing it did.
+ */
+const SESSION_ID_PLACEHOLDERS = new Set([
+  "LAST_CREATED", "LAST", "LATEST", "LAST_SESSION", "LATEST_SESSION",
+  "NEW", "NEW_SESSION", "JUST_CREATED", "CURRENT", "CURRENT_SESSION",
+  "$LAST", "LAST_ID", "SESSION_ID",
+]);
+
+function looksLikePlaceholderSessionId(s: string): boolean {
+  if (!s) return true;
+  if (SESSION_ID_PLACEHOLDERS.has(s.toUpperCase())) return true;
+  // Real Prisma cuids are lowercase alphanumeric. Any uppercase letter or
+  // `$` prefix is a giveaway for an LLM-invented placeholder.
+  if (/[A-Z]/.test(s) || s.startsWith("$")) return true;
+  return false;
+}
+
+async function resolveSessionId(
+  params: Record<string, unknown>,
+  userId: string,
+  contextSessionId?: string,
+): Promise<string | undefined> {
+  const raw = ((params.sessionId as string | undefined) ?? contextSessionId ?? "").trim();
+  if (raw && !looksLikePlaceholderSessionId(raw)) {
+    return raw;
+  }
+  if (raw) {
+    console.warn(
+      `[resolveSessionId] placeholder sessionId "${raw}" — falling back to latest session for user ${userId}`,
+    );
+  }
+  const latest = await prisma.negotiationSession.findFirst({
+    where: { hostId: userId, archived: false },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  return latest?.id;
 }
 
 /**
@@ -363,7 +410,7 @@ async function handleUpdateFormat(
   userId: string,
   contextSessionId?: string
 ): Promise<ActionResult> {
-  const sessionId = resolveSessionId(params, contextSessionId);
+  const sessionId = await resolveSessionId(params, userId, contextSessionId);
   const auth = await getAuthorizedSession(sessionId, userId);
   if (!("session" in auth)) return auth;
   const { session } = auth;
@@ -413,7 +460,7 @@ async function handleUpdateTime(
   userId: string,
   contextSessionId?: string
 ): Promise<ActionResult> {
-  const sessionId = resolveSessionId(params, contextSessionId);
+  const sessionId = await resolveSessionId(params, userId, contextSessionId);
   const auth = await getAuthorizedSession(sessionId, userId);
   if (!("session" in auth)) return auth;
   const { session } = auth;
@@ -499,7 +546,7 @@ async function handleUpdateLocation(
   userId: string,
   contextSessionId?: string
 ): Promise<ActionResult> {
-  const sessionId = resolveSessionId(params, contextSessionId);
+  const sessionId = await resolveSessionId(params, userId, contextSessionId);
   const auth = await getAuthorizedSession(sessionId, userId);
   if (!("session" in auth)) return auth;
   const { session } = auth;
@@ -617,6 +664,30 @@ async function handleCreateLink(
   const rawLocation = params.location;
   const location = typeof rawLocation === "string" && rawLocation.trim() ? rawLocation.trim() : null;
   const rules = (params.rules as Record<string, unknown>) || {};
+
+  // Drift detector (2026-04-20): the channel playbook asks the LLM to populate
+  // hostNote whenever the host's phrasing carries context — including
+  // structured constraints expressed conversationally ("on Tuesday or
+  // Wednesday next week"). If we see structured constraints set but no
+  // hostNote, that's a signal the LLM forgot to carry context through.
+  // Warn-only — don't block link creation. Monitor Vercel logs; if this
+  // fires on real "with narrative context" cases, revisit the playbook.
+  const hasStructuredConstraints =
+    Array.isArray(rules.preferredDays) ||
+    !!rules.dateRange ||
+    !!rules.preferredTimeStart ||
+    !!rules.preferredTimeEnd ||
+    !!params.preferredTimeStart ||
+    !!params.preferredTimeEnd;
+  if (hasStructuredConstraints && !hostNote) {
+    console.warn(
+      `[create_link] hostNote missing for structured constraint — invitee=${inviteeName} rules=${JSON.stringify({
+        preferredDays: rules.preferredDays,
+        dateRange: rules.dateRange,
+        preferredTimeStart: rules.preferredTimeStart ?? params.preferredTimeStart,
+      })}`,
+    );
+  }
 
   // Merge format/duration/urgency/VIP/window into rules so they're available
   // at greeting/composer time. isVip is a binary flag — it tells Envoy she

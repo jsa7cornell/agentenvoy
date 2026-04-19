@@ -270,3 +270,44 @@ describe("filterByDuration", () => {
     expect(out.lines[0]).toContain("10–11 AM");
   });
 });
+
+// ─── formatAvailabilitySlotList (V2 Danny-spec) ──────────────────────────────
+
+import { formatAvailabilitySlotList } from "@/lib/greeting-template";
+
+describe("formatAvailabilitySlotList — block range labels", () => {
+  // Regression 2026-04-20: V2 greeting emitted only the block's start time.
+  // For a day with 7 AM–4 PM wide open, the guest saw `• 7:00 AM PT` and
+  // reasonably read that as "one 30-min slot" when it was "9 hours open."
+  // See greeting-template.ts fmtBlockLabel for context.
+  it("emits a range for a merged multi-slot block", () => {
+    // 18 contiguous score-0 slots = 9 hours starting 7 AM PT
+    const slots = run([2026, 4, 28], 14, 0, 18, 0); // 7 AM–4 PM PT
+    const out = formatAvailabilitySlotList(slots, TZ, NOW);
+    // One day header, one bullet (contiguous → one block)
+    const bullets = out.lines.filter((l) => l.startsWith("•"));
+    expect(bullets).toHaveLength(1);
+    // Must show a range, not just "7:00 AM PDT"
+    expect(bullets[0]).toMatch(/7:00 AM\s*–\s*4:00 PM/);
+  });
+
+  it("emits a bare start time for a single 30-min block", () => {
+    const slots = run([2026, 4, 28], 14, 0, 1, 0); // 7:00 AM only
+    const out = formatAvailabilitySlotList(slots, TZ, NOW);
+    const bullets = out.lines.filter((l) => l.startsWith("•"));
+    expect(bullets).toHaveLength(1);
+    // No en-dash, no range
+    expect(bullets[0]).not.toContain("–");
+    expect(bullets[0]).toContain("7:00 AM");
+  });
+
+  it("renders dual-timezone range when guest tz differs", () => {
+    const slots = run([2026, 4, 28], 14, 0, 6, 0); // 7–10 AM PT (3h)
+    const out = formatAvailabilitySlotList(slots, TZ, NOW, "America/New_York");
+    const bullets = out.lines.filter((l) => l.startsWith("•"));
+    expect(bullets).toHaveLength(1);
+    // Guest (ET) range shown first, host (PT) range in slash-delimited
+    expect(bullets[0]).toMatch(/10:00 AM\s*–\s*1:00 PM.*EDT/);
+    expect(bullets[0]).toMatch(/7:00 AM\s*–\s*10:00 AM.*PDT/);
+  });
+});
