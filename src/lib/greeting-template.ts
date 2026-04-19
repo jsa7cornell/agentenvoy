@@ -384,17 +384,6 @@ export interface FormattedSlotList {
   isDualTimezone: boolean;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-/** "6:00 AM PT" — single-slot label (kept as reference; multi-slot uses fmtBlockLabel). */
-function fmtSlotLabel(d: Date, timezone: string, tzShort: string): string {
-  const t = d
-    .toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      timeZone: timezone,
-    });
-  return `${t} ${tzShort}`;
-}
 
 /**
  * Range label for a merged contiguous block — "7:00 AM – 4:00 PM PT".
