@@ -21,6 +21,7 @@ import {
   humanTimezoneLabel,
   formatLabel,
   buildOpenWindowGreeting,
+  formatHostNoteLine,
 } from "@/lib/greeting-template";
 import {
   buildGuestGreeting,
@@ -718,6 +719,7 @@ export async function POST(req: NextRequest) {
           location: guestPicks!.location,
         },
         guidance: guestGuidance,
+        hostNote: link.hostNote,
       });
     } else {
       // V2 Danny-spec assembly (2026-04-18):
@@ -788,8 +790,12 @@ export async function POST(req: NextRequest) {
         closing = `👉 Reply with a time that works — plus ${joined} — and I'll get it booked.`;
       }
 
+      // Host-supplied framing — verbatim, sanitized at create_link time.
+      const hostNoteLine = formatHostNoteLine({ hostFirstName, hostNote: link.hostNote });
+
       const headerLines = [hello, formatLine];
       if (tzLine) headerLines.push(tzLine);
+      if (hostNoteLine) headerLines.push(hostNoteLine);
       if (locationLine) headerLines.push(locationLine);
       const header = headerLines.join("\n");
 

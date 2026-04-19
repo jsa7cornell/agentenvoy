@@ -100,6 +100,12 @@ model NegotiationLink {
   /// as a soft-lock: once the session persists a TZ, observed browser TZ does
   /// not override it until the greeting re-render path ships.
   inviteeTimezone String?
+  /// Free-text host framing surfaced verbatim in the guest greeting as
+  /// `💬 {hostFirstName}: {hostNote}`. Sanitized via sanitizeHostFlavor at
+  /// create_link time (injection markers + URLs/emails/phones stripped).
+  /// Display-only — do NOT include in computeInputHash; has no effect on
+  /// scoring/availability.
+  hostNote     String?  @db.VarChar(280)
   topic        String?
   rules        Json?    @default("{}")
   /// When this link was spawned from an AvailabilityRule (e.g., office hours),

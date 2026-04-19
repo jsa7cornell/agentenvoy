@@ -612,6 +612,9 @@ interface BuildOpenWindowOpts {
     suggestions?: { locations?: string[]; durations?: number[] };
     tone?: string;
   };
+  /** Host-supplied framing surfaced verbatim as a 💬 line. Sanitized at
+   *  create_link time. Null/empty = line omitted. */
+  hostNote?: string | null;
 }
 
 /** "hike" → "a hike", "adventure" → "an adventure". Leaves phrases alone
@@ -647,6 +650,7 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
     anchorDate,
     picks,
     guidance,
+    hostNote,
   } = opts;
 
   const hostShort = shortTimezoneLabel(hostTimezone, new Date());
@@ -755,7 +759,11 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
 
   const askLine = `Pick ${pickClause}, and I'll get it booked. 🤝${locHint}`;
 
-  return [intro, anchorLine + toneSuffix, askLine].join("\n\n");
+  const hostNoteLine = formatHostNoteLine({ hostFirstName, hostNote });
+  const blocks = [intro];
+  if (hostNoteLine) blocks.push(hostNoteLine);
+  blocks.push(anchorLine + toneSuffix, askLine);
+  return blocks.join("\n\n");
 }
 
 // ─── Format label helpers ────────────────────────────────────────────────────
@@ -781,4 +789,22 @@ export function alternateFormatsLabel(
   if (defaultFormat === "phone") return "video or in-person";
   if (defaultFormat === "in-person") return "phone or video";
   return null;
+}
+
+/**
+ * Format the host-note line surfaced verbatim in the greeting header.
+ * Returns null when there's no note. Sanitization happens upstream at
+ * create_link time (see sanitizeHostFlavor); this function only formats.
+ *
+ * Shape: `💬 {hostFirstName}: {hostNote}` — colon attribution mirrors the
+ * existing emoji-prefix pattern (🕒, 📞, 📍).
+ */
+export function formatHostNoteLine(input: {
+  hostFirstName: string;
+  hostNote: string | null | undefined;
+}): string | null {
+  const note = (input.hostNote || "").trim();
+  if (!note) return null;
+  const who = input.hostFirstName?.trim() || "Host";
+  return `💬 ${who}: ${note}`;
 }

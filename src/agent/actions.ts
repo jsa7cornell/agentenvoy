@@ -583,6 +583,29 @@ async function handleCreateLink(
   // the host didn't specify a topic, which produces "about Meeting" in the greeting.
   const rawTopic = (params.topic as string) || null;
   const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
+
+  // hostNote — host-supplied framing surfaced verbatim in greeting. Defense-in-
+  // depth: reject newlines/control chars at the boundary, then route through
+  // sanitizeHostFlavor (same precedent as guestGuidance.tone). The sanitizer
+  // strips URLs/emails/phones and rejects injection markers; on rejection we
+  // log + persist null. On accept we slice to the column cap (280).
+  let hostNote: string | null = null;
+  const rawHostNote = params.hostNote;
+  if (typeof rawHostNote === "string") {
+    const trimmed = rawHostNote.trim();
+    if (trimmed && !/[\n\r\t\u0000-\u001f]/.test(trimmed)) {
+      const result = sanitizeHostFlavor(trimmed);
+      if (result.rejected) {
+        console.warn(
+          `[create_link] hostNote rejected (${result.reason}) — raw: ${JSON.stringify(result.raw).slice(0, 200)}`
+        );
+      } else if (result.safe) {
+        hostNote = result.safe.slice(0, 280);
+      }
+    } else if (trimmed) {
+      console.warn(`[create_link] hostNote dropped — contains newline or control char`);
+    }
+  }
   const format = (params.format as string) || null;
   const urgency = (params.urgency as string) || null;
   // Meeting location for in-person (or phone/video where host wants to pin
@@ -717,6 +740,7 @@ async function handleCreateLink(
       inviteeEmail,
       inviteeTimezone,
       topic,
+      hostNote,
       rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
     },
   });
