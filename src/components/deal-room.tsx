@@ -51,6 +51,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [topic, setTopic] = useState("");
   const [linkFormat, setLinkFormat] = useState("");
   const [linkLocation, setLinkLocation] = useState<string | null>(null);
+  const [linkActivity, setLinkActivity] = useState<string | null>(null);
+  const [linkActivityIcon, setLinkActivityIcon] = useState<string | null>(null);
+  const [linkTimingLabel, setLinkTimingLabel] = useState<string | null>(null);
   const [inviteeName, setInviteeName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -467,6 +470,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
         setLinkLocation(typeof data.link?.location === "string" && data.link.location.trim() ? data.link.location.trim() : null);
+        setLinkActivity(typeof data.link?.activity === "string" && data.link.activity.trim() ? data.link.activity.trim() : null);
+        setLinkActivityIcon(typeof data.link?.activityIcon === "string" && data.link.activityIcon.trim() ? data.link.activityIcon.trim() : null);
+        setLinkTimingLabel(typeof data.link?.timingLabel === "string" && data.link.timingLabel.trim() ? data.link.timingLabel.trim() : null);
         setInviteeName(data.link?.inviteeName || "");
         // Pre-fill the confirm-card form from any info we already have so the
         // guest doesn't have to retype their name/email if Envoy captured it.
@@ -943,7 +949,21 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             const hostTime = showDual ? dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: hostTz }) : null;
             return <span>{datePart} {localTime}{hostTime ? ` (${hostTime})` : ""}</span>;
           })()}
-          {!eventDateTime && !eventFormat && <span>Meeting details pending</span>}
+          {!eventDateTime && !eventFormat && (() => {
+            // Pre-confirmation fallback: render the host's proposal fragments
+            // from link.rules so the guest sees what the meeting is ABOUT
+            // before a time is locked. Mirrors the greeting's prose-first
+            // approach — show what's set, drop what isn't.
+            const parts: string[] = [];
+            if (linkActivity) {
+              parts.push(linkActivityIcon ? `${linkActivityIcon} ${linkActivity}` : linkActivity);
+            }
+            if (slotDuration) parts.push(`${slotDuration} min`);
+            if (linkTimingLabel) parts.push(linkTimingLabel);
+            if (linkLocation) parts.push(`📍 ${linkLocation}`);
+            if (parts.length === 0) return <span>Meeting details pending</span>;
+            return <span>{parts.join(" · ")}</span>;
+          })()}
           {confirmed && (formGuestName || formGuestEmail) && (
             <span className="text-muted" title="Guest">
               👤 {[formGuestName, formGuestEmail].filter(Boolean).join(" · ")}

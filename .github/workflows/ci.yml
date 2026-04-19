@@ -58,3 +58,42 @@ jobs:
           else
             echo "✓ schema.prisma not modified; skipping check."
           fi
+
+  # Integration tests — hit a real Postgres service container. See
+  # app/src/__tests__/integration/README.md and the harness proposal
+  # at proposals/2026-04-19_integration-test-harness_*.
+  #
+  # Schema provisioning: `prisma db push --skip-generate` (not `migrate
+  # deploy`). This decouples the harness from migration folder hygiene;
+  # migration validity is enforced by the `schema-migration-match` job
+  # above and by the shipped schema-management-and-deploy-infra proposal.
+  integration:
+    runs-on: ubuntu-latest
+    needs: check
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agentenvoy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agentenvoy_test
+      POSTGRES_URL_NON_POOLING: postgresql://postgres:postgres@localhost:5432/agentenvoy_test
+      EFFECT_MODE_EMAIL: log
+      EFFECT_MODE_CALENDAR: dryrun
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx prisma db push --skip-generate
+      - run: npm run test:integration

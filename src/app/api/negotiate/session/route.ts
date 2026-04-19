@@ -183,7 +183,11 @@ export async function POST(req: NextRequest) {
       topic: link.topic,
       inviteeName: link.inviteeName,
       format: (link.rules as Record<string, unknown>)?.format ?? null,
+      duration: (link.rules as Record<string, unknown>)?.duration ?? null,
       location: (link.rules as Record<string, unknown>)?.location ?? null,
+      activity: (link.rules as Record<string, unknown>)?.activity ?? null,
+      activityIcon: (link.rules as Record<string, unknown>)?.activityIcon ?? null,
+      timingLabel: (link.rules as Record<string, unknown>)?.timingLabel ?? null,
     };
 
     // --- GROUP MODE: each visitor gets their own session ---
@@ -636,6 +640,7 @@ export async function POST(req: NextRequest) {
     guestTzDiffers ? effectiveGuestTz : undefined,
     effectiveDuration ?? undefined,
     effectiveMinDuration,
+    { collapseIdenticalWindows: true },
   );
 
   let greeting: string;
@@ -687,29 +692,67 @@ export async function POST(req: NextRequest) {
         ? linkRules.activityIcon.trim()
         : null;
 
-    // Natural-prose opener that weaves duration + activity + location into
-    // a single sentence (per user spec 2026-04-20). Falls back to the
-    // shorter neutral form when we don't have activity framing.
+    // V4 prose-first opener (2026-04-20) — replaces V3's Proposal bar.
+    // Composes two sentences from whatever link-rule fragments are present,
+    // drops quietly when fields are missing. Structured at-a-glance info
+    // lives in the deal-room event card now, not the greeting.
+    //
+    //   1. Opener: "👋 NAME! I'm scheduling time with you and HOST[ for TIMING]."
+    //   2. Proposal: "He's proposing [TIMING and ][DUR min ]for ACTIVITY[ in LOC]."
+    //
+    // If we have no substantive fields (no activity, no timing, no
+    // duration/location) — drop the proposal sentence entirely.
     const linkLocationForOpener =
       typeof linkRules.location === "string" && linkRules.location.trim()
         ? linkRules.location.trim()
         : null;
     const durationForOpener =
       typeof linkRules.duration === "number" ? linkRules.duration : (effectiveDuration ?? null);
-    let openerTail = "";
-    if (activityText && linkLocationForOpener && durationForOpener) {
-      openerTail = ` He's suggesting ${durationForOpener} min for ${activityText} in ${linkLocationForOpener}.`;
-    } else if (activityText && durationForOpener) {
-      openerTail = ` He's suggesting ${durationForOpener} min for ${activityText}.`;
-    } else if (linkLocationForOpener && durationForOpener) {
-      openerTail = ` He's suggesting ${durationForOpener} min at ${linkLocationForOpener}.`;
-    } else if (activityText) {
-      openerTail = ` He's suggesting ${activityText}.`;
-    }
-    // When the host shared a hostNote, the natural-prose carry already comes
-    // through via formatHostNoteLine; drop the opener tail to avoid dupe.
-    if (link.hostNote) openerTail = "";
-    const hello = `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}.${openerTail}`;
+    const timingLabel =
+      typeof linkRules.timingLabel === "string" && linkRules.timingLabel.trim()
+        ? linkRules.timingLabel.trim().slice(0, 80)
+        : null;
+
+    const openerTimingClause = timingLabel ? ` for ${timingLabel}` : "";
+
+    const buildProposalSentence = (): string | null => {
+      // Fragments assemble into: "He's proposing [timing] [and] [dur min] [for activity] [in loc]."
+      const durStr = durationForOpener ? `${durationForOpener} min` : null;
+      if (activityText) {
+        const lead = timingLabel && durStr
+          ? `${timingLabel} and ${durStr}`
+          : timingLabel
+          ? timingLabel
+          : durStr
+          ? durStr
+          : null;
+        const tail = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
+        if (lead) return `He's proposing ${lead} for ${activityText}${tail}.`;
+        return `He's proposing a${/^[aeiou]/i.test(activityText) ? "n" : ""} ${activityText}${tail}.`;
+      }
+      // No activity — fall back to duration/format/location framing.
+      if (durStr || linkLocationForOpener || timingLabel) {
+        const parts: string[] = [];
+        if (timingLabel) parts.push(timingLabel);
+        if (durStr) parts.push(durStr);
+        const leadJoined = parts.join(" and ");
+        const locTail = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
+        return leadJoined
+          ? `He's proposing ${leadJoined}${locTail}.`
+          : linkLocationForOpener
+          ? `He's proposing to meet in ${linkLocationForOpener}.`
+          : null;
+      }
+      return null;
+    };
+
+    let proposalSentence = buildProposalSentence();
+    // When the host shared a hostNote, the flavor flows through formatHostNoteLine
+    // — drop the proposal sentence to avoid dupe.
+    if (link.hostNote) proposalSentence = null;
+    const hello = `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}${openerTimingClause}.${
+      proposalSentence ? ` ${proposalSentence}` : ""
+    }`;
 
     const fmtLabel = formatLabel(effectiveFormat);
     const durationLabel = (effectiveMinDuration && effectiveMinDuration < (effectiveDuration ?? 30))
@@ -774,29 +817,22 @@ export async function POST(req: NextRequest) {
         hostNote: link.hostNote,
       });
     } else {
-      // V3 assembly (2026-04-20 — "Proposal bar" redesign):
-      //   hello (opener weaves activity+location in natural prose)
-      //   Proposal: {formatIcon} {formatLabel} · {duration} min · 📍 {loc} · {actIcon} {activity}
+      // V4 assembly (2026-04-20 — prose-first, Proposal bar removed):
+      //   hello (opener + proposal sentence, both prose; empty lines preserved)
       //   [tzLine — only when timezones differ]
+      //   [hostNoteLine — verbatim host flavor]
       //
       //   **Mon, Apr 27**
       //   • 6:00 AM PT / 9:00 AM ET
       //   ...
       //
-      //   closing (one line, no email clause)
-      const proposalParts: string[] = [];
-      const formatChunk = fmtLabel
-        ? `${formatEmoji} ${fmtLabel.charAt(0).toUpperCase()}${fmtLabel.slice(1)}`
-        : null;
-      if (formatChunk) proposalParts.push(formatChunk);
-      if (durationLabel) proposalParts.push(`${durationLabel} min`);
-      if (linkLocation) proposalParts.push(`📍 ${linkLocation}`);
-      if (activityText) {
-        proposalParts.push(activityEmoji ? `${activityEmoji} ${activityText}` : activityText);
-      }
-      const formatLine = proposalParts.length > 0
-        ? `**Proposal:** ${proposalParts.join(" · ")}`
-        : `${formatEmoji} ${meetingDescShort}`;
+      //   closing (points at both chat + calendar)
+      //
+      // Structured at-a-glance facts (activity · duration · timing · location)
+      // now live in the deal-room event card instead of a greeting-bar.
+      // `fmtLabel`, `durationLabel`, `linkLocation`, `activityEmoji` are still
+      // used below by tzLine / hostNoteLine / event-card reader via linkRules.
+      void fmtLabel; void durationLabel; void linkLocation; void activityEmoji; void meetingDescShort;
 
       // Timezone line. Only render when guest's tz differs — when they match,
       // the slot times themselves already include the tz abbreviation, so the
@@ -805,10 +841,6 @@ export async function POST(req: NextRequest) {
         guestTzDiffers && guestTimezoneLabel
           ? `🕒 Times shown in your timezone: ${guestTimezoneLabel} · ${hostFirstName} is on ${hostTimezoneLabel}`
           : null;
-
-      // locationLine subsumed into the Proposal bar (above). Keep variable
-      // set to null so the existing headerLines assembly below skips it.
-      const locationLine: string | null = null;
 
       // Schedule body — the bulleted V2 list. If empty, fall back to an
       // open-ended ask.
@@ -841,22 +873,23 @@ export async function POST(req: NextRequest) {
       if (!inviteeName) needed.push("your name");
       let closing: string;
       if (needed.length === 0) {
-        closing = `👉 Reply with the time that works, and I'll get it booked.`;
+        closing = `Reply or choose a slot from the calendar below to get it booked.`;
       } else {
         const joined =
           needed.length === 1
             ? needed[0]
             : `${needed.slice(0, -1).join(", ")} and ${needed[needed.length - 1]}`;
-        closing = `👉 Reply with a time that works — plus ${joined} — and I'll get it booked.`;
+        closing = `Reply with a time that works — plus ${joined} — or choose a slot from the calendar below to get it booked.`;
       }
 
       // Host-supplied framing — verbatim, sanitized at create_link time.
       const hostNoteLine = formatHostNoteLine({ hostFirstName, hostNote: link.hostNote });
 
-      const headerLines = [hello, formatLine];
+      // V4: Proposal bar is gone; header is just the prose hello + optional
+      // tz/hostNote lines. Scheduled body and closing follow with blank lines.
+      const headerLines = [hello];
       if (tzLine) headerLines.push(tzLine);
       if (hostNoteLine) headerLines.push(hostNoteLine);
-      if (locationLine) headerLines.push(locationLine);
       const header = headerLines.join("\n");
 
       greeting = [header, scheduleBody, closing].join("\n\n");
@@ -935,6 +968,9 @@ export async function POST(req: NextRequest) {
       format: (link.rules as Record<string, unknown>)?.format ?? null,
       duration: (link.rules as Record<string, unknown>)?.duration ?? null,
       location: (link.rules as Record<string, unknown>)?.location ?? null,
+      activity: (link.rules as Record<string, unknown>)?.activity ?? null,
+      activityIcon: (link.rules as Record<string, unknown>)?.activityIcon ?? null,
+      timingLabel: (link.rules as Record<string, unknown>)?.timingLabel ?? null,
     },
     isHost,
     isGuest,

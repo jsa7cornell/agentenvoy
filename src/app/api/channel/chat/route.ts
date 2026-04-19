@@ -280,6 +280,17 @@ export async function POST(req: NextRequest) {
       // messages or rare model regressions don't leak raw JSON into the UI).
       displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
 
+      // Narration hygiene: if any action failed, the LLM's prose may already
+      // claim success. Prepend a visible correction so the user isn't misled.
+      // Minimum bar — don't silently narrate success when the bus rejected.
+      const failedResults = actionResults.filter((r) => !r.success);
+      if (failedResults.length > 0) {
+        const failNote = failedResults
+          .map((r) => `⚠️ That didn't go through: ${r.message}`)
+          .join("\n");
+        displayText = displayText ? `${failNote}\n\n${displayText}` : failNote;
+      }
+
       const createLinkResult = actionResults.find((r) => r.success && r.data?.url);
       if (createLinkResult?.data) {
         const d = createLinkResult.data;

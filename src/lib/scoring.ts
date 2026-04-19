@@ -1443,6 +1443,14 @@ export interface LinkRules {
    */
   activity?: string;
   activityIcon?: string;
+  /**
+   * Free-form human phrase describing WHEN the meeting should happen
+   * ("next week", "mid-May", "this weekend"). Captured verbatim from the
+   * host; displayed by the greeting's natural-prose opener. Does NOT drive
+   * scoring — use `dateRange` + `preferredDays` for that. `timingLabel` is
+   * the *label*, those are the *filter*.
+   */
+  timingLabel?: string;
 }
 
 // Canonical short day-name table. All persisted `preferredDays` / `lastResort` /

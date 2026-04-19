@@ -114,12 +114,18 @@ model NegotiationLink {
   /// in the user's preferences.explicit.structuredRules JSON, not a relation.
   sourceRuleId String?
   expiresAt    DateTime?
+  /// Per-link salt for hashing guest emails in MCPCallLog. Postgres ≥13
+  /// built-in `gen_random_uuid()` (no pgcrypto). Prevents cross-link
+  /// correlation: same email on two different links hashes to different
+  /// values. See src/lib/mcp/email-hash.ts and SPEC §4.
+  hashSalt     String   @default(dbgenerated("gen_random_uuid()::text"))
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sessions     NegotiationSession[]
-  participants SessionParticipant[]
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions       NegotiationSession[]
+  participants   SessionParticipant[]
+  consentRequests ConsentRequest[]
 
   @@index([slug])
   @@index([slug, code])
@@ -423,4 +429,83 @@ model RouteError {
 
   @@index([route, createdAt])
   @@index([createdAt])
+}
+
+/// Rate-limit counter for MCP tool calls. One row per (capabilityToken,
+/// tool, windowStart). Incremented via UPSERT with ON CONFLICT DO UPDATE
+/// — atomic under READ COMMITTED (Postgres default): the DO UPDATE takes
+/// a row-level lock and the `CASE` in the SET clause evaluates against
+/// the post-lock row state, so concurrent increments cannot lose counts.
+/// See `src/lib/mcp/rate-limit.ts` and SPEC §1.
+///
+/// `windowStart` is the bucket boundary (e.g., floor(NOW() / 60s) for a
+/// 60-second window). When the server-side clock passes the boundary,
+/// the CASE resets count to 1 and updates windowStart; otherwise it
+/// increments count in place. Server-side NOW() is used (not client
+/// clock) to defeat skew attacks.
+///
+/// `expiresAt` is used by the hourly sweep cron to GC expired rows.
+model MCPRateCounter {
+  id              String   @id @default(cuid())
+  /// SHA-256 hash of the capability token (the `/meet/<slug>?c=<code>`
+  /// URL fragment acting as the MCP bearer). Never store plaintext.
+  tokenHash       String
+  /// MCP tool name, e.g. "propose_lock", "post_message".
+  tool            String
+  /// ISO timestamp of the window's start (server-side NOW(), floored).
+  windowStart     DateTime
+  count           Int      @default(1)
+  /// `windowStart + windowDurationSec`. Cron GCs rows past this.
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tokenHash, tool, windowStart])
+  @@index([expiresAt])
+}
+
+/// Host consent record for any MCP-initiated change to a negotiable
+/// parameter. Written by `propose_lock` when the external agent wants to
+/// change a field the host hasn't pre-committed. Status transitions:
+/// pending → accepted | retracted | expired.
+///
+/// The invariant: `propose_lock` refuses with `consent_not_accepted` if
+/// ANY matching ConsentRequest exists in a non-accepted terminal state
+/// ({pending, retracted, expired}). No soft tolerance, no silent
+/// fall-through to defaults. See `src/lib/mcp/consent-request.ts` and
+/// SPEC §2.
+model ConsentRequest {
+  id            String    @id @default(cuid())
+  linkId        String
+  sessionId     String?
+  /// Logical field name — e.g., "format", "location", "duration", "date".
+  /// Treated as a string in Prisma; Zod schemas at the MCP boundary
+  /// union-type this against the field enum used elsewhere.
+  field         String
+  /// The structured value being requested. `propose_lock` reads this
+  /// verbatim; prose is NEVER the source of truth (see §3).
+  appliedValue  Json
+  /// Human-readable template with allow-listed placeholders — see
+  /// `src/lib/mcp/placeholders.ts`. Stored for audit; not rendered live
+  /// without running through the rationale validator.
+  rationaleTemplate String?
+  /// LLM-generated prose accompanying the request. Shown LIVE in the
+  /// deal-room; NEVER logged to MCPCallLog (redaction table §7 drops it).
+  /// Validated post-generation for URL/email/phone/length; on trip, the
+  /// UI falls back to template-rendered output instead. See §3.
+  rationaleProse String?  @db.Text
+  status        String   @default("pending") // pending | accepted | retracted | expired
+  /// Who decided. `guest` = human clicked OK; `host_envoy` = host's
+  /// Envoy accepted on their behalf; `system_expired` = timeout.
+  decidedBy     String?
+  decidedAt     DateTime?
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  link NegotiationLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@index([linkId, field, status])
+  @@index([sessionId, status])
+  @@index([expiresAt])
 }

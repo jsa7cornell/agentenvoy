@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
@@ -133,6 +134,11 @@ async function executeAction(
     case "create_link":
       return handleCreateLink(action.params, userId, context?.meetSlug);
     case "expand_link":
+    case "update_link":
+      // `update_link` is the canonical name; `expand_link` is kept as an
+      // alias because earlier playbook revisions used it. Same handler,
+      // same semantics. The LLM reliably reaches for "update_link" when
+      // editing link rules — don't force it through the older name.
       return handleExpandLink(action.params, userId);
     case "hold_slot":
       return handleHoldSlot(action.params, userId);
@@ -679,6 +685,13 @@ async function handleCreateLink(
   const activityIcon = typeof rawActivityIcon === "string" && rawActivityIcon.trim().length > 0 && rawActivityIcon.length <= 8
     ? rawActivityIcon.trim()
     : null;
+  // Timing label — free-form human phrase ("next week", "mid-May",
+  // "this weekend"). Purely display; the scoring engine uses dateRange
+  // and preferredDays for actual filtering.
+  const rawTimingLabel = params.timingLabel;
+  const timingLabel = typeof rawTimingLabel === "string" && rawTimingLabel.trim()
+    ? rawTimingLabel.trim().slice(0, 80)
+    : null;
   const rules = (params.rules as Record<string, unknown>) || {};
 
   // Drift detector (2026-04-20): the channel playbook asks the LLM to populate
@@ -815,6 +828,7 @@ async function handleCreateLink(
     ...(location ? { location } : {}),
     ...(activity ? { activity } : {}),
     ...(activityIcon ? { activityIcon } : {}),
+    ...(timingLabel ? { timingLabel } : {}),
     ...(guestPicksOut ? { guestPicks: guestPicksOut } : {}),
     ...(guidanceOut ? { guestGuidance: guidanceOut } : {}),
   });
@@ -1220,14 +1234,49 @@ async function handleExpandLink(
   if (typeof params.allowWeekends === "boolean") patch.allowWeekends = params.allowWeekends;
   if (params.preferredTimeStart !== undefined) patch.preferredTimeStart = params.preferredTimeStart;
   if (params.preferredTimeEnd !== undefined) patch.preferredTimeEnd = params.preferredTimeEnd;
+  // preferredDays accepts either short-name strings ("Mon","Tue") OR a
+  // numeric daysOfWeek array ([0..6], Sun=0). The LLM tends to reach for
+  // `daysOfWeek` when it thinks in calendar terms — accept both and
+  // normalize into preferredDays downstream via normalizeLinkRules.
   if (params.preferredDays !== undefined) patch.preferredDays = params.preferredDays;
+  else if (Array.isArray(params.daysOfWeek)) {
+    const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    patch.preferredDays = (params.daysOfWeek as unknown[])
+      .filter((d): d is number => typeof d === "number" && d >= 0 && d <= 6)
+      .map((d) => DAY_NAMES[d]);
+  }
   if (params.lastResort !== undefined) patch.lastResort = params.lastResort;
   if (params.dateRange !== undefined) patch.dateRange = params.dateRange;
+
+  // V4 link-rule fields (2026-04-20): timing label + format/duration +
+  // activity/activityIcon/location. All free-form; sanitized via
+  // normalizeLinkRules where it applies (duration must be positive int).
+  if (typeof params.timingLabel === "string") {
+    const t = params.timingLabel.trim().slice(0, 80);
+    patch.timingLabel = t || undefined;
+  }
+  if (typeof params.format === "string") {
+    const f = params.format.trim().toLowerCase();
+    if (f === "video" || f === "phone" || f === "in-person") patch.format = f;
+  }
+  if (typeof params.duration === "number") patch.duration = params.duration;
+  if (typeof params.activity === "string") {
+    const a = params.activity.trim().slice(0, 60);
+    patch.activity = a || undefined;
+  }
+  if (typeof params.activityIcon === "string") {
+    const ai = params.activityIcon.trim().slice(0, 8);
+    patch.activityIcon = ai || undefined;
+  }
+  if (typeof params.location === "string") {
+    const loc = params.location.trim().slice(0, 120);
+    patch.location = loc || undefined;
+  }
 
   if (Object.keys(patch).length === 0) {
     return {
       success: false,
-      message: "expand_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredDays, lastResort, dateRange)",
+      message: "update_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredDays/daysOfWeek, lastResort, dateRange, timingLabel, format, duration, activity, activityIcon, location)",
     };
   }
 
@@ -1258,6 +1307,62 @@ async function handleExpandLink(
   }
   if (patch.dateRange !== undefined) {
     changedParts.push(`dateRange: updated`);
+  }
+  if (patch.timingLabel !== undefined) changedParts.push(`timing: ${patch.timingLabel ?? "cleared"}`);
+  if (patch.format !== undefined) changedParts.push(`format: ${patch.format}`);
+  if (patch.duration !== undefined) changedParts.push(`duration: ${patch.duration} min`);
+  if (patch.activity !== undefined) changedParts.push(`activity: ${patch.activity ?? "cleared"}`);
+  if (patch.location !== undefined) changedParts.push(`location: ${patch.location ?? "cleared"}`);
+
+  // Post-edit follow-up: drop a short administrator message into every
+  // active session on this link so the guest's deal-room shows what
+  // changed since they last looked. Intentionally an additive message
+  // (not a greeting rewrite) — honors the chat-history model: what was
+  // offered before still appears above, the update is news.
+  try {
+    const activeSessions = await prisma.negotiationSession.findMany({
+      where: { linkId: link.id, status: { in: ["active", "pending"] } },
+      select: { id: true },
+    });
+    if (activeSessions.length > 0) {
+      const hostFirstName = (await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      }))?.name?.split(/\s+/)[0] ?? "The host";
+      const followupParts: string[] = [];
+      if (patch.preferredDays !== undefined && Array.isArray(patch.preferredDays)) {
+        const days = (patch.preferredDays as string[]).join(", ");
+        followupParts.push(days ? `available days updated to ${days}` : "available days cleared");
+      }
+      if (patch.dateRange !== undefined) followupParts.push("date range updated");
+      if (patch.timingLabel !== undefined && patch.timingLabel) {
+        followupParts.push(`timing now "${patch.timingLabel}"`);
+      }
+      if (patch.format !== undefined) followupParts.push(`format now ${patch.format}`);
+      if (patch.duration !== undefined) followupParts.push(`duration now ${patch.duration} min`);
+      if (patch.activity !== undefined && patch.activity) followupParts.push(`activity now "${patch.activity}"`);
+      if (patch.location !== undefined && patch.location) followupParts.push(`location now ${patch.location}`);
+      if (patch.preferredTimeStart !== undefined || patch.preferredTimeEnd !== undefined) {
+        followupParts.push("time window updated");
+      }
+      if (followupParts.length > 0) {
+        const msg = `${hostFirstName} updated the proposal — ${followupParts.join("; ")}. Let me know if this changes anything on your side.`;
+        await Promise.all(
+          activeSessions.map((s) =>
+            prisma.message.create({
+              data: {
+                sessionId: s.id,
+                role: "administrator",
+                content: msg,
+                metadata: { kind: "host_update", field: "link_rules" } as Prisma.InputJsonValue,
+              },
+            })
+          )
+        );
+      }
+    }
+  } catch (e) {
+    console.error("[update_link] follow-up message insert failed (non-blocking):", e);
   }
 
   const name = link.inviteeName || link.code;

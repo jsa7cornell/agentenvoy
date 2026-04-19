@@ -436,10 +436,11 @@ export function formatAvailabilitySlotList(
   guestTimezone?: string,
   durationMin?: number,
   minDurationMin?: number,
-  opts?: { maxSlotsPerDay?: number; maxDays?: number },
+  opts?: { maxSlotsPerDay?: number; maxDays?: number; collapseIdenticalWindows?: boolean },
 ): FormattedSlotList {
   const MAX_SLOTS_PER_DAY = opts?.maxSlotsPerDay ?? 5;
   const MAX_DAYS_LOCAL = opts?.maxDays ?? MAX_DAYS;
+  const COLLAPSE = opts?.collapseIdenticalWindows ?? false;
 
   const offerable = slots.filter((s) => {
     const start = new Date(s.start);
@@ -526,34 +527,103 @@ export function formatAvailabilitySlotList(
   const lines: string[] = [];
   let hasPreferred = false;
 
-  for (let i = 0; i < pickedDays.length; i++) {
-    const entry = pickedDays[i];
-    if (i > 0) lines.push(""); // blank line between day groups
-    lines.push(`**${entry.day}**`);
+  // Render each day into its final bullet lines first — so we can then
+  // (optionally) group consecutive days with byte-identical bullet sets.
+  interface RenderedDay {
+    day: string;           // "Mon, Apr 20"
+    weekdayShort: string;  // "Mon"
+    monthDay: string;      // "Apr 20"
+    bullets: string[];     // bullet lines, WITH the leading "• "
+  }
+  const rendered: RenderedDay[] = [];
 
-    // Pick up to N bullets: preferred-first, then chronological.
+  for (const entry of pickedDays) {
     const sorted = entry.blocks.slice().sort((a, b) => {
       if (a.hasPreferred !== b.hasPreferred) return a.hasPreferred ? -1 : 1;
       return a.start.getTime() - b.start.getTime();
     });
     if (sorted.length > MAX_SLOTS_PER_DAY) hasMore = true;
     const chosen = sorted.slice(0, MAX_SLOTS_PER_DAY);
-    // Re-sort chronologically for display.
     chosen.sort((a, b) => a.start.getTime() - b.start.getTime());
 
+    const bullets: string[] = [];
     for (const block of chosen) {
       const hostLabel = fmtBlockLabel(block.start, block.end, hostTimezone, hostShort);
       if (hasGuestTz) {
         const guestLabel = fmtBlockLabel(block.start, block.end, guestTimezone!, guestShort!);
         const star = block.hasPreferred ? " ★" : "";
         if (block.hasPreferred) hasPreferred = true;
-        lines.push(`• ${guestLabel} / ${hostLabel}${star}`);
+        bullets.push(`• ${guestLabel} / ${hostLabel}${star}`);
       } else {
         const star = block.hasPreferred ? " ★" : "";
         if (block.hasPreferred) hasPreferred = true;
-        lines.push(`• ${hostLabel}${star}`);
+        bullets.push(`• ${hostLabel}${star}`);
       }
     }
+
+    // Split `entry.day` ("Mon, Apr 20") into weekday + month-day parts so we
+    // can merge headers when consecutive days share a bullet set. The format
+    // is produced by toLocaleDateString with `{ weekday, month, day }` — we
+    // re-derive via substring split on ", " for robustness.
+    const commaIdx = entry.day.indexOf(", ");
+    const weekdayShort = commaIdx > 0 ? entry.day.slice(0, commaIdx) : entry.day;
+    const monthDay = commaIdx > 0 ? entry.day.slice(commaIdx + 2) : "";
+    rendered.push({ day: entry.day, weekdayShort, monthDay, bullets });
+  }
+
+  // Group consecutive days whose bullet lists are byte-identical. Byte
+  // equality is intentional — any difference (different time range, star
+  // mark, tz label) keeps them separate so we never merge dissimilar
+  // windows and mislead the guest. No normalization, no fuzzy matching.
+  interface Group {
+    weekdays: string[];    // ["Tue", "Wed", "Thu"]
+    monthDays: string[];   // ["Apr 22", "Apr 23", "Apr 24"]
+    bullets: string[];
+  }
+  const groups: Group[] = [];
+  for (const r of rendered) {
+    const last = groups[groups.length - 1];
+    const sameBullets =
+      !!last &&
+      last.bullets.length === r.bullets.length &&
+      last.bullets.every((b, i) => b === r.bullets[i]);
+    if (COLLAPSE && sameBullets) {
+      last.weekdays.push(r.weekdayShort);
+      last.monthDays.push(r.monthDay);
+    } else {
+      groups.push({
+        weekdays: [r.weekdayShort],
+        monthDays: [r.monthDay],
+        bullets: r.bullets.slice(),
+      });
+    }
+  }
+
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    if (i > 0) lines.push(""); // blank line between day groups
+    let header: string;
+    if (g.weekdays.length === 1) {
+      // Not collapsed — reuse the original pretty label ("Mon, Apr 20").
+      const md = g.monthDays[0] ? `, ${g.monthDays[0]}` : "";
+      header = `**${g.weekdays[0]}${md}**`;
+    } else {
+      // Collapsed: "**Tue, Wed, Thu (Apr 22, 23, 24)**".
+      // Share the month when all days fall in the same month (typical);
+      // otherwise include the month on each day for clarity.
+      const months = g.monthDays.map((md) => md.split(" ")[0]);
+      const allSameMonth = months.every((m) => m === months[0]);
+      let parenBody: string;
+      if (allSameMonth && months[0]) {
+        const dayNums = g.monthDays.map((md) => md.split(" ")[1] ?? md);
+        parenBody = `${months[0]} ${dayNums.join(", ")}`;
+      } else {
+        parenBody = g.monthDays.join(", ");
+      }
+      header = `**${g.weekdays.join(", ")} (${parenBody})**`;
+    }
+    lines.push(header);
+    for (const b of g.bullets) lines.push(b);
   }
 
   return { lines, hasPreferred, hasMore, isDualTimezone: hasGuestTz };
