@@ -17,6 +17,24 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
+  // Log which DB this instance is connected to. Catches "wrong database"
+  // misconfigurations (e.g., preview env pointing at prod) within seconds of
+  // boot — visible in Vercel runtime logs before any request is served.
+  try {
+    const rawUrl = process.env.POSTGRES_PRISMA_URL ?? "";
+    if (rawUrl) {
+      const parsed = new URL(rawUrl);
+      const host = parsed.hostname;
+      // Supabase pooler usernames are "postgres.<project-ref>"
+      const projectRef = parsed.username.split(".")[1] ?? parsed.username;
+      console.log(`[boot] db-target host=${host} project-ref=${projectRef}`);
+    } else {
+      console.warn("[boot] db-target POSTGRES_PRISMA_URL not set");
+    }
+  } catch (err) {
+    console.warn("[boot] db-target parse failed:", err);
+  }
+
   try {
     const { checkSchemaDrift, formatDriftSummary } = await import(
       "@/lib/schema-drift"
