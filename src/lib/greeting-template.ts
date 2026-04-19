@@ -384,7 +384,8 @@ export interface FormattedSlotList {
   isDualTimezone: boolean;
 }
 
-/** "6:00 AM PT" — single-slot label. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+/** "6:00 AM PT" — single-slot label (kept as reference; multi-slot uses fmtBlockLabel). */
 function fmtSlotLabel(d: Date, timezone: string, tzShort: string): string {
   const t = d
     .toLocaleTimeString("en-US", {

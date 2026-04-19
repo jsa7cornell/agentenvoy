@@ -84,8 +84,7 @@ function MeetLinkCard({ url }: { url: string }) {
 // ── Feed component ──────────────────────────────────────────────────────
 
 export default function Feed() {
-  // router kept for potential future use; navigateToThread now uses window.open
-  const router = useRouter();
+  const router = useRouter(); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [messages, setMessages] = useState<ChannelMsg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
