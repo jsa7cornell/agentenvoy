@@ -84,6 +84,7 @@ function MeetLinkCard({ url }: { url: string }) {
 // ── Feed component ──────────────────────────────────────────────────────
 
 export default function Feed() {
+  // router kept for potential future use; navigateToThread now uses window.open
   const router = useRouter();
   const [messages, setMessages] = useState<ChannelMsg[]>([]);
   const [input, setInput] = useState("");
@@ -303,12 +304,12 @@ export default function Feed() {
     el.style.height = Math.min(el.scrollHeight, 120) + "px";
   }, []);
 
-  // Navigate to deal room
+  // Open deal room in a new tab so host doesn't lose the dashboard context.
   function navigateToThread(thread: NonNullable<ChannelMsg["thread"]>) {
     const url = thread.link.code
       ? `/meet/${thread.link.slug}/${thread.link.code}`
       : `/meet/${thread.link.slug}`;
-    router.push(url);
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   // Archive a thread

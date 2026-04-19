@@ -455,14 +455,14 @@ export function AvailabilityPanel({
         >
           &rarr;
         </button>
-        {weekStart !== thisWeek && (
-          <button
-            onClick={() => setWeekStart(thisWeek)}
-            className="text-[10px] text-muted hover:text-secondary underline transition"
-          >
-            Today
-          </button>
-        )}
+        <button
+          onClick={() => setWeekStart(thisWeek)}
+          disabled={weekStart === thisWeek}
+          className="text-[10px] px-1.5 py-0.5 rounded border border-DEFAULT transition disabled:opacity-30 disabled:cursor-default text-secondary hover:text-primary hover:border-indigo-400 disabled:hover:border-DEFAULT disabled:hover:text-secondary"
+          title="Go to current week"
+        >
+          Today
+        </button>
       </div>
       <div className="flex items-center justify-end gap-2">
         {/* Desktop week-range toggle — Full (Sun-Sat) vs. Workweek (Mon-Fri) */}
@@ -512,13 +512,18 @@ export function AvailabilityPanel({
   // TZ chip — rendered into the day-header gutter of WeeklyCalendar so it
   // sits on the "times" side of the grid. Subtle but clickable.
   const tzChip = (
-    <div className="relative">
+    <div className="relative flex items-center gap-0.5" title={`Timezone: ${timezone}${tzSaving ? " (saving…)" : ""}`}>
+      {/* Globe icon */}
+      <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted flex-shrink-0" aria-hidden="true">
+        <circle cx="8" cy="8" r="6.5" />
+        <ellipse cx="8" cy="8" rx="2.5" ry="6.5" />
+        <line x1="1.5" y1="8" x2="14.5" y2="8" />
+      </svg>
       <select
         value={timezone}
         onChange={(e) => handleTimezoneChange(e.target.value)}
         disabled={tzSaving}
-        className="appearance-none pl-1 pr-3 py-0 text-[10px] font-medium text-muted hover:text-primary bg-transparent border-0 cursor-pointer focus:outline-none transition disabled:opacity-50"
-        title={`Timezone: ${timezone}${tzSaving ? " (saving…)" : ""}`}
+        className="appearance-none pl-0.5 pr-3 py-0 text-[10px] font-medium text-secondary hover:text-primary bg-transparent border-0 cursor-pointer focus:outline-none transition disabled:opacity-50 max-w-[48px]"
       >
         {TIMEZONE_TABLE.map((entry) => (
           <option key={entry.iana} value={entry.iana}>
