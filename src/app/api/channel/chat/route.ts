@@ -250,6 +250,24 @@ export async function POST(req: NextRequest) {
   const system = CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n");
   const modelId = "claude-sonnet-4-6";
 
+  // TEMP: diagnostic trace for jsa7cornell@gmail.com only (2026-04-20,
+  // investigating Sunday hallucination where Envoy invented an "Alex 8 AM"
+  // meeting that didn't exist). Remove after root cause found.
+  const TRACE_USER = "jsa7cornell@gmail.com";
+  const shouldTrace = safeUser.email === TRACE_USER;
+  if (shouldTrace) {
+    console.log(
+      `[TRACE][channel/chat] userId=${safeUser.id} ts=${new Date().toISOString()} userMsg=${JSON.stringify(message)}`,
+    );
+    console.log(
+      `[TRACE][channel/chat] scheduleConnected=${scheduleResult?.connected ?? "null"} slotCount=${scheduleResult?.slots?.length ?? 0}`,
+    );
+    console.log(`[TRACE][channel/chat] CONTEXT_PARTS_BEGIN\n${contextParts.join("\n")}\n[TRACE][channel/chat] CONTEXT_PARTS_END`);
+    console.log(
+      `[TRACE][channel/chat] historyLen=${messages.length} lastMsgRole=${messages[messages.length - 1]?.role ?? "none"}`,
+    );
+  }
+
   // Action-parsing + DB-write logic, hoisted out of onFinish so the
   // emission-retry path (below) can run it on the COMBINED text (original
   // stream + retry's appended action block). If we left it in onFinish it
@@ -345,6 +363,9 @@ export async function POST(req: NextRequest) {
           }
         }
         controller.close();
+        if (shouldTrace) {
+          console.log(`[TRACE][channel/chat] LLM_RESPONSE_BEGIN\n${fullText}\n[TRACE][channel/chat] LLM_RESPONSE_END`);
+        }
         await finalizeResponse(fullText);
       } catch (e) {
         controller.error(e);
