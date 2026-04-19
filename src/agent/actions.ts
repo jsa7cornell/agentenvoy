@@ -530,7 +530,8 @@ async function handleUpdateTime(
     data: {
       sessionId: session.id,
       role: "system",
-      content: `Host proposed a new time: ${timeStr}${tzLabel}${durationStr}`,
+      content: `Proposed new time: ${timeStr}${tzLabel}${durationStr}`,
+      metadata: { kind: "host_update", field: "time" },
     },
   });
 
@@ -663,6 +664,21 @@ async function handleCreateLink(
   // GCal event location.
   const rawLocation = params.location;
   const location = typeof rawLocation === "string" && rawLocation.trim() ? rawLocation.trim() : null;
+  // Activity — free-form short phrase describing what the meeting is (e.g.
+  // "bike ride", "coffee", "welcome-back lunch"). Paired with a single emoji
+  // icon the LLM picks. Both free-form on purpose — the taxonomy of possible
+  // meeting activities is too broad for a discrete enum. Empty/null when the
+  // host gave no activity framing (neutral calls/meetings).
+  const rawActivity = params.activity;
+  const activity = typeof rawActivity === "string" && rawActivity.trim()
+    ? rawActivity.trim().slice(0, 60)
+    : null;
+  const rawActivityIcon = params.activityIcon;
+  // Single-codepoint emoji guardrail — prevents abuse or long strings masquerading
+  // as icons. We don't validate that it IS an emoji, just that it's short.
+  const activityIcon = typeof rawActivityIcon === "string" && rawActivityIcon.trim().length > 0 && rawActivityIcon.length <= 8
+    ? rawActivityIcon.trim()
+    : null;
   const rules = (params.rules as Record<string, unknown>) || {};
 
   // Drift detector (2026-04-20): the channel playbook asks the LLM to populate
@@ -797,6 +813,8 @@ async function handleCreateLink(
     ...(preferredDays ? { preferredDays } : {}),
     ...(dateRange ? { dateRange } : {}),
     ...(location ? { location } : {}),
+    ...(activity ? { activity } : {}),
+    ...(activityIcon ? { activityIcon } : {}),
     ...(guestPicksOut ? { guestPicks: guestPicksOut } : {}),
     ...(guidanceOut ? { guestGuidance: guidanceOut } : {}),
   });
@@ -1148,11 +1166,21 @@ async function handleExpandLink(
 
   // Resolve link by code (preferred) or via session.linkId.
   let link: { id: string; userId: string; rules: unknown; inviteeName: string | null; code: string | null } | null = null;
+  let resolvedSessionIdForLink: string | null = sessionId || null;
   if (code) {
     link = await prisma.negotiationLink.findFirst({
       where: { code, userId },
       select: { id: true, userId: true, rules: true, inviteeName: true, code: true },
     });
+    // For "View it here" threading: find the most recent session on this link.
+    if (link) {
+      const latest = await prisma.negotiationSession.findFirst({
+        where: { linkId: link.id, archived: false },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (latest) resolvedSessionIdForLink = latest.id;
+    }
   } else if (sessionId) {
     const session = await prisma.negotiationSession.findUnique({
       where: { id: sessionId },
@@ -1231,7 +1259,7 @@ async function handleExpandLink(
   return {
     success: true,
     message: `Updated ${name}'s link — ${changedParts.join(", ")}`,
-    data: { linkId: link.id, code: link.code, rules: mergedRules },
+    data: { linkId: link.id, code: link.code, rules: mergedRules, sessionId: resolvedSessionIdForLink ?? undefined },
   };
 }
 

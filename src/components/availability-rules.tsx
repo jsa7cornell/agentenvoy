@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Clock, ChevronDown, ChevronRight,
   Plus, Check, X, Pencil, Trash2, Loader2, ToggleLeft, ToggleRight,
-  Ban, Lock, Timer, CheckCircle2, Star, MapPin, Megaphone, Copy,
+  Ban, Lock, Timer, CheckCircle2, Star, MapPin, Megaphone, Copy, UserX,
 } from "lucide-react";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 
@@ -13,7 +13,7 @@ import type { AvailabilityRule } from "@/lib/availability-rules";
 interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location" | "office_hours";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location" | "office_hours" | "no_in_person";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -101,6 +101,7 @@ const ACTION_LABELS: Record<string, string> = {
   business_hours: "Business Hours",
   location: "Location",
   office_hours: "Office Hours",
+  no_in_person: "No in-person",
 };
 
 const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -111,6 +112,7 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> 
   limit: Lock,
   location: MapPin,
   office_hours: Megaphone,
+  no_in_person: UserX,
 };
 
 // --- Component ---

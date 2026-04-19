@@ -666,13 +666,50 @@ export async function POST(req: NextRequest) {
     //
     //   👉 Reply with a time that works for you, and I'll get it booked.
     const greeteeName = inviteeName ? inviteeName.split(/\s+/)[0] : "there";
-    const hello = `👋 Hi ${greeteeName}! I'm scheduling time with you and ${hostFirstName}.`;
 
-    // Format emoji: phone → 📞, video → 📹, in-person → 🤝, fallback → 📅
+    // Format emoji: phone → 📞, video → 📹, in-person → 👤 (person; per UX
+    // 2026-04-20 we switched from 🤝 to 👤 to convey "together/in person"
+    // without the handshake formality), fallback → 📅
     const formatEmoji = effectiveFormat === "phone" ? "📞"
       : effectiveFormat === "video" ? "📹"
-      : effectiveFormat === "in-person" ? "🤝"
+      : effectiveFormat === "in-person" ? "👤"
       : "📅";
+
+    // Activity (free-form) + its icon (free-form emoji) — set by the host's
+    // LLM at create_link time. Keeps the meeting-type taxonomy expansive
+    // rather than discrete.
+    const activityText =
+      typeof linkRules.activity === "string" && linkRules.activity.trim()
+        ? linkRules.activity.trim()
+        : null;
+    const activityEmoji =
+      typeof linkRules.activityIcon === "string" && linkRules.activityIcon.trim()
+        ? linkRules.activityIcon.trim()
+        : null;
+
+    // Natural-prose opener that weaves duration + activity + location into
+    // a single sentence (per user spec 2026-04-20). Falls back to the
+    // shorter neutral form when we don't have activity framing.
+    const linkLocationForOpener =
+      typeof linkRules.location === "string" && linkRules.location.trim()
+        ? linkRules.location.trim()
+        : null;
+    const durationForOpener =
+      typeof linkRules.duration === "number" ? linkRules.duration : (effectiveDuration ?? null);
+    let openerTail = "";
+    if (activityText && linkLocationForOpener && durationForOpener) {
+      openerTail = ` He's suggesting ${durationForOpener} min for ${activityText} in ${linkLocationForOpener}.`;
+    } else if (activityText && durationForOpener) {
+      openerTail = ` He's suggesting ${durationForOpener} min for ${activityText}.`;
+    } else if (linkLocationForOpener && durationForOpener) {
+      openerTail = ` He's suggesting ${durationForOpener} min at ${linkLocationForOpener}.`;
+    } else if (activityText) {
+      openerTail = ` He's suggesting ${activityText}.`;
+    }
+    // When the host shared a hostNote, the natural-prose carry already comes
+    // through via formatHostNoteLine; drop the opener tail to avoid dupe.
+    if (link.hostNote) openerTail = "";
+    const hello = `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}.${openerTail}`;
 
     const fmtLabel = formatLabel(effectiveFormat);
     const durationLabel = (effectiveMinDuration && effectiveMinDuration < (effectiveDuration ?? 30))
@@ -737,18 +774,29 @@ export async function POST(req: NextRequest) {
         hostNote: link.hostNote,
       });
     } else {
-      // V2 Danny-spec assembly (2026-04-18):
-      //   hello
-      //   formatLine   (📞 15-min phone call)
-      //   tzLine       (🕒 Times in your timezone: Pacific · Danny is on Eastern)
-      //   [locationLine]
+      // V3 assembly (2026-04-20 — "Proposal bar" redesign):
+      //   hello (opener weaves activity+location in natural prose)
+      //   Proposal: {formatIcon} {formatLabel} · {duration} min · 📍 {loc} · {actIcon} {activity}
+      //   [tzLine — only when timezones differ]
       //
       //   **Mon, Apr 27**
       //   • 6:00 AM PT / 9:00 AM ET
       //   ...
       //
-      //   closing      (👉 Reply with a time that works…)
-      const formatLine = `${formatEmoji} ${meetingDescShort}`;
+      //   closing (one line, no email clause)
+      const proposalParts: string[] = [];
+      const formatChunk = fmtLabel
+        ? `${formatEmoji} ${fmtLabel.charAt(0).toUpperCase()}${fmtLabel.slice(1)}`
+        : null;
+      if (formatChunk) proposalParts.push(formatChunk);
+      if (durationLabel) proposalParts.push(`${durationLabel} min`);
+      if (linkLocation) proposalParts.push(`📍 ${linkLocation}`);
+      if (activityText) {
+        proposalParts.push(activityEmoji ? `${activityEmoji} ${activityText}` : activityText);
+      }
+      const formatLine = proposalParts.length > 0
+        ? `**Proposal:** ${proposalParts.join(" · ")}`
+        : `${formatEmoji} ${meetingDescShort}`;
 
       // Timezone line. Only render when guest's tz differs — when they match,
       // the slot times themselves already include the tz abbreviation, so the
@@ -758,7 +806,9 @@ export async function POST(req: NextRequest) {
           ? `🕒 Times shown in your timezone: ${guestTimezoneLabel} · ${hostFirstName} is on ${hostTimezoneLabel}`
           : null;
 
-      const locationLine = linkLocation ? `📍 ${linkLocation}` : null;
+      // locationLine subsumed into the Proposal bar (above). Keep variable
+      // set to null so the existing headerLines assembly below skips it.
+      const locationLine: string | null = null;
 
       // Schedule body — the bulleted V2 list. If empty, fall back to an
       // open-ended ask.
@@ -783,25 +833,20 @@ export async function POST(req: NextRequest) {
         scheduleBody = `I don't have open times to show right now — tell me what generally works and I'll find a match.`;
       }
 
-      // Closing — V2 keeps it to one line. If we still need info, fold the
-      // ask into the same sentence rather than adding another block.
+      // Closing — V3 keeps it to one line and NEVER asks for email up front
+      // (the confirmation card collects it when the guest locks a time). If
+      // we're missing name/topic, fold just those into the sentence.
       const needed: string[] = [];
       if (!topic) needed.push("what it's about");
       if (!inviteeName) needed.push("your name");
-      if (!link.inviteeEmail) needed.push("your email");
       let closing: string;
-      const onlyNeedsEmail = needed.length === 1 && !link.inviteeEmail && topic && inviteeName;
       if (needed.length === 0) {
-        closing = `👉 Select or reply with the time that works, and I'll get it booked.`;
-      } else if (onlyNeedsEmail) {
-        closing = `👉 Select or reply with the time that works, and I'll get it booked — we can grab your email on the confirmation card.`;
+        closing = `👉 Reply with the time that works, and I'll get it booked.`;
       } else {
         const joined =
           needed.length === 1
             ? needed[0]
-            : needed.length === 2
-            ? `${needed[0]} and ${needed[1]}`
-            : `${needed.slice(0, -1).join(", ")}, and ${needed[needed.length - 1]}`;
+            : `${needed.slice(0, -1).join(", ")} and ${needed[needed.length - 1]}`;
         closing = `👉 Reply with a time that works — plus ${joined} — and I'll get it booked.`;
       }
 

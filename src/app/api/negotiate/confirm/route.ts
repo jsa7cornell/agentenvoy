@@ -110,6 +110,53 @@ export async function POST(req: NextRequest) {
     attemptSlotStart = startTime;
     attemptSlotEnd = endTime;
 
+    // Enforce host's `no_in_person` availability rules. If the chosen format is
+    // in-person AND the slot overlaps a disallow window, block confirmation
+    // with a 409 so the guest sees the reason instead of silently booking.
+    if (meetingFormat === "in-person") {
+      const compiled = (hostPrefs as Record<string, unknown> | null)?.compiled as
+        | { formatFilters?: Array<{ start?: string; end?: string; days?: string[]; disallowFormats: string[]; expires?: string; effective?: string; label?: string }> }
+        | undefined;
+      const filters = compiled?.formatFilters;
+      if (filters && filters.length > 0) {
+        const isoDate = new Intl.DateTimeFormat("en-CA", {
+          timeZone: hostTimezone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(startTime);
+        const weekdayShort = new Intl.DateTimeFormat("en-US", {
+          timeZone: hostTimezone,
+          weekday: "short",
+        }).format(startTime);
+        const hhmm = new Intl.DateTimeFormat("en-US", {
+          timeZone: hostTimezone,
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(startTime);
+        for (const f of filters) {
+          if (!f.disallowFormats?.includes("in-person")) continue;
+          if (f.effective && isoDate < f.effective) continue;
+          if (f.expires && isoDate > f.expires) continue;
+          if (f.days && f.days.length > 0 && !f.days.includes(weekdayShort)) continue;
+          if (f.start && f.end) {
+            // Time window check — hhmm is "HH:MM" 24h.
+            if (hhmm < f.start || hhmm >= f.end) continue;
+          }
+          attemptOutcome = "validation_failed";
+          attemptError = `In-person blocked by host rule: ${f.label ?? "no_in_person"}`;
+          return NextResponse.json(
+            {
+              error:
+                "In-person meetings are not available at that time per the host's schedule rules. Try video or phone, or pick a different slot.",
+            },
+            { status: 409 }
+          );
+        }
+      }
+    }
+
     // === Idempotency: handle already-agreed sessions ===
     // Belt (pre-check): cheap short-circuit if we already know the answer.
     // Suspenders (CAS below): atomic at the DB even if this pre-check races.

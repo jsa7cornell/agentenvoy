@@ -14,7 +14,7 @@ export interface AvailabilityRule {
   id: string;
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "location" | "office_hours";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "location" | "office_hours" | "no_in_person";
   timeStart?: string;     // "HH:MM" 24h
   timeEnd?: string;       // "HH:MM" 24h
   allDay?: boolean;
@@ -157,6 +157,7 @@ export function compileStructuredRules(
   const buffers: CompiledBuffer[] = [];
   const priorityBuckets: CompiledPriorityBucket[] = [];
   const blackoutDays: string[] = [];
+  const formatFilters: NonNullable<CompiledRules["formatFilters"]> = [];
   let businessHoursStart: number | undefined;
   let businessHoursEnd: number | undefined;
 
@@ -274,6 +275,25 @@ export function compileStructuredRules(
         break;
       }
 
+      case "no_in_person": {
+        // Disallow in-person meetings on matching days / window. All-day by
+        // default; optionally scoped to hours and specific weekdays, and to
+        // a temporary date window via effective/expiry.
+        const ff: NonNullable<CompiledRules["formatFilters"]>[number] = {
+          disallowFormats: ["in-person"],
+          label: rule.originalText,
+        };
+        if (!rule.allDay && rule.timeStart) ff.start = rule.timeStart;
+        if (!rule.allDay && rule.timeEnd) ff.end = rule.timeEnd;
+        if (rule.daysOfWeek && rule.daysOfWeek.length > 0) {
+          ff.days = rule.daysOfWeek.map((d) => DAY_NAMES[d]);
+        }
+        if (rule.effectiveDate) ff.effective = rule.effectiveDate;
+        if (rule.expiryDate) ff.expires = rule.expiryDate;
+        formatFilters.push(ff);
+        break;
+      }
+
       case "office_hours": {
         // No-op in the global compiler. Office hours don't affect the host's
         // global scored schedule — they're per-link. Use compileOfficeHoursLinks()
@@ -309,6 +329,7 @@ export function compileStructuredRules(
     businessHoursStart: businessHoursStart ?? defaultBizStart,
     businessHoursEnd: businessHoursEnd ?? defaultBizEnd,
     blackoutDays: blackoutDays.length > 0 ? blackoutDays : undefined,
+    formatFilters: formatFilters.length > 0 ? formatFilters : undefined,
     ambiguities: [],
     compiledAt: new Date().toISOString(),
   };

@@ -1460,6 +1460,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
             const showPickerAfter = idx === firstAdminIdx;
 
+            // Inline host_update system messages render as small grey inline text
+            // (matches the dashboard ✓ summary style) instead of the emerald bubble.
+            const isHostUpdateInline =
+              msg.role === "system" &&
+              (msg.metadata as Record<string, unknown> | null | undefined)?.kind === "host_update";
+            if (isHostUpdateInline) {
+              return (
+                <React.Fragment key={msg.id}>
+                  {dateSeparator}
+                  <div className="flex justify-center">
+                    <div className="text-[11px] text-muted italic px-2 py-0.5">
+                      ✓ {text}
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            }
+
             return (
               <React.Fragment key={msg.id}>
                 {dateSeparator}

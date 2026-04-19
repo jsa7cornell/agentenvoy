@@ -294,6 +294,38 @@ export async function POST(req: NextRequest) {
         return;
       }
 
+      // For non-create actions that mutated a specific session (update_*, expand_link,
+      // cancel, archive, hold, save_guest_info), thread the envoy reply to that
+      // session so the feed renders a ThreadCard with a "View it here" link. Pick
+      // the most recent session-bearing action result as the thread anchor.
+      const threadedResult = actionResults.find(
+        (r) => r.success && typeof r.data?.sessionId === "string",
+      );
+      if (threadedResult?.data) {
+        const sid = threadedResult.data.sessionId as string;
+        const summary =
+          actionResults.length > 0
+            ? actionResults
+                .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
+                .join("\n")
+            : "";
+        const envoyText = displayText || threadedResult.message;
+        await prisma.channelMessage.create({
+          data: {
+            channelId: safeChannel.id,
+            role: "envoy",
+            content: envoyText,
+            threadId: sid,
+          },
+        });
+        if (summary && displayText) {
+          await prisma.channelMessage.create({
+            data: { channelId: safeChannel.id, role: "system", content: summary },
+          });
+        }
+        return;
+      }
+
       if (actionResults.length > 0) {
         const summary = actionResults
           .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)

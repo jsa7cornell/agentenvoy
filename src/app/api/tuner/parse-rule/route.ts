@@ -9,7 +9,7 @@ import { getUserTimezone } from "@/lib/timezone";
 export interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location" | "office_hours";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location" | "office_hours" | "no_in_person";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -69,7 +69,7 @@ Return ONLY valid JSON matching this schema — no markdown, no explanation:
 {
   "originalText": "the user's input verbatim",
   "type": "ongoing|recurring|temporary|one-time",
-  "action": "block|allow|buffer|prefer|limit|business_hours|location|office_hours",
+  "action": "block|allow|buffer|prefer|limit|business_hours|location|office_hours|no_in_person",
   "timeStart": "HH:MM or null",
   "timeEnd": "HH:MM or null",
   "allDay": false,
@@ -118,6 +118,11 @@ Action rules:
   - "available 9am to 5pm" → action: "business_hours", businessHoursStart: 9, businessHoursEnd: 17
   - "standard hours 10 to 4" → action: "business_hours", businessHoursStart: 10, businessHoursEnd: 16
   - "only take meetings 11-6" → action: "business_hours", businessHoursStart: 11, businessHoursEnd: 18
+- "no_in_person": disallow in-person meetings (but keep video/phone available). Use when the host says things like "no in-person this week", "no in-person on Mondays", "no in-person meetings", "remote-only Fridays", "video/phone only today". Scope with daysOfWeek, timeStart/End, effectiveDate/expiryDate as the input suggests. Examples:
+  - "no in-person meetings on Fridays" → action: "no_in_person", daysOfWeek: [5], allDay: true, type: "recurring"
+  - "no in-person this week" → action: "no_in_person", allDay: true, type: "temporary", effectiveDate: <today>, expiryDate: <this Sunday>
+  - "remote-only for the next two weeks" → action: "no_in_person", allDay: true, type: "temporary", expiryDate: <today + 14d>
+  - "no in-person meetings" (ongoing) → action: "no_in_person", allDay: true, type: "ongoing"
 - "office_hours": create a public, shareable booking window with a fixed meeting format and duration. This is different from "limit" — limit narrows general availability, office_hours creates a specific surface anyone can book against (like a drop-in window for students, mentees, or sales intros). Extract these fields when present:
   - timeStart / timeEnd: the window the host is making bookable
   - daysOfWeek: which days the window is available
@@ -182,7 +187,7 @@ Summary should be a clean, unambiguous description like:
     const rule: ParsedRule = {
       originalText: text.trim(),
       type: (["ongoing", "recurring", "temporary", "one-time"].includes(parsed.type) ? parsed.type : "ongoing") as ParsedRule["type"],
-      action: (["block", "allow", "buffer", "prefer", "limit", "business_hours", "location", "office_hours"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
+      action: (["block", "allow", "buffer", "prefer", "limit", "business_hours", "location", "office_hours", "no_in_person"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
       timeStart: parsed.timeStart || undefined,
       timeEnd: parsed.timeEnd || undefined,
       allDay: parsed.allDay || false,

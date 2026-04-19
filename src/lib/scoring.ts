@@ -191,6 +191,22 @@ export interface CompiledRules {
   businessHoursStart?: number;
   businessHoursEnd?: number;
   blackoutDays?: string[]; // ISO dates "YYYY-MM-DD"
+  /**
+   * Format filters — when a slot matches the window/days, the listed formats
+   * are disallowed for that slot. Compiled from `no_in_person` availability
+   * rules. The scoring engine does not consult these (format is a link-level
+   * concept); they're enforced at confirm time and can be consulted by the
+   * greeting/composer to avoid offering disallowed-format windows.
+   */
+  formatFilters?: Array<{
+    start?: string; // "HH:MM" — omit for all-day
+    end?: string;   // "HH:MM"
+    days?: string[]; // Short day names; omit for every day
+    disallowFormats: string[]; // e.g. ["in-person"]
+    expires?: string; // ISO date
+    effective?: string; // ISO date — earliest applicable
+    label?: string;
+  }>;
   ambiguities: string[];
   compiledAt: string; // ISO datetime
 }
@@ -1413,6 +1429,20 @@ export interface LinkRules {
     };
     tone?: string;
   };
+  /**
+   * Location string (venue / address / "Zoom") — copied from
+   * `params.location` into link.rules at create time. Used by the greeting
+   * template for the Proposal bar.
+   */
+  location?: string;
+  /**
+   * Short free-form phrase describing the *kind* of meeting (e.g. "bike
+   * ride", "coffee", "welcome-back lunch"). Deliberately NOT a discrete enum
+   * — the taxonomy is too broad. Pairs with `activityIcon` (single emoji the
+   * LLM picks). Both are optional; absent for neutral calls/meetings.
+   */
+  activity?: string;
+  activityIcon?: string;
 }
 
 // Canonical short day-name table. All persisted `preferredDays` / `lastResort` /
