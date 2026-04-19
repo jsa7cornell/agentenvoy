@@ -1,0 +1,101 @@
+name: Schema migration validator
+
+# Runs on every PR that touches prisma/ — catches the class of incident where
+# a migration file has invalid SQL or leaves the DB out of sync with schema.prisma.
+# Uses a throwaway Postgres service container so no Supabase plan is needed.
+#
+# Checks performed:
+#   1. prisma migrate deploy  — all migration SQL runs cleanly on a fresh DB
+#   2. prisma migrate status  — zero pending migrations after deploy
+#   3. prisma db pull (diff)  — DB schema after migrations matches schema.prisma
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+
+jobs:
+  validate-migrations:
+    name: Validate migrations on fresh DB
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agentenvoy_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Both URL and directUrl point at the local container — no pooler in CI.
+      POSTGRES_PRISMA_URL: postgresql://postgres:postgres@localhost:5432/agentenvoy_ci
+      POSTGRES_URL_NON_POOLING: postgresql://postgres:postgres@localhost:5432/agentenvoy_ci
+      # Dummy values so prisma generate doesn't complain about missing vars.
+      NEXTAUTH_SECRET: ci-dummy
+      NEXTAUTH_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Deploy all migrations to fresh DB
+        run: |
+          echo "Running prisma migrate deploy against fresh Postgres..."
+          npx prisma migrate deploy
+          echo "✓ All migrations applied successfully."
+
+      - name: Confirm zero pending migrations
+        run: |
+          echo "Checking prisma migrate status..."
+          STATUS=$(npx prisma migrate status 2>&1)
+          echo "$STATUS"
+          if echo "$STATUS" | grep -q "following migration.*not yet applied\|pending"; then
+            echo "::error::There are pending migrations after deploy. Check your migration files."
+            exit 1
+          fi
+          echo "✓ No pending migrations."
+
+      - name: Check schema.prisma matches DB (drift check)
+        run: |
+          echo "Pulling DB schema to check for drift..."
+          # Save the current schema.prisma for comparison
+          cp prisma/schema.prisma prisma/schema.prisma.before
+
+          # Pull schema from DB (overwrites schema.prisma)
+          npx prisma db pull
+
+          # Diff — ignore datasource/generator blocks which change between
+          # environments. We only care about model definitions drifting.
+          DIFF=$(git diff prisma/schema.prisma | grep "^[+-]" | grep -v "^---\|^+++" | grep -v "^\(+\|-\)\s*url\s*=\|^\(+\|-\)\s*provider\s*=\|^\(+\|-\)\s*directUrl\s*=\|^\(+\|-\)\s*output\s*=" || true)
+
+          # Restore original schema.prisma (we don't want db pull changes committed)
+          cp prisma/schema.prisma.before prisma/schema.prisma
+          rm prisma/schema.prisma.before
+
+          if [ -n "$DIFF" ]; then
+            echo "::error::schema.prisma has model-level drift from what the migrations produce."
+            echo "::error::Run 'prisma db pull' locally to see the full diff."
+            echo "$DIFF"
+            exit 1
+          fi
+          echo "✓ schema.prisma matches DB after migrations."
