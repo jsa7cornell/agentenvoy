@@ -7,6 +7,10 @@ import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
 import { PublicHeader } from "./public-header";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
+import {
+  getRoleStyles,
+  computeExternalAgentSender,
+} from "./deal-room-role-dispatch";
 
 interface DelegateSpeaker {
   kind: "human_assistant" | "ai_agent" | "unknown";
@@ -25,6 +29,42 @@ interface Message {
   } | null;
   createdAt?: string;
 }
+
+// ─── MESSAGE_ROLE_DISPATCH ─────────────────────────────────────────────────
+// Searchable anchor (banner micro-spec B2/N6). The style lookup and pure
+// sender-line computation live in deal-room-role-dispatch.ts — a plain
+// .ts file so unit tests can import without running through the JSX
+// parser. Grep for MESSAGE_ROLE_DISPATCH across the repo to jump between
+// the dispatch helper, this JSX wrapper, and the render site below.
+
+/**
+ * Renders the sender line for an `external_agent` message. JSX wrapper
+ * around computeExternalAgentSender.
+ *
+ * The 🤖 badge is a SINGLE DOM node with role="img" and
+ * aria-label="posted by external agent" — screen readers read the label,
+ * not "robot face". The visible sender text starts after the badge with no
+ * second emoji character (micro-spec N2). Browser-native `title` tooltip
+ * for v1 (N7: keyboard-focusable tooltip is a v2 upgrade).
+ */
+function renderExternalAgentSender(
+  metadata: Record<string, unknown> | null | undefined,
+  labelColor: string,
+) {
+  const { headline, tooltip } = computeExternalAgentSender(metadata);
+  return (
+    <div
+      className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${labelColor}`}
+      title={tooltip}
+    >
+      <span role="img" aria-label="posted by external agent" className="mr-1">
+        🤖
+      </span>
+      {headline}
+    </div>
+  );
+}
+// ─── end MESSAGE_ROLE_DISPATCH ─────────────────────────────────────────────
 
 interface DealRoomProps {
   slug: string;
@@ -1369,38 +1409,26 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   .trim()
               : parsed.text;
 
-            // 3-party model + guest Envoy advocate:
-            //   host / guest (human) → right-aligned, filled color
-            //   administrator (host-side facilitator) → left, neutral
-            //   guest_envoy (guest advocate) → left, viewer-relative tinted
-            //   system → left, emerald
-            const rightAligned = msg.role === "host" || msg.role === "guest";
-
-            // guest_envoy color follows team affiliation, viewer-relative:
-            //   logged-in guest viewer  → blue (your team)
-            //   host viewer             → purple (counterparty)
-            //   anonymous (shouldn't fire) → neutral fallback
-            const guestEnvoyStyle = isGuest
-              ? "bg-blue-900/30 border border-blue-800 text-blue-100 rounded-bl-sm"
-              : isHost
-                ? "bg-purple-900/30 border border-purple-800 text-purple-100 rounded-bl-sm"
-                : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
-            const guestEnvoyLabelColor = isGuest
-              ? "text-blue-300"
-              : isHost
-                ? "text-purple-300"
-                : "text-emerald-400";
-
-            const messageStyle =
-              msg.role === "host"
-                ? "bg-purple-600 text-white rounded-br-sm"
-                : msg.role === "guest"
-                  ? "bg-indigo-600 text-white rounded-br-sm"
-                  : msg.role === "system"
-                    ? "bg-emerald-900/30 border border-emerald-800 text-emerald-200 rounded-lg"
-                    : msg.role === "guest_envoy"
-                      ? guestEnvoyStyle
-                      : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
+            // MESSAGE_ROLE_DISPATCH — see helper definition at top of file.
+            // The helper returns null for roles that opt out of the bubble
+            // render entirely (e.g. system + metadata.kind = host_update,
+            // handled as an inline ✓ summary further down).
+            const metadataKind =
+              (msg.metadata as Record<string, unknown> | null | undefined)?.kind;
+            const roleStyle =
+              getRoleStyles(
+                msg.role,
+                typeof metadataKind === "string" ? metadataKind : undefined,
+                { isGuest, isHost },
+              ) ?? {
+                bubble:
+                  "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm",
+                labelColor: "text-emerald-400",
+                rightAligned: false,
+              };
+            const rightAligned = roleStyle.rightAligned;
+            const messageStyle = roleStyle.bubble;
+            const isExternalAgent = msg.role === "external_agent";
 
             // Each Envoy is named after the human it represents. "Your Envoy"
             // only for the viewer's own agent; counterparties always see the
@@ -1435,14 +1463,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       ? guestEnvoyLabel
                       : null;
 
-            const labelColor =
-              msg.role === "host"
-                ? "text-white/60"
-                : msg.role === "guest"
-                  ? "text-white/60"
-                  : msg.role === "guest_envoy"
-                    ? guestEnvoyLabelColor
-                    : "text-emerald-400";
+            // labelColor comes from MESSAGE_ROLE_DISPATCH via roleStyle.
+            const labelColor = roleStyle.labelColor;
 
             // Bilateral time chips render inline below the guest_envoy's
             // message — the greeting names a top pick and the chips let the
@@ -1503,11 +1525,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 {dateSeparator}
                 <div className={`flex min-w-0 ${rightAligned ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 text-sm leading-relaxed ${messageStyle}`}>
-                    {senderLabel && (
-                      <div className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${labelColor}`}>
-                        {senderLabel}
-                      </div>
-                    )}
+                    {isExternalAgent
+                      ? renderExternalAgentSender(msg.metadata ?? null, labelColor)
+                      : senderLabel && (
+                          <div
+                            className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${labelColor}`}
+                          >
+                            {senderLabel}
+                          </div>
+                        )}
                     <div className="whitespace-pre-wrap break-words">{text}</div>
                     {delegateBadge}
                     {showChipsHere && bilateralByDay && (
