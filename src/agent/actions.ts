@@ -1149,10 +1149,15 @@ async function handleExpandLink(
   userId: string
 ): Promise<ActionResult> {
   const code = (params.code as string) || null;
-  // Resolve placeholder sessionIds (e.g. "LAST_CREATED") before lookup.
-  // expand_link uses sessionId as an alternative key to reach the link —
-  // same placeholder risk as update_format/update_time (fixed 2026-04-19).
-  const resolvedSessionId = !code
+  // Resolve placeholder sessionIds (e.g. "LAST_CREATED") before lookup — but
+  // ONLY when the caller actually passed a sessionId. expand_link is a
+  // code-identifier tool; silently falling back to "latest session for user"
+  // when neither code nor sessionId was given would bypass the required-arg
+  // guard below and misroute to an unrelated link. (Regression caught
+  // 2026-04-20 by agent-actions.test.ts "rejects when no identifying code
+  // or sessionId provided".)
+  const rawSessionIdParam = typeof params.sessionId === "string" ? params.sessionId.trim() : "";
+  const resolvedSessionId = !code && rawSessionIdParam
     ? await resolveSessionId(params, userId)
     : null;
   const sessionId = code ? null : (resolvedSessionId ?? null);
