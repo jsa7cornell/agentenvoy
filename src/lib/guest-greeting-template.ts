@@ -49,27 +49,38 @@ export interface BuildGuestGreetingInput {
  */
 export function buildGuestGreeting(input: BuildGuestGreetingInput): string | null {
   const now = input.now ?? new Date();
-  const topSlot = pickTopSlot(input.offerableSlots, now);
-  if (!topSlot) return null;
+  const topSlots = pickTopSlots(input.offerableSlots, now, 3);
+  if (topSlots.length === 0) return null;
 
-  const slotLabel = formatSlotLabel(
-    new Date(topSlot.start),
-    input.hostTimezone,
-    input.guestTimezone,
-    now,
+  const slotLabels = topSlots.map((s) =>
+    formatSlotLabel(new Date(s.start), input.hostTimezone, input.guestTimezone, now),
   );
+  const slotsPhrase = formatSlotList(slotLabels);
 
   const prefPattern = formatPreferencePattern(input.guestPreferences);
-
   const hello = input.guestFirstName ? `Hey ${input.guestFirstName}` : "Hey";
-  const prefClause = prefPattern
-    ? `, aligns with your ${prefPattern},`
-    : "";
-  const hostClause = input.hostFirstName
-    ? ` and it's ${input.hostFirstName}'s best slot too`
-    : "";
 
-  return `${hello} — jumping in for you. **${slotLabel}** looks like a clean overlap${prefClause}${hostClause}. Want me to lock it in?`;
+  if (topSlots.length === 1) {
+    const prefClause = prefPattern ? `, aligns with your ${prefPattern},` : "";
+    const hostClause = input.hostFirstName
+      ? ` and it's ${input.hostFirstName}'s best slot too`
+      : "";
+    return `${hello} — jumping in for you. ${slotsPhrase} looks like a clean overlap${prefClause}${hostClause}. Want me to lock it in?`;
+  }
+
+  const prefClause = prefPattern ? ` (aligns with your ${prefPattern})` : "";
+  const hostClause = input.hostFirstName
+    ? ` ${slotLabels[0].includes("·") ? "The first" : "Top one"} is ${input.hostFirstName}'s best slot.`
+    : "";
+  return `${hello} — jumping in for you. A few clean overlaps: ${slotsPhrase}${prefClause}.${hostClause} Want me to lock one in?`;
+}
+
+/** Format a list of slot labels as bold-wrapped, comma-separated phrase. */
+function formatSlotList(labels: string[]): string {
+  const bold = labels.map((l) => `**${l}**`);
+  if (bold.length === 1) return bold[0];
+  if (bold.length === 2) return `${bold[0]} or ${bold[1]}`;
+  return `${bold.slice(0, -1).join(", ")}, or ${bold[bold.length - 1]}`;
 }
 
 // ─── Slot picker ─────────────────────────────────────────────────────────────
@@ -79,14 +90,21 @@ export function buildGuestGreeting(input: BuildGuestGreetingInput): string | nul
  * (score ≤ -1), falls back to the earliest offerable. Ignores past slots.
  */
 export function pickTopSlot(slots: ScoredSlot[], now: Date): ScoredSlot | null {
+  return pickTopSlots(slots, now, 1)[0] ?? null;
+}
+
+/**
+ * Pick up to N candidates from an offerable list. Same ranking rule as
+ * pickTopSlot — preferred (lower score) first, ties broken by earliest start.
+ */
+export function pickTopSlots(slots: ScoredSlot[], now: Date, n: number): ScoredSlot[] {
   const future = slots.filter((s) => new Date(s.start) > now && s.score <= 1);
-  if (future.length === 0) return null;
-  // Preferred first (lower score is stronger preference in this engine).
+  if (future.length === 0) return [];
   const sorted = [...future].sort((a, b) => {
     if (a.score !== b.score) return a.score - b.score;
     return new Date(a.start).getTime() - new Date(b.start).getTime();
   });
-  return sorted[0];
+  return sorted.slice(0, n);
 }
 
 // ─── Slot label formatter ────────────────────────────────────────────────────

@@ -1164,8 +1164,60 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // guest clicks "Propose changes" on a confirmed meeting.
   const renderPickerBubble = (keyPrefix: string) => {
     if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
+    const headerSlot = (() => {
+      if (isHost || isGuest || confirmed || anonCalCtaDismissed || !sessionId) return null;
+      if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
+
+      const connect = () => {
+        if (typeof window === "undefined") return;
+        const returnUrl = `/meet/${slug}${code ? `/${code}` : ""}`;
+        window.location.href = `/api/auth/guest-calendar?sessionId=${encodeURIComponent(sessionId)}&returnUrl=${encodeURIComponent(returnUrl)}`;
+      };
+
+      if (!chipCtaExpanded) {
+        return (
+          <div className="flex items-center gap-2 mb-1">
+            <button
+              type="button"
+              onClick={() => setChipCtaExpanded(true)}
+              className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition"
+            >
+              🗓️ Auto-match calendars
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAnonCalCtaDismissed(true);
+                try { window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1"); } catch { /* ignore */ }
+              }}
+              className="text-muted hover:text-secondary transition text-xs"
+              title="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        );
+      }
+
+      return (
+        <div className="mb-3 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 space-y-2">
+          <div className="text-xs font-medium text-blue-200">Find the best time automatically?</div>
+          <p className="text-xs text-secondary leading-snug">
+            Connect your calendar (read-only, ~5 seconds) to see times that work for both of you.
+          </p>
+          <div className="flex gap-2">
+            <button type="button" onClick={connect} className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500 hover:bg-blue-600 text-white transition">
+              Connect
+            </button>
+            <button type="button" onClick={() => setChipCtaExpanded(false)} className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium text-secondary border border-secondary hover:border-DEFAULT transition">
+              Not now
+            </button>
+          </div>
+        </div>
+      );
+    })();
     return (
-      <div key={keyPrefix} className="flex justify-start md:hidden">
+      <div key={keyPrefix} className="flex justify-start">
         <div className="max-w-[85%] w-full min-w-0 rounded-2xl px-3 py-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
           <div className="text-[10px] font-bold uppercase tracking-wider mb-2 text-emerald-400">
             Envoy
@@ -1177,13 +1229,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             currentLocation={slotLocation}
             duration={slotDuration}
             minDuration={slotMinDuration}
-            onSelectSlot={!isHost ? (_msg, slot) => {
+            onSelectSlot={!isHost && !confirmed ? (_msg, slot) => {
               if (slot) proposeFromSlot(slot);
             } : undefined}
             onTimezoneClick={() => {
               setInput("I\u2019m actually in a different timezone \u2014 ");
               document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
             }}
+            headerSlot={headerSlot}
           />
         </div>
       </div>
@@ -1901,84 +1954,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         </div>
 
-        {/* Availability sidebar — desktop only */}
-        <div className="hidden md:flex w-80 flex-shrink-0 border-l border-secondary p-5 overflow-y-auto flex-col">
-          <h4 className="text-[11px] font-bold uppercase tracking-widest text-muted mb-3">
-            {hostName ? `${hostName.split(" ")[0]}'s Availability` : "Availability"}
-            {slotTimezone && (() => {
-              const abbr = new Intl.DateTimeFormat("en-US", { timeZone: slotTimezone, timeZoneName: "short" })
-                .formatToParts(new Date())
-                .find((p) => p.type === "timeZoneName")?.value;
-              return abbr ? `, ${abbr}` : "";
-            })()}
-          </h4>
-          <AvailabilityCalendar
-            slotsByDay={slotsByDay || {}}
-            timezone={slotTimezone}
-            currentLocation={slotLocation}
-            duration={slotDuration}
-            minDuration={slotMinDuration}
-            onSelectSlot={!isHost && !confirmed ? (_msg, slot) => {
-              if (slot) proposeFromSlot(slot);
-            } : undefined}
-            onTimezoneClick={() => {
-              setInput("I\u2019m actually in a different timezone \u2014 ");
-              document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-            }}
-            headerSlot={(() => {
-              if (isHost || isGuest || confirmed || anonCalCtaDismissed || !sessionId) return null;
-              if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
-
-              const connect = () => {
-                if (typeof window === "undefined") return;
-                const returnUrl = `/meet/${slug}${code ? `/${code}` : ""}`;
-                window.location.href = `/api/auth/guest-calendar?sessionId=${encodeURIComponent(sessionId)}&returnUrl=${encodeURIComponent(returnUrl)}`;
-              };
-
-              if (!chipCtaExpanded) {
-                return (
-                  <div className="flex items-center gap-2 mb-1">
-                    <button
-                      type="button"
-                      onClick={() => setChipCtaExpanded(true)}
-                      className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition"
-                    >
-                      🗓️ Auto-match calendars
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAnonCalCtaDismissed(true);
-                        try { window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1"); } catch { /* ignore */ }
-                      }}
-                      className="text-muted hover:text-secondary transition text-xs"
-                      title="Dismiss"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                );
-              }
-
-              return (
-                <div className="mb-3 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 space-y-2">
-                  <div className="text-xs font-medium text-blue-200">Find the best time automatically?</div>
-                  <p className="text-xs text-secondary leading-snug">
-                    Connect your calendar (read-only, ~5 seconds) to see times that work for both of you.
-                  </p>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={connect} className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500 hover:bg-blue-600 text-white transition">
-                      Connect
-                    </button>
-                    <button type="button" onClick={() => setChipCtaExpanded(false)} className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium text-secondary border border-secondary hover:border-DEFAULT transition">
-                      Not now
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
-          />
-        </div>
       </div>
 
       {/* Details modal */}
