@@ -1,0 +1,45 @@
+name: Post-deploy smoke test
+
+# Runs after every push to main. Waits for Vercel to finish the deploy,
+# then hits /api/admin/smoke and fails the job if any probe is unhealthy.
+# A failing job sends a GitHub email notification to repository contributors.
+#
+# Prerequisites:
+#   - ADMIN_SMOKE_TOKEN GitHub Actions secret (same value as in Vercel prod env)
+#   - SMOKE_URL secret (default: https://agentenvoy.ai/api/admin/smoke)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  smoke:
+    name: Smoke test (post-deploy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Vercel deploy to propagate
+        # Vercel Hobby builds typically finish in 60–90s. We wait 2min to be safe.
+        run: sleep 120
+
+      - name: Run smoke probe
+        env:
+          ADMIN_SMOKE_TOKEN: ${{ secrets.ADMIN_SMOKE_TOKEN }}
+          SMOKE_URL: ${{ secrets.SMOKE_URL || 'https://agentenvoy.ai/api/admin/smoke' }}
+        run: |
+          echo "Hitting smoke endpoint: $SMOKE_URL"
+          RESPONSE=$(curl -s -o /tmp/smoke-body.json -w "%{http_code}" \
+            -H "Authorization: Bearer $ADMIN_SMOKE_TOKEN" \
+            "$SMOKE_URL")
+
+          echo "HTTP status: $RESPONSE"
+          echo "Response body:"
+          cat /tmp/smoke-body.json | python3 -m json.tool 2>/dev/null || cat /tmp/smoke-body.json
+
+          if [ "$RESPONSE" != "200" ]; then
+            echo ""
+            echo "::error::Smoke test FAILED (HTTP $RESPONSE). Check /admin/failures and Vercel runtime logs."
+            exit 1
+          fi
+
+          echo ""
+          echo "✓ Smoke test passed."

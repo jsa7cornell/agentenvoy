@@ -41,6 +41,10 @@ EFFECT_MODE_CALENDAR=dryrun
 # production. Set to `none` on preview IF you ever flip it to live there.
 CALENDAR_SEND_UPDATES=all
 
+# ─── Admin smoke token ─────────────────────────────────────
+# Token for /api/admin/smoke — also stored in Vercel prod env + GitHub Actions secret.
+ADMIN_SMOKE_TOKEN=op://Secrets/ADMIN_SMOKE_TOKEN/credential
+
 # ─── Dev Auth (non-secret, dev-only) ──────────────────────
 DEV_AUTH_SECRET=dev-test-secret-local-only
 NEXT_PUBLIC_DEV_AUTH_SECRET=dev-test-secret-local-only

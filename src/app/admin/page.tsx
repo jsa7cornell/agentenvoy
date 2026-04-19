@@ -35,6 +35,12 @@ const TOOLS: Tool[] = [
     tag: "email",
   },
   {
+    href: "/api/admin/smoke",
+    label: "Smoke Test",
+    description: "Post-deploy health probe: DB roundtrip, migration parity, SES credentials, calendar cache, critical env vars. Returns JSON — open in browser after a deploy.",
+    tag: "monitoring",
+  },
+  {
     href: "/api/admin/schema-health",
     label: "Schema Health",
     description: "On-demand schema drift check. Returns JSON — open in browser to see if Prisma and Supabase are in sync.",
