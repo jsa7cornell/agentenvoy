@@ -163,6 +163,13 @@ export function WeeklyCalendar({
   // matches what the grid actually labels, not the viewer's server tz.
   const todayStr = useMemo(() => toDayStr(now.toISOString(), timezone), [now, timezone]);
 
+  // Block-reason popover state — which slot's "?" indicator the viewer
+  // tapped. Null when closed. One open at a time across all days.
+  const [openBlockInfo, setOpenBlockInfo] = useState<{
+    day: string;
+    row: number;
+  } | null>(null);
+
   // Current-time offset in minutes-since-midnight (display timezone).
   // Used to position the red line within today's column.
   const nowMinutesInDay = useMemo(
@@ -375,6 +382,24 @@ export function WeeklyCalendar({
                   const scoreBorder = slot ? getScoreBorder(slot.score, slot.kind) : "";
                   const isHourBoundary = row % 2 === 0;
 
+                  // "Block top" detection: show the small "?" indicator on
+                  // slots that start a new non-bookable run (score >= 2 and
+                  // not a calendar event — events have their own click UX).
+                  // We only show one indicator per contiguous run so the
+                  // grid doesn't get busy.
+                  const prevMins = gridStartMin + (row - 1) * 30;
+                  const prevSlot = row > 0 ? slotIndex[`${day}-${prevMins}`] : undefined;
+                  const isRunStart =
+                    !!slot &&
+                    slot.score >= 2 &&
+                    slot.kind !== "event" &&
+                    (!prevSlot ||
+                      prevSlot.score < 2 ||
+                      prevSlot.kind === "event" ||
+                      (prevSlot.reason !== slot.reason));
+                  const infoOpen =
+                    openBlockInfo?.day === day && openBlockInfo?.row === row;
+
                   return (
                     <div
                       key={row}
@@ -393,8 +418,48 @@ export function WeeklyCalendar({
                       {slot && slot.score >= 2 && (
                         <div className={`absolute left-0 top-0 bottom-0 w-0.5 ${scoreBorder}`} />
                       )}
-                      {/* Tooltip on hover — surfaces tier + block intrinsics */}
-                      {slot && (
+                      {/* Block-reason indicator — tiny "?" on the top of
+                          each contiguous blocked/protected run. Click to
+                          reveal the reason + a link to the rules panel. */}
+                      {isRunStart && (
+                        <button
+                          type="button"
+                          aria-label="Why is this blocked?"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenBlockInfo(infoOpen ? null : { day, row });
+                          }}
+                          className="absolute top-0.5 right-0.5 w-3.5 h-3.5 rounded-full bg-surface/80 hover:bg-surface text-[9px] leading-none text-secondary hover:text-primary flex items-center justify-center border border-DEFAULT/60 z-[5]"
+                        >
+                          ?
+                        </button>
+                      )}
+                      {/* Click-to-reveal popover with full reason + manage link. */}
+                      {isRunStart && infoOpen && slot && (
+                        <div
+                          className="absolute top-4 right-0 z-30 w-52 rounded-md bg-surface-secondary border border-DEFAULT shadow-lg p-2 text-[11px] text-primary"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="font-semibold mb-0.5">
+                            {slotTierLabel(slot.score)}
+                          </div>
+                          <div className="text-muted leading-relaxed mb-2">
+                            {slot.reason}
+                            {slot.blockCost && slot.blockCost !== "none" && (
+                              <> · {slot.blockCost}{slot.firmness ? `:${slot.firmness}` : ""}</>
+                            )}
+                          </div>
+                          <a
+                            href="/dashboard/availability"
+                            className="block text-indigo-400 hover:text-indigo-300 transition text-[10px] font-medium"
+                          >
+                            Manage rules &rarr;
+                          </a>
+                        </div>
+                      )}
+                      {/* Hover tooltip — still there for quick scan when the
+                          viewer isn't looking for the full popover. */}
+                      {slot && !infoOpen && (
                         <div className="hidden group-hover:block absolute left-1/2 -translate-x-1/2 bottom-full mb-1 z-30 px-2 py-1 rounded bg-surface-secondary border border-DEFAULT text-[10px] text-primary whitespace-nowrap shadow-lg pointer-events-none">
                           <div className="font-semibold">{slotTierLabel(slot.score)}</div>
                           <div className="text-muted">

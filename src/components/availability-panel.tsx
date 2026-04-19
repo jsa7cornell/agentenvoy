@@ -90,8 +90,11 @@ export function AvailabilityPanel({
   const [calendars, setCalendars] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  // Mobile view toggle — day vs. M-F workweek. Only used when forceMobile.
-  const [mobileView, setMobileView] = useState<"day" | "week">("day");
+  // Mobile view toggle — day / 3-day midweek / full Sun-Sat week. Only used
+  // when forceMobile. Midweek is the default because it's the best
+  // compromise on a phone: enough context to see what's coming up without
+  // cramming 7 columns into a narrow screen.
+  const [mobileView, setMobileView] = useState<"day" | "midweek" | "week">("midweek");
   // Desktop week-range toggle — full Sun-Sat vs. Mon-Fri workweek. Default full.
   const [weekRange, setWeekRange] = useState<"full" | "workweek">("full");
 
@@ -116,6 +119,15 @@ export function AvailabilityPanel({
     const today = new Date();
     return today.toISOString().slice(0, 10);
   }, [weekStart, daysToShow]);
+
+  // Today anchor — used by mobile Day / Midweek views regardless of
+  // container width, so the 3-day view always shows "today + next 2"
+  // and doesn't drift to Sunday when the panel happens to be wide.
+  // Doesn't depend on weekStart — the week-nav arrows only affect the
+  // Week-view range; Day and Midweek always anchor on today.
+  const todayAnchor = useMemo(() => {
+    return new Date().toISOString().slice(0, 10);
+  }, []);
 
   // Monday of the current week — used by mobile-week and desktop workweek
   // toggle to anchor a Mon–Fri view.
@@ -651,7 +663,8 @@ export function AvailabilityPanel({
   // under the day-chip header (passed to the calendar via legendSlot).
   const mobileActionBar = showControls ? (
     <div className="grid grid-cols-3 items-stretch gap-1.5 px-3 py-1.5 border-b border-secondary text-xs shrink-0">
-      {/* a) Day | Week toggle — segmented */}
+      {/* a) Day | Midweek | Week toggle — segmented. Midweek is default:
+          3 days anchored to today, the best fit for a narrow screen. */}
       <div className="flex items-stretch rounded-md border border-DEFAULT overflow-hidden text-[11px] font-medium">
         <button
           onClick={() => setMobileView("day")}
@@ -662,6 +675,16 @@ export function AvailabilityPanel({
           }`}
         >
           Day
+        </button>
+        <button
+          onClick={() => setMobileView("midweek")}
+          className={`flex-1 px-2 py-1.5 transition border-l border-DEFAULT ${
+            mobileView === "midweek"
+              ? "bg-indigo-500 text-white"
+              : "text-secondary hover:text-primary"
+          }`}
+        >
+          3-day
         </button>
         <button
           onClick={() => setMobileView("week")}
@@ -773,13 +796,34 @@ export function AvailabilityPanel({
       <div className="flex-1 min-h-0 overflow-hidden">
         {forceMobile ? (
           mobileView === "week" ? (
+            // Full Sun–Sat week. weekStart is the Sunday of the containing
+            // week (set via getSunday() at page level). John's rule:
+            // calendar views always start Sunday on the left, end Saturday
+            // on the right.
             <WeeklyCalendar
               events={events}
               slots={slots}
               locationByDay={locationByDay}
               timezone={timezone}
-              weekStart={mondayAnchor}
-              daysToShow={5}
+              weekStart={weekStart}
+              daysToShow={7}
+              hideToolbar
+              headerGutterSlot={tzChip}
+              legendSlot={legendChips}
+              primaryCalendar={calendars[0]}
+              onEventClick={handleEventClick}
+            />
+          ) : mobileView === "midweek" ? (
+            // 3-day view anchored to today — "today + next 2". Uses
+            // todayAnchor (not gridStart) so the anchor stays on today
+            // regardless of responsive daysToShow state drift.
+            <WeeklyCalendar
+              events={events}
+              slots={slots}
+              locationByDay={locationByDay}
+              timezone={timezone}
+              weekStart={todayAnchor}
+              daysToShow={3}
               hideToolbar
               headerGutterSlot={tzChip}
               legendSlot={legendChips}
@@ -792,7 +836,7 @@ export function AvailabilityPanel({
               slots={slots}
               locationByDay={locationByDay}
               timezone={timezone}
-              weekStart={gridStart}
+              weekStart={todayAnchor}
               legendSlot={legendChips}
               primaryCalendar={calendars[0]}
               onEventClick={handleEventClick}

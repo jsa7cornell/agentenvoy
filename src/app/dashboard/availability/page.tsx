@@ -642,7 +642,7 @@ export default function AvailabilityPage() {
                   className="inline-block text-xs text-indigo-400 hover:text-indigo-300 transition"
                   onClick={() => setClickedEvent(null)}
                 >
-                  Open deal room →
+                  Open event &rarr;
                 </Link>
               </div>
             )}
@@ -886,7 +886,7 @@ export default function AvailabilityPage() {
                     onClick={() => setConfirmingCancel(true)}
                     className="px-3 py-2 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg hover:border-red-500/60 transition"
                   >
-                    Cancel
+                    Cancel meeting
                   </button>
                 )}
               </div>
