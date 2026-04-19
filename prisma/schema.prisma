@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("POSTGRES_PRISMA_URL")
+  provider  = "postgresql"
+  url       = env("POSTGRES_PRISMA_URL")
   directUrl = env("POSTGRES_URL_NON_POOLING")
 }
 
@@ -46,31 +46,31 @@ model VerificationToken {
 
 // AgentEnvoy models
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  meetSlug      String?   @unique
-  preferences      Json?     @default("{}")
-  hostDirectives   Json?     @default("[]") // string[] — global ::: directives that shape all negotiations
-  persistentKnowledge  String?   @db.Text   // Long-lived: who they are, how they work, what matters
-  upcomingSchedulePreferences String?   @db.Text @map("situationalKnowledge") // Near-term non-time context: mood, goals, temp rules
-  lastCalibratedAt DateTime?              // null = never calibrated, triggers onboarding flow
-  onboardingPhase  String?                // null = not started, tracks progress through onboarding chat
-  createdAt        DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                          String    @id @default(cuid())
+  name                        String?
+  email                       String?   @unique
+  emailVerified               DateTime?
+  image                       String?
+  meetSlug                    String?   @unique
+  preferences                 Json?     @default("{}")
+  hostDirectives              Json?     @default("[]") // string[] — global ::: directives that shape all negotiations
+  persistentKnowledge         String?   @db.Text // Long-lived: who they are, how they work, what matters
+  upcomingSchedulePreferences String?   @map("situationalKnowledge") @db.Text // Near-term non-time context: mood, goals, temp rules
+  lastCalibratedAt            DateTime? // null = never calibrated, triggers onboarding flow
+  onboardingPhase             String? // null = not started, tracks progress through onboarding chat
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
 
-  accounts           Account[]
-  sessions           Session[]
-  negotiationLinks   NegotiationLink[]
-  hostedSessions     NegotiationSession[] @relation("host")
-  guestSessions      NegotiationSession[] @relation("guest")
-  participations     SessionParticipant[]
-  apiKeys            ApiKey[]
-  channel            Channel?
-  calendarCaches     CalendarCache[]
-  computedSchedule   ComputedSchedule?
+  accounts         Account[]
+  sessions         Session[]
+  negotiationLinks NegotiationLink[]
+  hostedSessions   NegotiationSession[] @relation("host")
+  guestSessions    NegotiationSession[] @relation("guest")
+  participations   SessionParticipant[]
+  apiKeys          ApiKey[]
+  channel          Channel?
+  calendarCaches   CalendarCache[]
+  computedSchedule ComputedSchedule?
 }
 
 model ApiKey {
@@ -87,14 +87,14 @@ model ApiKey {
 }
 
 model NegotiationLink {
-  id           String   @id @default(cuid())
-  userId       String
-  type         String   @default("generic") // generic | contextual | office_hours
-  mode         String   @default("single")  // "single" | "group"
-  slug         String   // same as user.meetSlug for generic
-  code         String?  @unique // unique code for contextual links
-  inviteeEmail String?
-  inviteeName  String?
+  id              String    @id @default(cuid())
+  userId          String
+  type            String    @default("generic") // generic | contextual | office_hours
+  mode            String    @default("single") // "single" | "group"
+  slug            String // same as user.meetSlug for generic
+  code            String?   @unique // unique code for contextual links
+  inviteeEmail    String?
+  inviteeName     String?
   /// Host-declared guest timezone (IANA). Seed for session.guestTimezone at
   /// session creation. Null = unknown, fall back to browser-observed TZ. Acts
   /// as a soft-lock: once the session persists a TZ, observed browser TZ does
@@ -105,74 +105,75 @@ model NegotiationLink {
   /// create_link time (injection markers + URLs/emails/phones stripped).
   /// Display-only — do NOT include in computeInputHash; has no effect on
   /// scoring/availability.
-  hostNote     String?  @db.VarChar(280)
-  topic        String?
-  rules        Json?    @default("{}")
+  hostNote        String?   @db.VarChar(280)
+  topic           String?
+  rules           Json?     @default("{}")
   /// When this link was spawned from an AvailabilityRule (e.g., office hours),
   /// points at the rule ID. The session's offerable slots are filtered through
   /// the rule's window. Null for normal generic/contextual links. The rule lives
   /// in the user's preferences.explicit.structuredRules JSON, not a relation.
-  sourceRuleId String?
-  expiresAt    DateTime?
+  sourceRuleId    String?
+  expiresAt       DateTime?
   /// Per-link salt for hashing guest emails in MCPCallLog. Postgres ≥13
   /// built-in `gen_random_uuid()` (no pgcrypto). Prevents cross-link
   /// correlation: same email on two different links hashes to different
   /// values. See src/lib/mcp/email-hash.ts and SPEC §4.
-  hashSalt     String   @default(dbgenerated("gen_random_uuid()::text"))
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  hashSalt        String    @default(dbgenerated("gen_random_uuid()::text"))
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sessions       NegotiationSession[]
-  participants   SessionParticipant[]
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions        NegotiationSession[]
+  participants    SessionParticipant[]
   consentRequests ConsentRequest[]
+  mcpCallLogs     MCPCallLog[]
 
   @@index([slug])
   @@index([slug, code])
 }
 
 model NegotiationSession {
-  id            String   @id @default(cuid())
-  linkId        String
-  hostId        String
-  guestId       String?
-  type          String   @default("calendar") // calendar | rfp
-  status        String   @default("active") // active | agreed | escalated | expired
-  archived      Boolean  @default(false)
-  title         String?  // "Q2 Roadmap — Sarah Chen"
-  statusLabel   String?  // "Waiting for Sarah", "Confirmed", etc.
-  meetingType   String?  // phone | video | in-person
-  duration      Int?     // minutes
-  format        String?
-  agreedTime    DateTime?
-  agreedFormat  String?
-  summary       String?  @db.Text
-  meetLink      String?
+  id              String    @id @default(cuid())
+  linkId          String
+  hostId          String
+  guestId         String?
+  type            String    @default("calendar") // calendar | rfp
+  status          String    @default("active") // active | agreed | escalated | expired
+  archived        Boolean   @default(false)
+  title           String? // "Q2 Roadmap — Sarah Chen"
+  statusLabel     String? // "Waiting for Sarah", "Confirmed", etc.
+  meetingType     String? // phone | video | in-person
+  duration        Int? // minutes
+  format          String?
+  agreedTime      DateTime?
+  agreedFormat    String?
+  summary         String?   @db.Text
+  meetLink        String?
   /// Google Calendar event ID of the confirmed meeting event.
   /// Saved on confirmation so cancel can delete it cleanly.
   calendarEventId String?
-  guestEmail     String?
+  guestEmail      String?
   /// Guest's display name, captured on the confirm card. Session-scoped so a
   /// single generic link can host many named guests without overwriting
   /// link.inviteeName. Used in the confirmed event card, calendar invite
   /// attendee name, and reminder emails.
-  guestName      String?
+  guestName       String?
   /// IANA timezone captured from the guest's browser on first visit
   /// (Intl.DateTimeFormat().resolvedOptions().timeZone). First-write-wins —
   /// not overwritten on subsequent visits. Null when the guest visited
   /// before we started capturing, or when detection failed.
-  guestTimezone String?
+  guestTimezone   String?
   /// Whether to send the guest a 24h-ahead reminder email. Default true (opt-in).
   /// Set on the confirm card via the reminder checkbox. The daily cron scans
   /// sessions where this is true + status=agreed + agreedTime falls in the
   /// now+23h..now+25h window. Idempotency via SideEffectLog.
-  wantsReminder Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  wantsReminder   Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  link            NegotiationLink    @relation(fields: [linkId], references: [id], onDelete: Cascade)
-  host            User               @relation("host", fields: [hostId], references: [id])
-  guest           User?              @relation("guest", fields: [guestId], references: [id])
+  link            NegotiationLink     @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  host            User                @relation("host", fields: [hostId], references: [id])
+  guest           User?               @relation("guest", fields: [guestId], references: [id])
   messages        Message[]
   proposals       Proposal[]
   channelMessages ChannelMessage[]
@@ -184,7 +185,7 @@ model NegotiationSession {
 model Message {
   id        String   @id @default(cuid())
   sessionId String
-  role      String   // administrator | guest | system
+  role      String // administrator | guest | system
   content   String   @db.Text
   metadata  Json?    @default("{}")
   createdAt DateTime @default(now())
@@ -194,16 +195,16 @@ model Message {
 }
 
 model Proposal {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   sessionId String
   messageId String?
   dateTime  DateTime?
-  duration  Int?     // minutes
-  format    String?  // phone | video | in-person
+  duration  Int? // minutes
+  format    String? // phone | video | in-person
   location  String?
-  tier      Int      @default(1) // 1 | 2 | 3
-  status    String   @default("offered") // offered | accepted | rejected | countered
-  createdAt DateTime @default(now())
+  tier      Int       @default(1) // 1 | 2 | 3
+  status    String    @default("offered") // offered | accepted | rejected | countered
+  createdAt DateTime  @default(now())
 
   session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   message Message?           @relation(fields: [messageId], references: [id])
@@ -211,17 +212,17 @@ model Proposal {
 
 // NegotiationOutcome: tracks results of confirmed negotiations for learning
 model NegotiationOutcome {
-  id                     String   @id @default(cuid())
-  sessionId              String   @unique
-  exchangeCount          Int      // guest messages only (not system/greeting)
-  tierReached            Int      @default(1) // 1 | 2 | 3
-  guestCounterProposed   Boolean  @default(false)
-  timeToConfirmationSec  Int?     // seconds from session creation to confirmation
-  proposedFormat         String?  // what the agent first proposed
-  agreedFormat           String?  // what was actually confirmed
-  participantCount       Int      @default(2) // total participants including host
-  feedback               String?  @db.Text // open-ended guest feedback
-  createdAt              DateTime @default(now())
+  id                    String   @id @default(cuid())
+  sessionId             String   @unique
+  exchangeCount         Int // guest messages only (not system/greeting)
+  tierReached           Int      @default(1) // 1 | 2 | 3
+  guestCounterProposed  Boolean  @default(false)
+  timeToConfirmationSec Int? // seconds from session creation to confirmation
+  proposedFormat        String? // what the agent first proposed
+  agreedFormat          String? // what was actually confirmed
+  participantCount      Int      @default(2) // total participants including host
+  feedback              String?  @db.Text // open-ended guest feedback
+  createdAt             DateTime @default(now())
 
   session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }
@@ -244,8 +245,8 @@ model SessionParticipant {
   userId    String?
   email     String?
   name      String?
-  role      String   @default("guest")    // "host" | "guest"
-  status    String   @default("pending")  // "pending" | "active" | "agreed" | "declined"
+  role      String   @default("guest") // "host" | "guest"
+  status    String   @default("pending") // "pending" | "active" | "agreed" | "declined"
   joinedAt  DateTime @default(now())
 
   link    NegotiationLink    @relation(fields: [linkId], references: [id])
@@ -261,9 +262,9 @@ model ChannelMessage {
   id        String              @id @default(cuid())
   channelId String
   channel   Channel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  role      String              // "user" | "envoy" | "system"
+  role      String // "user" | "envoy" | "system"
   content   String              @db.Text
-  threadId  String?             // FK to NegotiationSession — renders as ThreadCard in feed
+  threadId  String? // FK to NegotiationSession — renders as ThreadCard in feed
   thread    NegotiationSession? @relation(fields: [threadId], references: [id])
   metadata  Json?               @default("{}")
   createdAt DateTime            @default(now())
@@ -274,13 +275,13 @@ model ChannelMessage {
 
 // CalendarCache: cached calendar events per user per calendar (incremental sync via syncToken)
 model CalendarCache {
-  id            String   @id @default(cuid())
-  userId        String
-  calendarId    String   // Google Calendar ID (e.g., "primary", "family@group.calendar.google.com")
-  calendarName  String
-  syncToken     String?  // Google's nextSyncToken for incremental sync
-  events        Json     @default("[]") // CalendarEvent[] — current state of this calendar
-  lastSyncedAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  userId       String
+  calendarId   String // Google Calendar ID (e.g., "primary", "family@group.calendar.google.com")
+  calendarName String
+  syncToken    String? // Google's nextSyncToken for incremental sync
+  events       Json     @default("[]") // CalendarEvent[] — current state of this calendar
+  lastSyncedAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -290,24 +291,24 @@ model CalendarCache {
 
 // ComputedSchedule: pre-scored 30-min slots for the next 2 weeks
 model ComputedSchedule {
-  id           String   @id @default(cuid())
-  userId       String   @unique
-  slots        Json     @default("[]") // ScoredSlot[] — protection scores -1 to 5
-  computedAt   DateTime @default(now())
-  inputHash    String   @default("") // hash of (events + preferences) — skip recompute if unchanged
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  slots      Json     @default("[]") // ScoredSlot[] — protection scores -1 to 5
+  computedAt DateTime @default(now())
+  inputHash  String   @default("") // hash of (events + preferences) — skip recompute if unchanged
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ChannelSession: conversational window in the host's dashboard chat
 model ChannelSession {
-  id         String   @id @default(cuid())
-  channelId  String
-  channel    Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  startedAt  DateTime @default(now())
-  expiresAt  DateTime // rolling: last message + 3 days
-  summary    String?  @db.Text // LLM-generated summary when session closes
-  closed     Boolean  @default(false)
+  id        String   @id @default(cuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  startedAt DateTime @default(now())
+  expiresAt DateTime // rolling: last message + 3 days
+  summary   String?  @db.Text // LLM-generated summary when session closes
+  closed    Boolean  @default(false)
 
   @@index([channelId])
 }
@@ -317,9 +318,9 @@ model NegotiatorResult {
   id                 String   @id @default(cuid())
   shareCode          String   @unique
   question           String   @db.Text
-  agents             Json     // AgentConfig[] minus apiKey
-  research           Json     // ResearchResult[]
-  syntheses          Json     // Synthesis[]
+  agents             Json // AgentConfig[] minus apiKey
+  research           Json // ResearchResult[]
+  syntheses          Json // Synthesis[]
   humanDecisions     Json     @default("[]")
   hostClarifications Json     @default("[]")
   finalResponses     Json     @default("[]")
@@ -365,25 +366,25 @@ model Hold {
 /// and no external service was contacted. This is the "what actually happened"
 /// record; queryable via `/dev/side-effects`. See RISK-MANAGEMENT.md.
 model SideEffectLog {
-  id             String   @id @default(cuid())
+  id            String   @id @default(cuid())
   /// SideEffect.kind (e.g. "email.send", "calendar.create_event")
-  kind           String
+  kind          String
   /// Active EffectMode at dispatch time
-  mode           String
+  mode          String
   /// Terminal EffectStatus: sent | suppressed | dryrun | failed | skipped
-  status         String
+  status        String
   /// Short human-readable target (e.g. "mike@example.com" or "host calendar")
   /// — scrubbed of anything that wouldn't be OK in a log line.
-  targetSummary  String
+  targetSummary String
   /// Full effect payload, minus secrets. Safe to dump on the dashboard.
-  payload        Json
+  payload       Json
   /// Optional structured context from the caller (sessionId, userId, etc.).
-  contextJson    Json?
+  contextJson   Json?
   /// Provider-assigned message ID or fake dryrun ID. Optional.
-  providerRef    String?
+  providerRef   String?
   /// Error message if status === "failed".
-  error          String?  @db.Text
-  createdAt      DateTime @default(now())
+  error         String?  @db.Text
+  createdAt     DateTime @default(now())
 
   @@index([kind, createdAt])
   @@index([status, createdAt])
@@ -446,19 +447,19 @@ model RouteError {
 ///
 /// `expiresAt` is used by the hourly sweep cron to GC expired rows.
 model MCPRateCounter {
-  id              String   @id @default(cuid())
+  id          String   @id @default(cuid())
   /// SHA-256 hash of the capability token (the `/meet/<slug>?c=<code>`
   /// URL fragment acting as the MCP bearer). Never store plaintext.
-  tokenHash       String
+  tokenHash   String
   /// MCP tool name, e.g. "propose_lock", "post_message".
-  tool            String
+  tool        String
   /// ISO timestamp of the window's start (server-side NOW(), floored).
-  windowStart     DateTime
-  count           Int      @default(1)
+  windowStart DateTime
+  count       Int      @default(1)
   /// `windowStart + windowDurationSec`. Cron GCs rows past this.
-  expiresAt       DateTime
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([tokenHash, tool, windowStart])
   @@index([expiresAt])
@@ -475,16 +476,16 @@ model MCPRateCounter {
 /// fall-through to defaults. See `src/lib/mcp/consent-request.ts` and
 /// SPEC §2.
 model ConsentRequest {
-  id            String    @id @default(cuid())
-  linkId        String
-  sessionId     String?
+  id                String    @id @default(cuid())
+  linkId            String
+  sessionId         String?
   /// Logical field name — e.g., "format", "location", "duration", "date".
   /// Treated as a string in Prisma; Zod schemas at the MCP boundary
   /// union-type this against the field enum used elsewhere.
-  field         String
+  field             String
   /// The structured value being requested. `propose_lock` reads this
   /// verbatim; prose is NEVER the source of truth (see §3).
-  appliedValue  Json
+  appliedValue      Json
   /// Human-readable template with allow-listed placeholders — see
   /// `src/lib/mcp/placeholders.ts`. Stored for audit; not rendered live
   /// without running through the rationale validator.
@@ -493,19 +494,60 @@ model ConsentRequest {
   /// deal-room; NEVER logged to MCPCallLog (redaction table §7 drops it).
   /// Validated post-generation for URL/email/phone/length; on trip, the
   /// UI falls back to template-rendered output instead. See §3.
-  rationaleProse String?  @db.Text
-  status        String   @default("pending") // pending | accepted | retracted | expired
+  rationaleProse    String?   @db.Text
+  status            String    @default("pending") // pending | accepted | retracted | expired
   /// Who decided. `guest` = human clicked OK; `host_envoy` = host's
   /// Envoy accepted on their behalf; `system_expired` = timeout.
-  decidedBy     String?
-  decidedAt     DateTime?
-  expiresAt     DateTime
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  decidedBy         String?
+  decidedAt         DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   link NegotiationLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
 
   @@index([linkId, field, status])
   @@index([sessionId, status])
   @@index([expiresAt])
+}
+
+/// Append-only audit log of every MCP tool invocation. Fed by the MCP HTTP
+/// route after redaction via `src/lib/mcp/call-log.ts` (SPEC §7). The
+/// redaction table is the single source of truth for what may land in
+/// `requestBody` / `responseBody`; in particular `rationaleProse` is
+/// DROPPED (never stored) and guest emails arrive pre-hashed per §4.
+///
+/// FK to NegotiationLink cascades on link deletion — a tenant erasing a
+/// link erases their log rows with it. `sessionId` is nullable because
+/// tools like `get_meeting_parameters` fire before any session exists.
+model MCPCallLog {
+  id           String   @id @default(cuid())
+  ts           DateTime @default(now())
+  linkId       String
+  sessionId    String?
+  /// MCP tool name: propose_lock, post_message, get_session_status, etc.
+  tool         String
+  /// Self-reported by the caller; untrusted metadata. Surfaced in the
+  /// deal-room banner alongside the 🤖 badge (see
+  /// `src/components/deal-room-role-dispatch.ts`).
+  clientName   String?
+  clientType   String?
+  /// Optional `{name, email?}` — email arrives pre-hashed via
+  /// `hashGuestEmail(link.hashSalt, ...)` before reaching this row.
+  principal    Json?
+  /// Tool arguments after redaction. Schema-driven; never ad-hoc.
+  requestBody  Json
+  /// Tool response after redaction. `rationaleProse` is always dropped.
+  responseBody Json
+  /// "ok" | "error:<code>" — cheap filter for dashboard queries.
+  outcome      String
+  /// End-to-end tool latency in ms, including DB writes and rate-limit
+  /// check. Null on early-abort paths (e.g. link lookup 404).
+  latencyMs    Int?
+
+  link NegotiationLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@index([linkId, ts])
+  @@index([sessionId, ts])
+  @@index([tool, ts])
 }
