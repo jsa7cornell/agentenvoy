@@ -36,7 +36,7 @@ export async function GET() {
     ? (activeSession.startedAt > threeDaysAgo ? activeSession.startedAt : threeDaysAgo)
     : threeDaysAgo;
 
-  const messages = await prisma.channelMessage.findMany({
+  const messages = (await prisma.channelMessage.findMany({
     where: { channelId: channel.id, createdAt: { gte: sessionStart } },
     orderBy: { createdAt: "asc" },
     include: {
@@ -74,6 +74,10 @@ export async function GET() {
         },
       },
     },
+  })).filter((m) => {
+    // Hide debug_trace rows (diagnostic logging sink, 2026-04-20).
+    const kind = (m.metadata as { kind?: string } | null)?.kind;
+    return kind !== "debug_trace";
   });
 
   // For group links, attach participant data

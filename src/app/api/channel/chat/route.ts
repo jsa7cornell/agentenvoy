@@ -252,21 +252,22 @@ export async function POST(req: NextRequest) {
 
   // TEMP: diagnostic trace for jsa7cornell@gmail.com only (2026-04-20,
   // investigating Sunday hallucination where Envoy invented an "Alex 8 AM"
-  // meeting that didn't exist). Remove after root cause found.
+  // meeting that didn't exist). Writes a ChannelMessage with metadata.kind
+  // = "debug_trace" — hidden from the feed UI by the /api/channel/messages
+  // filter. Query via Prisma/DB to read. Remove after root cause found.
   const TRACE_USER = "jsa7cornell@gmail.com";
   const shouldTrace = safeUser.email === TRACE_USER;
-  if (shouldTrace) {
-    console.log(
-      `[TRACE][channel/chat] userId=${safeUser.id} ts=${new Date().toISOString()} userMsg=${JSON.stringify(message)}`,
-    );
-    console.log(
-      `[TRACE][channel/chat] scheduleConnected=${scheduleResult?.connected ?? "null"} slotCount=${scheduleResult?.slots?.length ?? 0}`,
-    );
-    console.log(`[TRACE][channel/chat] CONTEXT_PARTS_BEGIN\n${contextParts.join("\n")}\n[TRACE][channel/chat] CONTEXT_PARTS_END`);
-    console.log(
-      `[TRACE][channel/chat] historyLen=${messages.length} lastMsgRole=${messages[messages.length - 1]?.role ?? "none"}`,
-    );
-  }
+  const traceBlock = shouldTrace
+    ? [
+        `ts=${new Date().toISOString()}`,
+        `userMsg=${JSON.stringify(message)}`,
+        `scheduleConnected=${scheduleResult?.connected ?? "null"} slotCount=${scheduleResult?.slots?.length ?? 0}`,
+        `historyLen=${messages.length} lastMsgRole=${messages[messages.length - 1]?.role ?? "none"}`,
+        `---CONTEXT_PARTS---`,
+        contextParts.join("\n"),
+        `---CONTEXT_PARTS_END---`,
+      ].join("\n")
+    : null;
 
   // Action-parsing + DB-write logic, hoisted out of onFinish so the
   // emission-retry path (below) can run it on the COMBINED text (original
@@ -363,8 +364,19 @@ export async function POST(req: NextRequest) {
           }
         }
         controller.close();
-        if (shouldTrace) {
-          console.log(`[TRACE][channel/chat] LLM_RESPONSE_BEGIN\n${fullText}\n[TRACE][channel/chat] LLM_RESPONSE_END`);
+        if (shouldTrace && traceBlock) {
+          try {
+            await prisma.channelMessage.create({
+              data: {
+                channelId: safeChannel.id,
+                role: "system",
+                content: `${traceBlock}\n---LLM_RESPONSE---\n${fullText}\n---LLM_RESPONSE_END---`,
+                metadata: { kind: "debug_trace" },
+              },
+            });
+          } catch (e) {
+            console.error("[channel/chat] debug_trace write failed:", e);
+          }
         }
         await finalizeResponse(fullText);
       } catch (e) {
