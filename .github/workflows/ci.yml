@@ -98,7 +98,10 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agentenvoy_test
+      # schema.prisma reads POSTGRES_PRISMA_URL (pooled) + POSTGRES_URL_NON_POOLING
+      # (direct). In CI we point both at the local Postgres service container
+      # since there's no pooler.
+      POSTGRES_PRISMA_URL: postgresql://postgres:postgres@localhost:5432/agentenvoy_test
       POSTGRES_URL_NON_POOLING: postgresql://postgres:postgres@localhost:5432/agentenvoy_test
       EFFECT_MODE_EMAIL: log
       EFFECT_MODE_CALENDAR: dryrun
