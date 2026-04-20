@@ -216,6 +216,20 @@ describe("account deletion — end-to-end cascade", () => {
       },
     });
 
+    // Group-mode edge case: target is hostId on a session whose link
+    // belongs to the survivor. No cascade path from User covers this; the
+    // route must hard-delete the row before the User delete to avoid a
+    // NO ACTION FK failure on NegotiationSession.hostId.
+    const groupHostedSession = await prisma.negotiationSession.create({
+      data: {
+        linkId: survivorLink.id,
+        hostId: target.id,
+        status: "active",
+        duration: 30,
+        meetingType: "video",
+      },
+    });
+
     // SideEffectLog row for ANOTHER user — must NOT be deleted.
     const survivorLog = await prisma.sideEffectLog.create({
       data: {
@@ -273,5 +287,9 @@ describe("account deletion — end-to-end cascade", () => {
     expect(refreshedParticipant).not.toBeNull();
     expect(refreshedParticipant!.userId).toBeNull();
     expect(await prisma.sideEffectLog.count({ where: { id: survivorLog.id } })).toBe(1);
+    // Group-hosted session on survivor's link was hard-deleted (hostId had no cascade).
+    expect(
+      await prisma.negotiationSession.count({ where: { id: groupHostedSession.id } }),
+    ).toBe(0);
   });
 });

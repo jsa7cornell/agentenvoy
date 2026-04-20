@@ -18,8 +18,6 @@ function isAllowedOrigin(origin: string | null): boolean {
       const appHost = new URL(appUrl).hostname;
       if (url.hostname === appHost) return true;
     }
-    // Vercel preview deploys
-    if (url.hostname.endsWith(".vercel.app")) return true;
     return false;
   } catch {
     return false;
@@ -76,6 +74,14 @@ export async function POST(request: NextRequest) {
       prisma.sessionParticipant.updateMany({
         where: { userId },
         data: { userId: null },
+      }),
+      // Group-mode edge case: a session can have hostId = target while its
+      // NegotiationLink belongs to another user. `hostId` has no onDelete
+      // and is non-nullable, so we hard-delete those rows before the User
+      // delete to avoid a NO ACTION FK failure. Sessions hosted on the
+      // target's own links get cleaned up via the link cascade.
+      prisma.negotiationSession.deleteMany({
+        where: { hostId: userId, link: { userId: { not: userId } } },
       }),
       // Cascades: Account, Session, ApiKey, Channel (+ messages, sessions),
       // CalendarCache, ComputedSchedule, NegotiationLink (+ sessions, messages,

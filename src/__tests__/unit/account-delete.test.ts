@@ -24,7 +24,7 @@ vi.mock("@/lib/prisma", () => ({
     account: {
       findMany: vi.fn(),
     },
-    negotiationSession: { updateMany: vi.fn() },
+    negotiationSession: { updateMany: vi.fn(), deleteMany: vi.fn() },
     sessionParticipant: { updateMany: vi.fn() },
     user: { delete: vi.fn() },
     routeError: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
