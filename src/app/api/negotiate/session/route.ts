@@ -895,13 +895,13 @@ export async function POST(req: NextRequest) {
             const durStr = effectiveDuration ? `${effectiveDuration} minutes` : null;
             const fmt = fmtLabel;
             if (durStr && fmt) {
-              return `${base}\n\nA typical slot is ${durStr} ${fmt}, but if you think a different length and type is appropriate, let me know.`;
+              return `${base}\n\nA typical slot is ${durStr} ${fmt}, but if you think a different length and type is appropriate (eg phone or even in person), let me know.`;
             }
             if (durStr) {
               return `${base}\n\nA typical slot is ${durStr}, but if you think a different length is appropriate, let me know.`;
             }
             if (fmt) {
-              return `${base}\n\nA typical slot is ${fmt}, but if you think a different type is appropriate, let me know.`;
+              return `${base}\n\nA typical slot is ${fmt}, but if you think a different type is appropriate (eg phone or even in person), let me know.`;
             }
             return base;
           })()
