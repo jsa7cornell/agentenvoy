@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import type { ScoredSlot } from "@/lib/scoring";
 import { dispatchGuestFlowWelcomeEmailOnce } from "@/lib/emails/guest-flow-welcome";
+import { logCalibrationWrite } from "@/lib/calibration-audit";
 
 // GET /api/auth/guest-calendar/callback?code=xxx&state=xxx
 //
@@ -118,6 +119,7 @@ export async function GET(req: NextRequest) {
         const preferences: Record<string, unknown> = {
           explicit: { signupSource: "guest_flow" },
         };
+        const calibratedAt = new Date();
         user = await prisma.user.create({
           data: {
             email: guestEmail,
@@ -127,9 +129,10 @@ export async function GET(req: NextRequest) {
             preferences: preferences as Prisma.InputJsonValue,
             // Skip onboarding: the user is mid-booking. We'll nudge them
             // post-confirm via email + deal-room thread.
-            lastCalibratedAt: new Date(),
+            lastCalibratedAt: calibratedAt,
           },
         });
+        logCalibrationWrite({ userId: user.id, value: calibratedAt, source: "guest-calendar-link" });
       }
       signedInUserId = user.id;
 

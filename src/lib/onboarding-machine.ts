@@ -24,6 +24,7 @@ export type OnboardingPhase =
   | "defaults_duration"
   | "defaults_buffer"
   | "calendar_rules"
+  | "calendar_rules_custom"
   | "calendar_evenings"
   | "complete";
 
@@ -224,9 +225,10 @@ export function getDefaultsBufferMessages(): PhaseResult {
         content: `How much buffer time do you want after each meeting?`,
         options: [
           { number: 1, label: "No buffer", value: "0" },
-          { number: 2, label: "10 minutes", value: "10" },
-          { number: 3, label: "15 minutes", value: "15" },
-          { number: 4, label: "30 minutes", value: "30" },
+          { number: 2, label: "5 minutes", value: "5" },
+          { number: 3, label: "10 minutes", value: "10" },
+          { number: 4, label: "15 minutes", value: "15" },
+          { number: 5, label: "30 minutes", value: "30" },
         ],
       },
     ],
@@ -246,22 +248,52 @@ export function getCalendarRulesMessages(): PhaseResult {
           { number: 3, label: "9am – 6pm", value: "9-18" },
           { number: 4, label: "10am – 6pm", value: "10-18" },
           { number: 5, label: "Flexible — no restrictions", value: "0-24" },
+          { number: 6, label: "Let me set my own hours", value: "custom_hours" },
         ],
       },
     ],
   };
 }
 
-// Phase 3b: Calendar Rules — Evenings
+// Phase 3a-custom: freetext start/end hours.
+// Accepts formats like "9-17", "9am-5pm", "8:30am - 5:30pm", "8:30 - 17:30".
+// Parsing lives in the route handler so the state machine stays pure — here
+// we just prompt.
+export function getCalendarRulesCustomMessages(): PhaseResult {
+  return {
+    phase: "calendar_rules_custom",
+    messages: [
+      {
+        content: `What hours work? Tell me a start and end — e.g. "8:30am – 5:30pm" or "9 – 18".`,
+      },
+    ],
+    placeholder: "8:30am – 5:30pm",
+  };
+}
+
+// Phase 3b: Calendar Rules — Evenings & early mornings
+// Default posture is protected: never offered without the host's explicit
+// direction. For VIP / high-priority guests Envoy may surface an out-of-hours
+// slot as "this is outside your normal hours — offer anyway?" rather than
+// including it silently. The three options below map to three postures.
 export function getCalendarEveningsMessages(): PhaseResult {
   return {
     phase: "calendar_evenings",
     messages: [
       {
-        content: `How about evenings?`,
+        content: `How about evenings and early mornings?`,
         options: [
-          { number: 1, label: "Evenings are fine", value: "open" },
-          { number: 2, label: "Only offer evenings with my permission", value: "blocked" },
+          {
+            number: 1,
+            label: "Protected — never offer without my say-so",
+            value: "protected",
+          },
+          {
+            number: 2,
+            label: "Protected, but OK to offer for VIPs / high-priority",
+            value: "vip_only",
+          },
+          { number: 3, label: "Open — fine to offer freely", value: "open" },
         ],
       },
     ],
@@ -275,7 +307,7 @@ export function getCompleteMessages(ctx: OnboardingContext): PhaseResult {
     phase: "complete",
     messages: [
       {
-        content: `You're all set! Your link is **agentenvoy.ai/meet/${slug}** — put it in your email signature and anyone can schedule with you.\n\nNow let me show you how this works. I'm setting up a quick test meeting for you — a 5-minute meet & greet with John, the founder of AgentEnvoy. Don't worry, it's just a demo! Watch what happens...`,
+        content: `You're all set! Your link is **agentenvoy.ai/meet/${slug}** — put it in your email signature and anyone can schedule with you.\n\nLet me show you how this works. I'm drafting a quick 5-minute meet & greet with John Anderson, the founder of AgentEnvoy, so you can see me in action. Watch what happens...`,
       },
     ],
     save: { complete: true },
@@ -292,6 +324,7 @@ const PHASE_ORDER: OnboardingPhase[] = [
   "defaults_duration",
   "defaults_buffer",
   "calendar_rules",
+  "calendar_rules_custom",
   "calendar_evenings",
   "complete",
 ];

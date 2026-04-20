@@ -754,7 +754,7 @@ describe("executeActions", () => {
       expect(mockPrisma.message.create).toHaveBeenCalled();
     });
 
-    it("rejects missing dateTime", async () => {
+    it("rejects when neither dateTime nor duration provided", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
 
       const results = await executeActions(
@@ -763,7 +763,30 @@ describe("executeActions", () => {
       );
 
       expect(results[0].success).toBe(false);
-      expect(results[0].message).toContain("Missing dateTime");
+      expect(results[0].message).toContain("Missing dateTime or duration");
+    });
+
+    // Regression — "change it to 50 mins" was failing with "Missing dateTime"
+    // because update_time required dateTime even for duration-only edits.
+    it("accepts duration-only edit (no dateTime)", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
+      mockPrisma.user.findUnique.mockResolvedValue({ preferences: {} });
+
+      const results = await executeActions(
+        [{ action: "update_time", params: { sessionId: "session-1", duration: 50 } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(results[0].message).toContain("50 min");
+      expect(mockPrisma.negotiationSession.update).toHaveBeenCalledWith({
+        where: { id: "session-1" },
+        data: expect.objectContaining({ duration: 50 }),
+      });
+      expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
+        where: { id: "link-1" },
+        data: { rules: expect.objectContaining({ duration: 50 }) },
+      });
     });
 
     it("rejects invalid dateTime", async () => {

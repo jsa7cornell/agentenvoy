@@ -16,6 +16,7 @@ import {
   getDefaultsDurationMessages,
   getDefaultsBufferMessages,
   getCalendarRulesMessages,
+  getCalendarRulesCustomMessages,
   getCalendarEveningsMessages,
   getCompleteMessages,
   nextPhase,
@@ -24,6 +25,7 @@ import {
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { safeTimezone, getUserTimezone } from "@/lib/timezone";
 import { generateOnboardingCalendarRead } from "@/lib/calendar-read";
+import { logCalibrationWrite } from "@/lib/calibration-audit";
 
 interface UserPreferences {
   timezone?: string;
@@ -98,7 +100,26 @@ export async function GET() {
   }
 
   const result = getMessagesForPhase(phase, ctx);
+  // Persist the intro message only once per onboarding run so repeated GETs
+  // (page reloads during onboarding) don't stack duplicates.
+  const existingOnboardingCount = await countOnboardingMessages(user.id);
+  if (existingOnboardingCount === 0) {
+    for (const m of result.messages) {
+      if (m.content) await persistOnboardingTurn(user.id, "envoy", m.content);
+    }
+  }
   return NextResponse.json({ ...result, currentPhase: phase });
+}
+
+async function countOnboardingMessages(userId: string): Promise<number> {
+  const channel = await prisma.channel.findUnique({ where: { userId } });
+  if (!channel) return 0;
+  return await prisma.channelMessage.count({
+    where: {
+      channelId: channel.id,
+      metadata: { path: ["kind"], equals: "onboarding" },
+    },
+  });
 }
 
 /**
@@ -129,10 +150,22 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { phase: currentPhase, response } = body as {
+  const { phase: currentPhase, response, responseLabel } = body as {
     phase: OnboardingPhase;
     response?: string;
+    /** Human-readable version of `response` for quick-reply clicks (the label
+     *  the user actually saw). For freetext responses this is undefined and
+     *  `response` is used verbatim. */
+    responseLabel?: string;
   };
+
+  // Persist the user's turn to the channel so onboarding history survives
+  // page reload. Skip "auto" responses (client-side auto-advance pings) and
+  // empty responses. We intentionally persist BEFORE we process so that even
+  // an error path leaves the user's input visible in the transcript.
+  if (response && response !== "auto") {
+    await persistOnboardingTurn(user.id, "user", responseLabel || response);
+  }
 
   const prefs = (user.preferences as UserPreferences) || {};
   const explicit = prefs.explicit || {};
@@ -143,6 +176,7 @@ export async function POST(req: NextRequest) {
   // Track which conditional phases to skip
   let skipPhoneNumber = false;
   let skipZoomLink = false;
+  let skipCustomHours = false;
 
   const ctx: OnboardingContext = {
     userName: user.name || undefined,
@@ -157,13 +191,13 @@ export async function POST(req: NextRequest) {
       if (response === "change_tz") {
         advancing = false;
         result = getTimezonePickerMessages();
-        return NextResponse.json(result);
+        return await respondWithPersist(user.id, result);
       }
       if (response === "other_tz") {
         // Show free-text timezone input
         advancing = false;
         result = getTimezoneInputMessages();
-        return NextResponse.json(result);
+        return await respondWithPersist(user.id, result);
       }
       // Validate timezone — if invalid, ask again
       const selectedTz = response || tz;
@@ -176,7 +210,7 @@ export async function POST(req: NextRequest) {
           messages: [{ content: `"${response}" isn't a recognized timezone. Try the format **Continent/City** (e.g. America/New_York, Europe/Berlin).` }],
           placeholder: "America/New_York",
         };
-        return NextResponse.json(result);
+        return await respondWithPersist(user.id, result);
       }
       await updatePrefs(user.id, prefs, explicit, { timezone: validatedTz });
       ctx.detectedTimezone = validatedTz;
@@ -253,21 +287,64 @@ export async function POST(req: NextRequest) {
     }
 
     case "calendar_rules": {
+      if (response === "custom_hours") {
+        // Fall through to the freetext custom-hours phase without writing.
+        advancing = true;
+        break;
+      }
       const [startH, endH] = (response || "9-17").split("-").map(Number);
       const freshPrefs = await getFreshPrefs(user.id);
       await updatePrefs(user.id, freshPrefs.prefs, freshPrefs.explicit, {
         businessHoursStart: startH,
         businessHoursEnd: endH,
       });
+      skipCustomHours = true;
+      break;
+    }
+
+    case "calendar_rules_custom": {
+      const parsed = parseCustomBusinessHours(response || "");
+      if (!parsed) {
+        advancing = false;
+        result = {
+          phase: "calendar_rules_custom",
+          messages: [
+            {
+              content: `I couldn't parse "${response}". Try a format like "9am-5pm", "8:30 - 17:30", or "9-18".`,
+            },
+          ],
+          placeholder: "8:30am – 5:30pm",
+        };
+        return await respondWithPersist(user.id, result);
+      }
+      const freshPrefs = await getFreshPrefs(user.id);
+      // Scoring uses hour-granularity; round start down and end up so a
+      // "8:30 - 5:30pm" user still has their whole working window covered.
+      const startH = parsed.startH;
+      const endH = parsed.endMin && parsed.endMin > 0 ? parsed.endH + 1 : parsed.endH;
+      await updatePrefs(user.id, freshPrefs.prefs, freshPrefs.explicit, {
+        businessHoursStart: startH,
+        businessHoursEnd: Math.min(endH, 24),
+      });
       break;
     }
 
     case "calendar_evenings": {
-      // Save evening preference to knowledge
+      // Save evenings-and-early-mornings posture to knowledge. Three postures:
+      //   - protected: never offer outside business hours without explicit say-so
+      //   - vip_only:  protected by default, but OK to surface (with
+      //                confirmation) for VIP / high-priority guests
+      //   - open:      fine to offer evenings/early mornings freely
+      // Legacy "blocked" is treated as "protected" so older rows still load.
       const pk = user.persistentKnowledge || "";
       let entry = "";
-      if (response === "blocked") entry = "- Evenings: only offer evening meetings with host's explicit permission";
-      else if (response === "open") entry = "- Evenings are open for scheduling";
+      if (response === "protected" || response === "blocked") {
+        entry = "- Evenings and early mornings: protected — never offer outside normal business hours without the host's explicit direction.";
+      } else if (response === "vip_only") {
+        entry = "- Evenings and early mornings: protected by default, but for VIP or high-priority guests you may surface an out-of-hours slot as 'this is outside your normal hours — want me to offer it anyway?' Never include silently.";
+      } else if (response === "open") {
+        entry = "- Evenings and early mornings are open for scheduling.";
+      }
       if (entry) {
         await prisma.user.update({
           where: { id: user.id },
@@ -278,7 +355,7 @@ export async function POST(req: NextRequest) {
       await completeOnboarding(user.id);
       result = getCompleteMessages(ctx);
       await savePhase(user.id, "complete");
-      return NextResponse.json({ ...result, onboardingComplete: true });
+      return await respondWithPersist(user.id, result, { onboardingComplete: true });
     }
 
     case "complete": {
@@ -296,11 +373,14 @@ export async function POST(req: NextRequest) {
   if (next === "zoom_link" && skipZoomLink) {
     next = nextPhase("zoom_link");
   }
+  if (next === "calendar_rules_custom" && skipCustomHours) {
+    next = nextPhase("calendar_rules_custom");
+  }
 
   await savePhase(user.id, next);
 
   result = getMessagesForPhase(next, ctx);
-  return NextResponse.json(result);
+  return await respondWithPersist(user.id, result);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -314,6 +394,7 @@ function getMessagesForPhase(phase: OnboardingPhase, ctx: OnboardingContext): Ph
     case "defaults_duration": return getDefaultsDurationMessages();
     case "defaults_buffer": return getDefaultsBufferMessages();
     case "calendar_rules": return getCalendarRulesMessages();
+    case "calendar_rules_custom": return getCalendarRulesCustomMessages();
     case "calendar_evenings": return getCalendarEveningsMessages();
     case "complete": return getCompleteMessages(ctx);
     default: return getIntroMessages(ctx);
@@ -354,11 +435,107 @@ async function updatePrefs(
   });
 }
 
+/**
+ * Parse freetext business-hours input into integer hour boundaries +
+ * optional minute offsets. Returns null if the input can't be understood.
+ *
+ * Accepted:
+ *   "9-17", "9 - 18"
+ *   "9am-5pm", "9 AM – 6 PM"
+ *   "8:30am-5:30pm", "8:30 - 17:30"
+ */
+export function parseCustomBusinessHours(input: string): {
+  startH: number;
+  endH: number;
+  startMin?: number;
+  endMin?: number;
+} | null {
+  const cleaned = input.trim().toLowerCase().replace(/\s+/g, "");
+  // Split on common range separators
+  const parts = cleaned.split(/–|—|-|to/).filter(Boolean);
+  if (parts.length !== 2) return null;
+  const start = parseClockTime(parts[0]);
+  const end = parseClockTime(parts[1], start);
+  if (!start || !end) return null;
+  if (end.hour === 0 && end.minute === 0) return null; // nonsensical
+  if (end.hour < start.hour || (end.hour === start.hour && end.minute <= start.minute)) {
+    return null;
+  }
+  return {
+    startH: start.hour,
+    endH: end.hour,
+    startMin: start.minute || undefined,
+    endMin: end.minute || undefined,
+  };
+}
+
+function parseClockTime(
+  token: string,
+  startCtx?: { hour: number; minute: number } | null
+): { hour: number; minute: number } | null {
+  const m = token.match(/^(\d{1,2})(?::(\d{2}))?(am|pm)?$/);
+  if (!m) return null;
+  let hour = parseInt(m[1], 10);
+  const minute = m[2] ? parseInt(m[2], 10) : 0;
+  const suffix = m[3];
+  if (hour > 24 || minute > 59) return null;
+  if (suffix === "am") {
+    if (hour === 12) hour = 0;
+  } else if (suffix === "pm") {
+    if (hour < 12) hour += 12;
+  } else if (startCtx && hour < startCtx.hour) {
+    // Unsuffixed end that looks earlier than start → probably PM. ("9-5" → 9-17)
+    if (hour + 12 <= 24) hour += 12;
+  }
+  if (hour > 24) return null;
+  return { hour, minute };
+}
+
+/**
+ * Persist one onboarding turn as a ChannelMessage so history survives page
+ * reload and reviewing past settings decisions is possible. Metadata tags
+ * kind="onboarding" so the client can filter/collapse if needed.
+ */
+async function persistOnboardingTurn(
+  userId: string,
+  role: "user" | "envoy",
+  content: string,
+) {
+  let channel = await prisma.channel.findUnique({ where: { userId } });
+  if (!channel) channel = await prisma.channel.create({ data: { userId } });
+  await prisma.channelMessage.create({
+    data: {
+      channelId: channel.id,
+      role,
+      content,
+      metadata: { kind: "onboarding" },
+    },
+  });
+}
+
+/**
+ * Shared exit point for onboarding handlers: persist the envoy messages
+ * we're about to return, then emit the JSON response. The user's prior
+ * turn was already persisted at the top of POST.
+ */
+async function respondWithPersist(
+  userId: string,
+  result: PhaseResult,
+  extras: Record<string, unknown> = {},
+) {
+  for (const m of result.messages) {
+    if (m.content) await persistOnboardingTurn(userId, "envoy", m.content);
+  }
+  return NextResponse.json({ ...result, ...extras });
+}
+
 async function completeOnboarding(userId: string) {
+  const now = new Date();
+  logCalibrationWrite({ userId, value: now, source: "onboarding-complete" });
   await prisma.user.update({
     where: { id: userId },
     data: {
-      lastCalibratedAt: new Date(),
+      lastCalibratedAt: now,
       onboardingPhase: "complete",
     },
   });

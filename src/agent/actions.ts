@@ -7,6 +7,7 @@ import { normalizeLinkRules } from "@/lib/scoring";
 import { createTentativeHoldEvent, deleteCalendarEvent } from "@/lib/calendar";
 import { parseTimeOfDay, TIME_OF_DAY_WINDOWS } from "@/lib/time-of-day";
 import { sanitizeHostFlavor, sanitizeSuggestionList } from "@/lib/host-flavor-sanitizer";
+import { logCalibrationWrite } from "@/lib/calibration-audit";
 
 // --- Helpers ---
 
@@ -471,27 +472,56 @@ async function handleUpdateTime(
   if (!("session" in auth)) return auth;
   const { session } = auth;
 
-  const dateTime = params.dateTime as string;
-  if (!dateTime) {
-    return { success: false, message: "Missing dateTime parameter" };
+  const dateTime = params.dateTime as string | undefined;
+  const durationRaw = params.duration !== undefined && params.duration !== null
+    ? Number(params.duration)
+    : undefined;
+  const duration = durationRaw !== undefined && !isNaN(durationRaw) ? durationRaw : undefined;
+
+  // Accept dateTime OR duration — duration-only edits ("change it to 50 min")
+  // must not require a new start time. At least one must be present.
+  if (!dateTime && duration === undefined) {
+    return { success: false, message: "Missing dateTime or duration parameter" };
   }
 
-  const parsed = new Date(dateTime);
-  if (isNaN(parsed.getTime())) {
+  const parsed = dateTime ? new Date(dateTime) : null;
+  if (parsed && isNaN(parsed.getTime())) {
     return { success: false, message: `Invalid dateTime: ${dateTime}` };
   }
 
   // For confirmed meetings already on GCal, propose via UI card.
   if (session.calendarEventId && session.status === "agreed" && !session.archived) {
-    const duration = params.duration ? Number(params.duration) : undefined;
-    const endTime = duration
+    const endTime = parsed && duration !== undefined
       ? new Date(parsed.getTime() + duration * 60 * 1000)
       : undefined;
     return await postGcalUpdateProposal(session, userId, {
-      startTime: parsed.toISOString(),
-      endTime: endTime?.toISOString(),
-      duration,
+      ...(parsed ? { startTime: parsed.toISOString() } : {}),
+      ...(endTime ? { endTime: endTime.toISOString() } : {}),
+      ...(duration !== undefined ? { duration } : {}),
     });
+  }
+
+  // Duration-only edit on a non-confirmed session: no re-propose, just mirror
+  // the duration through link.rules + post a system message. Leave status alone.
+  if (!parsed && duration !== undefined) {
+    await prisma.negotiationSession.update({
+      where: { id: session.id },
+      data: { duration },
+    });
+    await patchLinkRulesForContextual(session.link, { duration });
+    await prisma.message.create({
+      data: {
+        sessionId: session.id,
+        role: "system",
+        content: `Duration updated to ${duration} min`,
+        metadata: { kind: "host_update", field: "duration" },
+      },
+    });
+    return {
+      success: true,
+      message: `Updated duration to ${duration} min`,
+      data: { sessionId: session.id, duration },
+    };
   }
 
   const updateData: Record<string, unknown> = {
@@ -499,7 +529,7 @@ async function handleUpdateTime(
     statusLabel: "Time change proposed by host",
   };
 
-  if (params.duration) updateData.duration = Number(params.duration);
+  if (duration !== undefined) updateData.duration = duration;
   // NOTE: params.timezone from the LLM is deliberately IGNORED.
   // The host's canonical timezone is looked up from stored preferences.
   const host = await prisma.user.findUnique({
@@ -515,16 +545,16 @@ async function handleUpdateTime(
   // Mirror duration into link.rules.duration for contextual links so the
   // greeting template + confirm card reflect it. Same reason as format /
   // location — link.rules wins the precedence chain.
-  if (params.duration) {
-    await patchLinkRulesForContextual(session.link, {
-      duration: Number(params.duration),
-    });
+  if (duration !== undefined) {
+    await patchLinkRulesForContextual(session.link, { duration });
   }
 
   // Save a system message so the guest sees the proposal
-  const durationStr = params.duration ? ` (${params.duration} min)` : "";
-  const tzLabel = ` ${shortTimezoneLabel(hostTz, parsed)}`;
-  const timeStr = parsed.toLocaleString("en-US", {
+  const durationStr = duration !== undefined ? ` (${duration} min)` : "";
+  // parsed is guaranteed here: the duration-only branch above returned early.
+  const nonNullParsed = parsed as Date;
+  const tzLabel = ` ${shortTimezoneLabel(hostTz, nonNullParsed)}`;
+  const timeStr = nonNullParsed.toLocaleString("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -914,7 +944,9 @@ async function handleUpdateKnowledge(
   const updateData: Record<string, unknown> = {};
   if (persistent !== undefined) updateData.persistentKnowledge = persistent;
   if (situational !== undefined) updateData.upcomingSchedulePreferences = situational;
-  updateData.lastCalibratedAt = new Date();
+  const calibratedAt = new Date();
+  logCalibrationWrite({ userId, value: calibratedAt, source: "agent-update-knowledge" });
+  updateData.lastCalibratedAt = calibratedAt;
 
   // Merge blocked windows + currentLocation into preferences.explicit
   if ((blockedWindows && blockedWindows.length > 0) || currentLocation !== undefined) {

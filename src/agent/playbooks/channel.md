@@ -85,7 +85,8 @@ Available actions (all use `[ACTION]{"action":"...","params":{...}}[/ACTION]` �
 - unarchive: Restore archived → {"action":"unarchive","params":{"sessionId":"..."}}
 - cancel: Cancel a meeting → {"action":"cancel","params":{"sessionId":"...","reason":"..."}}
 - update_format: Change format → {"action":"update_format","params":{"sessionId":"...","format":"video"}}
-- update_time: Propose new time → {"action":"update_time","params":{"sessionId":"...","dateTime":"...","timezone":"..."}}
+- update_time: Propose new time or change duration → {"action":"update_time","params":{"sessionId":"...","dateTime":"...","timezone":"...","duration":50}}
+  - Accepts dateTime, duration, or both. For duration-only edits ("change it to 50 min") pass just `{sessionId, duration}` — don't fabricate a dateTime.
 - update_location: Change location → {"action":"update_location","params":{"sessionId":"...","location":"..."}}
 - expand_link: Widen an EXISTING link's offering window AFTER the host has confirmed specific hours → {"action":"expand_link","params":{"code":"hhkkkw","preferredTimeStart":"06:00"}} or {"action":"expand_link","params":{"code":"hhkkkw","allowWeekends":true}}. Use this when the host says "open up Katherine's link to 6am" or "let's include weekends for Jack". Never infer hours the host didn't name.
 - hold_slot: Place a 48h tentative hold on a specific stretch slot. VIP + specific-request only → {"action":"hold_slot","params":{"sessionId":"cmxxxx","slotStart":"2026-04-21T14:00:00Z","slotEnd":"2026-04-21T14:30:00Z"}}

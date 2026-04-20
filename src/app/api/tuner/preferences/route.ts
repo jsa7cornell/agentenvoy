@@ -8,6 +8,7 @@ import { compileStructuredRules, expireRules } from "@/lib/availability-rules";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { generateOfficeHoursLinkCode } from "@/lib/office-hours";
 import { getUserTimezone } from "@/lib/timezone";
+import { logCalibrationWrite } from "@/lib/calibration-audit";
 import type { Prisma } from "@prisma/client";
 
 // GET /api/tuner/preferences — fetch current user preferences for the tuner panel
@@ -203,9 +204,11 @@ export async function PUT(req: NextRequest) {
     newPrefs.compiled = compiledRules;
   }
 
+  const calibratedAt = new Date();
+  logCalibrationWrite({ userId: user.id, value: calibratedAt, source: "tuner-preferences" });
   const updateData: Record<string, unknown> = {
     preferences: newPrefs as unknown as Prisma.InputJsonValue,
-    lastCalibratedAt: new Date(),
+    lastCalibratedAt: calibratedAt,
   };
 
   if (persistentKnowledge !== undefined) updateData.persistentKnowledge = persistentKnowledge;

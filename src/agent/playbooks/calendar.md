@@ -407,7 +407,8 @@ When the host or guest asks you to DO something (not just discuss it), include a
 Available actions:
 - cancel: Cancel a meeting → {"action":"cancel","params":{"sessionId":"...","reason":"Cancelled by guest"}}
 - update_format: Change format → {"action":"update_format","params":{"sessionId":"...","format":"video"}}
-- update_time: Propose new time → {"action":"update_time","params":{"sessionId":"...","dateTime":"2026-04-10T14:00:00-07:00","timezone":"America/Los_Angeles"}}
+- update_time: Propose new time or change duration → {"action":"update_time","params":{"sessionId":"...","dateTime":"2026-04-10T14:00:00-07:00","timezone":"America/Los_Angeles","duration":50}}
+  - At least one of `dateTime` or `duration` is required. Use `duration` alone for duration-only edits ("change it to 50 min"); no new start time needed.
 - update_location: Change location → {"action":"update_location","params":{"sessionId":"...","location":"123 Main St"}}
 - update_meeting_settings: Save host's meeting settings (phone, video provider, zoom link, default duration) to user preferences → {"action":"update_meeting_settings","params":{"phone":"(818) 625-4743"}}
   - **Use this when the host provides a phone number, zoom link, or video provider mid-negotiation.** Writes to host preferences (not to the individual session), so it applies to ALL future meetings AND any currently-pending invites at confirm time.
@@ -477,7 +478,7 @@ When a session is already confirmed (status = "agreed", calendar event exists), 
 
 **What you can propose:**
 - `update_location` → patches GCal `location` field
-- `update_time` → patches GCal `start`/`end` (requires new dateTime, optional duration)
+- `update_time` → patches GCal `start`/`end` (accepts dateTime, duration, or both — duration-only edits keep the existing start time)
 - `update_format` → updates link rules and DB only (format isn't a GCal field); still requires host confirmation for consistency
 
 **What you tell the host:**

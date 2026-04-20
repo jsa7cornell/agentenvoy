@@ -144,6 +144,23 @@ export default function Feed() {
           return;
         }
 
+        // If we already loaded persisted onboarding history from the channel,
+        // don't re-add the current-phase messages — just sync phase + options.
+        // Otherwise we'd duplicate the last turn on every reload.
+        const hasPersistedHistory = messages.some(
+          (m) => (m.metadata as { kind?: string } | null)?.kind === "onboarding"
+        );
+        if (hasPersistedHistory) {
+          setOnboardingPhase(data.phase);
+          setInputPlaceholder(data.placeholder || null);
+          const lastMsg = data.messages?.[data.messages.length - 1];
+          if (lastMsg?.options?.length > 0) {
+            setActiveOptions(lastMsg.options);
+            setOptionsLocked(false);
+          }
+          return;
+        }
+
         processOnboardingResult(data);
       } catch (e) {
         console.error("Failed to initialize onboarding:", e);
@@ -176,7 +193,11 @@ export default function Feed() {
         // "watch what happens..." message first, then Envoy creates the demo
         // invite in front of their eyes.
         setTimeout(() => {
-          pendingSendRef.current = "Schedule a 5-minute introductory video call with John Abramson, founder of AgentEnvoy, at my next available time. Make the topic a quick meet & greet.";
+          // Tone note: phrase this as a concrete, completed-sounding request
+          // so the LLM's reply is a short acknowledgement ("Ok, here's the
+          // invite I drafted for John — [slot/link]. Let me know any tweaks.")
+          // rather than a performative recap of what it's about to do.
+          pendingSendRef.current = "Draft a 5-minute meet & greet video call with John Anderson, founder of AgentEnvoy, at my next available time. Keep your reply short — just confirm the draft with the time + link and invite tweaks.";
           setInput(pendingSendRef.current);
         }, 2500);
         return;
@@ -265,7 +286,7 @@ export default function Feed() {
     if (optionsLocked || !onboardingPhase) return;
     addUserMessage(label);
     setActiveOptions(null);
-    advanceOnboarding(onboardingPhase, value);
+    advanceOnboarding(onboardingPhase, value, { responseLabel: label });
   }
 
   // Auto-send after post-onboarding quick reply sets the input

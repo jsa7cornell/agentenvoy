@@ -1,0 +1,62 @@
+# AgentEnvoy
+
+> AgentEnvoy is a scheduling surface for humans and AI agents. Hosts publish
+> meeting URLs ("links"); guests — or guests' AI agents — negotiate a mutually
+> workable slot through a deal-room thread and book it on the host's calendar.
+> Every booking runs through the host's declared availability rules (score
+> engine, office hours, blocked windows, format filters) rather than a naive
+> "free = bookable" calendar check.
+
+For AI agents scheduling on behalf of a principal: use the Model Context
+Protocol (MCP) server rather than the web UI. Discovery manifest:
+
+  https://agentenvoy.ai/.well-known/mcp.json
+
+The MCP endpoint is at `/api/mcp` (Streamable HTTP transport, stateless mode).
+Every tool takes a `meetingUrl` argument — the URL the host gave to your
+principal (e.g. `https://agentenvoy.ai/meet/abc123`). Possession of that URL
+is authorization; there is no separate token exchange.
+
+## MCP tools
+
+- `get_meeting_parameters` — read the state envelope for every negotiable
+  parameter on a link (format, duration, location, timezone). Tells your
+  agent which values are locked, which are open for the guest to pick, and
+  which need host consent.
+- `get_availability` — read the host's scored, filtered slot list. Each slot
+  comes with a `tier` (`first_offer` / `stretch1` / `stretch2`) indicating
+  how hard it is for the host to take — use `first_offer` slots by default,
+  negotiate into stretches only if needed.
+- `get_session_status` — read the current state of a negotiation (active /
+  agreed / cancelled / rescheduled / expired) plus reschedule history and
+  pending consent requests.
+- `post_message` — post a message to the deal-room thread on your
+  principal's behalf. The Host Envoy (the host's AI) may reply.
+- `propose_parameters` — propose format / duration / location changes. Each
+  field is evaluated independently — a rejection on one does not kill the
+  batch. Use `action: "defer_to_host_envoy"` when you want the host's AI to
+  decide rather than the link's rules.
+- `propose_lock` — the booking handshake. Pass the chosen slot + guest info;
+  the server validates, compare-and-swaps the session to `agreed`, and
+  dispatches the calendar invite + confirmation email.
+- `cancel_meeting`, `reschedule_meeting` — lifecycle tools for previously
+  agreed meetings. (In development at time of writing — check the manifest.)
+
+## Principles
+
+1. **URL-as-capability-token.** The meeting URL IS the bearer. Don't share
+   it outside the guest-agent chain it was delegated to.
+2. **Ground-truth calendar.** Every availability read is the host's actual
+   scored schedule filtered through the link rules — what the UI widget
+   shows, your agent sees.
+3. **Envoy-to-Envoy negotiation.** When the host's AI and the guest's AI
+   disagree, the deal-room thread is the audit log. Everything that lands
+   in `propose_lock` has a paper trail.
+4. **Per-tool rate limits.** Read-only tools fail open; write tools fail
+   closed with `retryAfterSeconds`. See `/.well-known/mcp.json`.
+
+## For humans
+
+AgentEnvoy's web UI lives at https://agentenvoy.ai — hosts sign in, connect
+Google Calendar, and publish links. This `llms.txt` is for the agents your
+guests send on their behalf.

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeTimezone } from "@/lib/timezone";
+import { logCalibrationWrite } from "@/lib/calibration-audit";
 
 /**
  * Dev-only endpoint for onboarding testing.
@@ -27,9 +28,12 @@ export async function POST(req: NextRequest) {
 
   // Mark user as calibrated (skip onboarding) — used by dev-login
   if (mode === "calibrate") {
+    const calibratedAt = new Date();
+    const u = await prisma.user.findUnique({ where: { email: session.user.email }, select: { id: true } });
+    if (u) logCalibrationWrite({ userId: u.id, value: calibratedAt, source: "debug-calibrate" });
     await prisma.user.update({
       where: { email: session.user.email },
-      data: { lastCalibratedAt: new Date() },
+      data: { lastCalibratedAt: calibratedAt },
     });
     return NextResponse.json({ success: true, message: "User marked as calibrated." });
   }
@@ -50,6 +54,7 @@ export async function POST(req: NextRequest) {
       const timezone = safeTimezone(explicit.timezone as string);
 
       // Clear calibration + onboarding state
+      logCalibrationWrite({ userId: user.id, value: null, source: "debug-reset" });
       await prisma.user.update({
         where: { id: user.id },
         data: {
