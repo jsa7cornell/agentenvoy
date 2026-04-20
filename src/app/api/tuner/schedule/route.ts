@@ -155,6 +155,7 @@ function serializeEvent(
     isTransparent: e.isTransparent,
     eventType: e.eventType,
     htmlLink: e.htmlLink,
+    attendeeRollup: e.attendeeRollup,
     /** Host-set protection override score (0=Open, 3=Protected, 5=Blocked). Undefined if Auto. */
     protectionOverride: override?.score,
     protectionOverrideScope: override?.scope,

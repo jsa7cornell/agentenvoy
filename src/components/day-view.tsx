@@ -17,6 +17,7 @@ import {
   formatDayHeader,
   layoutEvents,
 } from "@/lib/calendar-utils";
+import { AttendeeStatusIcon } from "@/components/attendee-status-icon";
 
 interface DayViewProps {
   events: TunerEvent[];
@@ -279,8 +280,17 @@ export function DayView({
                   style={{ top, height, width, left }}
                 >
                   <div className="px-1.5 py-0.5">
-                    <div className="text-[10px] font-medium text-primary truncate leading-tight">
-                      {ev.summary}
+                    <div className="flex items-start gap-1">
+                      <div className="text-[10px] font-medium text-primary truncate leading-tight flex-1 min-w-0">
+                        {ev.summary}
+                      </div>
+                      {ev.attendeeRollup && (
+                        <AttendeeStatusIcon
+                          rollup={ev.attendeeRollup}
+                          size={10}
+                          className="flex-shrink-0 mt-[1px]"
+                        />
+                      )}
                     </div>
                     {primaryCalendar && ev.calendar && ev.calendar !== primaryCalendar && (
                       <div className="text-[9px] text-muted truncate italic">{ev.calendar}</div>

@@ -1,6 +1,7 @@
 import { google, calendar_v3 } from "googleapis";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
+import { rollupAttendeeStatus, type AttendeeRollup } from "./attendee-rollup";
 
 // --- Calendar Provider Abstraction ---
 
@@ -35,6 +36,10 @@ export interface CalendarEvent {
   /** Google Calendar deep-link to the event (`htmlLink` from the API). Lets the
    *  UI render a "View in Google Calendar" jump. */
   htmlLink?: string;
+  /** Rolled-up RSVP state of non-host attendees. Drives the little person
+   *  icon on the weekly-calendar tile. See lib/attendee-rollup.ts for the
+   *  precedence rules. Null when there are no other attendees. */
+  attendeeRollup?: AttendeeRollup | null;
 }
 
 export interface CreateEventParams {
@@ -130,6 +135,7 @@ class GoogleCalendarProvider implements CalendarProvider {
               recurringEventId: ev.recurringEventId || undefined,
               isTransparent: ev.transparency === "transparent",
               htmlLink: ev.htmlLink || undefined,
+              attendeeRollup: rollupAttendeeStatus(ev.attendees, this.hostEmail),
             } as CalendarEvent;
           });
         } catch (e) {
@@ -407,6 +413,7 @@ interface StoredCalendarEvent {
   isTransparent?: boolean;
   eventType?: string;
   htmlLink?: string;
+  attendeeRollup?: AttendeeRollup | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -610,6 +617,7 @@ async function fullSync(
         isTransparent: ev.transparency === "transparent",
         eventType: evType,
         htmlLink: ev.htmlLink || undefined,
+        attendeeRollup: rollupAttendeeStatus(ev.attendees, hostEmail),
       });
     }
 
@@ -688,6 +696,7 @@ async function incrementalSync(
           isTransparent: ev.transparency === "transparent",
           eventType: evType,
           htmlLink: ev.htmlLink || undefined,
+          attendeeRollup: rollupAttendeeStatus(ev.attendees, hostEmail),
         });
         changedIds.add(ev.id!);
       }

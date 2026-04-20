@@ -19,6 +19,7 @@ import {
   layoutEvents,
 } from "@/lib/calendar-utils";
 import { shortTimezoneLabel } from "@/lib/timezone";
+import { AttendeeStatusIcon } from "@/components/attendee-status-icon";
 
 export interface TunerEvent {
   id: string;
@@ -45,6 +46,9 @@ export interface TunerEvent {
   /** Google Calendar deep-link — used by the event-click popup to offer a
    *  "View in Google Calendar" jump. */
   htmlLink?: string;
+  /** Rolled-up RSVP state of non-host attendees; drives the small person
+   *  icon on the tile. See lib/attendee-rollup.ts. */
+  attendeeRollup?: "accepted" | "declined" | "pending" | null;
 }
 
 export interface TunerSlot {
@@ -528,8 +532,17 @@ export function WeeklyCalendar({
                       style={{ top, height, width, left }}
                     >
                       <div className="px-1.5 py-0.5">
-                        <div className="text-[10px] font-medium text-primary truncate leading-tight">
-                          {ev.summary}
+                        <div className="flex items-start gap-1">
+                          <div className="text-[10px] font-medium text-primary truncate leading-tight flex-1 min-w-0">
+                            {ev.summary}
+                          </div>
+                          {ev.attendeeRollup && (
+                            <AttendeeStatusIcon
+                              rollup={ev.attendeeRollup}
+                              size={10}
+                              className="flex-shrink-0 mt-[1px]"
+                            />
+                          )}
                         </div>
                         {primaryCalendar && ev.calendar && ev.calendar !== primaryCalendar && (
                           <div className="text-[9px] text-muted truncate italic">{ev.calendar}</div>
