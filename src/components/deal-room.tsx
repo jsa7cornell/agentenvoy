@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AvailabilityCalendar } from "./availability-calendar";
+import { MatchPulse } from "./match-pulse";
 import { DashboardHeader } from "./dashboard-header";
 import { PublicHeader } from "./public-header";
 import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
@@ -134,6 +135,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // guest whose calendar is connected. When absent, no chips render and the
   // existing host-only availability widget carries the interaction load.
   const [bilateralByDay, setBilateralByDay] = useState<Record<string, TimeChipData[]> | null>(null);
+  // T4: one-shot trigger for MatchPulse. Flips true on the render cycle
+  // when bilateralByDay first becomes non-empty, then resets next tick.
+  const [justMatched, setJustMatched] = useState(false);
+  const prevHadMatchRef = useRef(false);
 
   // TZ recovery banner state (Slice 7). When someone raced ahead of the human
   // guest — host, MCP agent, or a proxy — the session's guestTimezone ends up
@@ -307,6 +312,20 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         window.history.replaceState({}, "", url.pathname + url.search);
       });
   }, [sessionId]);
+
+  // T4: detect bilateralByDay empty → non-empty transition and fire the
+  // MatchPulse one-shot. Reset justMatched immediately so the next render
+  // doesn't re-fire the animation.
+  useEffect(() => {
+    const hasMatchNow = !!bilateralByDay && Object.keys(bilateralByDay).length > 0;
+    if (hasMatchNow && !prevHadMatchRef.current) {
+      setJustMatched(true);
+      const t = setTimeout(() => setJustMatched(false), 50);
+      prevHadMatchRef.current = true;
+      return () => clearTimeout(t);
+    }
+    if (!hasMatchNow) prevHadMatchRef.current = false;
+  }, [bilateralByDay]);
 
   // Fetch Google Calendar event status for confirmed meetings (host only).
   useEffect(() => {
@@ -1354,9 +1373,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     return (
       <div key={keyPrefix} className="flex justify-start">
         <div className="max-w-[85%] w-full min-w-0 rounded-2xl px-3 py-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
-          <div className="text-[10px] font-bold uppercase tracking-wider mb-2 text-emerald-400">
-            Envoy
-          </div>
+          <MatchPulse
+            justMatched={justMatched}
+            matchCount={bilateralByDay ? Object.values(bilateralByDay).reduce((n, v) => n + v.length, 0) : 0}
+            enabled={!isHost && !confirmed}
+            defaultLabel="Envoy"
+          >
           <AvailabilityCalendar
             view="week"
             slotsByDay={slotsByDay || {}}
@@ -1373,6 +1395,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             }}
             headerSlot={headerSlot}
           />
+          </MatchPulse>
         </div>
       </div>
     );
