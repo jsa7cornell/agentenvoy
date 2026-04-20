@@ -4,6 +4,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { DashboardHeader } from "@/components/dashboard-header";
+import { ScopeInterstitial } from "@/components/oauth/scope-interstitial";
 
 export default function DashboardLayout({
   children,
@@ -30,6 +31,7 @@ export default function DashboardLayout({
   return (
     <div className="flex-1 min-h-0 bg-surface text-primary flex flex-col overflow-hidden">
       <DashboardHeader />
+      <ScopeInterstitial />
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {children}
       </div>

@@ -25,6 +25,11 @@ import { prisma } from "@/lib/prisma";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { deleteCalendarEvent } from "@/lib/calendar";
 import { checkSchemaDrift, formatDriftSummary } from "@/lib/schema-drift";
+import {
+  getGoogleCalendarClient,
+  isDeadGoogleAuthError,
+  clearGoogleRefreshToken,
+} from "@/lib/calendar";
 import { checkEnvDrift, formatEnvDriftSummary } from "@/lib/env-drift";
 import { logRouteError } from "@/lib/route-error";
 import { buildDevStatsEmail } from "@/lib/emails/dev-stats";
@@ -67,6 +72,9 @@ export async function GET(req: NextRequest) {
   // ───────── Phase 5: 24h meeting reminders ─────────
   const remindersResult = await runMeetingReminders(ranAt);
 
+  // ───────── Phase 6: revoked-token probe ─────────
+  const revocationResult = await runRevocationProbe();
+
   return NextResponse.json({
     ranAt: ranAt.toISOString(),
     holds: holdsResult,
@@ -74,7 +82,69 @@ export async function GET(req: NextRequest) {
     envDrift: envResult,
     devStats: statsResult,
     reminders: remindersResult,
+    revocations: revocationResult,
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 6 — daily revoked-token sweep (T3b)
+//
+// Hosts can revoke AgentEnvoy's access from Google's account page at any
+// time; we don't get a webhook for it. Without this probe, the dashboard
+// keeps reporting `connected: true` until the next time the user takes an
+// action that hits Google. One freebusy.query per host per day is cheap
+// (~1 quota unit each) and surfaces the dead state proactively.
+//
+// On a confirmed dead-token error we clear the refresh_token row, which
+// flips `/api/connections/status` to `connected: false` and triggers the
+// dashboard's existing "Connect calendar" badge. The next sign-in attempt
+// will go through the pre-consent explainer (T2) and re-grant scopes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runRevocationProbe(): Promise<{
+  scanned: number;
+  revoked: number;
+  errors: string[];
+}> {
+  const accounts = await prisma.account.findMany({
+    where: { provider: "google", refresh_token: { not: null } },
+    select: { userId: true },
+  });
+
+  let revoked = 0;
+  const errors: string[] = [];
+
+  for (const { userId } of accounts) {
+    try {
+      const calendar = await getGoogleCalendarClient(userId);
+      // Tiny window — we only care whether the token still works.
+      const now = new Date();
+      await calendar.freebusy.query({
+        requestBody: {
+          timeMin: now.toISOString(),
+          timeMax: new Date(now.getTime() + 60_000).toISOString(),
+          items: [{ id: "primary" }],
+        },
+      });
+    } catch (e) {
+      if (isDeadGoogleAuthError(e)) {
+        try {
+          await clearGoogleRefreshToken(userId);
+          revoked += 1;
+        } catch (clearErr) {
+          errors.push(
+            `clear ${userId}: ${clearErr instanceof Error ? clearErr.message : String(clearErr)}`,
+          );
+        }
+      } else {
+        errors.push(
+          `probe ${userId}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+  }
+
+  return { scanned: accounts.length, revoked, errors };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
