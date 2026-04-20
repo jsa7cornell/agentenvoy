@@ -106,6 +106,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [emailWarning, setEmailWarning] = useState<string | null>(null);
   const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarDenied, setCalendarDenied] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -270,7 +271,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   useEffect(() => {
     if (!sessionId || typeof window === "undefined") return;
     const url = new URL(window.location.href);
-    if (url.searchParams.get("calendarConnected") !== "true") return;
+    const cc = url.searchParams.get("calendarConnected");
+    if (cc === "denied") {
+      setCalendarDenied(true);
+      url.searchParams.delete("calendarConnected");
+      window.history.replaceState({}, "", url.pathname + url.search);
+      return;
+    }
+    if (cc !== "true") return;
     fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -1264,6 +1272,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     const headerSlot = (() => {
       if (isHost || isGuest || confirmed || anonCalCtaDismissed || !sessionId) return null;
       if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
+      if (calendarDenied) {
+        return (
+          <div className="mb-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-200 leading-snug">
+            We didn&apos;t get permission to read your calendar — that&apos;s okay,
+            you can still pick from the times below.
+          </div>
+        );
+      }
 
       return (
         <DealRoomConnectCtas
@@ -1988,6 +2004,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (isHost || isGuest || confirmed || anonCalCtaDismissed || !sessionId) return null;
             if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
             if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
+            if (calendarDenied) {
+              return (
+                <div className="md:hidden border-b border-secondary flex-shrink-0 px-4 py-2 text-[11px] text-amber-200 bg-amber-500/10 leading-snug">
+                  We didn&apos;t get permission to read your calendar — that&apos;s
+                  okay, pick a time below.
+                </div>
+              );
+            }
 
             return (
               <DealRoomConnectCtas

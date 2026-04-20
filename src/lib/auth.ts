@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import { google } from "googleapis";
 import { prisma } from "./prisma";
 import { dispatchWelcomeEmailOnce } from "@/lib/emails/welcome";
+import { HOST_REQUIRED, auditScopes } from "@/lib/oauth/required-scopes";
 
 // Dev-only credentials provider — NEVER available in production
 const devProvider =
@@ -87,6 +88,18 @@ export const authOptions: NextAuthOptions = {
       // fixes that by updating the Account record with fresh credentials
       // every time the user signs in via Google.
       if (account?.provider === "google" && account.providerAccountId) {
+        // Scope audit (T3a): log partial-permission grants so we have a
+        // single signal for telemetry and the dashboard interstitial can
+        // surface a reconnect prompt. We never reject the sign-in — half
+        // permissions are still useful; the host just won't be able to
+        // write events until they upgrade. (Q5 / T3c — degrade not block.)
+        const audit = auditScopes(account.scope, HOST_REQUIRED);
+        if (!audit.satisfied) {
+          console.warn(
+            `[signIn] host scope audit: missing ${audit.missingRequired.join(",")} for ${account.providerAccountId}`,
+          );
+        }
+
         try {
           await prisma.account.updateMany({
             where: {
@@ -106,6 +119,18 @@ export const authOptions: NextAuthOptions = {
           console.error("[signIn] Failed to update Google account tokens:", e);
           // Don't block sign-in — stale tokens are better than no sign-in
         }
+      }
+
+      // T3b: when host granted partial permissions (write scope missing),
+      // route them to the dashboard with `?scopeMissing=calendar.events` so
+      // the interstitial surfaces a reconnect action immediately. Returning
+      // a URL string from `signIn` overrides callbackUrl per NextAuth v4.
+      if (
+        account?.provider === "google" &&
+        account.scope &&
+        !account.scope.includes("https://www.googleapis.com/auth/calendar.events")
+      ) {
+        return "/dashboard?scopeMissing=calendar.events";
       }
 
       return true;

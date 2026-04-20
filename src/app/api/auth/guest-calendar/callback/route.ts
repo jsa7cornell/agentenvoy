@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import type { ScoredSlot } from "@/lib/scoring";
 import { dispatchGuestFlowWelcomeEmailOnce } from "@/lib/emails/guest-flow-welcome";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
+import { GUEST_REQUIRED, auditScopes } from "@/lib/oauth/required-scopes";
 
 // GET /api/auth/guest-calendar/callback?code=xxx&state=xxx
 //
@@ -225,6 +226,13 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // === Scope audit ===
+  // If the guest unticked calendar.readonly on Google's consent screen, we
+  // can't run freebusy at all — surface a denied banner in the deal room
+  // instead of falsely claiming we connected.
+  const scopeAudit = auditScopes(tokens.scope, GUEST_REQUIRED);
+  const calendarReadDenied = !scopeAudit.satisfied;
+
   // === Guest freebusy → bilateral slots (legacy, preserved) ===
   const calendar = google.calendar({ version: "v3", auth: oauth2Client });
   const now = new Date();
@@ -234,8 +242,12 @@ export async function GET(req: NextRequest) {
   // humanSummary feeds the LLM's conversational context.
   const scoredSlots: ScoredSlot[] = [];
   const humanLabels: string[] = [];
+  let freebusyFailed = false;
 
   try {
+    if (calendarReadDenied) {
+      throw new Error("calendar.readonly scope not granted");
+    }
     const { data } = await calendar.freebusy.query({
       requestBody: {
         timeMin: now.toISOString(),
@@ -287,8 +299,11 @@ export async function GET(req: NextRequest) {
       current.setMinutes(current.getMinutes() + 30);
     }
   } catch (e) {
+    freebusyFailed = true;
     console.error("Guest freebusy error:", e);
   }
+
+  const denied = calendarReadDenied || freebusyFailed;
 
   // One message carries both surfaces — text for LLM context, metadata for
   // the slots endpoint's bilateral compute.
@@ -323,9 +338,10 @@ export async function GET(req: NextRequest) {
   }
 
   // Redirect back to deal room with a flag so the client can re-fetch slots
-  // and surface bilateral chips.
+  // and surface bilateral chips. `denied` triggers the partial-permission
+  // banner — manual time-pick still works.
   const returnUrl = new URL(state.returnUrl, baseUrl);
-  returnUrl.searchParams.set("calendarConnected", "true");
+  returnUrl.searchParams.set("calendarConnected", denied ? "denied" : "true");
   const response = NextResponse.redirect(returnUrl.toString());
 
   // Set the NextAuth session cookie so the header reflects signed-in state
