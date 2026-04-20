@@ -1146,6 +1146,22 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             )}
           </div>
         )}
+
+        {/* Agent-bookable badge — visible to everyone (guest, host, agent).
+            Links to /agents where humans learn how to point their AI at
+            this link and agents find the MCP manifest. */}
+        <div className="mt-2.5 flex justify-end">
+          <a
+            href="/agents"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[10px] text-muted hover:text-indigo-400 transition"
+            title="This meeting is bookable by AI agents via MCP"
+          >
+            <span>📡</span>
+            <span>Agent-bookable</span>
+          </a>
+        </div>
       </div>
     </div>
   );
