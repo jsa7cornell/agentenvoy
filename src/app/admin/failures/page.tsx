@@ -11,7 +11,8 @@
  */
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { requireAdminPage } from "@/lib/admin-auth";
+import { requireAdminContext } from "@/lib/admin-auth";
+import { logAdminAccess } from "@/lib/admin/access-log";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -68,7 +69,13 @@ export default async function AdminFailuresPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const adminEmail = await requireAdminPage("/admin/failures");
+  const admin = await requireAdminContext("/admin/failures");
+  const adminEmail = admin.email;
+  await logAdminAccess({
+    adminId: admin.id,
+    path: "/admin/failures",
+    action: "list",
+  });
 
   const params = await searchParams;
   const { since, label } = parseRange(params.range);
