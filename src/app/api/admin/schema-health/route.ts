@@ -1,30 +1,23 @@
 /**
  * GET /api/admin/schema-health
  *
- * OAuth-gated (ADMIN_EMAIL) endpoint that runs the schema drift check on
- * demand and returns the full report as JSON. Paired with the
- * /api/cron/schema-health background check — use this route for manual
- * inspection, use the cron for automated alerting.
+ * Admin-gated endpoint that runs the schema drift check on demand and
+ * returns the full report as JSON. Paired with the /api/cron/schema-health
+ * background check — use this route for manual inspection, use the cron
+ * for automated alerting.
  *
  * Non-admins get 404 (not 401/403) — deliberate, so the route's existence
  * isn't advertised.
  */
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { isAdminSession } from "@/lib/admin-auth";
 import { checkSchemaDrift } from "@/lib/schema-drift";
 
 export const dynamic = "force-dynamic";
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "jsa7cornell@gmail.com";
-
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (
-    !session?.user?.email ||
-    session.user.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()
-  ) {
+  if (!(await isAdminSession())) {
     return new NextResponse(null, { status: 404 });
   }
 

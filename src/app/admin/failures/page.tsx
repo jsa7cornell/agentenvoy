@@ -1,19 +1,17 @@
 /**
- * Admin failure log — OAuth-gated to ADMIN_EMAIL.
+ * Admin failure log — admin-gated via requireAdminPage().
  *
  * Shows three feeds interleaved by time:
  *   1. ConfirmAttempt rows where outcome !== 'success' | 'already_agreed'
  *   2. RouteError rows (all)
  *   3. SideEffectLog rows where status === 'failed'
  *
- * If the visitor is not signed in as the admin email, the page 404s
+ * If the visitor is not signed in as an admin, the page 404s
  * (deliberate — we don't want to leak existence of /admin/* to anyone).
  */
-import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,8 +20,6 @@ interface SearchParams {
   range?: string; // "24h" | "7d" | "30d" — default 7d
   source?: string; // "confirm" | "route" | "sideeffect" | undefined (all)
 }
-
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "jsa7cornell@gmail.com";
 
 function parseRange(range: string | undefined): { since: Date; label: string } {
   const now = Date.now();
@@ -72,10 +68,7 @@ export default async function AdminFailuresPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email || session.user.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
-    notFound();
-  }
+  const adminEmail = await requireAdminPage("/admin/failures");
 
   const params = await searchParams;
   const { since, label } = parseRange(params.range);
@@ -186,7 +179,7 @@ export default async function AdminFailuresPage({
       <header className="mb-6 flex items-baseline justify-between">
         <h1 className="text-xl font-bold">Admin · Failures</h1>
         <p className="text-zinc-500">
-          Signed in as <code>{session.user.email}</code> · Range: <code>{label}</code>
+          Signed in as <code>{adminEmail}</code> · Range: <code>{label}</code>
         </p>
       </header>
 
