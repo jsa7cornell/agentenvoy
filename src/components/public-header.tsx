@@ -1,9 +1,15 @@
+"use client";
+
 import Link from "next/link";
+import { signIn } from "next-auth/react";
 import { LogoFull } from "./logo";
 
 /**
- * Minimal header for public pages (FAQ, Terms, Privacy).
+ * Minimal header for public pages (FAQ, Terms, Privacy, Agents).
  * Matches the dashboard header's visual style but without auth/session features.
+ *
+ * The "Sign in / Join" CTA is a single entry point — Google's account chooser
+ * routes new vs existing users automatically, so one link serves both intents.
  */
 export function PublicHeader() {
   return (
@@ -25,12 +31,13 @@ export function PublicHeader() {
           >
             For Agents
           </Link>
-          <Link
-            href="/"
+          <button
+            type="button"
+            onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
             className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md transition font-medium"
           >
-            Sign In
-          </Link>
+            Sign in / Join
+          </button>
         </div>
       </div>
     </header>

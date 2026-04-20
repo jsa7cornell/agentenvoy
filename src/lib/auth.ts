@@ -129,6 +129,38 @@ export const authOptions: NextAuthOptions = {
     error: "/",
   },
   events: {
+    // Guest-flow → host upgrade detection. When a user who originally signed
+    // up via the read-only guest-calendar flow signs in via host signin
+    // (full calendar.events scope), clear lastCalibratedAt so onboarding
+    // fires, and leave a permanent breadcrumb of the upgrade.
+    async signIn({ user, account, isNewUser }) {
+      if (account?.provider !== "google" || isNewUser) return;
+      const scopes = (account.scope ?? "").split(" ");
+      if (!scopes.includes("https://www.googleapis.com/auth/calendar.events")) return;
+      try {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { preferences: true },
+        });
+        const prefs = (dbUser?.preferences as Record<string, unknown> | null) ?? {};
+        const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
+        const source = explicit.signupSource;
+        if (source !== "guest_flow" && source !== "guest_flow_upgrading") return;
+        const nextExplicit: Record<string, unknown> = { ...explicit };
+        delete nextExplicit.signupSource;
+        nextExplicit.signupSourceUpgradedFrom = "guest_flow";
+        nextExplicit.signupSourceUpgradedAt = new Date().toISOString();
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            lastCalibratedAt: null,
+            preferences: { ...prefs, explicit: nextExplicit } as Prisma.InputJsonValue,
+          },
+        });
+      } catch (e) {
+        console.error("[events.signIn] guest_flow upgrade hook failed:", e);
+      }
+    },
     async createUser({ user }) {
       // Generate a default meetSlug from the user's name or email
       const base = user.name

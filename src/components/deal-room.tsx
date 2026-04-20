@@ -6,6 +6,7 @@ import { signIn } from "next-auth/react";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
 import { PublicHeader } from "./public-header";
+import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
 import { formatDuration } from "@/lib/format-duration";
 import {
@@ -1257,52 +1258,20 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       if (isHost || isGuest || confirmed || anonCalCtaDismissed || !sessionId) return null;
       if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
 
-      const connect = () => {
-        if (typeof window === "undefined") return;
-        const returnUrl = `/meet/${slug}${code ? `/${code}` : ""}`;
-        window.location.href = `/api/auth/guest-calendar?sessionId=${encodeURIComponent(sessionId)}&returnUrl=${encodeURIComponent(returnUrl)}`;
-      };
-
-      if (!chipCtaExpanded) {
-        return (
-          <div className="flex items-center gap-2 mb-1">
-            <button
-              type="button"
-              onClick={() => setChipCtaExpanded(true)}
-              className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition"
-            >
-              🗓️ Auto-match calendars
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAnonCalCtaDismissed(true);
-                try { window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1"); } catch { /* ignore */ }
-              }}
-              className="text-muted hover:text-secondary transition text-xs"
-              title="Dismiss"
-            >
-              ✕
-            </button>
-          </div>
-        );
-      }
-
       return (
-        <div className="mb-3 p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 space-y-2">
-          <div className="text-xs font-medium text-blue-200">Find the best time automatically?</div>
-          <p className="text-xs text-secondary leading-snug">
-            Connect your calendar (read-only, ~5 seconds) to see times that work for both of you.
-          </p>
-          <div className="flex gap-2">
-            <button type="button" onClick={connect} className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500 hover:bg-blue-600 text-white transition">
-              Connect
-            </button>
-            <button type="button" onClick={() => setChipCtaExpanded(false)} className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium text-secondary border border-secondary hover:border-DEFAULT transition">
-              Not now
-            </button>
-          </div>
-        </div>
+        <DealRoomConnectCtas
+          variant="bubble"
+          sessionId={sessionId}
+          slug={slug}
+          code={code}
+          expanded={chipCtaExpanded}
+          onExpand={() => setChipCtaExpanded(true)}
+          onCollapse={() => setChipCtaExpanded(false)}
+          onDismiss={() => {
+            setAnonCalCtaDismissed(true);
+            try { window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1"); } catch { /* ignore */ }
+          }}
+        />
       );
     })();
     return (
@@ -2013,67 +1982,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
             if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
 
-            const connect = () => {
-              const returnUrl = `/meet/${slug}${code ? `/${code}` : ""}`;
-              window.location.href = `/api/auth/guest-calendar?sessionId=${encodeURIComponent(sessionId)}&returnUrl=${encodeURIComponent(returnUrl)}`;
-            };
-
-            if (!chipCtaExpanded) {
-              return (
-                <div className="md:hidden border-b border-secondary flex-shrink-0 px-4 py-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setChipCtaExpanded(true)}
-                    className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition"
-                  >
-                    🗓️ Auto-match calendars
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAnonCalCtaDismissed(true);
-                      try {
-                        if (typeof window !== "undefined") {
-                          window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1");
-                        }
-                      } catch { /* ignore */ }
-                    }}
-                    className="text-muted hover:text-secondary transition text-xs"
-                    title="Dismiss"
-                  >
-                    ✕
-                  </button>
-                </div>
-              );
-            }
-
             return (
-              <div className="md:hidden border-b border-secondary flex-shrink-0 px-4 py-3">
-                <div className="p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 space-y-2">
-                  <div className="text-xs font-medium text-blue-200">
-                    Want me to find the best time automatically?
-                  </div>
-                  <p className="text-xs text-secondary leading-snug">
-                    Connect your calendar (read-only, ~5 seconds). I&apos;ll show you times that work for both of you.
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={connect}
-                      className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500 hover:bg-blue-600 text-white transition"
-                    >
-                      Connect
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChipCtaExpanded(false)}
-                      className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium text-secondary border border-secondary hover:border-DEFAULT transition"
-                    >
-                      Not now
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <DealRoomConnectCtas
+                variant="mobile-banner"
+                sessionId={sessionId}
+                slug={slug}
+                code={code}
+                expanded={chipCtaExpanded}
+                onExpand={() => setChipCtaExpanded(true)}
+                onCollapse={() => setChipCtaExpanded(false)}
+                onDismiss={() => {
+                  setAnonCalCtaDismissed(true);
+                  try {
+                    if (typeof window !== "undefined") {
+                      window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1");
+                    }
+                  } catch { /* ignore */ }
+                }}
+              />
             );
           })()}
             {chatContent}
