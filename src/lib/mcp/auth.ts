@@ -16,6 +16,7 @@
 import type { NegotiationLink } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { incrementRateCounter, type RateLimitResult } from "@/lib/mcp/rate-limit";
+import { ensureDefaultLinkForUser } from "@/lib/negotiation/default-link";
 
 // ---------------------------------------------------------------------------
 // URL parsing
@@ -66,14 +67,38 @@ export type ResolveLinkResult =
   | { ok: true; link: NegotiationLink }
   | { ok: false; error: "link_not_found" | "link_expired" };
 
-/** Resolve a parsed meeting URL to a NegotiationLink. */
+/**
+ * Resolve a parsed meeting URL to a NegotiationLink.
+ *
+ * Vanity-URL fallback (2026-04-20, see proposals/2026-04-19_mcp-bare-slug-resolution_*):
+ * when the URL is a bare slug with no code and no matching NegotiationLink row
+ * exists, look the slug up against `User.meetSlug`. If a host owns that vanity
+ * slug, mint-or-fetch their default link-per-user via `ensureDefaultLinkForUser`.
+ * Keeps the "URL is the capability" framing — the bare vanity path is always a
+ * live capability for a registered host, regardless of whether a NegotiationLink
+ * was ever explicitly minted.
+ */
 export async function resolveLink(
   parsed: ParsedMeetingUrl,
 ): Promise<ResolveLinkResult> {
   const { slug, code } = parsed;
-  const link = code
+  let link = code
     ? await prisma.negotiationLink.findFirst({ where: { slug, code } })
     : await prisma.negotiationLink.findFirst({ where: { slug, code: null } });
+
+  // Vanity-URL fallback: bare slug with no code, no NegotiationLink row yet.
+  // Only runs when `code` is absent — contextual links (`?c=`) that miss are
+  // genuinely not-found and must stay that way.
+  if (!link && !code) {
+    const user = await prisma.user.findUnique({
+      where: { meetSlug: slug },
+      select: { id: true },
+    });
+    if (user) {
+      link = await ensureDefaultLinkForUser(user.id);
+    }
+  }
+
   if (!link) return { ok: false, error: "link_not_found" };
   if (link.expiresAt && link.expiresAt.getTime() < Date.now()) {
     return { ok: false, error: "link_expired" };
