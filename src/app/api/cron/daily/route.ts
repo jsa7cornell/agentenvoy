@@ -31,6 +31,7 @@ import { buildDevStatsEmail } from "@/lib/emails/dev-stats";
 import { gatherDevStats } from "@/lib/emails/dev-stats-gather";
 import { buildMeetingReminderEmail } from "@/lib/emails/meeting-reminder";
 import { formatDuration } from "@/lib/format-duration";
+import { getLogRecipients } from "@/lib/log-recipients";
 
 // Cron routes must never be prerendered — see PLAYBOOK Rule 11.
 export const dynamic = "force-dynamic";
@@ -186,7 +187,7 @@ async function runSchemaDriftCheck(): Promise<{
 
     let alertDispatched = false;
     if (!recentAlert) {
-      const recipient = process.env.ADMIN_EMAIL || "jsa7cornell@gmail.com";
+      const recipient = getLogRecipients();
       await dispatch({
         kind: "email.send",
         to: recipient,
@@ -273,7 +274,7 @@ async function runEnvDriftCheck(): Promise<{
       });
 
       if (!recentAlert) {
-        const recipient = process.env.ADMIN_EMAIL || "jsa7cornell@gmail.com";
+        const recipient = getLogRecipients();
         await dispatch({
           kind: "email.send",
           to: recipient,
@@ -355,7 +356,7 @@ async function runDevStats(
   to: string;
 }> {
   const stats = await gatherDevStats(windowStart, windowEnd);
-  const recipient = process.env.ADMIN_EMAIL || "jsa7cornell@gmail.com";
+  const recipient = getLogRecipients();
   const { subject, html } = buildDevStatsEmail(stats);
 
   const result = await dispatch({
@@ -370,7 +371,7 @@ async function runDevStats(
     },
   });
 
-  return { status: result.status, to: recipient };
+  return { status: result.status, to: recipient.join(", ") };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

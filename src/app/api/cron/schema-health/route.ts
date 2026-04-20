@@ -21,6 +21,7 @@ import { prisma } from "@/lib/prisma";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { checkSchemaDrift, formatDriftSummary } from "@/lib/schema-drift";
 import { logRouteError } from "@/lib/route-error";
+import { getLogRecipients } from "@/lib/log-recipients";
 
 // Cron routes must never be prerendered — see PLAYBOOK Rule 11.
 export const dynamic = "force-dynamic";
@@ -100,7 +101,7 @@ export async function GET(req: NextRequest) {
 
   let emailResult: { status: string; logId: string } | null = null;
   if (!recentAlert) {
-    const recipient = process.env.ADMIN_EMAIL || "jsa7cornell@gmail.com";
+    const recipient = getLogRecipients();
     const html = buildDriftAlertHtml(report, summary);
     const dispatched = await dispatch({
       kind: "email.send",
