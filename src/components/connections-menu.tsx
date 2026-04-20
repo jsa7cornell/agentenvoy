@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { signIn } from "next-auth/react";
+import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 
 interface ConnectionStatus {
   google: {
@@ -15,6 +15,7 @@ export function ConnectionsMenu() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const reconnect = useOAuthSignIn({ mode: "reconnect", callbackUrl: "/dashboard" });
 
   useEffect(() => {
     fetch("/api/connections/status")
@@ -151,9 +152,7 @@ export function ConnectionsMenu() {
                 </div>
               ) : (
                 <button
-                  onClick={() => {
-                    signIn("google", { callbackUrl: "/dashboard" });
-                  }}
+                  onClick={reconnect.trigger}
                   className="px-3 py-1 text-xs font-medium rounded-lg bg-accent hover:bg-accent-hover text-white transition flex-shrink-0"
                 >
                   Connect
@@ -223,6 +222,7 @@ export function ConnectionsMenu() {
           </div>
         </div>
       )}
+      {reconnect.modal}
     </div>
   );
 }

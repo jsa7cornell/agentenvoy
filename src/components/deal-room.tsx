@@ -2,11 +2,11 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { signIn } from "next-auth/react";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
 import { PublicHeader } from "./public-header";
 import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
+import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
 import { formatDuration } from "@/lib/format-duration";
 import {
@@ -152,6 +152,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [signupUpsellDismissed, setSignupUpsellDismissed] = useState(false);
   // Mobile chip CTA expanded state
   const [chipCtaExpanded, setChipCtaExpanded] = useState(false);
+  // Signup-upsell modal "Connect with Google" pre-consent step. Uses
+  // reconnect mode because the upsell modal already shows the value-prop;
+  // here we just need a thin "Continue to Google" affirmation.
+  const signupUpsellSignIn = useOAuthSignIn({
+    mode: "reconnect",
+    callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
+  });
   // Propose-changes UI: each click injects a synthetic Envoy text bubble +
   // a fresh picker bubble into the thread. Client-only, never persisted.
   // Incrementing triggers a re-render with one more (text, picker) pair at
@@ -2056,11 +2063,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             </ol>
             <button
               type="button"
-              onClick={() =>
-                signIn("google", {
-                  callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
-                })
-              }
+              onClick={signupUpsellSignIn.trigger}
               className="block w-full text-center px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition"
             >
               Connect with Google to begin
@@ -2078,6 +2081,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         </div>
       )}
+      {signupUpsellSignIn.modal}
     </div>
   );
 }

@@ -1,10 +1,11 @@
 "use client";
 
-import { signIn, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { LogoFull } from "@/components/logo";
 import { TryItChat } from "@/components/tryit-chat";
+import { useOAuthSignIn } from "@/components/oauth/use-oauth-signin";
 
 /* ── Google logo (color) ─────────────────────────────────── */
 function GoogleIcon({ className = "w-5 h-5" }: { className?: string }) {
@@ -47,7 +48,10 @@ export default function Home() {
     }
   }, [status, session, router]);
 
-  const handleSignIn = () => signIn("google", { callbackUrl: "/dashboard" });
+  const { trigger: handleSignIn, modal: signInModal } = useOAuthSignIn({
+    mode: "first-connect",
+    callbackUrl: "/dashboard",
+  });
 
   if (status === "authenticated") return null;
 
@@ -539,6 +543,7 @@ export default function Home() {
           <p className="text-xs text-muted mt-5">Free while in beta &middot; No credit card required</p>
         </div>
       </section>
+      {signInModal}
     </>
   );
 }

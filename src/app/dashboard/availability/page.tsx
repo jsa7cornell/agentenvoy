@@ -1,10 +1,11 @@
 "use client";
 
-import { useSession, signIn } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calendar";
 import { AvailabilityRules } from "@/components/availability-rules";
 import { AvailabilityPanel } from "@/components/availability-panel";
+import { useOAuthSignIn } from "@/components/oauth/use-oauth-signin";
 import Link from "next/link";
 
 type SessionSummary = {
@@ -63,6 +64,7 @@ function CalendarFilterPanel({
   onRetry: () => void;
 }) {
   const [open, setOpen] = useState(true);
+  const reconnect = useOAuthSignIn({ mode: "reconnect", callbackUrl: "/dashboard/availability" });
 
   // Sort: primary first, then alphabetical
   const sorted = useMemo(
@@ -114,7 +116,7 @@ function CalendarFilterPanel({
             <div className="py-3 space-y-2 text-center">
               <p className="text-xs text-muted">{calendarsError.message}</p>
               <button
-                onClick={() => signIn("google", { callbackUrl: "/dashboard/availability" })}
+                onClick={reconnect.trigger}
                 className="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-lg transition"
               >
                 Reconnect Google Calendar
@@ -197,6 +199,7 @@ function CalendarFilterPanel({
           )}
         </div>
       )}
+      {reconnect.modal}
     </div>
   );
 }
