@@ -107,6 +107,51 @@ describe("normalizeLinkRules", () => {
     expect(normalizeLinkRules(null)).toEqual({});
     expect(normalizeLinkRules(undefined)).toEqual({});
   });
+
+  // ─── guestGuidance.preferredFormat (envelope-preferred 2026-04-20) ─────────
+
+  it("preserves guestGuidance.preferredFormat: 'video'", () => {
+    const out = normalizeLinkRules({
+      guestGuidance: { preferredFormat: "video" },
+    }) as LinkRules;
+    expect(out.guestGuidance?.preferredFormat).toBe("video");
+  });
+
+  it("preserves guestGuidance.preferredFormat: 'in-person'", () => {
+    const out = normalizeLinkRules({
+      guestGuidance: { preferredFormat: "in-person" },
+    }) as LinkRules;
+    expect(out.guestGuidance?.preferredFormat).toBe("in-person");
+  });
+
+  it("drops 'in_person' (underscore — common LLM typo, same treatment as guestPicks.format)", () => {
+    const out = normalizeLinkRules({
+      guestGuidance: { preferredFormat: "in_person" as unknown as "in-person" },
+    }) as LinkRules;
+    expect(out.guestGuidance?.preferredFormat).toBeUndefined();
+  });
+
+  it("drops bogus preferredFormat values", () => {
+    const out = normalizeLinkRules({
+      guestGuidance: { preferredFormat: "telepathy" as unknown as "video" },
+    }) as LinkRules;
+    expect(out.guestGuidance?.preferredFormat).toBeUndefined();
+  });
+
+  it("preferredFormat co-exists with other guestGuidance keys", () => {
+    const out = normalizeLinkRules({
+      guestGuidance: {
+        suggestions: { locations: ["Ritual"], durations: [30] },
+        tone: "friendly",
+        preferredFormat: "video",
+      },
+    }) as LinkRules;
+    expect(out.guestGuidance).toEqual({
+      suggestions: { locations: ["Ritual"], durations: [30] },
+      tone: "friendly",
+      preferredFormat: "video",
+    });
+  });
 });
 
 // ─── applyEventOverrides — preferredDays ─────────────────────────────────────

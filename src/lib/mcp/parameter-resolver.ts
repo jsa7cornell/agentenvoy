@@ -58,6 +58,17 @@ export interface ParameterEnvelope<T> {
   mutability: ParameterMutability;
   allowedValues?: T[];
   suggestions?: T[];
+  /**
+   * Host's single preferred value within `allowedValues`. Emitted ONLY under
+   * `delegated` mutability in v1 (format-only; duration/location/timezone
+   * deferred). Invariant: `preferred ∈ allowedValues` whenever both present;
+   * the resolver drops `preferred` silently when per-slot narrowing removes
+   * it from `allowedValues`. Advisory-only — `propose_lock` validates
+   * against `allowedValues`, never against `preferred`.
+   *
+   * See proposal 2026-04-20_mcp-envelope-preferred-primitive and SPEC §2.3.
+   */
+  preferred?: T;
   guestMustResolve: boolean;
 }
 
@@ -184,15 +195,27 @@ function resolveFormat(input: ResolveInput): ParameterEnvelope<FormatValue> {
     };
   }
 
+  // v1: `preferred` is format-only; see proposal
+  // 2026-04-20_mcp-envelope-preferred-primitive. Computed once here, scoped
+  // by `preferred ∈ narrowed` so per-slot filter subtraction that removes
+  // the host's lean drops it silently rather than emitting a ghost hint.
+  const preferredCandidate = rules.guestGuidance?.preferredFormat;
+  const pickPreferred = (narrowed: FormatValue[]): FormatValue | undefined =>
+    preferredCandidate && narrowed.includes(preferredCandidate)
+      ? preferredCandidate
+      : undefined;
+
   // 2. Guest picks — explicit allow-list.
   if (Array.isArray(rules.guestPicks?.format)) {
     const arr = rules.guestPicks.format as FormatValue[];
     const narrowed = narrow(arr);
+    const preferred = pickPreferred(narrowed);
     return {
       value: null,
       origin: "link-rule",
       mutability: "delegated",
       allowedValues: narrowed,
+      ...(preferred ? { preferred } : {}),
       guestMustResolve: true,
     };
   }
@@ -200,11 +223,13 @@ function resolveFormat(input: ResolveInput): ParameterEnvelope<FormatValue> {
   // 3. Guest picks — any system-default.
   if (rules.guestPicks?.format === true) {
     const narrowed = narrow([...SYSTEM_DEFAULT_FORMATS]);
+    const preferred = pickPreferred(narrowed);
     return {
       value: null,
       origin: "system-default",
       mutability: "delegated",
       allowedValues: narrowed,
+      ...(preferred ? { preferred } : {}),
       guestMustResolve: true,
     };
   }

@@ -29,6 +29,7 @@ This file is intentionally short — it's a pointer to the decision record plus 
 5. **`external_agent` turns are prefixed at the LLM boundary, not at the DB.** The DB's `Message.content` is the verbatim text; the prefix is applied when assembling the LLM history.
 6. **`canObject` is derived, not stored.** A single function over `(session.status, finalizesAt, supersededByRescheduleId, now)`.
 7. **Log redaction is schema-driven.** Every field in every tool response has a named redaction class (`verbatim`, `hashed`, `cap(N)`, `drop`, `shape-summary`). The log writer iterates the map; there is no "ad-hoc redaction at the call site."
+8. **`ParameterEnvelope.preferred` is scoped to `delegated` + `preferred ∈ allowedValues`.** The optional `preferred?: T` field on the parameter envelope (handshake §2.3) is host's single preferred value within `allowedValues`. v1 emits it only from `resolveFormat` under `delegated` mutability; `locked`/`host-filled`/`open`/`required` never emit it. The resolver drops `preferred` silently when per-slot `subtractFormatFilters` narrows it out of `allowedValues`; the Zod `envelopeOf` schema enforces `preferred ∈ allowedValues` at parse time as defense-in-depth against hand-constructed bad envelopes. **Advisory-only:** `propose_lock.overrides.format` validates against `allowedValues`, never against `preferred` — `preferred` is display/UI-default only, never implies `value = preferred`. See proposal `2026-04-20_mcp-envelope-preferred-primitive_reviewed-2026-04-20_decided-2026-04-20`.
 
 ## Test matrix (from §8 of the decided SPEC)
 
