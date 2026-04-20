@@ -6,19 +6,20 @@ import { deleteCalendarEvent, invalidateSchedule } from "@/lib/calendar";
 
 // POST /api/negotiate/reschedule
 // Reschedule a confirmed meeting: removes the Google Calendar event (notifying
-// attendees it needs to be rescheduled), releases holds, and resets the session
-// back to active negotiation so a new time can be found.
-// Only available to the host. Only valid for confirmed (agreed) sessions.
+// attendees it needs to be rescheduled), releases holds, and resets the
+// session back to active negotiation so a new time can be found.
+//
+// Callable by BOTH host and guest. Per the 2026-04-20 calendar-popup-ctas
+// proposal (Q1 decision): guests auth by sessionId alone — symmetric with
+// /api/negotiate/message and /api/negotiate/confirm. Anyone holding the
+// deal-room URL is trusted to act on the session. The initiator label only
+// changes the system-message wording + statusLabel; the mechanical cascade
+// is identical either way.
 export async function POST(req: NextRequest) {
-  const authSession = await getServerSession(authOptions);
-  if (!authSession?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const body = await req.json().catch(() => ({}));
+  const { sessionId } = body ?? {};
 
-  const body = await req.json();
-  const { sessionId } = body;
-
-  if (!sessionId) {
+  if (!sessionId || typeof sessionId !== "string") {
     return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
   }
 
@@ -26,14 +27,12 @@ export async function POST(req: NextRequest) {
     where: { id: sessionId },
     include: {
       holds: { where: { status: "active" }, select: { id: true, calendarEventId: true } },
+      link: { select: { inviteeName: true } },
     },
   });
 
   if (!negotiation) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
-  if (negotiation.hostId !== authSession.user.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
   if (negotiation.status !== "agreed") {
     return NextResponse.json(
@@ -41,6 +40,12 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+
+  // Distinguish host vs. guest caller purely for labelling. Host = logged in
+  // as the session's host user. Everyone else = guest (trust by sessionId).
+  const authSession = await getServerSession(authOptions);
+  const isHost = authSession?.user?.id === negotiation.hostId;
+  const initiator: "host" | "guest" = isHost ? "host" : "guest";
 
   // 1. Delete the confirmed Google Calendar event, notifying attendees.
   if (negotiation.calendarEventId) {
@@ -81,12 +86,18 @@ export async function POST(req: NextRequest) {
   }
 
   // 4. Reset the session back to active negotiation.
+  const statusLabel = isHost
+    ? "Rescheduling — finding a new time"
+    : negotiation.link.inviteeName
+    ? `Rescheduling — ${negotiation.link.inviteeName} finding a new time`
+    : "Rescheduling — guest finding a new time";
+
   await prisma.negotiationSession.update({
     where: { id: sessionId },
     data: {
       status: "active",
       archived: false,
-      statusLabel: "Rescheduling — finding a new time",
+      statusLabel,
       agreedTime: null,
       agreedFormat: null,
       meetLink: null,
@@ -94,14 +105,17 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  const systemContent = isHost
+    ? "The host has requested to reschedule this meeting. The previous time has been cancelled and attendees have been notified. A new time is being arranged."
+    : "The guest has requested to reschedule this meeting. The previous time has been cancelled and attendees have been notified. A new time is being arranged.";
+
   await prisma.message.create({
     data: {
       sessionId,
       role: "system",
-      content:
-        "The host has requested to reschedule this meeting. The previous time has been cancelled and attendees have been notified. A new time is being arranged.",
+      content: systemContent,
     },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, initiator });
 }

@@ -18,6 +18,7 @@ import { DayView } from "@/components/day-view";
 import { AvailabilityRules } from "@/components/availability-rules";
 import { TIMEZONE_TABLE, shortTimezoneLabel, getTimezoneEntry } from "@/lib/timezone";
 import { getSunday } from "@/lib/week-boundaries";
+import { googleCalendarEventUrl } from "@/lib/google-calendar-url";
 
 type SessionSummary = {
   id: string;
@@ -149,6 +150,7 @@ export function AvailabilityPanel({
   const [clickedSession, setClickedSession] = useState<SessionSummary | null | undefined>(undefined);
   const [sessionActionBusy, setSessionActionBusy] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [cancelNote, setCancelNote] = useState("");
   const [protectionSaving, setProtectionSaving] = useState(false);
   const [localProtection, setLocalProtection] = useState<number | null | undefined>(undefined);
   const [pendingProtection, setPendingProtection] = useState<number | null | undefined>(undefined);
@@ -340,19 +342,52 @@ export function AvailabilityPanel({
     }
   }
 
-  async function handleSessionCancel(sessionId: string) {
+  async function handleSessionCancel(sessionId: string, note?: string) {
     setSessionActionBusy(true);
     try {
       const res = await fetch("/api/negotiate/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({
+          sessionId,
+          note: note && note.trim().length > 0 ? note.trim() : undefined,
+        }),
       });
       if (res.ok) {
         setClickedEvent(null);
         setClickedSession(undefined);
         setConfirmingCancel(false);
+        setCancelNote("");
         await fetchSchedule();
+      }
+    } finally {
+      setSessionActionBusy(false);
+    }
+  }
+
+  // Host-initiated reschedule from the event popup. Calls the same
+  // /api/negotiate/reschedule route the deal-room uses — the route deletes
+  // the confirmed Google event (notifying attendees), releases holds,
+  // invalidates the schedule cache, and resets the session to active so
+  // Envoy can find a new time. After success we jump the host into the
+  // deal room where the negotiation resumes.
+  async function handleSessionReschedule(session: SessionSummary) {
+    setSessionActionBusy(true);
+    try {
+      const res = await fetch("/api/negotiate/reschedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: session.id }),
+      });
+      if (res.ok) {
+        setClickedEvent(null);
+        setClickedSession(undefined);
+        setConfirmingCancel(false);
+        setCancelNote("");
+        // Pop the host into the deal room so they can drive the new-time
+        // search. Full navigation (not router.push) so the dashboard's
+        // schedule cache picks up fresh state on the way back.
+        window.location.href = session.dealRoomUrl;
       }
     } finally {
       setSessionActionBusy(false);
@@ -898,7 +933,7 @@ export function AvailabilityPanel({
       {clickedEvent && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); }}
+          onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); setCancelNote(""); }}
         >
           <div
             className="bg-surface-inset border border-DEFAULT rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
@@ -923,17 +958,25 @@ export function AvailabilityPanel({
             </p>
 
             {/* GCal jump — always available when Google returned htmlLink,
-                regardless of whether this event is AgentEnvoy-booked. */}
-            {clickedEvent.htmlLink && (
-              <a
-                href={clickedEvent.htmlLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block text-xs text-indigo-400 hover:text-indigo-300 transition mb-3"
-              >
-                View in Google Calendar →
-              </a>
-            )}
+                regardless of whether this event is AgentEnvoy-booked. Falls
+                back to a deterministic eid URL if htmlLink is missing
+                (older events + some calendar feeds don't populate it). */}
+            {(() => {
+              const gcalUrl =
+                clickedEvent.htmlLink ||
+                googleCalendarEventUrl(clickedEvent.id);
+              if (!gcalUrl) return null;
+              return (
+                <a
+                  href={gcalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-xs text-indigo-400 hover:text-indigo-300 transition mb-3"
+                >
+                  View in Google Calendar →
+                </a>
+              );
+            })()}
 
             {clickedSession === undefined && (
               <p className="text-xs text-muted py-2">Looking up session…</p>
@@ -1113,19 +1156,45 @@ export function AvailabilityPanel({
             )}
 
             {confirmingCancel && clickedSession ? (
+              // In-place cancel confirmation. NOT a second modal layered
+              // over this one (John: "should feel like an interaction on
+              // the existing modal, not a modal on a modal") — the popup's
+              // body swaps to this confirm view while the outer card stays
+              // put. "Keep it" flips back to the default CTA row.
               <div className="mt-1">
                 <p className="text-xs text-secondary mb-3">
                   {clickedSession.status === "agreed"
                     ? <>Cancel this meeting? The Google Calendar invite will be deleted and{" "}{clickedSession.guestName || "your guest"} will be notified.</>
                     : <>Stop this negotiation? The session will be closed and {clickedSession.guestName || "your guest"} won&apos;t receive a new meeting.</>}
                 </p>
+                {clickedSession.status === "agreed" && (
+                  <label className="block mb-3">
+                    <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted mb-1">
+                      Note (optional)
+                    </span>
+                    <textarea
+                      value={cancelNote}
+                      onChange={(e) => setCancelNote(e.target.value)}
+                      placeholder="e.g. Something came up — will reach out later this week."
+                      rows={2}
+                      maxLength={280}
+                      disabled={sessionActionBusy}
+                      className="w-full text-xs bg-surface-secondary border border-secondary rounded-lg px-2.5 py-2 text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500/60 disabled:opacity-50 resize-none"
+                    />
+                    <span className="block text-[10px] text-muted mt-1">
+                      Shown in the deal room and the guest&apos;s cancellation email.
+                    </span>
+                  </label>
+                )}
                 <div className="flex gap-2">
-                  <button onClick={() => setConfirmingCancel(false)} disabled={sessionActionBusy}
+                  <button onClick={() => { setConfirmingCancel(false); setCancelNote(""); }} disabled={sessionActionBusy}
                     className="flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50">
                     Keep it
                   </button>
                   <button
-                    onClick={() => clickedSession.status === "agreed" ? handleSessionCancel(clickedSession.id) : handleSessionArchive(clickedSession.id)}
+                    onClick={() => clickedSession.status === "agreed"
+                      ? handleSessionCancel(clickedSession.id, cancelNote)
+                      : handleSessionArchive(clickedSession.id)}
                     disabled={sessionActionBusy}
                     className="flex-1 px-3 py-2 text-xs font-medium bg-red-900/40 text-red-300 border border-red-500/30 rounded-lg hover:bg-red-900/60 transition disabled:opacity-50">
                     {sessionActionBusy ? "Cancelling…" : "Yes, cancel"}
@@ -1133,62 +1202,106 @@ export function AvailabilityPanel({
                 </div>
               </div>
             ) : (
-              <div className="flex gap-2 mt-1">
-                {(() => {
-                  const hasUnsaved =
-                    clickedEvent !== null &&
-                    (pendingProtection !== localProtection ||
-                      (pendingProtection !== null && pendingScope !== localScope));
-                  const saveEventId =
-                    clickedEvent && pendingScope === "series" && clickedEvent.recurringEventId
-                      ? clickedEvent.recurringEventId
-                      : clickedEvent?.id;
-                  const onPrimary = hasUnsaved && clickedEvent && saveEventId
-                    ? async () => {
-                        await handleProtectionChange(
-                          saveEventId,
-                          (pendingProtection as 0 | 3 | 5 | null),
-                          pendingScope
-                        );
-                        setClickedEvent(null);
-                        setClickedSession(undefined);
-                        setConfirmingCancel(false);
-                      }
-                    : () => {
-                        setClickedEvent(null);
-                        setClickedSession(undefined);
-                        setConfirmingCancel(false);
-                      };
-                  return (
-                    <button
-                      onClick={onPrimary}
-                      disabled={protectionSaving}
-                      className={
-                        hasUnsaved
-                          ? "flex-1 px-3 py-2 text-xs font-semibold bg-indigo-500/90 hover:bg-indigo-500 text-white rounded-lg transition disabled:opacity-50"
-                          : "flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50"
-                      }
-                    >
-                      {protectionSaving ? "Saving…" : hasUnsaved ? "Submit" : "Close"}
-                    </button>
-                  );
-                })()}
-                {/* Confirmed meetings: single "Close" CTA only. To cancel a confirmed
-                    meeting, the user jumps into the deal room or Google Calendar via
-                    the links above — avoids the "Close vs. Cancel" ambiguity on a
-                    popup with no editable fields. Pending negotiations still get the
-                    destructive CTA because there's a real in-flight thing to stop. */}
+              <div className="flex flex-col gap-2 mt-1">
+                {/* Confirmed Envoy meetings: offer the three host paths —
+                    Cancel (hybrid route, AE authoritative), Reschedule in
+                    Google (leaves AE in sync post-drift-cron), and Find a
+                    new time with Envoy (full reschedule flow → deal room).
+                    Stacked so they read cleanly on mobile. */}
                 {clickedSession &&
-                  !clickedSession.archived &&
-                  clickedSession.status !== "cancelled" &&
-                  clickedSession.status !== "agreed" && (
-                    <button
-                      onClick={() => setConfirmingCancel(true)}
-                      className="px-3 py-2 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg hover:border-red-500/60 transition"
-                    >
-                      Cancel
-                    </button>
+                  clickedSession.status === "agreed" &&
+                  !clickedSession.archived && (
+                    <div className="flex flex-col gap-1.5">
+                      <button
+                        onClick={() => handleSessionReschedule(clickedSession)}
+                        disabled={sessionActionBusy}
+                        className="w-full px-3 py-2 text-xs font-medium bg-indigo-500/90 hover:bg-indigo-500 text-white rounded-lg transition disabled:opacity-50"
+                      >
+                        {sessionActionBusy ? "Working…" : "Find a new time with Envoy"}
+                      </button>
+                      {(() => {
+                        const gcalUrl =
+                          clickedEvent?.htmlLink ||
+                          googleCalendarEventUrl(clickedEvent?.id);
+                        if (!gcalUrl) return null;
+                        return (
+                          <a
+                            href={gcalUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full px-3 py-2 text-xs text-center text-secondary border border-secondary rounded-lg hover:border-DEFAULT hover:text-primary transition"
+                          >
+                            Reschedule in Google Calendar →
+                          </a>
+                        );
+                      })()}
+                      <button
+                        onClick={() => setConfirmingCancel(true)}
+                        disabled={sessionActionBusy}
+                        className="w-full px-3 py-2 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg hover:border-red-500/60 transition disabled:opacity-50"
+                      >
+                        Cancel meeting
+                      </button>
+                    </div>
                   )}
+
+                <div className="flex gap-2">
+                  {(() => {
+                    const hasUnsaved =
+                      clickedEvent !== null &&
+                      (pendingProtection !== localProtection ||
+                        (pendingProtection !== null && pendingScope !== localScope));
+                    const saveEventId =
+                      clickedEvent && pendingScope === "series" && clickedEvent.recurringEventId
+                        ? clickedEvent.recurringEventId
+                        : clickedEvent?.id;
+                    const onPrimary = hasUnsaved && clickedEvent && saveEventId
+                      ? async () => {
+                          await handleProtectionChange(
+                            saveEventId,
+                            (pendingProtection as 0 | 3 | 5 | null),
+                            pendingScope
+                          );
+                          setClickedEvent(null);
+                          setClickedSession(undefined);
+                          setConfirmingCancel(false);
+                          setCancelNote("");
+                        }
+                      : () => {
+                          setClickedEvent(null);
+                          setClickedSession(undefined);
+                          setConfirmingCancel(false);
+                          setCancelNote("");
+                        };
+                    return (
+                      <button
+                        onClick={onPrimary}
+                        disabled={protectionSaving}
+                        className={
+                          hasUnsaved
+                            ? "flex-1 px-3 py-2 text-xs font-semibold bg-indigo-500/90 hover:bg-indigo-500 text-white rounded-lg transition disabled:opacity-50"
+                            : "flex-1 px-3 py-2 text-xs text-secondary border border-secondary rounded-lg hover:border-DEFAULT transition disabled:opacity-50"
+                        }
+                      >
+                        {protectionSaving ? "Saving…" : hasUnsaved ? "Submit" : "Close"}
+                      </button>
+                    );
+                  })()}
+                  {/* Pre-confirmation sessions (pending negotiations, not
+                      yet agreed) still get the destructive "Cancel" CTA —
+                      stops the in-flight negotiation via archive path. */}
+                  {clickedSession &&
+                    !clickedSession.archived &&
+                    clickedSession.status !== "cancelled" &&
+                    clickedSession.status !== "agreed" && (
+                      <button
+                        onClick={() => setConfirmingCancel(true)}
+                        className="px-3 py-2 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg hover:border-red-500/60 transition"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                </div>
               </div>
             )}
           </div>

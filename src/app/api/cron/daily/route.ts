@@ -23,7 +23,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { dispatch } from "@/lib/side-effects/dispatcher";
-import { deleteCalendarEvent } from "@/lib/calendar";
+import { deleteCalendarEvent, getCalendarEventStatus } from "@/lib/calendar";
+import { cancelSession } from "@/lib/cancel-pipeline";
 import { checkSchemaDrift, formatDriftSummary } from "@/lib/schema-drift";
 import {
   getGoogleCalendarClient,
@@ -76,6 +77,9 @@ export async function GET(req: NextRequest) {
   // ───────── Phase 6: revoked-token probe ─────────
   const revocationResult = await runRevocationProbe();
 
+  // ───────── Phase 7: gcal drift detection ─────────
+  const gcalDriftResult = await runGcalDriftCheck(ranAt);
+
   return NextResponse.json({
     ranAt: ranAt.toISOString(),
     holds: holdsResult,
@@ -84,7 +88,136 @@ export async function GET(req: NextRequest) {
     devStats: statsResult,
     reminders: remindersResult,
     revocations: revocationResult,
+    gcalDrift: gcalDriftResult,
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7 — Google Calendar drift detection
+//
+// The host can delete a confirmed event directly in Google Calendar at any
+// time. When that happens, Google sends its own cancellation email, but AE
+// is blind to the deletion — the session stays `agreed` in our DB, the slot
+// stays blocked, and the UI keeps showing a "Confirmed" pill for a meeting
+// that no longer exists. This phase defends against that drift.
+//
+// Two-cycle trip:
+//   1. First cycle where events.get returns 404/410 on a session's
+//      calendarEventId — record the observation in gcalDriftFirstSeenAt
+//      but don't cancel. Guards against transient Google hiccups.
+//   2. Next daily cycle — if the event is STILL missing, run the full
+//      cancelSession() cascade with initiator="external" and
+//      notifyAttendees=false (Google already sent the cancellation email
+//      when the host deleted).
+//   3. If the event comes back (host undid, or first-observation was
+//      transient), clear gcalDriftFirstSeenAt.
+//
+// Only agreed sessions with a calendarEventId are scanned. Errors that
+// aren't a clean 404/410 are recorded but don't change state — we only
+// trust unambiguous not-found responses.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runGcalDriftCheck(now: Date): Promise<{
+  scanned: number;
+  firstMissing: number;
+  cancelled: number;
+  cleared: number;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let firstMissing = 0;
+  let cancelled = 0;
+  let cleared = 0;
+
+  let sessions: Array<{
+    id: string;
+    hostId: string;
+    calendarEventId: string | null;
+    guestEmail: string | null;
+    gcalDriftFirstSeenAt: Date | null;
+  }> = [];
+
+  try {
+    sessions = await prisma.negotiationSession.findMany({
+      where: {
+        status: "agreed",
+        calendarEventId: { not: null },
+      },
+      select: {
+        id: true,
+        hostId: true,
+        calendarEventId: true,
+        guestEmail: true,
+        gcalDriftFirstSeenAt: true,
+      },
+    });
+  } catch (e) {
+    errors.push(`scan failed: ${e instanceof Error ? e.message : String(e)}`);
+    return { scanned: 0, firstMissing, cancelled, cleared, errors };
+  }
+
+  for (const session of sessions) {
+    if (!session.calendarEventId) continue;
+    try {
+      const status = await getCalendarEventStatus(
+        session.hostId,
+        session.calendarEventId,
+        session.guestEmail,
+      );
+
+      if (status.eventExists) {
+        // Event found on Google. If we'd previously flagged drift, clear
+        // the flag — the first observation was either transient or the
+        // host undid their deletion.
+        if (session.gcalDriftFirstSeenAt) {
+          await prisma.negotiationSession.update({
+            where: { id: session.id },
+            data: { gcalDriftFirstSeenAt: null },
+          });
+          cleared += 1;
+        }
+        continue;
+      }
+
+      // Event missing. First observation → stamp and wait; second
+      // observation → promote to cancelled.
+      if (!session.gcalDriftFirstSeenAt) {
+        await prisma.negotiationSession.update({
+          where: { id: session.id },
+          data: { gcalDriftFirstSeenAt: now },
+        });
+        firstMissing += 1;
+        continue;
+      }
+
+      const result = await cancelSession({
+        sessionId: session.id,
+        hostId: session.hostId,
+        initiator: "external",
+        note: null,
+        // Google already sent its own cancellation email when the host
+        // deleted the event directly — don't layer a second one.
+        notifyAttendees: false,
+      });
+      if (result.ok) {
+        cancelled += 1;
+      } else {
+        errors.push(`cancel ${session.id}: ${result.error ?? "unknown"}`);
+      }
+    } catch (e) {
+      errors.push(
+        `probe ${session.id}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  return {
+    scanned: sessions.length,
+    firstMissing,
+    cancelled,
+    cleared,
+    errors,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

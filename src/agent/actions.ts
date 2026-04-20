@@ -5,6 +5,7 @@ import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { normalizeLinkRules } from "@/lib/scoring";
 import { createTentativeHoldEvent, deleteCalendarEvent } from "@/lib/calendar";
+import { cancelSession } from "@/lib/cancel-pipeline";
 import { parseTimeOfDay, TIME_OF_DAY_WINDOWS } from "@/lib/time-of-day";
 import { sanitizeHostFlavor, sanitizeSuggestionList } from "@/lib/host-flavor-sanitizer";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
@@ -379,23 +380,27 @@ async function handleCancel(
     return { success: false, message: "Session is already cancelled" };
   }
 
-  const reason = (params.reason as string) || "Cancelled by host";
-  await prisma.negotiationSession.update({
-    where: { id: session.id },
-    data: {
-      status: "cancelled",
-      statusLabel: reason,
-    },
+  // Historically this path only flipped DB state — leaving live Google
+  // events and active holds in place when the agent cancelled on the host's
+  // behalf. Now routed through the shared cancelSession() pipeline so the
+  // cascade matches the host-UI route exactly. initiator="agent" drives the
+  // system-message + statusLabel wording.
+  const reasonParam =
+    typeof params.reason === "string" && params.reason.trim().length > 0
+      ? (params.reason as string)
+      : null;
+
+  const result = await cancelSession({
+    sessionId: session.id,
+    hostId: userId,
+    initiator: "agent",
+    note: reasonParam,
+    notifyAttendees: true,
   });
 
-  // Save a system message in the deal room
-  await prisma.message.create({
-    data: {
-      sessionId: session.id,
-      role: "system",
-      content: `Meeting cancelled: ${reason}`,
-    },
-  });
+  if (!result.ok) {
+    return { success: false, message: result.error ?? "Cancel failed" };
+  }
 
   const name = session.link.inviteeName || session.title || "session";
   return { success: true, message: `Cancelled "${name}"`, data: { sessionId: session.id } };
