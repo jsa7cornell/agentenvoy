@@ -24,7 +24,8 @@ export async function GET() {
   const scopes = account?.scope?.split(" ") ?? [];
   const hasCalendarScope =
     scopes.includes("https://www.googleapis.com/auth/calendar") ||
-    scopes.includes("https://www.googleapis.com/auth/calendar.events");
+    scopes.includes("https://www.googleapis.com/auth/calendar.events") ||
+    scopes.includes("https://www.googleapis.com/auth/calendar.readonly");
 
   return NextResponse.json({
     google: {
