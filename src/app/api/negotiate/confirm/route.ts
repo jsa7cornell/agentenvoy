@@ -65,6 +65,9 @@ export async function POST(req: NextRequest) {
         eventLink: result.eventLink,
         emailSent: result.emailSent,
         ...(result.idempotent ? { idempotent: true } : {}),
+        ...(result.calendarWriteUnavailable
+          ? { calendarWriteUnavailable: true }
+          : {}),
       });
     }
 
