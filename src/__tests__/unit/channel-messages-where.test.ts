@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildChannelMessagesWhere } from "@/app/api/channel/messages/route";
+import { buildChannelMessagesWhere } from "@/app/api/channel/messages/_where";
 
 describe("buildChannelMessagesWhere", () => {
   it("includes recent rows in the session window", () => {

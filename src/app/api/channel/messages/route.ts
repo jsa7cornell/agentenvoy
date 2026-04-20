@@ -4,20 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { shortTimezoneLabel } from "@/lib/timezone";
 import { displayStatusLabel } from "@/lib/status-label";
-
-// Always include onboarding rows regardless of the session window — once a
-// post-calibration ChannelSession opens, its startedAt is more recent than the
-// onboarding turns, which would otherwise drop them from the feed and leave
-// the user staring at an empty channel after calibration completes.
-export function buildChannelMessagesWhere(channelId: string, sessionStart: Date) {
-  return {
-    channelId,
-    OR: [
-      { createdAt: { gte: sessionStart } },
-      { metadata: { path: ["kind"], equals: "onboarding" } },
-    ],
-  };
-}
+import { buildChannelMessagesWhere } from "./_where";
 
 // GET /api/channel/messages
 // Returns channel messages with thread snapshots for ThreadCard rendering
