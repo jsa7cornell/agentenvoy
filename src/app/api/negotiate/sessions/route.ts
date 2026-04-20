@@ -55,6 +55,7 @@ export async function GET(req: NextRequest) {
       statusLabel: s.statusLabel,
       guestEmail: s.guestEmail,
       guestName: s.guestName,
+      linkType: s.link?.type ?? null,
     }),
   }));
 

@@ -69,6 +69,7 @@ export async function GET() {
               code: true,
               slug: true,
               mode: true,
+              type: true,
               rules: true, // read by the client to extract priority (Layer 5)
             },
           },
@@ -136,6 +137,7 @@ export async function GET() {
       statusLabel: msg.thread.statusLabel,
       guestEmail: msg.thread.guestEmail,
       guestName: msg.thread.guestName,
+      linkType: msg.thread.link?.type ?? null,
     });
 
     const base = {

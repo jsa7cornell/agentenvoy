@@ -20,8 +20,13 @@ export function displayStatusLabel(session: {
   statusLabel: string | null;
   guestEmail: string | null;
   guestName: string | null;
+  /** Optional — when known, generic shared links suppress the label until
+   *  the session actually reaches agreed. "Waiting for invitee" on a shared
+   *  office-hours-style link is meaningless; there's no single invitee. */
+  linkType?: string | null;
 }): string | null {
   if (!session.statusLabel) return null;
+  if (session.linkType === "generic" && session.status !== "agreed") return null;
   if (session.status !== "active") return session.statusLabel;
   if (session.guestEmail || session.guestName) return session.statusLabel;
   return null;

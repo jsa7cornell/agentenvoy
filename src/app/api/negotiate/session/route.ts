@@ -886,7 +886,26 @@ export async function POST(req: NextRequest) {
       // Closing — V3 keeps it to one line and NEVER asks for email up front
       // (the confirmation card collects it when the guest locks a time). If
       // we're missing name/topic, fold just those into the sentence.
-      const closing = `Choose a slot from the calendar below or reply to me with your preference to get it booked.`;
+      // Generic links: pluralize "preferences" and append a "typical slot"
+      // hint inviting the guest to suggest a different length/format.
+      const isGeneric = link.type === "generic";
+      const closing = isGeneric
+        ? (() => {
+            const base = `Choose a slot from the calendar below or reply to me with your preferences to get it booked.`;
+            const durStr = effectiveDuration ? `${effectiveDuration} minutes` : null;
+            const fmt = fmtLabel;
+            if (durStr && fmt) {
+              return `${base}\n\nA typical slot is ${durStr} ${fmt}, but if you think a different length and type is appropriate, let me know.`;
+            }
+            if (durStr) {
+              return `${base}\n\nA typical slot is ${durStr}, but if you think a different length is appropriate, let me know.`;
+            }
+            if (fmt) {
+              return `${base}\n\nA typical slot is ${fmt}, but if you think a different type is appropriate, let me know.`;
+            }
+            return base;
+          })()
+        : `Choose a slot from the calendar below or reply to me with your preference to get it booked.`;
 
       // Host-supplied flavor (hostNote) is NO LONGER rendered verbatim in
       // the guest greeting (narration-hygiene-v2, 2026-04-20). Root cause:
@@ -900,7 +919,10 @@ export async function POST(req: NextRequest) {
 
       // V4: Proposal bar is gone; header is just the prose hello + optional
       // tz line. Scheduled body and closing follow with blank lines.
-      const headerLines = [hello];
+      // Generic links have no single invitee, so the opener "scheduling time
+      // with you and John" reads wrong. Use an agent-framed self-intro.
+      const genericHello = `👋 I'm ${hostFirstName}'s scheduling agent.`;
+      const headerLines = [isGeneric ? genericHello : hello];
       if (tzLine) headerLines.push(tzLine);
       const header = headerLines.join("\n");
 
@@ -972,6 +994,7 @@ export async function POST(req: NextRequest) {
       statusLabel: session.statusLabel,
       guestEmail: session.guestEmail,
       guestName: session.guestName,
+      linkType: link.type,
     }),
     greeting,
     code: link.code || undefined,
