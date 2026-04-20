@@ -853,8 +853,8 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
   const locHint = !picks.location || locSugs.length === 0
     ? ""
     : locSugs.length === 1
-      ? ` ${hostFirstName} suggested: **${locSugs[0]}**.`
-      : ` A few places ${hostFirstName} suggested: ${locSugs.map((l) => `**${l}**`).join(", ")}.`;
+      ? ` ${hostFirstName} suggested: ${locSugs[0]}.`
+      : ` A few places ${hostFirstName} suggested: ${locSugs.join(", ")}.`;
 
   const askLine = `Pick ${pickClause}, and I'll get it booked. 🤝${locHint}`;
 
