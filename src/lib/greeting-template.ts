@@ -847,10 +847,14 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
       : `a ${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 
   const locSugs = guidance?.suggestions?.locations || [];
-  const locHint =
-    picks.location && locSugs.length > 0
-      ? ` A few places ${hostFirstName} suggested: ${locSugs.map((l) => `**${l}**`).join(", ")}.`
-      : "";
+  // Pluralize: single suggestion reads as "John suggested: **the club**",
+  // multiple reads as "A few places John suggested: **X**, **Y**, **Z**".
+  // Previously always said "A few places" which was awkward for one item.
+  const locHint = !picks.location || locSugs.length === 0
+    ? ""
+    : locSugs.length === 1
+      ? ` ${hostFirstName} suggested: **${locSugs[0]}**.`
+      : ` A few places ${hostFirstName} suggested: ${locSugs.map((l) => `**${l}**`).join(", ")}.`;
 
   const askLine = `Pick ${pickClause}, and I'll get it booked. 🤝${locHint}`;
 
