@@ -30,6 +30,7 @@ import { waitUntil } from "@vercel/functions";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createCalendarEvent, deleteCalendarEvent, invalidateSchedule } from "@/lib/calendar";
+import { HOST_WRITE_SCOPE } from "@/lib/oauth/required-scopes";
 import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
 import { dispatch } from "@/lib/side-effects/dispatcher";
@@ -98,7 +99,13 @@ export type ConfirmResult =
       emailSent: boolean;
       idempotent?: boolean;
       /** Non-fatal degraded-path signals. */
-      warnings?: Array<"gcal_failed">;
+      warnings?: Array<"gcal_failed" | "gcal_skipped_scope">;
+      /**
+       * True when we deliberately skipped the GCal write attempt because
+       * the host hasn't granted `calendar.events`. UI consumers surface
+       * the .ics fallback + reconnect upsell on this signal (T3c).
+       */
+      calendarWriteUnavailable?: boolean;
       attempt: ConfirmAttemptRecord;
     }
   | {
@@ -473,13 +480,31 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   let meetLink: string | undefined;
   let eventLink: string | undefined;
   let confirmedCalendarEventId: string | undefined;
+  let calendarWriteUnavailable = false;
 
   const guestNoteStr = typeof bodyGuestNote === "string" && bodyGuestNote.trim()
     ? bodyGuestNote.trim().slice(0, 500)
     : null;
 
+  // T3c — degrade-not-block. Pre-flight scope check: if the host's Google
+  // Account doesn't carry calendar.events, skip the create attempt entirely
+  // (saves a guaranteed-403 round-trip) and signal the .ics fallback.
+  // Sign-in is never blocked on this in T3a; the host gets a confirmed
+  // booking either way, just without the auto-add convenience.
+  const hostGoogleAcct = await prisma.account.findFirst({
+    where: { userId: session.hostId, provider: "google" },
+    select: { scope: true, refresh_token: true },
+  });
+  const hostHasWriteScope =
+    !!hostGoogleAcct?.refresh_token &&
+    !!hostGoogleAcct?.scope?.split(" ").includes(HOST_WRITE_SCOPE);
+
   const tGcalStart = Date.now();
-  try {
+  if (!hostHasWriteScope) {
+    calendarWriteUnavailable = true;
+    attemptOutcome = "gcal_skipped_scope";
+    attemptError = "calendar.events scope not granted; .ics fallback offered";
+  } else try {
     const descriptionLines = [
       `Scheduled via AgentEnvoy`,
       `Format: ${meetingFormat}`,
@@ -811,11 +836,16 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     `[confirm] sessionId=${sessionId} total=${totalMs}ms gcal=${tGcalMs}ms parallel=${tParMs}ms email=${tEmailMs}ms`
   );
 
-  // Only flip outcome to "success" if we didn't already mark gcal_failed.
+  // Only flip outcome to "success" if we didn't already mark a degraded path.
   const gcalFailed = attemptOutcome === "gcal_failed";
-  if (!gcalFailed) {
+  const gcalSkippedScope = attemptOutcome === "gcal_skipped_scope";
+  if (!gcalFailed && !gcalSkippedScope) {
     attemptOutcome = "success";
   }
+
+  const warnings: Array<"gcal_failed" | "gcal_skipped_scope"> = [];
+  if (gcalFailed) warnings.push("gcal_failed");
+  if (gcalSkippedScope) warnings.push("gcal_skipped_scope");
 
   return {
     ok: true,
@@ -828,7 +858,8 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     meetLink,
     eventLink,
     emailSent,
-    ...(gcalFailed ? { warnings: ["gcal_failed"] as const } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
+    ...(calendarWriteUnavailable ? { calendarWriteUnavailable: true } : {}),
     attempt: buildAttempt(),
   };
 }

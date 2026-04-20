@@ -160,6 +160,20 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     mode: "reconnect",
     callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
   });
+  // T3c: re-prompt host for calendar.events write scope when the confirm
+  // pipeline degraded to .ics-only (gcal_skipped_scope). prompt=consent so
+  // Google re-shows the unchecked write scope checkbox.
+  const writeScopeReconnect = useOAuthSignIn({
+    mode: "upgrade-scope",
+    callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
+    signInParams: { prompt: "consent" },
+  });
+  // T3c: tracks whether the host's Google account currently lacks
+  // calendar.events. Sourced from confirmData.calendarWriteUnavailable
+  // (set by the pipeline pre-flight check) and refreshed from
+  // /api/connections/status on mount so a post-reload host still sees
+  // the upsell.
+  const [calendarWriteUnavailable, setCalendarWriteUnavailable] = useState(false);
   // Propose-changes UI: each click injects a synthetic Envoy text bubble +
   // a fresh picker bubble into the thread. Client-only, never persisted.
   // Incrementing triggers a re-render with one more (text, picker) pair at
@@ -302,6 +316,25 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       .then((data) => { if (data) setGcalStatus(data); })
       .catch(() => {});
   }, [sessionId, isHost, confirmed]);
+
+  // T3c: detect host missing calendar.events write scope so the upsell
+  // banner appears even after a page reload (when confirmData no longer
+  // carries the warning flag from the original confirm response).
+  useEffect(() => {
+    if (!isHost || !confirmed) return;
+    if (confirmData?.calendarWriteUnavailable) {
+      setCalendarWriteUnavailable(true);
+      return;
+    }
+    fetch("/api/connections/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.google?.connected && data.google.calendarWrite === false) {
+          setCalendarWriteUnavailable(true);
+        }
+      })
+      .catch(() => {});
+  }, [isHost, confirmed, confirmData]);
 
   // Track event status changes for animation pulse
   useEffect(() => {
@@ -1047,6 +1080,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             </span>
           )}
         </div>
+
+        {/* T3c: host-only soft upsell when the confirm pipeline degraded
+            to .ics-only (no calendar.events write scope). Degrade-not-block:
+            the meeting is confirmed, we just couldn't auto-add it to GCal.
+            The .ics download in the actions row below remains the floor. */}
+        {isHost && confirmed && calendarWriteUnavailable && (
+          <div className="ml-5 mt-2.5 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+            <span className="text-amber-400 text-sm leading-5">⚠</span>
+            <div className="flex-1 text-xs text-amber-200/90 leading-5">
+              <span className="font-medium">Not on your Google Calendar.</span>{" "}
+              Grant calendar write access to auto-add future meetings — or use the .ics download below.
+            </div>
+            <button
+              onClick={writeScopeReconnect.trigger}
+              className="text-xs font-medium text-amber-300 hover:text-amber-200 transition whitespace-nowrap"
+            >
+              Grant access
+            </button>
+            {writeScopeReconnect.modal}
+          </div>
+        )}
 
         {/* Row 3: Actions (confirmed / cancelled only) */}
         {(confirmed || eventStatus === "cancelled") && (
