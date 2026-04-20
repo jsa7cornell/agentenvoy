@@ -86,3 +86,65 @@ body {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
   30% { transform: translateY(-4px); opacity: 1; }
 }
+
+/* T4 Match Pulse — see src/components/match-pulse.tsx.
+   `match-pulse-ring` is the ~2s opening pulse (emerald → blue → purple sweep
+   with shadow halo). `match-pulse-ring-persistent` is the durable subtle ring
+   that stays after the opening pulse for the lifetime of the matched view.
+   `match-pulse-badge-in` is the badge crossfade.
+   All animations no-op under prefers-reduced-motion. */
+@keyframes match-pulse-ring {
+  0% {
+    box-shadow:
+      0 0 0 0 color-mix(in srgb, #10b981 70%, transparent),
+      0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+    background-position: 0% 50%;
+  }
+  40% {
+    box-shadow:
+      0 0 0 6px color-mix(in srgb, #3b82f6 40%, transparent),
+      0 0 24px 4px color-mix(in srgb, var(--accent) 35%, transparent);
+    background-position: 60% 50%;
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 transparent,
+      0 0 0 0 transparent;
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes match-pulse-badge-in {
+  0%   { opacity: 0; transform: translateY(-2px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.match-pulse-ring-active {
+  position: relative;
+  background-image: linear-gradient(
+    110deg,
+    color-mix(in srgb, #10b981 18%, transparent) 0%,
+    color-mix(in srgb, #3b82f6 18%, transparent) 50%,
+    color-mix(in srgb, #a855f7 18%, transparent) 100%
+  );
+  background-size: 250% 100%;
+  animation: match-pulse-ring 2000ms ease-out 1 both;
+}
+
+.match-pulse-ring-persistent {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent-3) 35%, transparent),
+    0 0 18px -6px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.match-pulse-badge {
+  animation: match-pulse-badge-in 320ms ease-out 1 both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .match-pulse-ring-active {
+    animation: none;
+    background-image: none;
+  }
+  .match-pulse-badge { animation: none; }
+}
