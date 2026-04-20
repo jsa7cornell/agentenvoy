@@ -16,6 +16,7 @@ import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calen
 import { DayView } from "@/components/day-view";
 import { AvailabilityRules } from "@/components/availability-rules";
 import { TIMEZONE_TABLE, shortTimezoneLabel, getTimezoneEntry } from "@/lib/timezone";
+import { getSunday } from "@/lib/week-boundaries";
 
 type SessionSummary = {
   id: string;
@@ -38,12 +39,10 @@ type GoogleCalendar = {
   backgroundColor: string | null;
 };
 
-export function getSunday(d: Date): string {
-  const date = new Date(d);
-  const day = date.getDay();
-  date.setDate(date.getDate() - day);
-  return date.toISOString().slice(0, 10);
-}
+// getSunday lives in src/lib/week-boundaries.ts so it's unit-testable
+// outside this JSX component. Re-exported for back-compat with call sites
+// that used to import it from this module.
+export { getSunday };
 
 function formatWeekRange(weekStart: string, days: number): string {
   const start = new Date(weekStart + "T12:00:00");
