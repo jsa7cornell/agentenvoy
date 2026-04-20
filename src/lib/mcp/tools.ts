@@ -36,9 +36,15 @@ import {
   applyOfficeHoursWindow,
   type ConfirmedBooking,
 } from "@/lib/office-hours";
-import { authorizeMcpCall, type AuthorizeResult } from "@/lib/mcp/auth";
+import {
+  authorizeMcpCall,
+  parseMeetingUrl,
+  resolveLink,
+  type AuthorizeResult,
+} from "@/lib/mcp/auth";
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
 import { confirmBooking } from "@/lib/confirm-pipeline";
+import { writeMcpCallLog } from "@/lib/mcp/call-log";
 import {
   MCP_TOOLS,
   type McpToolName,
@@ -906,6 +912,63 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
  * client's tool discovery list is stable across deploys. Incomplete tools
  * return an `isError: true` refusal.
  */
+/**
+ * Wrap a handler so every call — ok or refusal — lands in `MCPCallLog`.
+ *
+ * The writer is fire-and-forget (non-blocking): we build the ctx synchronously
+ * after the handler returns, kick off the insert, and return the tool result
+ * immediately. If the writer throws, it already logs to console — we don't
+ * let observability sit on the critical path.
+ *
+ * `linkId` is re-resolved from `meetingUrl` here. This costs an extra
+ * findUnique per call; the alternative (threading the auth result out of
+ * every handler) touches eight call sites for marginal gain. The log write
+ * itself is off the hot path, so the duplicate read is fine.
+ */
+function withCallLogging(
+  name: string,
+  handler: (args: Record<string, unknown>) => Promise<CallToolResult> | CallToolResult,
+): (args: Record<string, unknown>) => Promise<CallToolResult> {
+  return async (args) => {
+    const started = Date.now();
+    const result = await handler(args);
+    const response = (result.structuredContent ?? {}) as Record<string, unknown>;
+    const latencyMs = Date.now() - started;
+    const meetingUrl = args.meetingUrl as string | undefined;
+    const clientMeta = args.clientMeta as
+      | {
+          clientName?: string;
+          clientType?: string;
+          principal?: { name?: string; email?: string };
+        }
+      | undefined;
+
+    // Resolve linkId lazily in a floating promise — never block the response.
+    void (async () => {
+      try {
+        if (!meetingUrl) return;
+        const parsed = parseMeetingUrl(meetingUrl);
+        if (!parsed.ok) return;
+        const resolved = await resolveLink(parsed);
+        if (!resolved.ok) return;
+        await writeMcpCallLog({
+          tool: name,
+          linkId: resolved.link.id,
+          sessionId: (response.sessionId as string | undefined) ?? null,
+          clientMeta,
+          requestArgs: args,
+          response,
+          latencyMs,
+        });
+      } catch (e) {
+        console.error("[mcp/tools] call-log wrapper failed:", e);
+      }
+    })();
+
+    return result;
+  };
+}
+
 export function registerMcpTools(server: McpServer): void {
   const handlers: Record<McpToolName, (args: Record<string, unknown>) => Promise<CallToolResult> | CallToolResult> =
     {
@@ -948,7 +1011,7 @@ export function registerMcpTools(server: McpServer): void {
         inputSchema: inputShape,
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      handlers[name] as any
+      withCallLogging(name, handlers[name]) as any
     );
   }
 }
