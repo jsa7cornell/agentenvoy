@@ -35,11 +35,22 @@ vi.mock("@/lib/prisma", () => ({
     negotiationSession: {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    message: {
+      create: vi.fn(),
     },
     consentRequest: {
       findMany: vi.fn().mockResolvedValue([]),
     },
   },
+}));
+
+// propose_lock delegates to confirmBooking. Mock the pipeline so this
+// remains a pure wiring test — confirm-pipeline has its own unit coverage.
+vi.mock("@/lib/confirm-pipeline", () => ({
+  confirmBooking: vi.fn(),
 }));
 
 // `get_availability` pulls the host's computed schedule. Mock the compute
@@ -414,14 +425,327 @@ describe("POST /api/mcp — get_session_status", () => {
   });
 });
 
-describe("POST /api/mcp — not-yet-implemented tools are discoverable", () => {
-  it("propose_lock returns isError:true not-implemented stub", async () => {
+describe("POST /api/mcp — post_message", () => {
+  const mockSessionFind = prisma.negotiationSession
+    .findFirst as unknown as ReturnType<typeof vi.fn>;
+  const mockSessionCreate = prisma.negotiationSession
+    .create as unknown as ReturnType<typeof vi.fn>;
+  const mockMessageCreate = prisma.message
+    .create as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockSessionFind.mockReset();
+    mockSessionCreate.mockReset();
+    mockMessageCreate.mockReset();
+  });
+
+  it("persists message + auto-bootstraps session on first contact", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_1", userId: "u1", rules: {}, sourceRuleId: null },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockSessionFind.mockResolvedValueOnce(null); // no existing session
+    mockSessionCreate.mockResolvedValueOnce({
+      id: "sess_new",
+      linkId: "link_1",
+      hostId: "u1",
+      status: "active",
+    });
+    mockMessageCreate.mockResolvedValueOnce({ id: "msg_1" });
+
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("post_message", {
+          meetingUrl: "/meet/abc",
+          text: "Hi — proposing Friday 10am.",
+          clientMeta: { clientType: "external_agent" },
+        })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as {
+      ok: boolean;
+      messageId: string;
+      sessionId: string;
+    };
+    expect(sc.ok).toBe(true);
+    expect(sc.messageId).toBe("msg_1");
+    expect(sc.sessionId).toBe("sess_new");
+  });
+
+  it("refuses session_terminal on cancelled session", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_1", userId: "u1", rules: {}, sourceRuleId: null },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockSessionFind.mockResolvedValueOnce({
+      id: "sess_1",
+      linkId: "link_1",
+      hostId: "u1",
+      status: "cancelled",
+    });
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("post_message", {
+          meetingUrl: "/meet/abc",
+          text: "hello",
+        })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as { ok: boolean; reason: string };
+    expect(sc.ok).toBe(false);
+    expect(sc.reason).toBe("session_terminal");
+  });
+});
+
+describe("POST /api/mcp — propose_parameters", () => {
+  const mockSessionFind = prisma.negotiationSession
+    .findFirst as unknown as ReturnType<typeof vi.fn>;
+  const mockSessionUpdate = prisma.negotiationSession
+    .update as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockSessionFind.mockReset();
+    mockUserFind.mockReset();
+    mockSessionUpdate.mockClear();
+  });
+
+  it("accepts writeable fields, rejects locked fields with field_locked", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: {
+        id: "link_1",
+        userId: "u1",
+        // format is locked (link rule); duration is open
+        rules: { format: "video" },
+        sourceRuleId: null,
+      },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockSessionFind.mockResolvedValueOnce({
+      id: "sess_1",
+      linkId: "link_1",
+      hostId: "u1",
+      status: "active",
+    });
+    mockUserFind.mockResolvedValueOnce({
+      preferences: { explicit: { timezone: "UTC" } },
+    });
+
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("propose_parameters", {
+          meetingUrl: "/meet/abc",
+          sessionId: "sess_1",
+          proposal: { format: "phone", duration: 45 },
+        })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as {
+      ok: boolean;
+      results: Array<{ field: string; accepted: boolean; reason?: string }>;
+    };
+    expect(sc.ok).toBe(true);
+    const byField = Object.fromEntries(sc.results.map((r) => [r.field, r]));
+    expect(byField.format.accepted).toBe(false);
+    expect(byField.format.reason).toBe("field_locked");
+    expect(byField.duration.accepted).toBe(true);
+    // Only duration should be persisted — format was rejected.
+    expect(mockSessionUpdate).toHaveBeenCalledWith({
+      where: { id: "sess_1" },
+      data: { duration: 45 },
+    });
+  });
+
+  it("action=defer_to_host_envoy short-circuits every field", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_1", userId: "u1", rules: {}, sourceRuleId: null },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockSessionFind.mockResolvedValueOnce({
+      id: "sess_1",
+      linkId: "link_1",
+      hostId: "u1",
+      status: "active",
+    });
+    mockUserFind.mockResolvedValueOnce({ preferences: {} });
+
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("propose_parameters", {
+          meetingUrl: "/meet/abc",
+          sessionId: "sess_1",
+          proposal: { duration: 45 },
+          action: "defer_to_host_envoy",
+        })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as {
+      ok: boolean;
+      results: Array<{ accepted: boolean; reason?: string }>;
+    };
+    expect(sc.ok).toBe(true);
+    expect(sc.results[0].accepted).toBe(false);
+    expect(sc.results[0].reason).toBe("deferred_to_host_envoy");
+    expect(mockSessionUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/mcp — propose_lock", () => {
+  const mockSessionFind = prisma.negotiationSession
+    .findFirst as unknown as ReturnType<typeof vi.fn>;
+  const mockSessionCreate = prisma.negotiationSession
+    .create as unknown as ReturnType<typeof vi.fn>;
+  const mockSessionUpdate = prisma.negotiationSession
+    .update as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    mockSessionFind.mockReset();
+    mockSessionCreate.mockReset();
+    mockSessionUpdate.mockReset().mockResolvedValue({});
+    mockUserFind.mockReset();
+    const { confirmBooking } = await import("@/lib/confirm-pipeline");
+    (confirmBooking as unknown as ReturnType<typeof vi.fn>).mockReset();
+  });
+
+  it("happy path: bootstraps session, calls confirmBooking, maps to confirmed envelope", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: {
+        id: "link_1",
+        userId: "u1",
+        rules: { duration: 30 },
+        sourceRuleId: null,
+      },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockUserFind.mockResolvedValueOnce({ name: "Hanna" });
+    mockSessionFind.mockResolvedValueOnce(null);
+    mockSessionCreate.mockResolvedValueOnce({
+      id: "sess_new",
+      linkId: "link_1",
+      hostId: "u1",
+      status: "active",
+    });
+    const { confirmBooking } = await import("@/lib/confirm-pipeline");
+    (confirmBooking as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: true,
+        outcome: "success",
+        status: "confirmed",
+        dateTime: "2026-05-01T15:00:00.000Z",
+        duration: 30,
+        format: "video",
+        location: null,
+        meetLink: "https://meet.google.com/xxx",
+        emailSent: true,
+        attempt: {
+          outcome: "success",
+          error: null,
+          sessionId: "sess_new",
+          slotStart: new Date(),
+          slotEnd: new Date(),
+        },
+      });
+
     const res = await POST(
       makeRpcRequest(
         jsonRpcCall("propose_lock", {
           meetingUrl: "/meet/abc",
           slot: { start: "2026-05-01T15:00:00Z" },
           guest: { email: "alice@example.com", name: "Alice" },
+        })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as {
+      ok: boolean;
+      status: string;
+      sessionId: string;
+      meetLink?: string;
+    };
+    expect(sc.ok).toBe(true);
+    expect(sc.status).toBe("confirmed");
+    expect(sc.sessionId).toBe("sess_new");
+    expect(sc.meetLink).toBe("https://meet.google.com/xxx");
+  });
+
+  it("maps confirmBooking refusal (slot_mismatch) to wire refusal", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_1", userId: "u1", rules: {}, sourceRuleId: null },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockUserFind.mockResolvedValueOnce({ name: "Hanna" });
+    mockSessionFind.mockResolvedValueOnce({
+      id: "sess_1",
+      linkId: "link_1",
+      hostId: "u1",
+      status: "agreed",
+    });
+    const { confirmBooking } = await import("@/lib/confirm-pipeline");
+    (confirmBooking as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: "slot_mismatch",
+        message: "Already agreed at a different time.",
+        attempt: {
+          outcome: "slot_mismatch",
+          error: null,
+          sessionId: "sess_1",
+          slotStart: null,
+          slotEnd: null,
+        },
+      });
+
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("propose_lock", {
+          meetingUrl: "/meet/abc",
+          slot: { start: "2026-05-01T15:00:00Z" },
+          guest: { email: "alice@example.com", name: "Alice" },
+        })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as { ok: boolean; reason: string };
+    expect(sc.ok).toBe(false);
+    expect(sc.reason).toBe("slot_mismatch");
+  });
+});
+
+describe("POST /api/mcp — pipeline-blocked tools are discoverable", () => {
+  it("cancel_meeting returns isError:true blocked stub", async () => {
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("cancel_meeting", { meetingUrl: "/meet/abc" })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    expect(rpc.result?.isError).toBe(true);
+    const sc = rpc.result?.structuredContent;
+    expect(sc?.ok).toBe(false);
+    expect(String(sc?.message)).toMatch(/not yet implemented/);
+  });
+
+  it("reschedule_meeting returns isError:true blocked stub", async () => {
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("reschedule_meeting", {
+          meetingUrl: "/meet/abc",
+          newSlot: { start: "2026-05-01T15:00:00Z" },
         })
       )
     );

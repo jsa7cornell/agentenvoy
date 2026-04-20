@@ -15,6 +15,7 @@
  * to wire every handler into an `McpServer` instance per-request. Stateless
  * mode — no cross-request state lives here.
  */
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getUserTimezone } from "@/lib/timezone";
 import {
@@ -37,12 +38,18 @@ import {
 } from "@/lib/office-hours";
 import { authorizeMcpCall, type AuthorizeResult } from "@/lib/mcp/auth";
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
+import { confirmBooking } from "@/lib/confirm-pipeline";
 import {
   MCP_TOOLS,
   type McpToolName,
   getMeetingParametersInput,
   getAvailabilityInput,
   getSessionStatusInput,
+  postMessageInput,
+  proposeParametersInput,
+  proposeLockInput,
+  cancelMeetingInput,
+  rescheduleMeetingInput,
 } from "@/lib/mcp/schemas";
 import type { z } from "zod";
 
@@ -432,18 +439,454 @@ export async function handleGetSessionStatus(
 }
 
 // ---------------------------------------------------------------------------
-// Stub handlers for the 7 tools landing in later chunks. Registered so the
-// tool list is discoverable from day one; each returns a `not_implemented`
-// refusal until its chunk lands. Keeps the `.well-known/mcp.json` list
-// stable instead of growing tool-by-tool.
+// Shared: resolve the target NegotiationSession for a write call.
 // ---------------------------------------------------------------------------
 
-function notImplemented(tool: McpToolName): CallToolResult {
+type ResolvedSession = {
+  id: string;
+  linkId: string;
+  hostId: string;
+  status: string;
+};
+
+/**
+ * Find (or mint) the session this write should act on.
+ *
+ * The MCP caller may pass `sessionId` explicitly (bounded to the link) or
+ * omit it — in which case we look for the most-recent session on this link.
+ * When `bootstrap` is true AND no session exists, we mint one with
+ * defaults derived from the link rules. This is the path an external agent
+ * takes when it's the first to touch a fresh link.
+ */
+async function resolveSession(args: {
+  linkId: string;
+  hostId: string;
+  sessionId?: string | null;
+  bootstrap?: { format?: string; duration?: number; title?: string };
+}): Promise<ResolvedSession | null> {
+  if (args.sessionId) {
+    const s = await prisma.negotiationSession.findFirst({
+      where: { id: args.sessionId, linkId: args.linkId },
+      select: { id: true, linkId: true, hostId: true, status: true },
+    });
+    return s ?? null;
+  }
+  const existing = await prisma.negotiationSession.findFirst({
+    where: { linkId: args.linkId },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, linkId: true, hostId: true, status: true },
+  });
+  if (existing) return existing;
+  if (!args.bootstrap) return null;
+  const created = await prisma.negotiationSession.create({
+    data: {
+      linkId: args.linkId,
+      hostId: args.hostId,
+      status: "active",
+      title: args.bootstrap.title,
+      format: args.bootstrap.format,
+      duration: args.bootstrap.duration,
+    },
+    select: { id: true, linkId: true, hostId: true, status: true },
+  });
+  return created;
+}
+
+// ---------------------------------------------------------------------------
+// Handler: post_message
+// ---------------------------------------------------------------------------
+
+/**
+ * Persist a message to the deal-room thread on behalf of an external agent.
+ *
+ * v1 scope: thread-of-record only. The message lands with role="guest" and
+ * `metadata.clientType = "external_agent"` so the UI can badge it. The
+ * envoy-reply streaming path (via the SDK's notification channel) is a
+ * follow-up — the schema already marks `envoyReply` as optional so clients
+ * are future-compatible when it lights up.
+ */
+export async function handlePostMessage(
+  args: z.infer<typeof postMessageInput>
+): Promise<CallToolResult> {
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "post_message",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+
+  // Bootstrap a session on first contact so an external agent can open a
+  // thread without a round-trip. Defaults come from link rules.
+  const rules = (link.rules ?? {}) as LinkRules;
+  const session = await resolveSession({
+    linkId: link.id,
+    hostId: link.userId,
+    bootstrap: {
+      format: (rules as Record<string, unknown>).format as string | undefined,
+      duration: (rules as Record<string, unknown>).duration as number | undefined,
+      title: args.clientMeta?.principal?.name
+        ? `External agent — ${args.clientMeta.principal.name}`
+        : "External agent thread",
+    },
+  });
+  if (!session) {
+    return asCallResult({
+      ok: false,
+      reason: "session_not_found",
+      message: "Session could not be opened for this link.",
+    });
+  }
+
+  // Terminal sessions refuse writes — mirrors SPEC §2.4. "agreed" remains
+  // writeable so the guest (or their agent) can follow up after booking.
+  if (session.status === "cancelled" || session.status === "expired") {
+    return asCallResult({
+      ok: false,
+      reason: "session_terminal",
+      message: `Session is ${session.status}; messages are closed.`,
+    });
+  }
+
+  const metadata: Record<string, unknown> = {
+    clientType: args.clientMeta?.clientType ?? "external_agent",
+  };
+  if (args.clientMeta?.clientName) metadata.clientName = args.clientMeta.clientName;
+  if (args.clientMeta?.principal)
+    metadata.principal = args.clientMeta.principal;
+
+  const created = await prisma.message.create({
+    data: {
+      sessionId: session.id,
+      role: "guest",
+      content: args.text,
+      metadata: metadata as Prisma.InputJsonValue,
+    },
+    select: { id: true },
+  });
+
+  return asCallResult({
+    ok: true,
+    messageId: created.id,
+    sessionId: session.id,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Handler: propose_parameters
+// ---------------------------------------------------------------------------
+
+/**
+ * Batch proposal: "I want format=phone, duration=45." For each requested
+ * field, check against the parameter-resolver's envelope:
+ *   - `locked`                  → reject with `field_locked`
+ *   - `allowedValues` bounded   → reject with `value_not_allowed` if outside
+ *   - otherwise                 → write onto NegotiationSession and mark accepted
+ *
+ * v1 scope: format + duration are persisted directly onto the session. The
+ * `location` field stays delegated to `propose_lock` / host-envoy consent
+ * since there's no per-session `location` column yet.
+ *
+ * `action: "defer_to_host_envoy"` short-circuits every field to a
+ * `deferred_to_host_envoy` result — the actual consent-request wiring lives
+ * in the ConsentRequest table and will be populated by the host envoy
+ * follow-up chunk.
+ */
+export async function handleProposeParameters(
+  args: z.infer<typeof proposeParametersInput>
+): Promise<CallToolResult> {
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "propose_parameters",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+  const rules = (link.rules ?? {}) as LinkRules;
+
+  const session = await resolveSession({
+    linkId: link.id,
+    hostId: link.userId,
+    sessionId: args.sessionId,
+    bootstrap: args.sessionId
+      ? undefined
+      : {
+          format: (rules as Record<string, unknown>).format as string | undefined,
+          duration: (rules as Record<string, unknown>).duration as number | undefined,
+          title: "External agent thread",
+        },
+  });
+  if (!session) {
+    return asCallResult({
+      ok: false,
+      reason: "session_not_found",
+      message: "Session not found for this link.",
+    });
+  }
+  if (session.status === "cancelled" || session.status === "expired") {
+    return asCallResult({
+      ok: false,
+      reason: "session_terminal",
+      message: `Session is ${session.status}; proposals are closed.`,
+    });
+  }
+
+  // Load host preferences for the resolver fallback chain.
+  const host = await prisma.user.findUnique({
+    where: { id: link.userId },
+    select: { preferences: true },
+  });
+  const hostPreferences = (host?.preferences ?? null) as UserPreferences | null;
+  const hostTimezone = getUserTimezone(
+    hostPreferences as Record<string, unknown> | null
+  );
+  const compiledRules =
+    ((hostPreferences?.explicit as Record<string, unknown> | undefined)
+      ?.compiled as CompiledRules | undefined) ?? null;
+  const envelopes = resolveParameters({
+    rules,
+    hostPreferences,
+    hostTimezone,
+    compiledRules,
+  });
+
+  const proposal = args.proposal;
+  const deferred = args.action === "defer_to_host_envoy";
+  const accepted: Record<string, unknown> = {};
+  const results: Array<Record<string, unknown>> = [];
+
+  for (const field of ["format", "duration", "location"] as const) {
+    if (!(field in proposal)) continue;
+    const value = (proposal as Record<string, unknown>)[field];
+
+    if (deferred) {
+      results.push({
+        field,
+        accepted: false,
+        reason: "deferred_to_host_envoy",
+        decidedBy: "host_envoy",
+      });
+      continue;
+    }
+
+    const env = (envelopes as unknown as Record<string, unknown>)[field] as
+      | { mutability: string; allowedValues?: unknown[] }
+      | undefined;
+
+    if (env?.mutability === "locked") {
+      results.push({
+        field,
+        accepted: false,
+        reason: "field_locked",
+      });
+      continue;
+    }
+    if (
+      env?.allowedValues &&
+      env.allowedValues.length > 0 &&
+      !env.allowedValues.includes(value)
+    ) {
+      results.push({
+        field,
+        accepted: false,
+        reason: "value_not_allowed",
+      });
+      continue;
+    }
+
+    accepted[field] = value;
+    results.push({
+      field,
+      accepted: true,
+      reason: "accepted",
+      appliedValue: value,
+      decidedBy: "guest",
+    });
+  }
+
+  // Persist accepted fields. Location stays deferred — no per-session column.
+  const updateData: Record<string, unknown> = {};
+  if (typeof accepted.format === "string") updateData.format = accepted.format;
+  if (typeof accepted.duration === "number")
+    updateData.duration = accepted.duration;
+  if (Object.keys(updateData).length > 0) {
+    await prisma.negotiationSession.update({
+      where: { id: session.id },
+      data: updateData,
+    });
+  }
+
+  return asCallResult({
+    ok: true,
+    sessionId: session.id,
+    results,
+    decidedAt: new Date().toISOString(),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Handler: propose_lock (the handshake)
+// ---------------------------------------------------------------------------
+
+/**
+ * The booking handshake. Validates, bootstraps a session if needed, calls
+ * `confirmBooking()` — the same pipeline the HTTP confirm route uses — and
+ * maps the `ConfirmResult` onto the wire envelope.
+ *
+ * Session bootstrap: if the caller omits `sessionId` and no session exists
+ * on this link, we mint one with minimal defaults before calling the
+ * pipeline. The alternative (refusing with `session_not_found`) would force
+ * every external agent to call `post_message` first just to materialize a
+ * session, which is silly for pure-booking flows.
+ *
+ * Overrides precedence: slot.durationMinutes > overrides.* > session
+ * defaults > link rules. Mirrored inside `confirmBooking` — we just pass
+ * through what the caller specified.
+ */
+export async function handleProposeLock(
+  args: z.infer<typeof proposeLockInput>
+): Promise<CallToolResult> {
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "propose_lock",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+  const rules = (link.rules ?? {}) as LinkRules;
+
+  // Resolve or bootstrap. For propose_lock, bootstrap is always on — the
+  // whole point is to open-and-commit in a single call when possible.
+  const host = await prisma.user.findUnique({
+    where: { id: link.userId },
+    select: { name: true },
+  });
+  const session = await resolveSession({
+    linkId: link.id,
+    hostId: link.userId,
+    sessionId: args.sessionId,
+    bootstrap: {
+      format:
+        args.overrides?.format ??
+        ((rules as Record<string, unknown>).format as string | undefined),
+      duration:
+        args.slot.durationMinutes ??
+        ((rules as Record<string, unknown>).duration as number | undefined),
+      title: `${host?.name ?? "Host"} & ${args.guest.name}`,
+    },
+  });
+  if (!session) {
+    return asCallResult({
+      ok: false,
+      reason: "session_not_found",
+      message: "Session could not be resolved for this link.",
+    });
+  }
+
+  // Persist guest info before the pipeline runs so the confirm card has it
+  // (the pipeline reads session.guestEmail/guestName when the body values
+  // are null).
+  await prisma.negotiationSession.update({
+    where: { id: session.id },
+    data: {
+      guestEmail: args.guest.email,
+      guestName: args.guest.name,
+      ...(args.guest.wantsReminder !== undefined
+        ? { wantsReminder: args.guest.wantsReminder }
+        : {}),
+    },
+  });
+
+  const duration =
+    args.slot.durationMinutes ??
+    ((rules as Record<string, unknown>).duration as number | undefined) ??
+    30;
+
+  const result = await confirmBooking({
+    sessionId: session.id,
+    dateTime: args.slot.start,
+    duration,
+    format: args.overrides?.format ?? undefined,
+    location: args.overrides?.location ?? null,
+    guestEmail: args.guest.email,
+    guestName: args.guest.name,
+    wantsReminder: args.guest.wantsReminder,
+    guestNote: args.guest.note ?? null,
+    userAgent: null,
+  });
+
+  if (!result.ok) {
+    // Map ConfirmResult refusal reasons to the schema's propose_lock enum.
+    // They're 1:1 by design except validation_failed which stays as-is.
+    return asCallResult({
+      ok: false,
+      reason: result.reason,
+      message: result.message,
+    });
+  }
+
+  return asCallResult({
+    ok: true,
+    sessionId: session.id,
+    status: "confirmed",
+    dateTime: result.dateTime,
+    duration: result.duration,
+    format: result.format,
+    location: result.location,
+    ...(result.meetLink ? { meetLink: result.meetLink } : {}),
+    ...(result.eventLink ? { eventLink: result.eventLink } : {}),
+    ...(result.idempotent ? { idempotent: true } : {}),
+    ...(result.warnings && result.warnings.length > 0
+      ? { warnings: result.warnings }
+      : {}),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Handler: cancel_meeting  (blocked — pipeline extraction pending)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns an explicit refusal until `cancel-pipeline.ts` lands (per the
+ * parent proposal's extraction sequence). Kept discoverable so agents can
+ * parse the tools/list response today and know this name reserves the slot.
+ */
+export async function handleCancelMeeting(
+  _args: z.infer<typeof cancelMeetingInput>
+): Promise<CallToolResult> {
   return asCallResult(
     {
       ok: false,
-      reason: "rate_limited", // nearest-fit in every refusal union
-      message: `Tool "${tool}" is registered but not yet implemented. Check the deploy notes.`,
+      reason: "session_terminal",
+      message:
+        "cancel_meeting is not yet implemented. Blocked on cancel-pipeline extraction (parent proposal §2).",
+    },
+    { isError: true }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Handler: reschedule_meeting  (blocked — pipeline extraction pending)
+// ---------------------------------------------------------------------------
+
+export async function handleRescheduleMeeting(
+  _args: z.infer<typeof rescheduleMeetingInput>
+): Promise<CallToolResult> {
+  return asCallResult(
+    {
+      ok: false,
+      reason: "session_terminal",
+      message:
+        "reschedule_meeting is not yet implemented. Blocked on reschedule-pipeline extraction (parent proposal §2).",
     },
     { isError: true }
   );
@@ -474,11 +917,20 @@ export function registerMcpTools(server: McpServer): void {
         handleGetAvailability(args as z.infer<typeof getAvailabilityInput>),
       get_session_status: (args) =>
         handleGetSessionStatus(args as z.infer<typeof getSessionStatusInput>),
-      post_message: () => notImplemented("post_message"),
-      propose_parameters: () => notImplemented("propose_parameters"),
-      propose_lock: () => notImplemented("propose_lock"),
-      cancel_meeting: () => notImplemented("cancel_meeting"),
-      reschedule_meeting: () => notImplemented("reschedule_meeting"),
+      post_message: (args) =>
+        handlePostMessage(args as z.infer<typeof postMessageInput>),
+      propose_parameters: (args) =>
+        handleProposeParameters(
+          args as z.infer<typeof proposeParametersInput>
+        ),
+      propose_lock: (args) =>
+        handleProposeLock(args as z.infer<typeof proposeLockInput>),
+      cancel_meeting: (args) =>
+        handleCancelMeeting(args as z.infer<typeof cancelMeetingInput>),
+      reschedule_meeting: (args) =>
+        handleRescheduleMeeting(
+          args as z.infer<typeof rescheduleMeetingInput>
+        ),
     };
 
   for (const name of Object.keys(MCP_TOOLS) as McpToolName[]) {
