@@ -253,6 +253,7 @@ const mockPrisma = vi.hoisted(() => ({
   },
   message: {
     create: vi.fn(),
+    count: vi.fn(),
   },
   user: {
     findUnique: vi.fn(),
@@ -293,6 +294,10 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     title: "Q2 Planning — Sarah",
     archived: false,
     linkId: "link-1",
+    // Default fixture represents an engaged session — a real guest on the
+    // other side. Pre-engagement tests override these to null.
+    guestEmail: "sarah@example.com",
+    guestName: "Sarah",
     link: {
       id: "link-1",
       type: "contextual",
@@ -309,6 +314,7 @@ describe("executeActions", () => {
     vi.clearAllMocks();
     mockPrisma.negotiationSession.update.mockResolvedValue({});
     mockPrisma.message.create.mockResolvedValue({});
+    mockPrisma.message.count.mockResolvedValue(1);
   });
 
   // --- Archive ---
@@ -789,6 +795,30 @@ describe("executeActions", () => {
       });
     });
 
+    // Regression — 2026-04-20. On a draft link with no engaged guest, the LLM
+    // was calling update_time with a synthesized dateTime for intents like
+    // "push it to Wednesday", flipping the session into `proposed` with a
+    // misleading "Time change proposed by host" label. Guard rejects and
+    // steers the LLM to update_link.
+    it("rejects dateTime-setting edit on a pre-engagement session", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeSession({ guestEmail: null, guestName: null })
+      );
+      mockPrisma.message.count.mockResolvedValue(0);
+
+      const results = await executeActions(
+        [{
+          action: "update_time",
+          params: { sessionId: "session-1", dateTime: "2026-04-22T09:00:00-07:00" },
+        }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("update_link");
+      expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
+    });
+
     it("rejects invalid dateTime", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
 
@@ -846,6 +876,32 @@ describe("executeActions", () => {
           content: expect.stringContaining("Café Nero"),
         }),
       });
+    });
+
+    // Regression — 2026-04-20. Clobbering statusLabel to "Location updated to
+    // X" on a never-engaged draft overrides the draft-state label and misleads
+    // the host. On pre-engagement, still mirror to link.rules + post the note.
+    it("on pre-engagement, mirrors to link.rules but does NOT clobber statusLabel", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeSession({ guestEmail: null, guestName: null })
+      );
+      mockPrisma.message.count.mockResolvedValue(0);
+
+      const results = await executeActions(
+        [{ action: "update_location", params: { sessionId: "session-1", location: "Café Nero" } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      // link.rules mirror still happens
+      expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
+        where: { id: "link-1" },
+        data: { rules: expect.objectContaining({ location: "Café Nero" }) },
+      });
+      // statusLabel write is skipped
+      expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
+      // System note still posted
+      expect(mockPrisma.message.create).toHaveBeenCalled();
     });
 
     it("rejects missing location", async () => {
@@ -1618,6 +1674,7 @@ describe("parse → execute pipeline", () => {
     vi.clearAllMocks();
     mockPrisma.negotiationSession.update.mockResolvedValue({});
     mockPrisma.message.create.mockResolvedValue({});
+    mockPrisma.message.count.mockResolvedValue(1);
   });
 
   it("full pipeline: parse AI text → execute actions → strip display text", async () => {

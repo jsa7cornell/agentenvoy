@@ -158,7 +158,7 @@ async function executeAction(
 
 // --- Authorization helper ---
 
-async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; title: string | null; linkId: string; calendarEventId: string | null; archived: boolean; link: { id: string; type: string; inviteeName: string | null; topic: string | null; rules: unknown } } }> {
+async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; title: string | null; linkId: string; calendarEventId: string | null; archived: boolean; guestEmail: string | null; guestName: string | null; link: { id: string; type: string; inviteeName: string | null; topic: string | null; rules: unknown } } }> {
   if (!sessionId || typeof sessionId !== "string") {
     return { success: false, message: "Missing or invalid sessionId" };
   }
@@ -172,6 +172,8 @@ async function getAuthorizedSession(sessionId: unknown, userId: string): Promise
       linkId: true,
       calendarEventId: true,
       archived: true,
+      guestEmail: true,
+      guestName: true,
       link: {
         select: {
           id: true,
@@ -202,6 +204,28 @@ async function getAuthorizedSession(sessionId: unknown, userId: string): Promise
  * That's almost always what the model meant when it just ran create_link or
  * is following up on the last thing it did.
  */
+/**
+ * "Pre-engagement" = the host is tweaking a link that no guest has interacted
+ * with yet. Writing `status=proposed, statusLabel="Time change proposed by
+ * host"` or overwriting `statusLabel` on a never-sent draft is misleading —
+ * there's nobody to propose to. Detect this and let handlers soften their
+ * behavior (no status flip, no statusLabel clobber) while still mirroring the
+ * change to `link.rules` so a future guest sees the right offer.
+ *
+ * Signal: no guest-role messages exist AND the session has no guestEmail/
+ * guestName captured AND status is still in a mutable pre-agreed state.
+ */
+async function isPreEngagement(
+  session: { id: string; status: string; guestEmail: string | null; guestName: string | null }
+): Promise<boolean> {
+  if (session.status === "agreed" || session.status === "escalated") return false;
+  if (session.guestEmail || session.guestName) return false;
+  const guestMsgCount = await prisma.message.count({
+    where: { sessionId: session.id, role: "guest" },
+  });
+  return guestMsgCount === 0;
+}
+
 const SESSION_ID_PLACEHOLDERS = new Set([
   "LAST_CREATED", "LAST", "LATEST", "LAST_SESSION", "LATEST_SESSION",
   "NEW", "NEW_SESSION", "JUST_CREATED", "CURRENT", "CURRENT_SESSION",
@@ -524,6 +548,19 @@ async function handleUpdateTime(
     };
   }
 
+  // Pre-engagement guard: if no guest has engaged yet, do NOT flip the session
+  // into `proposed` with a "Time change proposed by host" label — there's no
+  // one to propose to. Mirror the intent into link.rules (dateRange + duration)
+  // so the first guest to land sees the right offer, and tell the LLM to stop
+  // synthesizing specific times from window-shaped requests.
+  if (await isPreEngagement(session)) {
+    return {
+      success: false,
+      message:
+        "This link has no engaged guest yet — use update_link (dateRange / preferredDays / duration) to adjust the offer on the link itself. update_time should only be used after a guest has engaged, to re-propose a specific slot.",
+    };
+  }
+
   const updateData: Record<string, unknown> = {
     status: "proposed",
     statusLabel: "Time change proposed by host",
@@ -604,12 +641,19 @@ async function handleUpdateLocation(
   // Previously this only wrote statusLabel + a system message, leaving
   // link.rules.location untouched — the confirm route reads link.rules.location
   // and so silently ignored the update.
-  await prisma.negotiationSession.update({
-    where: { id: session.id },
-    data: {
-      statusLabel: `Location updated to ${location}`,
-    },
-  });
+  //
+  // Pre-engagement: skip the statusLabel clobber — "Location updated to X" on
+  // a never-engaged draft is misleading and overrides the draft-state label.
+  // Still mirror to link.rules + post the system note so the offer is correct.
+  const preEngagement = await isPreEngagement(session);
+  if (!preEngagement) {
+    await prisma.negotiationSession.update({
+      where: { id: session.id },
+      data: {
+        statusLabel: `Location updated to ${location}`,
+      },
+    });
+  }
   await patchLinkRulesForContextual(session.link, { location });
 
   await prisma.message.create({
