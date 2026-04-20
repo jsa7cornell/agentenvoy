@@ -861,7 +861,7 @@ export async function handleProposeLock(
  * parse the tools/list response today and know this name reserves the slot.
  */
 export async function handleCancelMeeting(
-  _args: z.infer<typeof cancelMeetingInput>
+  _args: z.infer<typeof cancelMeetingInput> // eslint-disable-line @typescript-eslint/no-unused-vars
 ): Promise<CallToolResult> {
   return asCallResult(
     {
@@ -879,7 +879,7 @@ export async function handleCancelMeeting(
 // ---------------------------------------------------------------------------
 
 export async function handleRescheduleMeeting(
-  _args: z.infer<typeof rescheduleMeetingInput>
+  _args: z.infer<typeof rescheduleMeetingInput> // eslint-disable-line @typescript-eslint/no-unused-vars
 ): Promise<CallToolResult> {
   return asCallResult(
     {
