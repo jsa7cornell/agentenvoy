@@ -593,8 +593,11 @@ export function AvailabilityPanel({
             </button>
             {calPickerOpen && (
               <>
-                <div className="fixed inset-0 z-30" onClick={() => setCalPickerOpen(false)} />
-                <div className="absolute right-0 mt-1 z-40 w-64 bg-surface-inset border border-DEFAULT rounded-lg shadow-xl p-2">
+                {/* Backdrop + panel sit above the sticky dashboard header (z-50)
+                    so the top rows of the calendar list aren't clipped. Mobile
+                    variant below already does this — 55519ca missed desktop. */}
+                <div className="fixed inset-0 z-[60]" onClick={() => setCalPickerOpen(false)} />
+                <div className="absolute right-0 mt-1 z-[70] w-64 bg-surface-inset border border-DEFAULT rounded-lg shadow-xl p-2">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-muted px-1 pb-1.5">
                     Calendars
                   </p>
