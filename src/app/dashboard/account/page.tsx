@@ -1,9 +1,10 @@
 "use client";
 
-import { useSession, signIn, signOut } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { useEffect, useState, useCallback } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { TIMEZONE_TABLE, shortTimezoneLabel, getTimezoneEntry } from "@/lib/timezone";
+import { useOAuthSignIn } from "@/components/oauth/use-oauth-signin";
 
 interface ConnectionStatus {
   google: {
@@ -50,6 +51,10 @@ export default function AccountPage() {
   const [savingCalendarFilter, setSavingCalendarFilter] = useState(false);
 
   const calendarConnected = connStatus?.google?.calendar ?? false;
+  const calendarReconnect = useOAuthSignIn({
+    mode: "reconnect",
+    callbackUrl: "/dashboard/account",
+  });
 
   const fetchData = useCallback(() => {
     fetch("/api/connections/status")
@@ -217,7 +222,7 @@ export default function AccountPage() {
                 if (calendarConnected) {
                   setCalendarModal(true);
                 } else {
-                  signIn("google", { callbackUrl: "/dashboard/account" });
+                  calendarReconnect.trigger();
                 }
               }}
               className="flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-black/5 dark:hover:bg-white/5 transition rounded-xl"
@@ -720,6 +725,7 @@ export default function AccountPage() {
           </div>
         </div>
       )}
+      {calendarReconnect.modal}
     </div>
   );
 }

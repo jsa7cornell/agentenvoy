@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSession, signIn } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoFull } from "./logo";
+import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 
 interface ConnectionStatus {
   google: {
@@ -64,6 +65,13 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
   const isDashboard = pathname === "/dashboard" || pathname === "/dashboard/";
   const isSignedIn = sessionStatus === "authenticated" && !!session?.user;
 
+  const anonSignIn = useOAuthSignIn({
+    mode: "first-connect",
+    callbackUrl:
+      signInCallbackUrl ||
+      (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"),
+  });
+
   // Anonymous variant — same layout, but logo links home and the right side
   // is a single Sign-in button that round-trips back to the current page.
   if (!isSignedIn) {
@@ -76,17 +84,14 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
           <div className="flex-1" />
           <button
             type="button"
-            onClick={() =>
-              signIn("google", {
-                callbackUrl: signInCallbackUrl || (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"),
-              })
-            }
+            onClick={anonSignIn.trigger}
             className="text-xs text-muted hover:text-primary transition px-2 py-1"
             data-testid="header-signin"
           >
-            Sign in
+            Sign in / Join
           </button>
         </div>
+        {anonSignIn.modal}
       </header>
     );
   }

@@ -11,8 +11,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { signIn } from "next-auth/react";
 import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calendar";
+import { useOAuthSignIn } from "@/components/oauth/use-oauth-signin";
 import { AttendeeStatusIcon } from "@/components/attendee-status-icon";
 import { DayView } from "@/components/day-view";
 import { AvailabilityRules } from "@/components/availability-rules";
@@ -80,6 +80,7 @@ export function AvailabilityPanel({
   className = "",
   showControls = true,
 }: AvailabilityPanelProps) {
+  const calendarReconnect = useOAuthSignIn({ mode: "reconnect", callbackUrl: "/dashboard" });
   const [weekStart, setWeekStart] = useState(() => getSunday(new Date()));
   const [events, setEvents] = useState<TunerEvent[]>([]);
   const [slots, setSlots] = useState<TunerSlot[]>([]);
@@ -608,7 +609,7 @@ export function AvailabilityPanel({
                     <div className="px-1 py-2 space-y-1.5">
                       <p className="text-[11px] text-muted">{calendarsError.message}</p>
                       <button
-                        onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+                        onClick={calendarReconnect.trigger}
                         className="w-full px-2 py-1 text-xs text-white bg-accent hover:bg-accent-hover rounded transition"
                       >
                         Reconnect
@@ -739,7 +740,7 @@ export function AvailabilityPanel({
                 <div className="px-1 py-2 space-y-1.5">
                   <p className="text-[11px] text-muted">{calendarsError.message}</p>
                   <button
-                    onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+                    onClick={calendarReconnect.trigger}
                     className="w-full px-2 py-1 text-xs text-white bg-accent hover:bg-accent-hover rounded transition"
                   >
                     Reconnect
@@ -1193,6 +1194,7 @@ export function AvailabilityPanel({
           </div>
         </div>
       )}
+      {calendarReconnect.modal}
     </div>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { signIn } from "next-auth/react";
 import { LogoFull } from "./logo";
+import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 
 /**
  * Minimal header for public pages (FAQ, Terms, Privacy, Agents).
@@ -12,6 +12,11 @@ import { LogoFull } from "./logo";
  * routes new vs existing users automatically, so one link serves both intents.
  */
 export function PublicHeader() {
+  const { trigger, modal } = useOAuthSignIn({
+    mode: "first-connect",
+    callbackUrl: "/dashboard",
+  });
+
   return (
     <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary">
       <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
@@ -33,13 +38,14 @@ export function PublicHeader() {
           </Link>
           <button
             type="button"
-            onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+            onClick={trigger}
             className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md transition font-medium"
           >
             Sign in / Join
           </button>
         </div>
       </div>
+      {modal}
     </header>
   );
 }
