@@ -32,6 +32,9 @@ export interface CalendarEvent {
   recurringEventId?: string;
   isTransparent?: boolean; // "transparent" events don't block time (FYI only)
   eventType?: string; // "default", "workingLocation", "outOfOffice", etc.
+  /** Google Calendar deep-link to the event (`htmlLink` from the API). Lets the
+   *  UI render a "View in Google Calendar" jump. */
+  htmlLink?: string;
 }
 
 export interface CreateEventParams {
@@ -126,6 +129,7 @@ class GoogleCalendarProvider implements CalendarProvider {
               isRecurring: !!ev.recurringEventId,
               recurringEventId: ev.recurringEventId || undefined,
               isTransparent: ev.transparency === "transparent",
+              htmlLink: ev.htmlLink || undefined,
             } as CalendarEvent;
           });
         } catch (e) {
@@ -402,6 +406,7 @@ interface StoredCalendarEvent {
   recurringEventId?: string;
   isTransparent?: boolean;
   eventType?: string;
+  htmlLink?: string;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -604,6 +609,7 @@ async function fullSync(
         recurringEventId: ev.recurringEventId || undefined,
         isTransparent: ev.transparency === "transparent",
         eventType: evType,
+        htmlLink: ev.htmlLink || undefined,
       });
     }
 
@@ -681,6 +687,7 @@ async function incrementalSync(
           isRecurring: !!ev.recurringEventId,
           isTransparent: ev.transparency === "transparent",
           eventType: evType,
+          htmlLink: ev.htmlLink || undefined,
         });
         changedIds.add(ev.id!);
       }

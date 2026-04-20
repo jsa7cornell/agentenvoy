@@ -373,6 +373,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     if (!formGuestEmail && (guestUser?.email || guestEmail)) {
       setFormGuestEmail(guestUser?.email || guestEmail);
     }
+    // Scroll the thread to the bottom so the newly-rendered confirm card
+    // (name/email/Confirm button) is visible without manual scrolling. Two
+    // RAFs + a short timeout cover the pickerʼs render + layout settle.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        }, 80);
+      });
+    });
   }
 
   async function handleConfirm(proposal: {

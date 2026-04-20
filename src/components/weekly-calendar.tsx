@@ -42,6 +42,9 @@ export interface TunerEvent {
   /** Scope of the current override, when one is set. "instance" = this event
    *  only; "series" = all instances of the recurring series. */
   protectionOverrideScope?: "instance" | "series";
+  /** Google Calendar deep-link — used by the event-click popup to offer a
+   *  "View in Google Calendar" jump. */
+  htmlLink?: string;
 }
 
 export interface TunerSlot {

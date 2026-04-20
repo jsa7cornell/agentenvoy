@@ -154,6 +154,7 @@ function serializeEvent(
     recurringEventId: e.recurringEventId,
     isTransparent: e.isTransparent,
     eventType: e.eventType,
+    htmlLink: e.htmlLink,
     /** Host-set protection override score (0=Open, 3=Protected, 5=Blocked). Undefined if Auto. */
     protectionOverride: override?.score,
     protectionOverrideScope: override?.scope,

@@ -931,8 +931,18 @@ export function AvailabilityPanel({
                   className="inline-block text-xs text-indigo-400 hover:text-indigo-300 transition"
                   onClick={() => setClickedEvent(null)}
                 >
-                  Open deal room →
+                  View this event on AgentEnvoy →
                 </Link>
+                {clickedEvent.htmlLink && (
+                  <a
+                    href={clickedEvent.htmlLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-xs text-indigo-400 hover:text-indigo-300 transition"
+                  >
+                    View in Google Calendar →
+                  </a>
+                )}
               </div>
             )}
 
@@ -1145,14 +1155,22 @@ export function AvailabilityPanel({
                     </button>
                   );
                 })()}
-                {clickedSession && !clickedSession.archived && clickedSession.status !== "cancelled" && (
-                  <button
-                    onClick={() => setConfirmingCancel(true)}
-                    className="px-3 py-2 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg hover:border-red-500/60 transition"
-                  >
-                    Cancel
-                  </button>
-                )}
+                {/* Confirmed meetings: single "Close" CTA only. To cancel a confirmed
+                    meeting, the user jumps into the deal room or Google Calendar via
+                    the links above — avoids the "Close vs. Cancel" ambiguity on a
+                    popup with no editable fields. Pending negotiations still get the
+                    destructive CTA because there's a real in-flight thing to stop. */}
+                {clickedSession &&
+                  !clickedSession.archived &&
+                  clickedSession.status !== "cancelled" &&
+                  clickedSession.status !== "agreed" && (
+                    <button
+                      onClick={() => setConfirmingCancel(true)}
+                      className="px-3 py-2 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded-lg hover:border-red-500/60 transition"
+                    >
+                      Cancel
+                    </button>
+                  )}
               </div>
             )}
           </div>
