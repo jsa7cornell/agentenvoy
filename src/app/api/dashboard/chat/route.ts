@@ -125,7 +125,7 @@ guestGuidance.tone (optional, <=200 chars):
 
 RULE — reflect the deferral in your chat reply too. When the host defers details to the guest, your confirmation message MUST NOT pin specifics that the host left open.
 
-✓ "Link ready — Mike picks the time this afternoon, the duration, and the spot. Share his email and I'll send it."
+✓ "Link ready — Mike picks the time this afternoon, the duration, and the spot. Let me know any tweaks."
 ✗ "Offering 10:30 AM–4 PM PDT; 60-min video call; location TBD."
 
 Example — host says: "book welcome-back lunch with Mike this week — he picks the day and place but suggest Soquel Demo, Wilder, or UCSC trails. 60 or 90 min. it's his first week back"
@@ -134,7 +134,7 @@ Example — host says: "book welcome-back lunch with Mike this week — he picks
 {"action": "create_link", "inviteeName": "Mike", "topic": "welcome-back lunch", "rules": {"isVip": true, "dateRange": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}, "guestPicks": {"date": true, "duration": [60, 90], "location": true}, "guestGuidance": {"suggestions": {"locations": ["Soquel Demo Forest", "Wilder Ranch", "UCSC trails"]}, "tone": "It's his first week back."}}}
 \`\`\`
 
-Then your reply: "Link ready — Mike picks the day this week, 60 or 90 min, and the trail. I passed along your three suggestions. Share his email and I'll send it."
+Then your reply: "Link ready — Mike picks the day this week, 60 or 90 min, and the trail. I passed along your three suggestions. Let me know any tweaks."
 `;
 
 // POST /api/dashboard/chat
