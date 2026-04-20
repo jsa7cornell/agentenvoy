@@ -102,7 +102,7 @@ CREATE TABLE "NegotiationLink" (
     "rules" JSONB DEFAULT '{}',
     "sourceRuleId" TEXT,
     "expiresAt" TIMESTAMP(3),
-    "hashSalt" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+    "hashSalt" TEXT NOT NULL DEFAULT (gen_random_uuid())::text,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

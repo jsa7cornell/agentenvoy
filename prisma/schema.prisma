@@ -123,7 +123,10 @@ model NegotiationLink {
   /// built-in `gen_random_uuid()` (no pgcrypto). Prevents cross-link
   /// correlation: same email on two different links hashes to different
   /// values. See src/lib/mcp/email-hash.ts and SPEC §4.
-  hashSalt        String    @default(dbgenerated("gen_random_uuid()::text"))
+  /// Form matches Postgres's canonical storage: `(gen_random_uuid())::text`.
+  /// Without the outer parens, Postgres rewrites the default internally and
+  /// `prisma migrate diff` reports phantom drift.
+  hashSalt        String    @default(dbgenerated("(gen_random_uuid())::text"))
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
