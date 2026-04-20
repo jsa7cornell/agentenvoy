@@ -66,7 +66,7 @@ export default function Home() {
           <div className="flex items-center gap-6">
             <a href="#demo" className="hidden md:inline text-sm text-secondary hover:text-primary transition">Demo</a>
             <a href="#how-it-works" className="hidden md:inline text-sm text-secondary hover:text-primary transition">How It Works</a>
-            <a href="/mcp" className="hidden md:inline text-sm text-secondary hover:text-primary transition">Developers</a>
+            <a href="/agents" className="hidden md:inline text-sm text-secondary hover:text-primary transition">For Agents</a>
             <button
               onClick={handleSignIn}
               className="inline-flex items-center gap-2 bg-accent hover:bg-accent-hover text-white px-4 py-2 rounded-lg text-sm font-semibold transition shadow-accent-glow group"
@@ -109,7 +109,7 @@ export default function Home() {
                 <ArrowRight className="w-4 h-4 transition group-hover:translate-x-0.5" />
               </button>
               <a
-                href="/mcp"
+                href="/agents"
                 className="inline-flex items-center gap-2 bg-transparent text-primary border border-DEFAULT hover:bg-surface-secondary hover:border-muted px-5 py-3.5 rounded-xl text-base font-medium transition"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -377,12 +377,12 @@ export default function Home() {
           }}
         />
         <div className="relative max-w-[1080px] mx-auto">
-          <SectionLabel>The Vision</SectionLabel>
+          <SectionLabel>Live today</SectionLabel>
           <h2 className="text-3xl md:text-[2.5rem] font-extrabold tracking-tight mb-4">
-            Agents negotiating with agents
+            Your agent can book this meeting for you.
           </h2>
           <p className="text-base md:text-lg text-secondary max-w-2xl mx-auto mb-14 leading-relaxed">
-            When both sides have an AI, you don&apos;t need a scheduling link. The agents talk directly, negotiate per each person&apos;s preferences, and drop a calendar invite in both inboxes. It&apos;s what email should have been.
+            Every AgentEnvoy meeting link doubles as a Model Context Protocol endpoint. Hand it to Claude, Cursor, or any MCP client, and your agent negotiates within the host&apos;s rules — same scoring engine, same confirmation pipeline as the web UI. No parallel track for humans vs. agents.
           </p>
 
           <div className="max-w-[900px] mx-auto grid md:grid-cols-[1fr_auto_1fr] gap-5 items-center">
@@ -407,45 +407,41 @@ export default function Home() {
               Point your agent at it
             </h2>
             <p className="text-base text-secondary leading-relaxed mb-6">
-              AgentEnvoy is an open scheduling protocol. Any agent that speaks MCP or REST can read your availability, propose times, and book meetings on your behalf — with your rules enforced.
+              Every meeting URL is an MCP endpoint. Hand one to your AI, and it can read the host&apos;s rules, fetch scored availability, propose a time, and book — all through the same pipeline the web UI uses.
             </p>
             <div className="flex flex-wrap gap-2 mb-6">
               <TechBadge color="accent">MCP</TechBadge>
-              <TechBadge color="accent2">REST API</TechBadge>
+              <TechBadge color="accent2">URL-as-capability</TechBadge>
               <TechBadge color="accent3">Open Spec</TechBadge>
             </div>
             <a
-              href="/mcp"
+              href="/agents"
               className="inline-flex items-center gap-2 bg-transparent text-primary border border-DEFAULT hover:bg-surface-secondary hover:border-muted px-5 py-3 rounded-xl text-[0.95rem] font-medium transition"
             >
-              Read the developer docs
+              See how to connect your agent
               <ArrowRight className="w-3.5 h-3.5" />
             </a>
           </div>
 
-          {/* Code block */}
+          {/* Code block — real, copy-paste-able setup */}
           <div className="rounded-2xl overflow-hidden border border-DEFAULT shadow-[0_12px_48px_-8px_rgba(30,27,75,0.18)] font-mono" style={{ background: "#0c0c14" }}>
             <div className="px-4 py-3 flex items-center gap-2 border-b border-white/5" style={{ background: "rgba(255,255,255,0.03)" }}>
               <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
               <span className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
               <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-              <span className="flex-1 text-center text-[0.78rem] text-zinc-400">my-agent.py</span>
+              <span className="flex-1 text-center text-[0.78rem] text-zinc-400">terminal</span>
             </div>
             <pre className="px-5 py-5 text-[0.82rem] leading-[1.7] text-zinc-200 overflow-x-auto">
-<span className="text-zinc-500 italic"># Point any MCP client at AgentEnvoy</span>
-{"\n"}<span className="text-purple-300">from</span> mcp <span className="text-purple-300">import</span> Client
+<span className="text-zinc-500 italic"># Add AgentEnvoy to Claude Code, once:</span>
+{"\n"}<span className="text-emerald-300">$</span> claude mcp add --transport http \
+  agentenvoy https://agentenvoy.ai/api/mcp
 
-envoy = Client(<span className="text-emerald-300">&quot;https://agentenvoy.ai/mcp&quot;</span>)
+<span className="text-zinc-500 italic"># Then, in any Claude Code session:</span>
+{"\n"}<span className="text-blue-300">&gt;</span> I got this invite: <span className="text-emerald-300">https://agentenvoy.ai/meet/abc123</span>
+{"  "}Book me a time next Tuesday afternoon.
 
-<span className="text-zinc-500 italic"># Your agent, scheduling on your behalf</span>
-{"\n"}result = envoy.<span className="text-blue-300">schedule_meeting</span>(
-  <span className="text-yellow-300">with_</span>=<span className="text-emerald-300">&quot;sarah@acme.com&quot;</span>,
-  <span className="text-yellow-300">context</span>=<span className="text-emerald-300">&quot;Q2 review, keep it to 30 min&quot;</span>,
-  <span className="text-yellow-300">format</span>=<span className="text-emerald-300">&quot;phone&quot;</span>,
-)
-
-<span className="text-zinc-500 italic"># → Envoy negotiates with Sarah, books it,</span>
-{"\n"}<span className="text-zinc-500 italic">#   and drops the invite in both calendars.</span>
+<span className="text-zinc-500 italic"># Claude calls get_availability → propose_lock.</span>
+{"\n"}<span className="text-zinc-500 italic"># Calendar invites land in both inboxes.</span>
             </pre>
           </div>
         </div>
@@ -503,7 +499,7 @@ envoy = Client(<span className="text-emerald-300">&quot;https://agentenvoy.ai/mc
           <div className="flex justify-center gap-7 flex-wrap">
             <a href="/privacy" className="text-sm text-accent font-semibold hover:underline">Privacy Policy &rarr;</a>
             <a href="/terms" className="text-sm text-accent font-semibold hover:underline">Terms &rarr;</a>
-            <a href="/mcp" className="text-sm text-accent font-semibold hover:underline">Developer Docs &rarr;</a>
+            <a href="/agents" className="text-sm text-accent font-semibold hover:underline">For Agents &rarr;</a>
           </div>
         </div>
       </section>
@@ -534,10 +530,10 @@ envoy = Client(<span className="text-emerald-300">&quot;https://agentenvoy.ai/mc
               <ArrowRight className="w-4 h-4 transition group-hover:translate-x-0.5" />
             </button>
             <a
-              href="/mcp"
+              href="/agents"
               className="inline-flex items-center gap-2 bg-transparent text-primary border border-DEFAULT hover:bg-surface-secondary px-6 py-4 rounded-xl text-base font-medium transition"
             >
-              View developer docs
+              For agents
             </a>
           </div>
           <p className="text-xs text-muted mt-5">Free while in beta &middot; No credit card required</p>

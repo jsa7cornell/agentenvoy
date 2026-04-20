@@ -20,6 +20,12 @@ export function PublicHeader() {
             How It Works
           </Link>
           <Link
+            href="/agents"
+            className="text-xs text-secondary hover:text-primary transition"
+          >
+            For Agents
+          </Link>
+          <Link
             href="/"
             className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md transition font-medium"
           >

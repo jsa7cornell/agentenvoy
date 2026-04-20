@@ -36,16 +36,36 @@ export default function AgentsPage() {
         <h1 className="text-3xl font-bold mb-4">
           Your AI can book this meeting for you.
         </h1>
-        <p className="text-base text-secondary leading-relaxed max-w-2xl">
+        <p className="text-base text-secondary leading-relaxed max-w-2xl mb-5">
           Every AgentEnvoy meeting link doubles as a Model Context Protocol
           endpoint. If you&rsquo;ve been sent one, hand it to your AI assistant
           and it can negotiate the time, pick a slot that works, and book it —
           on the same scoring engine the host uses themselves.
         </p>
+        <nav className="flex flex-wrap gap-2">
+          <a
+            href="#for-humans"
+            className="text-xs px-3 py-1.5 rounded-full border border-secondary text-secondary hover:text-primary hover:border-DEFAULT transition"
+          >
+            For humans ↓
+          </a>
+          <a
+            href="#why"
+            className="text-xs px-3 py-1.5 rounded-full border border-secondary text-secondary hover:text-primary hover:border-DEFAULT transition"
+          >
+            Why this matters ↓
+          </a>
+          <a
+            href="#for-agents"
+            className="text-xs px-3 py-1.5 rounded-full border border-secondary text-secondary hover:text-primary hover:border-DEFAULT transition"
+          >
+            For agents ↓
+          </a>
+        </nav>
       </div>
 
       {/* For humans — try it with Claude */}
-      <section className="max-w-3xl mx-auto px-6 pb-12">
+      <section id="for-humans" className="max-w-3xl mx-auto px-6 pb-12 scroll-mt-20">
         <h2 className="text-xl font-semibold mb-3">For curious humans</h2>
         <p className="text-sm text-secondary leading-relaxed mb-6">
           The fastest way to see this work is to point Claude at a meeting
@@ -115,7 +135,7 @@ and book it? My name is Alex, email alex@example.com.`}</code>
       </section>
 
       {/* Why this is awesome */}
-      <section className="max-w-3xl mx-auto px-6 pb-12">
+      <section id="why" className="max-w-3xl mx-auto px-6 pb-12 scroll-mt-20">
         <h2 className="text-xl font-semibold mb-3">Why this matters</h2>
         <div className="space-y-4 text-sm text-secondary leading-relaxed">
           <p>
@@ -140,7 +160,7 @@ and book it? My name is Alex, email alex@example.com.`}</code>
       </section>
 
       {/* For agents — the spec surface */}
-      <section className="max-w-3xl mx-auto px-6 pb-16">
+      <section id="for-agents" className="max-w-3xl mx-auto px-6 pb-16 scroll-mt-20">
         <h2 className="text-xl font-semibold mb-3">For agents reading this</h2>
         <p className="text-sm text-secondary leading-relaxed mb-4">
           You&rsquo;re the intended second audience for this page. Here&rsquo;s
@@ -201,18 +221,24 @@ and book it? My name is Alex, email alex@example.com.`}</code>
         </div>
       </section>
 
-      {/* Footer ribbon */}
+      {/* Footer — dogfood the product: book 5 min with John via his own MCP link. */}
       <div className="max-w-3xl mx-auto px-6 pb-20">
-        <div className="text-xs text-muted border-t border-secondary pt-6">
-          Questions? This is early. If you&rsquo;re trying to build
-          something on top of this surface and hit a rough edge, email{" "}
+        <div className="border-t border-secondary pt-8">
+          <h3 className="text-lg font-semibold text-primary mb-2">
+            Questions? Book five minutes with me.
+          </h3>
+          <p className="text-sm text-secondary leading-relaxed mb-4 max-w-xl">
+            The fastest way to reach me is the same way the product works —
+            grab a slot on my calendar. Your agent is welcome to negotiate
+            one on your behalf, or you can pick one yourself.
+          </p>
           <a
-            href="mailto:john@agentenvoy.ai"
-            className="text-indigo-400 hover:text-indigo-300"
+            href="https://agentenvoy.ai/meet/johnanderson"
+            className="inline-flex items-center gap-2 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-4 py-2 text-sm text-indigo-300 hover:text-indigo-200 hover:border-indigo-400/70 transition"
           >
-            john@agentenvoy.ai
+            <span>📅</span>
+            <span>Book 5 min with John →</span>
           </a>
-          .
         </div>
       </div>
     </div>
