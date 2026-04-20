@@ -1,9 +1,9 @@
 /**
  * /admin — central admin portal.
- * OAuth-gated to ADMIN_EMAIL; non-admins get 404.
+ * OAuth-gated to users with userClass === "admin"; non-admins get 404.
  */
 
-import { requireAdminPage, ADMIN_EMAIL } from "@/lib/admin-auth";
+import { requireAdminPage } from "@/lib/admin-auth";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -67,7 +67,7 @@ const TAG_COLORS: Record<string, string> = {
 };
 
 export default async function AdminPage() {
-  await requireAdminPage();
+  const adminEmail = await requireAdminPage();
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 p-8">
@@ -75,7 +75,7 @@ export default async function AdminPage() {
         <header className="mb-10">
           <p className="text-xs text-zinc-500 uppercase tracking-widest mb-2">AgentEnvoy</p>
           <h1 className="text-2xl font-bold mb-1">Admin</h1>
-          <p className="text-sm text-zinc-500">Signed in as {ADMIN_EMAIL}</p>
+          <p className="text-sm text-zinc-500">Signed in as {adminEmail}</p>
         </header>
 
         <div className="grid gap-3">
@@ -102,7 +102,7 @@ export default async function AdminPage() {
         </div>
 
         <footer className="mt-12 text-xs text-zinc-700 text-center">
-          agentenvoy.ai/admin · {ADMIN_EMAIL}
+          agentenvoy.ai/admin · {adminEmail}
         </footer>
       </div>
     </main>
