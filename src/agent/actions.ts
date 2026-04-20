@@ -586,6 +586,32 @@ async function handleUpdateTime(
     await patchLinkRulesForContextual(session.link, { duration });
   }
 
+  // Expand link.rules.dateRange to include the proposed date if it falls
+  // outside the current window. Without this, proposing Wed Apr 22 on a link
+  // whose offer window is "Mon Apr 20" leaves the guest's slot picker stuck
+  // showing Monday — the proposed slot isn't even offerable. Observed
+  // 2026-04-20 on link wrv65w. Host-TZ bucketed YYYY-MM-DD, matching
+  // src/lib/scoring.ts.
+  {
+    const dateFmt = new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      timeZone: hostTz,
+    });
+    const proposedDate = dateFmt.format(parsed as Date); // YYYY-MM-DD
+    const existingRules = (session.link.rules as Record<string, unknown>) || {};
+    const existingRange = (existingRules.dateRange as { start?: string; end?: string } | undefined) || undefined;
+    if (existingRange && (existingRange.start || existingRange.end)) {
+      const nextRange: { start?: string; end?: string } = { ...existingRange };
+      if (nextRange.start && proposedDate < nextRange.start) nextRange.start = proposedDate;
+      if (nextRange.end && proposedDate > nextRange.end) nextRange.end = proposedDate;
+      if (nextRange.start !== existingRange.start || nextRange.end !== existingRange.end) {
+        await patchLinkRulesForContextual(session.link, { dateRange: nextRange });
+      }
+    }
+  }
+
   // Save a system message so the guest sees the proposal
   const durationStr = duration !== undefined ? ` (${duration} min)` : "";
   // parsed is guaranteed here: the duration-only branch above returned early.

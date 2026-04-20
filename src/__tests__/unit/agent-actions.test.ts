@@ -819,6 +819,49 @@ describe("executeActions", () => {
       expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
     });
 
+    // Regression — 2026-04-20, link wrv65w. Host proposing Wed Apr 22 on a
+    // link whose offer window was "Mon Apr 20" flipped the session to
+    // proposed but left link.rules.dateRange=Mon Apr 20, so the guest's slot
+    // picker never showed Wed. Widen the window to cover the proposed date.
+    it("expands link.rules.dateRange to include proposed date when outside window", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeSession({
+          link: {
+            id: "link-1",
+            type: "contextual",
+            inviteeName: "Bob",
+            topic: null,
+            rules: {
+              format: "phone",
+              duration: 30,
+              dateRange: { start: "2026-04-20", end: "2026-04-20" },
+            },
+          },
+        })
+      );
+      mockPrisma.user.findUnique.mockResolvedValue({
+        preferences: { explicit: { timezone: "America/Los_Angeles" } },
+      });
+
+      const results = await executeActions(
+        [{
+          action: "update_time",
+          params: { sessionId: "session-1", dateTime: "2026-04-22T09:00:00-07:00" },
+        }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
+        where: { id: "link-1" },
+        data: {
+          rules: expect.objectContaining({
+            dateRange: { start: "2026-04-20", end: "2026-04-22" },
+          }),
+        },
+      });
+    });
+
     it("rejects invalid dateTime", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
 
