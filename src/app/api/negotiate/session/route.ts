@@ -12,13 +12,14 @@ import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availabili
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
-import { formatDuration } from "@/lib/format-duration";
+import { formatDuration, formatDurationCasual } from "@/lib/format-duration";
 import {
   resolveSeedGuestTimezoneForCreate,
   resolveEffectiveGuestTimezone,
 } from "@/lib/guest-timezone-seed";
 import {
   formatAvailabilitySlotList,
+  formatAvailabilityProse,
   formatStretchDays,
   humanTimezoneLabel,
   formatLabel,
@@ -853,6 +854,38 @@ export async function POST(req: NextRequest) {
       // used below by tzLine / hostNoteLine / event-card reader via linkRules.
       void fmtLabel; void durationLabel; void linkLocation; void activityEmoji; void meetingDescShort;
 
+      // V5 prose-form gate (2026-04-20): when the offer is narrow enough to
+      // say in a single sentence — "tomorrow or Thursday, or next week if
+      // needed" — skip the bulleted day-list and fold availability into a
+      // casual combined opener. Gates: same timezone, not VIP, not generic,
+      // ≤ 3 days in the preferred bucket. Caller derives preferredAnchor
+      // from timingLabel: "this week" → anchor=this-week, "next week" or
+      // "next <weekday>" → next-week.
+      const isGenericLink = link.type === "generic";
+      const proseAnchor: "this-week" | "next-week" | null = (() => {
+        if (!rawTimingLabel) return null;
+        const lc = rawTimingLabel.toLowerCase();
+        if (/\bthis\s+week\b|\btoday\b|\btomorrow\b|\basap\b|\bsoon\b/.test(lc)) {
+          return "this-week";
+        }
+        if (/\bnext\s+week\b|\bnext\s+(mon|tue|wed|thu|fri|sat|sun)/.test(lc)) {
+          return "next-week";
+        }
+        return null;
+      })();
+      const proseCandidate =
+        !guestTzDiffers && !isVip && !isGenericLink
+          ? formatAvailabilityProse(
+              filteredSlots,
+              hostTimezone,
+              new Date(),
+              undefined,
+              effectiveDuration ?? undefined,
+              effectiveMinDuration,
+              { preferredAnchor: proseAnchor },
+            )
+          : null;
+
       // Timezone line. Only render when guest's tz differs — when they match,
       // the slot times themselves already include the tz abbreviation, so the
       // line is redundant noise.
@@ -918,16 +951,34 @@ export async function POST(req: NextRequest) {
       // inform structured fields (timingLabel, activity, etc.) but is never
       // displayed verbatim to guests.
 
-      // V4: Proposal bar is gone; header is just the prose hello + optional
-      // tz line. Scheduled body and closing follow with blank lines.
-      // Generic links have no single invitee, so the opener "scheduling time
-      // with you and John" reads wrong. Use an agent-framed self-intro.
-      const genericHello = `👋 I'm ${hostFirstName}'s scheduling agent.`;
-      const headerLines = [isGeneric ? genericHello : hello];
-      if (tzLine) headerLines.push(tzLine);
-      const header = headerLines.join("\n");
+      // V5 prose-form (2026-04-20): when proseCandidate is non-null, fold
+      // the day list into a casual combined opener — "He's proposing 10
+      // minutes tomorrow or Thursday, or next week if needed." — and skip
+      // the bulleted schedule body. Shorter closing, no timezone line
+      // (same-tz gated by the prose helper itself).
+      if (proseCandidate && !isGeneric) {
+        const durCasual = durationForOpener
+          ? formatDurationCasual(durationForOpener)
+          : null;
+        const activityPart = activityText ? ` for ${activityText}` : "";
+        const locPart = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
+        const durPart = durCasual ? `${durCasual} ` : "";
+        const proposal = `He's proposing ${durPart}${proseCandidate.phrase}${activityPart}${locPart}.`;
+        const proseHello = `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}. ${proposal}`;
+        const proseClosing = `Pick a time below, or reply with what works for you.`;
+        greeting = [proseHello, proseClosing].join("\n\n");
+      } else {
+        // V4 bulleted fallback: proposal sentence already rendered in `hello`,
+        // followed by the bulleted schedule body.
+        // Generic links have no single invitee, so the opener "scheduling time
+        // with you and John" reads wrong. Use an agent-framed self-intro.
+        const genericHello = `👋 I'm ${hostFirstName}'s scheduling agent.`;
+        const headerLines = [isGeneric ? genericHello : hello];
+        if (tzLine) headerLines.push(tzLine);
+        const header = headerLines.join("\n");
 
-      greeting = [header, scheduleBody, closing].join("\n\n");
+        greeting = [header, scheduleBody, closing].join("\n\n");
+      }
     }
   }
 

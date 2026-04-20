@@ -679,6 +679,238 @@ export function formatStretchDays(
   return `${days.slice(0, -1).join(", ")}, and ${days[days.length - 1]}`;
 }
 
+// ─── Prose-form availability (casual greeting, 2026-04-20) ──────────────────
+//
+// When the offer is narrow enough to say in a single sentence — e.g.
+// "tomorrow or Thursday, or next week if needed" — we skip the bulleted
+// day-list entirely and fold availability into the proposal sentence.
+//
+// Gates for prose form (any one false → caller falls back to bullets):
+//   - Same timezone (dual-tz needs per-time labels bullets do best)
+//   - Not VIP (VIP offers add a stretch-days tail; bullets handle that cleanly)
+//   - ≤ 3 days in the "preferred" group (otherwise too verbose for prose)
+//   - Offer fits one of these shapes:
+//       (a) all slots in a single week → no split, just day list
+//       (b) slots span this-week + next-week and a preferredAnchor is given
+//           → "{preferred-group}, or {fallback-week} if needed"
+//
+// The anchor is contextual — it comes from the host's framing (timingLabel,
+// ★-cluster in scored slots) and is computed by the caller. This helper stays
+// pure: given slots + anchor, produce the phrase.
+
+export interface FormattedProse {
+  /** One sentence fragment, e.g. "tomorrow or Thursday, or next week if needed". */
+  phrase: string;
+  /** True if any offered slot is score ≤ -1 (for ★ legend decisions). */
+  hasPreferred: boolean;
+}
+
+/** Relative day label in host tz: "today", "tomorrow", weekday, or "Mon next week". */
+function relativeDayLabel(
+  d: Date,
+  now: Date,
+  hostTimezone: string,
+  nowMondayUtc: Date,
+  nextMondayUtc: Date,
+  weekMondayOf: (x: Date) => Date,
+): string {
+  const ymd = (x: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: hostTimezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(x);
+  const weekday = (x: Date) =>
+    new Intl.DateTimeFormat("en-US", {
+      weekday: "long",
+      timeZone: hostTimezone,
+    }).format(x);
+
+  const today = ymd(now);
+  const tomorrowMs = new Date(now.getTime() + 86400000);
+  const tomorrow = ymd(tomorrowMs);
+  const dYmd = ymd(d);
+
+  if (dYmd === today) return "today";
+  if (dYmd === tomorrow) return "tomorrow";
+
+  const dWeek = weekMondayOf(d).getTime();
+  if (dWeek === nowMondayUtc.getTime()) {
+    return weekday(d);
+  }
+  if (dWeek === nextMondayUtc.getTime()) {
+    return `${weekday(d)} next week`;
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: hostTimezone,
+  }).format(d);
+}
+
+/** Join a short list with "or": ["a"] → "a", ["a","b"] → "a or b", ["a","b","c"] → "a, b, or c". */
+function joinWithOr(parts: string[]): string {
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} or ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, or ${parts[parts.length - 1]}`;
+}
+
+export function formatAvailabilityProse(
+  slots: ScoredSlot[],
+  hostTimezone: string,
+  now: Date = new Date(),
+  guestTimezone?: string,
+  durationMin?: number,
+  minDurationMin?: number,
+  opts?: { preferredAnchor?: "this-week" | "next-week" | null; maxPreferredDays?: number },
+): FormattedProse | null {
+  // Gate 1: dual-tz → bullets.
+  if (guestTimezone && guestTimezone !== hostTimezone) return null;
+
+  // Filter to offerable, duration-ok, future.
+  const offerable = slots.filter((s) => new Date(s.start) > now && s.score <= 1);
+  const good = durationMin
+    ? filterByDuration(offerable, durationMin, minDurationMin)
+    : offerable;
+  if (good.length === 0) return null;
+
+  // Compute week boundaries in host tz.
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  function weekMondayOf(d: Date): Date {
+    const wkShort = new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      timeZone: hostTimezone,
+    }).format(d);
+    const dow = DOW.indexOf(wkShort);
+    const offset = dow === 0 ? 6 : dow - 1;
+    const ymd = new Intl.DateTimeFormat("en-CA", {
+      timeZone: hostTimezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d);
+    const [y, m, da] = ymd.split("-").map(Number);
+    const base = new Date(Date.UTC(y, m - 1, da));
+    base.setUTCDate(base.getUTCDate() - offset);
+    return base;
+  }
+  const nowMonday = weekMondayOf(now);
+  const nextMonday = new Date(nowMonday);
+  nextMonday.setUTCDate(nextMonday.getUTCDate() + 7);
+  const weekAfterNext = new Date(nextMonday);
+  weekAfterNext.setUTCDate(weekAfterNext.getUTCDate() + 7);
+
+  // Group offered slots by host-tz calendar day.
+  const dayFmt = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: hostTimezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(d);
+
+  interface DayBucket {
+    ymd: string;
+    firstStart: Date;
+    hasPreferred: boolean;
+    weekKey: number;
+  }
+  const byDay = new Map<string, DayBucket>();
+  for (const s of good) {
+    const start = new Date(s.start);
+    const ymd = dayFmt(start);
+    const existing = byDay.get(ymd);
+    if (existing) {
+      if (s.score <= -1) existing.hasPreferred = true;
+      if (start < existing.firstStart) existing.firstStart = start;
+    } else {
+      byDay.set(ymd, {
+        ymd,
+        firstStart: start,
+        hasPreferred: s.score <= -1,
+        weekKey: weekMondayOf(start).getTime(),
+      });
+    }
+  }
+  const days = Array.from(byDay.values()).sort(
+    (a, b) => a.firstStart.getTime() - b.firstStart.getTime(),
+  );
+
+  // Gate 2: all days must fall in {this-week, next-week}. Anything beyond
+  // that — or older — falls back to bullets. Prose is the "close offer" path.
+  const thisOrNext = (wk: number) =>
+    wk === nowMonday.getTime() || wk === nextMonday.getTime();
+  if (!days.every((d) => thisOrNext(d.weekKey))) return null;
+
+  const hasThisWeek = days.some((d) => d.weekKey === nowMonday.getTime());
+  const hasNextWeek = days.some((d) => d.weekKey === nextMonday.getTime());
+  const anyPreferred = days.some((d) => d.hasPreferred);
+
+  // Resolve anchor. Caller hint wins; otherwise infer from ★ cluster when the
+  // offer spans both weeks; otherwise no split.
+  let anchor: "this-week" | "next-week" | null = opts?.preferredAnchor ?? null;
+  if (!anchor && hasThisWeek && hasNextWeek) {
+    const starInThis = days.some(
+      (d) => d.hasPreferred && d.weekKey === nowMonday.getTime(),
+    );
+    const starInNext = days.some(
+      (d) => d.hasPreferred && d.weekKey === nextMonday.getTime(),
+    );
+    if (starInThis && !starInNext) anchor = "this-week";
+    else if (starInNext && !starInThis) anchor = "next-week";
+  }
+
+  const maxPreferred = opts?.maxPreferredDays ?? 3;
+
+  let preferredDays: DayBucket[];
+  let fallbackLabel: string | null = null;
+
+  if (anchor === "this-week" && hasThisWeek && hasNextWeek) {
+    preferredDays = days.filter((d) => d.weekKey === nowMonday.getTime());
+    fallbackLabel = "next week if needed";
+  } else if (anchor === "next-week" && hasThisWeek && hasNextWeek) {
+    preferredDays = days.filter((d) => d.weekKey === nextMonday.getTime());
+    fallbackLabel = "this week if you need sooner";
+  } else {
+    // No split. Everything is preferred.
+    preferredDays = days;
+  }
+
+  // Gate 3: preferred group must be ≤ maxPreferred days and ≥ 1.
+  if (preferredDays.length === 0) return null;
+  if (preferredDays.length > maxPreferred) return null;
+
+  // Label each preferred day.
+  const labels = preferredDays.map((d) =>
+    relativeDayLabel(d.firstStart, now, hostTimezone, nowMonday, nextMonday, weekMondayOf),
+  );
+
+  // If all preferred days are in next week, drop redundant "next week"
+  // suffixes — the fallback tail (or the reader's context) carries the week
+  // frame. "Monday next week or Tuesday next week" → "Monday or Tuesday next week".
+  const allNext =
+    anchor === "next-week" &&
+    preferredDays.every((d) => d.weekKey === nextMonday.getTime());
+  let preferredPhrase: string;
+  if (allNext && labels.every((l) => l.endsWith(" next week"))) {
+    const stripped = labels.map((l) => l.replace(/ next week$/, ""));
+    preferredPhrase =
+      stripped.length === 1
+        ? `${stripped[0]} next week`
+        : `${joinWithOr(stripped)} next week`;
+  } else {
+    preferredPhrase = joinWithOr(labels);
+  }
+
+  const phrase = fallbackLabel
+    ? `${preferredPhrase}, or ${fallbackLabel}`
+    : preferredPhrase;
+
+  return { phrase, hasPreferred: anyPreferred };
+}
+
 // ─── Open-window greeting (guestPicks variant, 2026-04-17) ─────────────────
 
 interface BuildOpenWindowOpts {

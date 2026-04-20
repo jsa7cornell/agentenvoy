@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   formatAvailabilityWindows,
+  formatAvailabilityProse,
   humanTimezoneLabel,
   formatLabel,
   alternateFormatsLabel,
@@ -309,5 +310,130 @@ describe("formatAvailabilitySlotList — block range labels", () => {
     // Guest (ET) range shown first, host (PT) range in slash-delimited
     expect(bullets[0]).toMatch(/10:00 AM\s*–\s*1:00 PM.*EDT/);
     expect(bullets[0]).toMatch(/7:00 AM\s*–\s*10:00 AM.*PDT/);
+  });
+});
+
+// ─── formatAvailabilityProse ─────────────────────────────────────────────────
+
+describe("formatAvailabilityProse", () => {
+  // NOW = 2026-04-14 00:00Z = Mon 2026-04-13 17:00 PDT.
+  // This week Mon–Sun (host tz): Apr 13–Apr 19.
+  // Next week Mon–Sun:            Apr 20–Apr 26.
+
+  it("returns null when dual-timezone", () => {
+    const slots = run([2026, 4, 15], 17, 0, 2, 0); // Tue 10 AM PT
+    const out = formatAvailabilityProse(
+      slots, TZ, NOW, "America/New_York",
+    );
+    expect(out).toBeNull();
+  });
+
+  it("returns null when slots fall beyond next week", () => {
+    // Week-after-next: May 4 (Mon of W+2)
+    const slots = run([2026, 5, 4], 17, 0, 2, 0);
+    const out = formatAvailabilityProse(slots, TZ, NOW);
+    expect(out).toBeNull();
+  });
+
+  it("returns null when no offerable slots remain", () => {
+    const slots = run([2026, 4, 15], 17, 0, 2, 5); // score 5 → filtered out
+    const out = formatAvailabilityProse(slots, TZ, NOW);
+    expect(out).toBeNull();
+  });
+
+  it("renders single-day this-week offer", () => {
+    // Tue Apr 14 PT (slots on Apr 14 UTC 17:00 = Apr 14 10 AM PT)
+    const slots = run([2026, 4, 14], 17, 0, 2, 0);
+    const out = formatAvailabilityProse(slots, TZ, NOW);
+    expect(out).not.toBeNull();
+    expect(out!.phrase).toBe("tomorrow");
+  });
+
+  it("renders two this-week days joined by 'or'", () => {
+    // Tue Apr 14 + Thu Apr 16, both PT 10 AM
+    const slots = [
+      ...run([2026, 4, 14], 17, 0, 2, 0),
+      ...run([2026, 4, 16], 17, 0, 2, 0),
+    ];
+    const out = formatAvailabilityProse(slots, TZ, NOW);
+    expect(out).not.toBeNull();
+    expect(out!.phrase).toBe("tomorrow or Thursday");
+  });
+
+  it("appends 'or next week if needed' when anchor=this-week and next-week slots exist", () => {
+    const slots = [
+      ...run([2026, 4, 14], 17, 0, 2, 0), // tomorrow (Tue)
+      ...run([2026, 4, 16], 17, 0, 2, 0), // Thu
+      ...run([2026, 4, 21], 17, 0, 2, 1), // next Tue
+      ...run([2026, 4, 22], 17, 0, 2, 1), // next Wed
+    ];
+    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, undefined, {
+      preferredAnchor: "this-week",
+    });
+    expect(out).not.toBeNull();
+    expect(out!.phrase).toBe("tomorrow or Thursday, or next week if needed");
+  });
+
+  it("appends 'this week if you need sooner' when anchor=next-week and this-week slots exist", () => {
+    const slots = [
+      ...run([2026, 4, 14], 17, 0, 2, 1), // tomorrow (this week) — fallback
+      ...run([2026, 4, 24], 17, 0, 2, 0), // next Fri — preferred (★-free but anchored)
+    ];
+    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, undefined, {
+      preferredAnchor: "next-week",
+    });
+    expect(out).not.toBeNull();
+    expect(out!.phrase).toBe("Friday next week, or this week if you need sooner");
+  });
+
+  it("collapses redundant 'next week' suffix when all preferred days are in next week", () => {
+    const slots = [
+      ...run([2026, 4, 20], 17, 0, 2, 0), // Mon next week
+      ...run([2026, 4, 21], 17, 0, 2, 0), // Tue next week
+      ...run([2026, 4, 14], 17, 0, 2, 1), // tomorrow (this week fallback)
+    ];
+    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, undefined, {
+      preferredAnchor: "next-week",
+    });
+    expect(out).not.toBeNull();
+    // Should read "Monday or Tuesday next week, or this week if you need sooner"
+    // — not "Monday next week or Tuesday next week".
+    expect(out!.phrase).toBe(
+      "Monday or Tuesday next week, or this week if you need sooner",
+    );
+  });
+
+  it("no-split when all slots in the same week (no fallback tail)", () => {
+    const slots = [
+      ...run([2026, 4, 14], 17, 0, 2, 0),
+      ...run([2026, 4, 15], 17, 0, 2, 0),
+    ];
+    const out = formatAvailabilityProse(slots, TZ, NOW);
+    expect(out).not.toBeNull();
+    expect(out!.phrase).toBe("tomorrow or Wednesday");
+    expect(out!.phrase).not.toContain("if needed");
+  });
+
+  it("falls back to null when preferred group exceeds maxPreferredDays", () => {
+    // 5 this-week days — above default cap of 3
+    const slots = [
+      ...run([2026, 4, 14], 17, 0, 2, 0),
+      ...run([2026, 4, 15], 17, 0, 2, 0),
+      ...run([2026, 4, 16], 17, 0, 2, 0),
+      ...run([2026, 4, 17], 17, 0, 2, 0),
+      ...run([2026, 4, 18], 17, 0, 2, 0),
+    ];
+    const out = formatAvailabilityProse(slots, TZ, NOW);
+    expect(out).toBeNull();
+  });
+
+  it("sets hasPreferred when a ★ slot is present", () => {
+    const slots = [
+      ...run([2026, 4, 14], 17, 0, 2, 0),
+      ...run([2026, 4, 14], 18, 0, 1, -1),
+    ];
+    const out = formatAvailabilityProse(slots, TZ, NOW);
+    expect(out).not.toBeNull();
+    expect(out!.hasPreferred).toBe(true);
   });
 });

@@ -24,6 +24,25 @@ export function formatDuration(minutes: number | null | undefined): string {
 }
 
 /**
+ * Casual variant for prose greetings — spells out units rather than
+ * abbreviating, and uses natural phrases for round hours. Examples:
+ *   10 → "10 minutes", 30 → "30 minutes", 60 → "an hour",
+ *   90 → "90 minutes" (keep numeric to stay unambiguous),
+ *   120 → "2 hours", 180 → "3 hours".
+ *
+ * Used in the prose-form greeting assembly to match John's casual voice:
+ * "He's proposing 10 minutes tomorrow or Thursday." (2026-04-20)
+ */
+export function formatDurationCasual(minutes: number | null | undefined): string {
+  if (minutes == null || !Number.isFinite(minutes) || minutes <= 0) return "";
+  const total = Math.round(minutes);
+  if (total < 60) return `${total} minutes`;
+  if (total === 60) return "an hour";
+  if (total % 60 === 0) return `${total / 60} hours`;
+  return `${total} minutes`;
+}
+
+/**
  * Variant for contexts where a space-separated "-min" suffix is baked
  * into surrounding copy (e.g. "30-min meeting", "90-min call"). Returns
  * a bare string suitable for `${formatDurationCompact(n)} meeting`.
