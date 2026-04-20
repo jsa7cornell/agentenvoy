@@ -1410,6 +1410,13 @@ export interface LinkRules {
     date?: boolean;
     duration?: boolean | number[];
     location?: boolean;
+    /**
+     * Format deferral (2026-04-19, MCP Phase B). `true` = guest picks any
+     * system-default format. Array = guest picks from an explicit allow-list.
+     * Omitted = host picks via `rules.format` (or format is `required` if
+     * neither is set). Consumed by `src/lib/mcp/parameter-resolver.ts`.
+     */
+    format?: boolean | Array<"video" | "phone" | "in-person">;
   };
   /**
    * Qualitative hints from the host to personalize the guest experience
@@ -1579,6 +1586,16 @@ export function normalizeLinkRules(
       if (durs.length) cleaned.duration = Array.from(new Set(durs)).sort((a, b) => a - b);
     }
     if (src.location === true) cleaned.location = true;
+    if (src.format === true) {
+      cleaned.format = true;
+    } else if (Array.isArray(src.format)) {
+      const VALID_FORMATS = new Set(["video", "phone", "in-person"]);
+      const fmts = src.format.filter(
+        (f): f is "video" | "phone" | "in-person" =>
+          typeof f === "string" && VALID_FORMATS.has(f)
+      );
+      if (fmts.length) cleaned.format = Array.from(new Set(fmts));
+    }
     if (Object.keys(cleaned).length) out.guestPicks = cleaned;
     else delete out.guestPicks;
   } else {
