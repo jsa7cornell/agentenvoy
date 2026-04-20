@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { WeeklyCalendar, TunerEvent, TunerSlot } from "@/components/weekly-calendar";
+import { AttendeeStatusIcon } from "@/components/attendee-status-icon";
 import { DayView } from "@/components/day-view";
 import { AvailabilityRules } from "@/components/availability-rules";
 import { TIMEZONE_TABLE, shortTimezoneLabel, getTimezoneEntry } from "@/lib/timezone";
@@ -902,7 +903,16 @@ export function AvailabilityPanel({
             className="bg-surface-inset border border-DEFAULT rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-semibold text-primary mb-1 truncate">{clickedEvent.summary}</h3>
+            <h3 className="text-sm font-semibold text-primary mb-1 truncate flex items-center gap-1.5">
+              {clickedEvent.attendeeRollup && (
+                <AttendeeStatusIcon
+                  rollup={clickedEvent.attendeeRollup}
+                  size={12}
+                  className="flex-shrink-0"
+                />
+              )}
+              <span className="truncate">{clickedEvent.summary}</span>
+            </h3>
             <p className="text-xs text-muted mb-3">
               {new Date(clickedEvent.start).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
               {" · "}
