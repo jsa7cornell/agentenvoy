@@ -134,7 +134,10 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Host account data</strong> (profile, preferences, calendar connection) persists
-                for the life of your account. You can delete your account at any time.
+                for the life of your account. You can delete your account and all associated data at
+                any time from <strong>Dashboard → Account → Danger Zone</strong>. Deletion also revokes
+                AgentEnvoy&apos;s access to your Google Calendar. Meetings already written to your calendar
+                will remain there &mdash; cancel them first if you&apos;d like guests notified.
               </li>
             </ul>
           </section>
@@ -180,7 +183,11 @@ export default function PrivacyPage() {
                 </a>
               </li>
               <li><strong>Request a copy</strong> of all data we hold about you</li>
-              <li><strong>Request deletion</strong> of your account and all associated data</li>
+              <li>
+                <strong>Delete your account</strong> and all associated data at any time from{" "}
+                <strong>Dashboard → Account → Danger Zone</strong>. Guest-calendar-only users
+                (no AgentEnvoy account) can email <a href="mailto:privacy@agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300">privacy@agentenvoy.ai</a>.
+              </li>
               <li><strong>Opt out</strong> of enhanced calendar access at any time (revert to free/busy only)</li>
             </ul>
           </section>

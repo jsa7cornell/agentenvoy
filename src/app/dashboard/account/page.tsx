@@ -39,6 +39,10 @@ export default function AccountPage() {
   // Calendar modals
   const [calendarModal, setCalendarModal] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [calendarFilterModal, setCalendarFilterModal] = useState(false);
   const [googleCalendars, setGoogleCalendars] = useState<Array<{ id: string; name: string; primary: boolean; backgroundColor: string | null }>>([]);
   const [activeCalendarIds, setActiveCalendarIds] = useState<string[]>([]);
@@ -440,6 +444,27 @@ export default function AccountPage() {
         {/* Dev Tools */}
         <DevTools />
 
+        {/* Danger Zone */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-secondary">Danger Zone</h2>
+          <div className="border border-red-500/40 bg-red-500/5 rounded-xl px-4 py-4 flex items-center justify-between gap-4">
+            <div className="text-sm">
+              <div className="text-primary font-medium">Delete your account</div>
+              <div className="text-secondary text-xs mt-1">
+                Permanently deletes your AgentEnvoy account, links, sessions, messages, calendar cache,
+                preferences, and API keys. Meetings already on your Google Calendar will stay there.
+                This cannot be undone.
+              </div>
+            </div>
+            <button
+              onClick={() => { setDeleteConfirmEmail(""); setDeleteError(""); setDeleteModal(true); }}
+              className="shrink-0 px-3 py-2 text-xs rounded-lg border border-red-500/60 text-red-400 hover:bg-red-500/10 transition"
+            >
+              Delete Account
+            </button>
+          </div>
+        </section>
+
         {/* Save button */}
         <div className={`flex items-center justify-end gap-2 transition-opacity duration-200 ${isDirty ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
           {saveMessage && (
@@ -601,6 +626,95 @@ export default function AccountPage() {
                 className="flex-1 px-3 py-2 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-lg transition disabled:opacity-40"
               >
                 {savingCalendarFilter ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Account Modal */}
+      {deleteModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => { if (!deleting) setDeleteModal(false); }}
+        >
+          <div
+            className="bg-surface-inset border border-red-500/50 rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-primary mb-2">Delete your account?</h3>
+            <p className="text-sm text-secondary mb-3">
+              This permanently deletes your AgentEnvoy account and everything tied to it:
+              profile and preferences, links, negotiation sessions and messages, calendar cache,
+              and API keys.
+            </p>
+            <p className="text-sm text-secondary mb-3">
+              Your Google authorization will be revoked, so AgentEnvoy can no longer read or write your calendar.
+            </p>
+            <p className="text-sm text-secondary mb-4">
+              <strong className="text-primary">Meetings already on your Google Calendar will stay there.</strong>{" "}
+              If you want guests notified, cancel them before deleting.
+            </p>
+
+            <label className="block text-xs text-secondary mb-2">
+              Type your email to confirm: <span className="text-primary font-mono">{session?.user?.email ?? ""}</span>
+            </label>
+            <input
+              type="email"
+              autoFocus
+              autoComplete="off"
+              value={deleteConfirmEmail}
+              onChange={(e) => { setDeleteConfirmEmail(e.target.value); setDeleteError(""); }}
+              disabled={deleting}
+              placeholder="you@example.com"
+              className="w-full px-3 py-2 text-sm bg-surface border border-DEFAULT rounded-lg text-primary placeholder:text-secondary/50 focus:outline-none focus:border-red-500/60 mb-3"
+            />
+
+            {deleteError && (
+              <div className="text-xs text-red-400 mb-3">{deleteError}</div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setDeleteModal(false)}
+                disabled={deleting}
+                className="flex-1 px-3 py-2 text-sm font-medium text-secondary border border-DEFAULT rounded-lg hover:border-surface-tertiary transition disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const sessionEmail = (session?.user?.email ?? "").trim().toLowerCase();
+                  if (deleteConfirmEmail.trim().toLowerCase() !== sessionEmail) return;
+                  setDeleting(true);
+                  setDeleteError("");
+                  try {
+                    const res = await fetch("/api/account/delete", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ confirmEmail: deleteConfirmEmail.trim() }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || !data.ok) {
+                      setDeleteError(data.error || "Deletion failed. Please try again.");
+                      setDeleting(false);
+                      return;
+                    }
+                    await signOut({ callbackUrl: "/" });
+                  } catch {
+                    setDeleteError("Network error. Please try again.");
+                    setDeleting(false);
+                  }
+                }}
+                disabled={
+                  deleting ||
+                  deleteConfirmEmail.trim().toLowerCase() !==
+                    (session?.user?.email ?? "").trim().toLowerCase() ||
+                  !session?.user?.email
+                }
+                className="flex-1 px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {deleting ? "Deleting..." : "Delete permanently"}
               </button>
             </div>
           </div>
