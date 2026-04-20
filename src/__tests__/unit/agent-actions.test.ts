@@ -1238,6 +1238,26 @@ describe("executeActions", () => {
       expect(results[0].message).toContain("code");
     });
 
+    // Regression — "oops - change it to 50 mins" on a just-drafted meet &
+    // greet returned "Missing dateTime parameter" because the LLM selected
+    // update_time (which at the time required dateTime). Duration-only edits
+    // on a drafted link must route through update_link with just {code,
+    // duration} and succeed without a dateTime. Same class as d3cfaed /
+    // 55929a9: tools demanding args that aren't semantically required.
+    it("accepts duration-only edit on a drafted link (no dateTime)", async () => {
+      mockPrisma.negotiationLink.findFirst.mockResolvedValue(existingLink);
+      mockPrisma.negotiationLink.update.mockResolvedValue({ id: "link-1" });
+
+      const results = await executeActions(
+        [{ action: "update_link", params: { code: "hhkkkw", duration: 50 } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
+      expect(call.data.rules).toMatchObject({ duration: 50 });
+    });
+
     it("rejects when no mutation fields provided", async () => {
       mockPrisma.negotiationLink.findFirst.mockResolvedValue(existingLink);
       const results = await executeActions(

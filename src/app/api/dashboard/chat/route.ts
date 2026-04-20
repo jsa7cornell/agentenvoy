@@ -92,6 +92,19 @@ If the user just wants to update their default preferences:
 {"action": "update_preferences", "preferences": {...}}
 \`\`\`
 
+EDITING A JUST-DRAFTED INVITE (duration, format, location):
+When the host tweaks a draft you just created — "change it to 50 mins", "make it 30 instead", "switch to phone" — emit an update action against the link you just created. OMIT sessionId; the server defaults to the latest session.
+- Duration-only edits: \`{"action": "update_link", "params": {"duration": 50}}\`. Do NOT emit update_time for a duration-only change on a drafted link — update_time is for proposing a new start time. For a draft that has no confirmed start yet, update_link is the right action.
+- Format: \`{"action": "update_format", "params": {"format": "phone"}}\`
+- Location: \`{"action": "update_location", "params": {"location": "..."}}\`
+Never fabricate a dateTime to satisfy a tool — if the host only changed duration, only pass duration.
+
+POST-ACTION REPLY TONE:
+After emitting an action block, your conversational reply should be a short acknowledgement, not a performative recap. One sentence plus the artifact — do not list what you did in prose, do not celebrate.
+- ✓ "Okay, here's the invite I drafted for Mike — Tue 2pm, 30 min. Let me know any tweaks."
+- ✓ "Updated to 50 min."
+- ✗ "Great! I've gone ahead and drafted a meet & greet for you. Here's what I put together: ..."
+
 After creating or expanding a link, confirm what you captured — briefly state whether the link is VIP and WHY you flagged it ("I set this as VIP because Katherine is a key client in Paris"). Tell the user the link will appear above. Suggest they share the contextual link since it carries all the meeting context.
 
 DEFERRED-TO-GUEST FIELDS (guestPicks + guestGuidance) — USE WHEN THE HOST DEFERS:
@@ -140,7 +153,6 @@ export async function POST(req: NextRequest) {
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
     select: {
-      name: true,
       meetSlug: true,
       preferences: true,
       persistentKnowledge: true,
@@ -184,7 +196,11 @@ export async function POST(req: NextRequest) {
     knowledgeContext += `\nHost's situational context:\n${user.upcomingSchedulePreferences}`;
   }
 
-  const contextMessage = `User: ${user?.name || "User"}\nMeet slug: ${user?.meetSlug || "not set"}\nCurrent preferences: ${JSON.stringify(user?.preferences || {})}\nBase URL: ${process.env.NEXTAUTH_URL || "https://agentenvoy.ai"}${availabilityContext}${knowledgeContext}`;
+  // Source the display name from the live next-auth session (Google profile),
+  // not from a derived-from-email guess. Falls back to "there" — never to the
+  // email localpart — so we don't render e.g. "jsa7cornell" as a name.
+  const displayName = session.user.name || "there";
+  const contextMessage = `User: ${displayName}\nMeet slug: ${user?.meetSlug || "not set"}\nCurrent preferences: ${JSON.stringify(user?.preferences || {})}\nBase URL: ${process.env.NEXTAUTH_URL || "https://agentenvoy.ai"}${availabilityContext}${knowledgeContext}`;
 
   const system = DASHBOARD_SYSTEM + "\n\nCONTEXT:\n" + contextMessage;
   const modelId = "claude-sonnet-4-6";
