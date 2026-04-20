@@ -911,6 +911,19 @@ export function AvailabilityPanel({
               {new Date(clickedEvent.end).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: timezone, timeZoneName: "short" })}
             </p>
 
+            {/* GCal jump — always available when Google returned htmlLink,
+                regardless of whether this event is AgentEnvoy-booked. */}
+            {clickedEvent.htmlLink && (
+              <a
+                href={clickedEvent.htmlLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-xs text-indigo-400 hover:text-indigo-300 transition mb-3"
+              >
+                View in Google Calendar →
+              </a>
+            )}
+
             {clickedSession === undefined && (
               <p className="text-xs text-muted py-2">Looking up session…</p>
             )}
@@ -937,16 +950,6 @@ export function AvailabilityPanel({
                 >
                   View this event on AgentEnvoy →
                 </Link>
-                {clickedEvent.htmlLink && (
-                  <a
-                    href={clickedEvent.htmlLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block text-xs text-indigo-400 hover:text-indigo-300 transition"
-                  >
-                    View in Google Calendar →
-                  </a>
-                )}
               </div>
             )}
 
