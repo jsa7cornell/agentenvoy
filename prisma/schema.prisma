@@ -58,6 +58,11 @@ model User {
   upcomingSchedulePreferences String?   @map("situationalKnowledge") @db.Text // Near-term non-time context: mood, goals, temp rules
   lastCalibratedAt            DateTime? // null = never calibrated, triggers onboarding flow
   onboardingPhase             String? // null = not started, tracks progress through onboarding chat
+  /// Admin gate. "user" | "admin". Replaces the ADMIN_EMAIL env-var check in
+  /// src/lib/admin-auth.ts. Default "user" so migration is additive; John's
+  /// row is seeded to "admin" in the same migration. Env-var fallback stays
+  /// for 24–48h, removed in the next PR.
+  userClass                   String    @default("user")
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 
