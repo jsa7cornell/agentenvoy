@@ -1,5 +1,6 @@
 "use client";
 
+import { GoogleButton } from "./google-button";
 import { useOAuthSignIn } from "./use-oauth-signin";
 
 type Variant = "bubble" | "mobile-banner";
@@ -16,9 +17,8 @@ interface Props {
 }
 
 /**
- * Anonymous-viewer CTAs in the deal room. Two routes:
- *   - Auto-match (read-only) → guest-calendar OAuth flow (no account)
- *   - Sign up for AgentEnvoy → NextAuth host signin (full account + onboarding)
+ * Anonymous-viewer CTA in the deal room. Single primary route:
+ *   Continue with Google → pre-consent modal → NextAuth host signin
  *
  * Rendered at two callsites today (in-bubble desktop, mobile sticky banner).
  * Shared component prevents copy/behavior drift across the two surfaces.
@@ -33,14 +33,10 @@ export function DealRoomConnectCtas({
   onCollapse,
   onDismiss,
 }: Props) {
-  const returnUrl = `/meet/${slug}${code ? `/${code}` : ""}`;
-
-  const connectReadOnly = () => {
-    if (typeof window === "undefined") return;
-    window.location.href = `/api/auth/guest-calendar?sessionId=${encodeURIComponent(
-      sessionId
-    )}&returnUrl=${encodeURIComponent(returnUrl)}`;
-  };
+  // returnUrl preserved for future flows that need to bounce back to the
+  // deal room after auth (e.g. read-only path if it returns).
+  void slug;
+  void code;
 
   const signUpFlow = useOAuthSignIn({
     mode: "first-connect",
@@ -61,7 +57,7 @@ export function DealRoomConnectCtas({
             onClick={onExpand}
             className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition"
           >
-            🗓️ Auto-match (read-only)
+            ✨ Safely sync your calendar
           </button>
           <button
             type="button"
@@ -81,43 +77,32 @@ export function DealRoomConnectCtas({
     variant === "mobile-banner"
       ? "md:hidden border-b border-secondary flex-shrink-0 px-4 py-3"
       : "mb-3";
-  const innerClass =
-    "p-3 rounded-lg bg-blue-900/20 border border-blue-800/40 space-y-2";
 
   return (
     <>
       <div className={expandedWrapperClass}>
-        <div className={innerClass}>
-          <div className="text-xs font-medium text-blue-200">
-            Find the best time automatically?
-          </div>
-          <p className="text-xs text-secondary leading-snug">
-            Connect your calendar (read-only, ~5 seconds) to see times that work
-            for both of you. No account needed.
-          </p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={connectReadOnly}
-              className="flex-1 px-2 py-1.5 rounded-md text-xs font-semibold bg-blue-500 hover:bg-blue-600 text-white transition"
+        <div className="p-3.5 rounded-xl border border-indigo-500/30 bg-gradient-to-br from-emerald-500/10 to-indigo-500/10 space-y-3">
+          <div className="flex items-start gap-2.5">
+            <span
+              className="flex-shrink-0 w-5 h-5 rounded-md bg-gradient-to-br from-emerald-500 to-indigo-500 flex items-center justify-center text-[11px] mt-0.5"
+              aria-hidden
             >
-              Auto-match (read-only)
-            </button>
+              ✨
+            </span>
+            <p className="text-sm font-semibold text-primary leading-snug">
+              Safely sync your calendar to automatically find the best time
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <GoogleButton onClick={signUpFlow.trigger} block />
             <button
               type="button"
               onClick={onCollapse}
-              className="flex-1 px-2 py-1.5 rounded-md text-xs font-medium text-secondary border border-secondary hover:border-DEFAULT transition"
+              className="text-xs text-muted hover:text-secondary underline underline-offset-2 transition py-2 px-1 sm:py-0"
             >
-              Not now
+              Maybe later
             </button>
           </div>
-          <button
-            type="button"
-            onClick={signUpFlow.trigger}
-            className="block w-full text-center text-[11px] text-blue-300 hover:text-blue-200 underline underline-offset-2 transition pt-1"
-          >
-            Or sign up for AgentEnvoy →
-          </button>
         </div>
       </div>
       {signUpFlow.modal}
