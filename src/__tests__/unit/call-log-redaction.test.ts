@@ -3,39 +3,17 @@ import {
   redactForCallLog,
   redactResponseForCallLog,
 } from "@/lib/mcp/call-log";
-import { createHash } from "node:crypto";
 
 describe("redactForCallLog", () => {
   it("verbatim class keeps value as-is", () => {
-    expect(redactForCallLog("propose_lock", "field", "format")).toEqual({
+    expect(redactForCallLog("propose_lock", "status", "agreed")).toEqual({
       kind: "keep",
-      value: "format",
-    });
-  });
-
-  it("drop class omits", () => {
-    expect(redactForCallLog("propose_lock", "rationaleProse", "x")).toEqual({
-      kind: "drop",
-    });
-  });
-
-  it("hashed class sha256-hexes", () => {
-    const input = "alex@example.com";
-    const expected = createHash("sha256").update(input).digest("hex");
-    expect(
-      redactForCallLog("post_message", "guestEmail", input),
-    ).toEqual({ kind: "keep", value: expected });
-  });
-
-  it("cap:0 drops long strings", () => {
-    // post_message.body has { cap: 0 } → always drop
-    expect(redactForCallLog("post_message", "body", "hello")).toEqual({
-      kind: "drop",
+      value: "agreed",
     });
   });
 
   it("shape-summary replaces objects with keys/types", () => {
-    const out = redactForCallLog("read_state", "rules", {
+    const out = redactForCallLog("get_meeting_parameters", "rules", {
       duration: 30,
       format: "video",
     });
@@ -47,10 +25,29 @@ describe("redactForCallLog", () => {
     });
   });
 
+  it("shape-summary on arrays returns type/length/elementShape", () => {
+    const out = redactForCallLog("get_availability", "slots", [
+      { start: "2026-05-01T10:00:00Z", tier: "first_offer" },
+    ]);
+    expect(out.kind).toBe("keep");
+    if (out.kind !== "keep") return;
+    expect(out.value).toMatchObject({ type: "array", length: 1 });
+  });
+
+  it("refusal common fields are verbatim across tools", () => {
+    expect(redactForCallLog("propose_lock", "reason", "slot_mismatch")).toEqual({
+      kind: "keep",
+      value: "slot_mismatch",
+    });
+    expect(
+      redactForCallLog("get_availability", "retryAfterSeconds", 30),
+    ).toEqual({ kind: "keep", value: 30 });
+  });
+
   it("throws on unknown tool", () => {
-    expect(() =>
-      redactForCallLog("unknown_tool", "field", 1),
-    ).toThrow(/unknown tool/);
+    expect(() => redactForCallLog("unknown_tool", "field", 1)).toThrow(
+      /unknown tool/,
+    );
   });
 
   it("throws on unknown field (forces table to stay exhaustive)", () => {
@@ -61,18 +58,40 @@ describe("redactForCallLog", () => {
 });
 
 describe("redactResponseForCallLog", () => {
-  it("drops fields with drop class; keeps the rest", () => {
+  it("keeps verbatim fields and shape-summarizes nested objects", () => {
     const out = redactResponseForCallLog("propose_lock", {
-      accepted: true,
-      field: "format",
-      rationaleProse: "anything with secrets https://x.com",
-      rationaleTemplate: "Switch to {{format}}",
+      ok: true,
+      sessionId: "sess_123",
+      status: "agreed",
+      dateTime: "2026-05-01T10:00:00Z",
+      duration: 30,
+      format: "video",
+      location: null,
+      meetLink: "https://meet.example/abc",
+      eventLink: "https://cal.example/evt",
+      idempotent: false,
+      warnings: [],
+      counterProposal: { dateTime: "2026-05-02T10:00:00Z", reason: "soft" },
+    });
+    expect(out.sessionId).toBe("sess_123");
+    expect(out.status).toBe("agreed");
+    expect(out.meetLink).toBe("https://meet.example/abc");
+    // counterProposal → shape-summary
+    expect(out.counterProposal).toMatchObject({
+      keys: ["dateTime", "reason"],
+    });
+  });
+
+  it("handles refusal envelopes", () => {
+    const out = redactResponseForCallLog("propose_lock", {
+      ok: false,
+      reason: "slot_mismatch",
+      message: "slot no longer available",
     });
     expect(out).toEqual({
-      accepted: true,
-      field: "format",
-      rationaleTemplate: "Switch to {{format}}",
+      ok: false,
+      reason: "slot_mismatch",
+      message: "slot no longer available",
     });
-    expect(out).not.toHaveProperty("rationaleProse");
   });
 });

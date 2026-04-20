@@ -4,7 +4,6 @@ import {
   renderRationaleTemplate,
   RATIONALE_MAX_LEN,
 } from "@/lib/mcp/rationale";
-import { redactForCallLog } from "@/lib/mcp/call-log";
 
 describe("validateRationaleProse", () => {
   it("accepts plain short prose", () => {
@@ -76,16 +75,7 @@ describe("renderRationaleTemplate", () => {
   });
 });
 
-describe("redactForCallLog drops rationaleProse", () => {
-  it("propose_lock.rationaleProse → drop", () => {
-    expect(redactForCallLog("propose_lock", "rationaleProse", "any text")).toEqual({
-      kind: "drop",
-    });
-  });
-
-  it("propose_lock.rationaleTemplate → kept (verbatim)", () => {
-    expect(
-      redactForCallLog("propose_lock", "rationaleTemplate", "Switch to {{format}}"),
-    ).toEqual({ kind: "keep", value: "Switch to {{format}}" });
-  });
-});
+// NOTE: The old rationaleProse/rationaleTemplate redaction cases moved out
+// of scope when the propose_lock wire schema was finalized — current
+// propose_lock responses don't carry those fields. Coverage for the
+// redaction table now lives in call-log-redaction.test.ts.
