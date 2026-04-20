@@ -23,6 +23,7 @@
     "@ai-sdk/openai": "^3.0.51",
     "@auth/prisma-adapter": "^1.6.0",
     "@aws-sdk/client-sesv2": "^3.1031.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@prisma/client": "^5.22.0",
     "@vercel/functions": "^1.5.0",
     "ai": "^6.0.144",
