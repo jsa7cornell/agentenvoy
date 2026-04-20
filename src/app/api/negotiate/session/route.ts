@@ -7,7 +7,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";
 import type { ScoredSlot, LinkRules } from "@/lib/scoring";
-import { applyEventOverrides } from "@/lib/scoring";
+import { applyEventOverrides, deriveTimingAnchor } from "@/lib/scoring";
 import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
@@ -862,17 +862,9 @@ export async function POST(req: NextRequest) {
       // from timingLabel: "this week" → anchor=this-week, "next week" or
       // "next <weekday>" → next-week.
       const isGenericLink = link.type === "generic";
-      const proseAnchor: "this-week" | "next-week" | null = (() => {
-        if (!rawTimingLabel) return null;
-        const lc = rawTimingLabel.toLowerCase();
-        if (/\bthis\s+week\b|\btoday\b|\btomorrow\b|\basap\b|\bsoon\b/.test(lc)) {
-          return "this-week";
-        }
-        if (/\bnext\s+week\b|\bnext\s+(mon|tue|wed|thu|fri|sat|sun)/.test(lc)) {
-          return "next-week";
-        }
-        return null;
-      })();
+      // Shared helper — kept in sync with MCP `rules.timingPreference.anchor`
+      // projection by construction (both call `deriveTimingAnchor`).
+      const proseAnchor = deriveTimingAnchor(rawTimingLabel);
       const proseCandidate =
         !guestTzDiffers && !isVip && !isGenericLink
           ? formatAvailabilityProse(

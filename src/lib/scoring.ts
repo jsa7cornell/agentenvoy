@@ -1938,3 +1938,31 @@ export function filterByDuration(
       return slot;
     });
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Timing anchor — shared derivation for prose greeting + MCP rule projection.
+//
+// Source of truth for turning a free-form `timingLabel` ("this week",
+// "next Friday", "ASAP", …) into a structured anchor. The prose greeting in
+// `src/app/api/negotiate/session/route.ts` calls this; the MCP
+// `get_meeting_parameters` handler projects the result onto
+// `rules.timingPreference.anchor` so external guest agents don't have to
+// re-implement the regex. Parity test in
+// `src/__tests__/unit/derive-timing-anchor.test.ts`.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type TimingAnchor = "this-week" | "next-week" | null;
+
+export function deriveTimingAnchor(
+  timingLabel: string | null | undefined,
+): TimingAnchor {
+  if (!timingLabel) return null;
+  const lc = timingLabel.toLowerCase();
+  if (/\bthis\s+week\b|\btoday\b|\btomorrow\b|\basap\b|\bsoon\b/.test(lc)) {
+    return "this-week";
+  }
+  if (/\bnext\s+week\b|\bnext\s+(mon|tue|wed|thu|fri|sat|sun)/.test(lc)) {
+    return "next-week";
+  }
+  return null;
+}
