@@ -7,6 +7,7 @@ import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
 import { PublicHeader } from "./public-header";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
+import { formatDuration } from "@/lib/format-duration";
 import {
   getRoleStyles,
   computeExternalAgentSender,
@@ -1008,7 +1009,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (linkActivity) {
               parts.push(linkActivityIcon ? `${linkActivityIcon} ${linkActivity}` : linkActivity);
             }
-            if (slotDuration) parts.push(`${slotDuration} min`);
+            if (slotDuration) parts.push(formatDuration(slotDuration));
             if (linkTimingLabel) parts.push(linkTimingLabel);
             if (linkLocation) parts.push(`📍 ${linkLocation}`);
             if (parts.length === 0) return <span>Meeting details pending</span>;
@@ -1712,7 +1713,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 </div>
                 <div className="space-y-1 text-sm text-primary">
                   <p>&#128197; {dt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: slotTimezone })}</p>
-                  <p>&#128336; {dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: slotTimezone })} ({effective.duration} min)</p>
+                  <p>&#128336; {dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: slotTimezone })} ({formatDuration(effective.duration)})</p>
                   <p>&#128241; {effective.format.charAt(0).toUpperCase() + effective.format.slice(1)}</p>
                   {effective.location && <p>&#128205; {effective.location}</p>}
                 </div>

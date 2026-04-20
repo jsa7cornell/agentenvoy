@@ -4,6 +4,7 @@ import type { CalendarContext, CalendarEvent } from "@/lib/calendar";
 import { getUserTimezone } from "@/lib/timezone";
 import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
 import { computeWeekAnchors, computeWeekAnchorsHostSide, formatWeekAnchorsForPrompt } from "@/lib/week-anchors";
+import { formatDuration } from "@/lib/format-duration";
 
 // --- Playbook cache (read once per cold start) ---
 
@@ -155,7 +156,7 @@ function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: str
     const items: string[] = [];
     if (explicit.preferredTimes) items.push(`Preferred times: ${JSON.stringify(explicit.preferredTimes)}`);
     if (explicit.format) items.push(`Preferred format: ${explicit.format}`);
-    if (explicit.duration) items.push(`Default duration: ${explicit.duration} minutes`);
+    if (explicit.duration) items.push(`Default duration: ${formatDuration(explicit.duration as number)}`);
     if (explicit.bufferMinutes) items.push(`Buffer between meetings: ${explicit.bufferMinutes} minutes`);
     if (explicit.timezone) items.push(`Timezone: ${explicit.timezone}`);
     if (explicit.blackoutDays) items.push(`Avoid days: ${JSON.stringify(explicit.blackoutDays)}`);
@@ -257,7 +258,7 @@ function formatRules(rules: Record<string, unknown>): string {
   }
 
   if (rules.duration) {
-    lines.push(`- [GROUND TRUTH] Duration (decided by host): ${rules.duration} minutes. State as fact — do NOT ask the guest about duration.`);
+    lines.push(`- [GROUND TRUTH] Duration (decided by host): ${formatDuration(rules.duration as number)}. State as fact — do NOT ask the guest about duration.`);
   }
 
   if (typeof rules.location === "string" && rules.location.trim()) {

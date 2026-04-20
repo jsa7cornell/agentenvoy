@@ -30,6 +30,8 @@ export interface GuestConfirmationEmailParams {
   guestNote?: string | null;
 }
 
+import { formatDuration } from "@/lib/format-duration";
+
 export function buildGuestConfirmationEmail(
   p: GuestConfirmationEmailParams,
 ): { subject: string; html: string } {
@@ -76,7 +78,7 @@ export function buildGuestConfirmationEmail(
         ${p.topic ? `<p style="margin:0 0 12px 0;font-size:15px;font-weight:600;">${escapeHtml(p.topic)}</p>` : ""}
         <p style="margin:0 0 8px 0;color:#444;font-size:14px;">with <strong>${escapeHtml(p.hostName)}</strong></p>
         <p style="margin:0 0 8px 0;color:#444;font-size:14px;">📅 ${escapeHtml(guestDateLabel)}</p>
-        <p style="margin:0 0 8px 0;color:#444;font-size:14px;">🕐 ${escapeHtml(guestTimeLabel)} ${escapeHtml(guestTzAbbr)} · ${p.duration} min · ${escapeHtml(formatDisplay)}</p>
+        <p style="margin:0 0 8px 0;color:#444;font-size:14px;">🕐 ${escapeHtml(guestTimeLabel)} ${escapeHtml(guestTzAbbr)} · ${formatDuration(p.duration)} · ${escapeHtml(formatDisplay)}</p>
         ${hostTimeLabel ? `<p style="margin:0 0 8px 0;color:#999;font-size:12px;">Host's time: ${escapeHtml(hostTimeLabel)}</p>` : ""}
         ${p.location ? `<p style="margin:0 0 8px 0;color:#444;font-size:14px;">📍 ${escapeHtml(p.location)}</p>` : ""}
         ${p.meetLink ? `<p style="margin:0;font-size:14px;"><a href="${escapeHtml(p.meetLink)}" style="color:#6c5ce7;font-weight:600;text-decoration:none;">${escapeHtml(p.meetLink)}</a></p>` : ""}

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ThreadCard from "./thread-card";
 import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-status";
+import { formatDuration } from "@/lib/format-duration";
 import { QuickReplies } from "./onboarding/quick-replies";
 import { GcalUpdateCard } from "./gcal-update-card";
 import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
@@ -598,7 +599,7 @@ export default function Feed() {
                   statusColor={status.color}
                   subtitle={[
                     msg.thread.format === "phone" ? "Phone call" : msg.thread.format === "video" ? "Video" : msg.thread.format,
-                    msg.thread.duration ? `${msg.thread.duration} min` : null,
+                    msg.thread.duration ? formatDuration(msg.thread.duration) : null,
                     isGroup ? `${guestParticipants.length} participant${guestParticipants.length !== 1 ? "s" : ""}` : null,
                   ].filter(Boolean).join(" · ") || undefined}
                   inviteeName={msg.thread.link.inviteeName || undefined}

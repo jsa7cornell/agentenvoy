@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { formatDuration } from "@/lib/format-duration";
 
 interface ThreadMessage {
   id: string;
@@ -148,7 +149,7 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
       {/* Info bar */}
       <div className="flex gap-4 px-5 py-2.5 border-b border-white/[0.03] text-xs text-gray-500 flex-shrink-0">
         {session.format && <span>{session.format === "phone" ? "Phone" : session.format === "video" ? "Video" : "In-person"}</span>}
-        {session.duration && <span>{session.duration} min</span>}
+        {session.duration && <span>{formatDuration(session.duration)}</span>}
         {session.link.inviteeEmail && <span>{session.link.inviteeEmail}</span>}
         {session.link.code && (
           <button
@@ -218,7 +219,7 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
                   </h4>
                   <div className="text-xs text-gray-400 space-y-1">
                     <div>{new Date(proposal.dateTime).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at {new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" })}{proposal.timezone && proposal.timezone !== Intl.DateTimeFormat().resolvedOptions().timeZone ? ` (${new Date(proposal.dateTime).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: proposal.timezone })})` : ""}</div>
-                    <div>{proposal.duration} minutes</div>
+                    <div>{formatDuration(proposal.duration)}</div>
                     <div>{proposal.format}</div>
                     {proposal.location && <div>{proposal.location}</div>}
                   </div>

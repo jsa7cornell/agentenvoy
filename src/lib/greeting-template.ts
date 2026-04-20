@@ -9,6 +9,7 @@
 import type { ScoredSlot } from "@/lib/scoring";
 import { filterByDuration } from "@/lib/scoring";
 import { shortTimezoneLabel } from "./timezone";
+import { formatDuration } from "./format-duration";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -835,7 +836,7 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
   items.push("time");
   if (picks.duration === true) items.push("duration");
   else if (Array.isArray(picks.duration) && picks.duration.length > 0) {
-    items.push(`duration (${picks.duration.join(" or ")} min)`);
+    items.push(`duration (${picks.duration.map((n) => formatDuration(n)).join(" or ")})`);
   }
   if (picks.location) items.push("location");
 

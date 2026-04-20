@@ -8,6 +8,7 @@ import { createTentativeHoldEvent, deleteCalendarEvent } from "@/lib/calendar";
 import { parseTimeOfDay, TIME_OF_DAY_WINDOWS } from "@/lib/time-of-day";
 import { sanitizeHostFlavor, sanitizeSuggestionList } from "@/lib/host-flavor-sanitizer";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
+import { formatDuration } from "@/lib/format-duration";
 
 // --- Helpers ---
 
@@ -537,13 +538,13 @@ async function handleUpdateTime(
       data: {
         sessionId: session.id,
         role: "system",
-        content: `Duration updated to ${duration} min`,
+        content: `Duration updated to ${formatDuration(duration)}`,
         metadata: { kind: "host_update", field: "duration" },
       },
     });
     return {
       success: true,
-      message: `Updated duration to ${duration} min`,
+      message: `Updated duration to ${formatDuration(duration)}`,
       data: { sessionId: session.id, duration },
     };
   }
@@ -613,7 +614,7 @@ async function handleUpdateTime(
   }
 
   // Save a system message so the guest sees the proposal
-  const durationStr = duration !== undefined ? ` (${duration} min)` : "";
+  const durationStr = duration !== undefined ? ` (${formatDuration(duration)})` : "";
   // parsed is guaranteed here: the duration-only branch above returned early.
   const nonNullParsed = parsed as Date;
   const tzLabel = ` ${shortTimezoneLabel(hostTz, nonNullParsed)}`;
@@ -1435,7 +1436,7 @@ async function handleExpandLink(
   }
   if (patch.timingLabel !== undefined) changedParts.push(`timing: ${patch.timingLabel ?? "cleared"}`);
   if (patch.format !== undefined) changedParts.push(`format: ${patch.format}`);
-  if (patch.duration !== undefined) changedParts.push(`duration: ${patch.duration} min`);
+  if (patch.duration !== undefined) changedParts.push(`duration: ${formatDuration(patch.duration as number)}`);
   if (patch.activity !== undefined) changedParts.push(`activity: ${patch.activity ?? "cleared"}`);
   if (patch.location !== undefined) changedParts.push(`location: ${patch.location ?? "cleared"}`);
 
@@ -1464,7 +1465,7 @@ async function handleExpandLink(
         followupParts.push(`timing now "${patch.timingLabel}"`);
       }
       if (patch.format !== undefined) followupParts.push(`format now ${patch.format}`);
-      if (patch.duration !== undefined) followupParts.push(`duration now ${patch.duration} min`);
+      if (patch.duration !== undefined) followupParts.push(`duration now ${formatDuration(patch.duration as number)}`);
       if (patch.activity !== undefined && patch.activity) followupParts.push(`activity now "${patch.activity}"`);
       if (patch.location !== undefined && patch.location) followupParts.push(`location now ${patch.location}`);
       if (patch.preferredTimeStart !== undefined || patch.preferredTimeEnd !== undefined) {

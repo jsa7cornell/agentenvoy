@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
 
 interface Slot {
   start: string;
@@ -117,7 +118,7 @@ function SlotPills({
         const clickable = isSlotClickable(slot);
         const isShort = slot.isShortSlot === true;
         const shortTooltip = isShort && duration && minDuration
-          ? `${minDuration} min available — ${duration} min if adjacent time opens up`
+          ? `${formatDuration(minDuration)} available — ${formatDuration(duration)} if adjacent time opens up`
           : isShort
           ? "Short window — may not fit full meeting"
           : undefined;
@@ -370,7 +371,7 @@ function WeekView({
               month: "short",
               day: "numeric",
             })}
-            , {duration}-min meeting
+            , {formatDurationCompact(duration)} meeting
           </div>
           <SlotPills
             slots={selectedSlots}
@@ -550,7 +551,7 @@ function MonthView({
               month: "short",
               day: "numeric",
             })}
-            , {duration}-min meeting
+            , {formatDurationCompact(duration)} meeting
           </div>
           <SlotPills
             slots={selectedSlots}

@@ -12,6 +12,7 @@ import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availabili
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
+import { formatDuration } from "@/lib/format-duration";
 import {
   resolveSeedGuestTimezoneForCreate,
   resolveEffectiveGuestTimezone,
@@ -735,7 +736,7 @@ export async function POST(req: NextRequest) {
 
     const buildProposalSentence = (): string | null => {
       // Fragments assemble into: "He's proposing [timing] [and] [dur min] [for activity] [in loc]."
-      const durStr = durationForOpener ? `${durationForOpener} min` : null;
+      const durStr = durationForOpener ? formatDuration(durationForOpener) : null;
       if (activityText) {
         const lead = timingLabel && durStr
           ? `${timingLabel} and ${durStr}`
@@ -892,7 +893,7 @@ export async function POST(req: NextRequest) {
       const closing = isGeneric
         ? (() => {
             const base = `Choose a slot from the calendar below or reply to me with your preferences to get it booked.`;
-            const durStr = effectiveDuration ? `${effectiveDuration} minutes` : null;
+            const durStr = effectiveDuration ? formatDuration(effectiveDuration) : null;
             const fmt = fmtLabel;
             if (durStr && fmt) {
               return `${base}\n\nA typical slot is ${durStr} ${fmt}, but if you think a different length and type is appropriate (eg phone or even in person), let me know.`;

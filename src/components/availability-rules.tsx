@@ -7,6 +7,7 @@ import {
   Ban, Lock, Timer, CheckCircle2, Star, MapPin, Megaphone, Copy, UserX,
 } from "lucide-react";
 import type { AvailabilityRule } from "@/lib/availability-rules";
+import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
 
 // --- Types ---
 
@@ -1145,7 +1146,7 @@ function RuleCard({
     const window = rule.timeStart && rule.timeEnd
       ? `${formatTime24to12(rule.timeStart)}\u2013${formatTime24to12(rule.timeEnd)}`
       : "";
-    summary = `${rule.officeHours.title} · ${days} ${window} · ${rule.officeHours.durationMinutes}-min ${rule.officeHours.format}`.trim();
+    summary = `${rule.officeHours.title} · ${days} ${window} · ${formatDurationCompact(rule.officeHours.durationMinutes)} ${rule.officeHours.format}`.trim();
   } else {
     summary = rule.originalText;
   }
@@ -1440,7 +1441,7 @@ function RuleCard({
                       {rule.officeHours.format === "video" ? "Video" : rule.officeHours.format === "phone" ? "Phone" : "In-person"}
                     </span>
                     <span className="text-muted">Duration</span>
-                    <span className="text-primary">{rule.officeHours.durationMinutes} min</span>
+                    <span className="text-primary">{formatDuration(rule.officeHours.durationMinutes)}</span>
                   </>
                 )}
                 {/* Added */}

@@ -30,6 +30,7 @@ import { logRouteError } from "@/lib/route-error";
 import { buildDevStatsEmail } from "@/lib/emails/dev-stats";
 import { gatherDevStats } from "@/lib/emails/dev-stats-gather";
 import { buildMeetingReminderEmail } from "@/lib/emails/meeting-reminder";
+import { formatDuration } from "@/lib/format-duration";
 
 // Cron routes must never be prerendered — see PLAYBOOK Rule 11.
 export const dynamic = "force-dynamic";
@@ -479,7 +480,7 @@ async function runMeetingReminders(now: Date): Promise<{
           hostName: session.host.name || "Your host",
           whenLabel: `${displayDate} at ${displayTime}`,
           timezoneLabel: tzAbbr,
-          durationLabel: `${durationMin} min`,
+          durationLabel: formatDuration(durationMin),
           format: agreedFormat,
           location: null,
           meetLink: session.meetLink || null,
