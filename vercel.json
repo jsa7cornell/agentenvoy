@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/schema-health",
       "schedule": "0 16 * * *"
+    },
+    {
+      "path": "/api/cron/gc-empty-sessions",
+      "schedule": "0 */6 * * *"
     }
   ]
 }

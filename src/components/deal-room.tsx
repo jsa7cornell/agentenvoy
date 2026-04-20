@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { DashboardHeader } from "./dashboard-header";
@@ -72,7 +71,6 @@ interface DealRoomProps {
 }
 
 export function DealRoom({ slug, code }: DealRoomProps) {
-  const router = useRouter();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -535,10 +533,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (data.isGroupEvent) setIsGroupEvent(true);
         if (data.participants) setParticipants(data.participants);
 
-        // Generic link → redirect to persistent contextual URL
-        if (!code && data.code) {
-          router.replace(`/meet/${slug}/${data.code}`);
-        }
+        // Generic-link client-side mint + redirect removed 2026-04-20 —
+        // the server-side route handler at /meet/[slug]/route.ts now
+        // performs the skeleton mint and 303 before this code ever runs
+        // in the generic case. See proposals/2026-04-20_generic-link-
+        // server-redirect_*.md. DealRoom now only mounts under
+        // /meet/[slug]/[code], so `code` is always defined here.
 
         // Already confirmed — load messages AND set confirmed state
         if (data.confirmed) {
