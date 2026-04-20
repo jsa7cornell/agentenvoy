@@ -930,12 +930,46 @@ export type OfferTier = "first-offer" | "stretch1" | "stretch2" | null;
  * host has personally authorized ("I said 6 AM is fine for this link").
  */
 function inExplicitWindow(slot: ScoredSlot, rules: LinkRules, tz: string): boolean {
-  if (!rules.preferredTimeStart && !rules.preferredTimeEnd) return false;
+  const windows = getTimeWindows(rules);
+  if (windows.length === 0) return false;
   const { hour, minute } = getLocalParts(new Date(slot.start), tz);
   const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  if (rules.preferredTimeStart && timeStr < rules.preferredTimeStart) return false;
-  if (rules.preferredTimeEnd && timeStr >= rules.preferredTimeEnd) return false;
-  return true;
+  return windows.some(
+    (w) => timeStr >= w.start && timeStr < w.end,
+  );
+}
+
+/**
+ * Canonical accessor for a link's offering-time windows.
+ *
+ * Returns the effective list of `{start, end}` `HH:MM` windows that a slot
+ * must fall within to be offerable. Precedence:
+ *   1. `preferredTimeWindows` (multi-window) — returned as-is when present
+ *      and non-empty.
+ *   2. `preferredTimeStart` / `preferredTimeEnd` (single-window legacy) —
+ *      returned as a one-element array with `00:00` / `24:00` bounds for
+ *      whichever end the host left open.
+ *   3. Neither set → empty array, i.e. no window constraint.
+ *
+ * All windowing consumers should use this helper rather than reading the
+ * underlying fields directly, so that multi-window rows behave correctly
+ * without per-site conditionals. Introduced 2026-04-20.
+ */
+export function getTimeWindows(
+  rules: LinkRules,
+): Array<{ start: string; end: string }> {
+  if (Array.isArray(rules.preferredTimeWindows) && rules.preferredTimeWindows.length > 0) {
+    return rules.preferredTimeWindows;
+  }
+  if (rules.preferredTimeStart || rules.preferredTimeEnd) {
+    return [
+      {
+        start: rules.preferredTimeStart ?? "00:00",
+        end: rules.preferredTimeEnd ?? "24:00",
+      },
+    ];
+  }
+  return [];
 }
 
 /**
@@ -1351,6 +1385,22 @@ export interface LinkRules {
   lastResort?: string[];
   preferredTimeStart?: string; // "09:00" — widens the daily offering window
   preferredTimeEnd?: string; // "12:00"
+  /**
+   * Multi-window variant (2026-04-20). Array of disjoint `HH:MM` time
+   * windows applied uniformly across whatever `dateRange` / `preferredDays`
+   * the rule specifies. Use this when the host wants the meeting to fit
+   * into two+ separate spans on the same day — e.g. "12–2 PM OR 4:30–6 PM
+   * today." A slot passes if it falls within ANY window.
+   *
+   * Coexists with single-window `preferredTimeStart/End`: when the array
+   * is present and non-empty, it takes precedence; when absent, the
+   * single-window fields still apply. Callers should go through
+   * `getTimeWindows(rules)` rather than reading either field directly.
+   *
+   * Not intended for day-specific windows ("Mon 9–12, Tue 1–3"). If you
+   * need that, model the meeting as two links or fall back to hostNote.
+   */
+  preferredTimeWindows?: Array<{ start: string; end: string }>;
   /** Inclusive date window in host's local calendar. "YYYY-MM-DD". */
   dateRange?: { start?: string; end?: string };
   slotOverrides?: SlotOverride[];
@@ -1541,6 +1591,36 @@ export function normalizeLinkRules(
     out.minDuration = Math.round(input.minDuration);
   } else {
     delete out.minDuration;
+  }
+
+  // preferredTimeWindows: array of { start, end } HH:MM windows (2026-04-20).
+  // Validate each entry's shape, drop malformed entries, sort by start, and
+  // drop empty/inverted windows. Overlapping entries are kept as-authored —
+  // the filter's `.some(...)` makes them idempotent, and merging them would
+  // obscure what Envoy actually asked for in observability. A non-array or
+  // empty-after-cleanup value is deleted rather than stored as [].
+  const ptw = input.preferredTimeWindows;
+  if (Array.isArray(ptw)) {
+    const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/; // 00:00 – 23:59
+    const cleaned = ptw
+      .filter((w): w is { start: string; end: string } => {
+        if (!w || typeof w !== "object") return false;
+        const s = (w as Record<string, unknown>).start;
+        const e = (w as Record<string, unknown>).end;
+        if (typeof s !== "string" || typeof e !== "string") return false;
+        // Allow "24:00" as the canonical end-of-day sentinel even though
+        // HHMM regex rejects hour 24 — any earlier start still sorts
+        // before it.
+        const startOk = HHMM.test(s);
+        const endOk = HHMM.test(e) || e === "24:00";
+        return startOk && endOk && s < e;
+      })
+      .map((w) => ({ start: w.start, end: w.end }))
+      .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+    if (cleaned.length > 0) out.preferredTimeWindows = cleaned;
+    else delete out.preferredTimeWindows;
+  } else {
+    delete out.preferredTimeWindows;
   }
 
   // dateRange: keep only if it's an object with at least one valid ISO date.
@@ -1746,14 +1826,15 @@ export function applyEventOverrides(
     }
   }
 
-  // Apply preferred time window
-  if (rules.preferredTimeStart || rules.preferredTimeEnd) {
+  // Apply preferred time window(s). See `getTimeWindows` for the
+  // single-window vs multi-window precedence — callers must not read
+  // preferredTimeStart/End directly.
+  const timeWindows = getTimeWindows(rules);
+  if (timeWindows.length > 0) {
     slots = slots.filter((s) => {
       const { hour, minute } = getLocalParts(new Date(s.start), tz);
       const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-      if (rules.preferredTimeStart && timeStr < rules.preferredTimeStart) return false;
-      if (rules.preferredTimeEnd && timeStr >= rules.preferredTimeEnd) return false;
-      return true;
+      return timeWindows.some((w) => timeStr >= w.start && timeStr < w.end);
     });
   }
 

@@ -67,9 +67,12 @@ IMPORTANT: When you create a link, include the structured data in a JSON block a
 {"action": "create_link", "inviteeEmail": "...", "inviteeName": "...", "topic": "...", "location": "Coupa Cafe, Palo Alto", "rules": {"preferredDays": ["Mon","Tue"], "lastResort": ["Fri"], "format": "...", "duration": 30, "isVip": true, "dateRange": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}, "notes": "..."}}
 \`\`\`
 
-To expand an EXISTING link AFTER the host has confirmed specific hours. preferredTimeStart/End widen the daily offering window; allowWeekends unlocks Saturdays/Sundays. Pass the link's 6-char code:
+To expand an EXISTING link AFTER the host has confirmed specific hours. preferredTimeStart/End widen the daily offering window as a single contiguous span; preferredTimeWindows does the same for two+ disjoint spans on the same day ("12–2 PM or 4:30–6 PM"); allowWeekends unlocks Saturdays/Sundays. Pass the link's 6-char code:
 \`\`\`agentenvoy-action
 {"action": "expand_link", "params": {"code": "hhkkkw", "preferredTimeStart": "06:00"}}
+\`\`\`
+\`\`\`agentenvoy-action
+{"action": "expand_link", "params": {"code": "hhkkkw", "preferredTimeWindows": [{"start":"12:00","end":"14:00"},{"start":"16:30","end":"18:00"}]}}
 \`\`\`
 \`\`\`agentenvoy-action
 {"action": "expand_link", "params": {"code": "hhkkkw", "allowWeekends": true}}
