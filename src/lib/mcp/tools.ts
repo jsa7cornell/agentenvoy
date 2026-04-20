@@ -17,13 +17,31 @@
  */
 import { prisma } from "@/lib/prisma";
 import { getUserTimezone } from "@/lib/timezone";
-import type { LinkRules, UserPreferences, CompiledRules } from "@/lib/scoring";
+import {
+  applyEventOverrides,
+  getTier,
+  filterByDuration,
+  type LinkRules,
+  type UserPreferences,
+  type CompiledRules,
+  type ScoredSlot,
+} from "@/lib/scoring";
+import { getOrComputeSchedule } from "@/lib/calendar";
+import {
+  compileOfficeHoursLinks,
+  type AvailabilityRule,
+} from "@/lib/availability-rules";
+import {
+  applyOfficeHoursWindow,
+  type ConfirmedBooking,
+} from "@/lib/office-hours";
 import { authorizeMcpCall, type AuthorizeResult } from "@/lib/mcp/auth";
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
 import {
   MCP_TOOLS,
   type McpToolName,
   getMeetingParametersInput,
+  getAvailabilityInput,
 } from "@/lib/mcp/schemas";
 import type { z } from "zod";
 
@@ -142,6 +160,175 @@ export async function handleGetMeetingParameters(
 }
 
 // ---------------------------------------------------------------------------
+// Handler: get_availability
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the host's scored, filtered slot list through the lens of this link.
+ * Mirrors the logic in `/api/negotiate/slots` (the UI widget's source) but:
+ *   - Skips bilateral compute — external agents don't have a guest calendar
+ *     to XOR with. (If the caller has one, they can locally subtract their
+ *     own busy times.)
+ *   - Accepts an optional `dateRange` to clip the server-side result.
+ *   - Emits a flat `{ start, end, score, tier }` array — tier is the LLM's
+ *     offerability signal (first_offer / stretch1 / stretch2).
+ */
+export async function handleGetAvailability(
+  args: z.infer<typeof getAvailabilityInput>
+): Promise<CallToolResult> {
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "get_availability",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+  const rules = (link.rules ?? {}) as LinkRules;
+
+  // Load the host's preferences for tz + structuredRules (office hours).
+  const host = await prisma.user.findUnique({
+    where: { id: link.userId },
+    select: { preferences: true },
+  });
+  const prefs = (host?.preferences ?? {}) as Record<string, unknown>;
+  const timezone = getUserTimezone(prefs);
+
+  // Pull the host's global scored schedule.
+  const schedule = await getOrComputeSchedule(link.userId);
+  if (!schedule.connected) {
+    return asCallResult({ ok: true, timezone, slots: [] });
+  }
+
+  // Event-level overrides from link rules (dateRange, preferredDays, etc).
+  let slots: ScoredSlot[] = applyEventOverrides(schedule.slots, rules, timezone);
+
+  // Office-hours transform if the link was spawned from a rule.
+  if (link.sourceRuleId) {
+    const explicit = prefs.explicit as Record<string, unknown> | undefined;
+    const allRules =
+      (explicit?.structuredRules as AvailabilityRule[] | undefined) ?? [];
+    const compiledLinks = compileOfficeHoursLinks(allRules);
+    const compiled = compiledLinks.find((l) => l.ruleId === link.sourceRuleId);
+    if (compiled) {
+      const siblings = await prisma.negotiationSession.findMany({
+        where: {
+          status: "agreed",
+          agreedTime: { not: null },
+          link: { sourceRuleId: link.sourceRuleId },
+        },
+        select: { agreedTime: true, duration: true },
+      });
+      const confirmedBookings: ConfirmedBooking[] = siblings
+        .filter((s) => s.agreedTime)
+        .map((s) => {
+          const start = s.agreedTime!;
+          const durationMin = s.duration || compiled.durationMinutes;
+          return {
+            start: start.toISOString(),
+            end: new Date(start.getTime() + durationMin * 60 * 1000).toISOString(),
+          };
+        });
+      slots = applyOfficeHoursWindow({
+        rule: compiled,
+        slots,
+        timezone,
+        confirmedBookings,
+      });
+    }
+  }
+
+  // Score filter — mirrors slots-route. Exclusive overrides win; VIP links
+  // permit protected-band stretches; everyone else gets score ≤ 1.
+  const isVip = !!(rules as Record<string, unknown>).isVip;
+  const hasExclusive = slots.some((s) => s.score === -2);
+  if (hasExclusive) {
+    slots = slots.filter((s) => s.score <= -1);
+  } else if (isVip) {
+    slots = slots.filter((s) => s.score <= 3);
+  } else {
+    slots = slots.filter((s) => s.score <= 1);
+  }
+
+  // Drop past slots (the calendar cache starts 7 days back for incremental sync).
+  const now = Date.now();
+  slots = slots.filter((s) => new Date(s.start).getTime() > now);
+
+  // guestPicks.window clamp in host tz.
+  const guestPicks = (rules as Record<string, unknown>).guestPicks as
+    | { window?: { startHour?: number; endHour?: number } }
+    | undefined;
+  const win = guestPicks?.window;
+  if (
+    win &&
+    typeof win.startHour === "number" &&
+    typeof win.endHour === "number" &&
+    win.endHour > win.startHour
+  ) {
+    const { slotStartInWindow } = await import("@/lib/time-of-day");
+    const clampWindow = { startHour: win.startHour, endHour: win.endHour };
+    slots = slots.filter((s) =>
+      slotStartInWindow(s.start, clampWindow, timezone)
+    );
+  }
+
+  // Duration chain filter.
+  const duration = (rules as Record<string, unknown>).duration as number | undefined;
+  const minDuration = (rules as Record<string, unknown>).minDuration as
+    | number
+    | undefined;
+  if (duration && duration > 30) {
+    slots = filterByDuration(slots, duration, minDuration);
+  }
+
+  // Caller-supplied dateRange clip (input is YYYY-MM-DD in the requested tz,
+  // or the host tz by default).
+  if (args.dateRange) {
+    const clipTz = args.timezone ?? timezone;
+    const dateFmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: clipTz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const { start, end } = args.dateRange;
+    slots = slots.filter((s) => {
+      const local = dateFmt.format(new Date(s.start));
+      if (start && local < start) return false;
+      if (end && local > end) return false;
+      return true;
+    });
+  }
+
+  // Emit wire shape. Map "first-offer" (internal) → "first_offer" (schema).
+  const wireSlots = slots.map((s) => {
+    const tier = getTier(s, rules, timezone);
+    const wireTier =
+      tier === "first-offer"
+        ? "first_offer"
+        : tier === "stretch1"
+          ? "stretch1"
+          : tier === "stretch2"
+            ? "stretch2"
+            : undefined;
+    return {
+      start: s.start,
+      end: s.end,
+      score: s.score,
+      ...(wireTier ? { tier: wireTier } : {}),
+    };
+  });
+
+  return asCallResult({
+    ok: true,
+    timezone: args.timezone ?? timezone,
+    slots: wireSlots,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Stub handlers for the 7 tools landing in later chunks. Registered so the
 // tool list is discoverable from day one; each returns a `not_implemented`
 // refusal until its chunk lands. Keeps the `.well-known/mcp.json` list
@@ -180,7 +367,8 @@ export function registerMcpTools(server: McpServer): void {
         handleGetMeetingParameters(
           args as z.infer<typeof getMeetingParametersInput>
         ),
-      get_availability: () => notImplemented("get_availability"),
+      get_availability: (args) =>
+        handleGetAvailability(args as z.infer<typeof getAvailabilityInput>),
       get_session_status: () => notImplemented("get_session_status"),
       post_message: () => notImplemented("post_message"),
       propose_parameters: () => notImplemented("propose_parameters"),

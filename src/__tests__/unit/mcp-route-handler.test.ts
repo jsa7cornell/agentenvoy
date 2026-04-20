@@ -32,15 +32,26 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findUnique: vi.fn(),
     },
+    negotiationSession: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   },
+}));
+
+// `get_availability` pulls the host's computed schedule. Mock the compute
+// entry point so the test doesn't need a real user / Google OAuth token.
+vi.mock("@/lib/calendar", () => ({
+  getOrComputeSchedule: vi.fn(),
 }));
 
 import { authorizeMcpCall } from "@/lib/mcp/auth";
 import { prisma } from "@/lib/prisma";
+import { getOrComputeSchedule } from "@/lib/calendar";
 import { POST } from "@/app/api/mcp/route";
 
 const mockAuthorize = authorizeMcpCall as unknown as ReturnType<typeof vi.fn>;
 const mockUserFind = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
+const mockSchedule = getOrComputeSchedule as unknown as ReturnType<typeof vi.fn>;
 
 function jsonRpcCall(tool: string, args: Record<string, unknown>) {
   return {
@@ -84,6 +95,7 @@ async function readJsonRpc(res: Response): Promise<{
 beforeEach(() => {
   mockAuthorize.mockReset();
   mockUserFind.mockReset();
+  mockSchedule.mockReset();
 });
 
 describe("POST /api/mcp — initialize", () => {
@@ -182,6 +194,96 @@ describe("POST /api/mcp — get_meeting_parameters auth refusal", () => {
     expect(sc?.ok).toBe(false);
     expect(sc?.reason).toBe("rate_limited");
     expect(sc?.retryAfterSeconds).toBe(42);
+  });
+});
+
+describe("POST /api/mcp — get_availability happy path", () => {
+  it("returns scored slots with tier labels, filtering past/high-score", async () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const mk = (startMs: number, score: number) => ({
+      start: new Date(startMs).toISOString(),
+      end: new Date(startMs + 30 * 60 * 1000).toISOString(),
+      score,
+      confidence: "high" as const,
+      reason: "",
+      kind: "open" as const,
+      blockCost: "none" as const,
+    });
+
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: {
+        id: "link_1",
+        userId: "user_1",
+        rules: {}, // vanilla link → score ≤ 1 only
+        sourceRuleId: null,
+      },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockUserFind.mockResolvedValueOnce({
+      preferences: { explicit: { timezone: "America/Los_Angeles" } },
+    });
+    mockSchedule.mockResolvedValueOnce({
+      connected: true,
+      slots: [
+        mk(future.getTime(), 0),            // offerable → first_offer
+        mk(future.getTime() + 60 * 60_000, 3), // protected band on non-VIP → filtered
+        mk(past.getTime(), 0),              // past → filtered
+      ],
+      events: [],
+      timezone: "America/Los_Angeles",
+      canWrite: true,
+      calendars: [],
+    });
+
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("get_availability", { meetingUrl: "/meet/abc" })
+      )
+    );
+    expect(res.status).toBe(200);
+    const rpc = await readJsonRpc(res);
+    expect(rpc.error).toBeUndefined();
+    const sc = rpc.result?.structuredContent as {
+      ok: boolean;
+      timezone: string;
+      slots: Array<{ start: string; score: number; tier?: string }>;
+    };
+    expect(sc.ok).toBe(true);
+    expect(sc.timezone).toBe("America/Los_Angeles");
+    expect(sc.slots.length).toBe(1);
+    expect(sc.slots[0].score).toBe(0);
+    expect(sc.slots[0].tier).toBe("first_offer");
+  });
+
+  it("not-connected host → ok:true with empty slot list", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_2", userId: "user_2", rules: {}, sourceRuleId: null },
+      parsed: { slug: "xyz", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockUserFind.mockResolvedValueOnce({
+      preferences: { explicit: { timezone: "UTC" } },
+    });
+    mockSchedule.mockResolvedValueOnce({
+      connected: false,
+      slots: [],
+      events: [],
+      timezone: "UTC",
+      canWrite: false,
+      calendars: [],
+    });
+
+    const res = await POST(
+      makeRpcRequest(jsonRpcCall("get_availability", { meetingUrl: "/meet/xyz" }))
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as { ok: boolean; slots: unknown[] };
+    expect(sc.ok).toBe(true);
+    expect(sc.slots).toEqual([]);
   });
 });
 
