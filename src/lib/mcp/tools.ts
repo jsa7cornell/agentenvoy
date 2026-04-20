@@ -42,6 +42,7 @@ import {
   type McpToolName,
   getMeetingParametersInput,
   getAvailabilityInput,
+  getSessionStatusInput,
 } from "@/lib/mcp/schemas";
 import type { z } from "zod";
 
@@ -329,6 +330,108 @@ export async function handleGetAvailability(
 }
 
 // ---------------------------------------------------------------------------
+// Handler: get_session_status
+// ---------------------------------------------------------------------------
+
+/** Map the DB session status string onto the wire enum. "escalated" is an
+ *  internal detour; externally it's still an active negotiation. Unknown
+ *  values fall back to "active" rather than 500'ing the call. */
+function mapSessionStatus(
+  s: string
+): "active" | "agreed" | "cancelled" | "rescheduled" | "expired" {
+  switch (s) {
+    case "agreed":
+    case "cancelled":
+    case "rescheduled":
+    case "expired":
+      return s;
+    case "escalated":
+    case "active":
+    default:
+      return "active";
+  }
+}
+
+export async function handleGetSessionStatus(
+  args: z.infer<typeof getSessionStatusInput>
+): Promise<CallToolResult> {
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "get_session_status",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+
+  // Session lookup. With explicit sessionId, the session must belong to this
+  // link (defense against cross-link id guessing). Without one, pick the most
+  // recent session on this link.
+  const session = args.sessionId
+    ? await prisma.negotiationSession.findFirst({
+        where: { id: args.sessionId, linkId: link.id },
+        select: {
+          id: true,
+          status: true,
+          agreedTime: true,
+        },
+      })
+    : await prisma.negotiationSession.findFirst({
+        where: { linkId: link.id },
+        orderBy: { updatedAt: "desc" },
+        select: {
+          id: true,
+          status: true,
+          agreedTime: true,
+        },
+      });
+
+  if (!session) {
+    return asCallResult({
+      ok: false,
+      reason: "session_not_found",
+      message: "No negotiation session exists for this meeting link.",
+    });
+  }
+
+  // Live consent requests on this session (or link-level when unscoped).
+  const consentRows = await prisma.consentRequest.findMany({
+    where: {
+      linkId: link.id,
+      sessionId: session.id,
+      status: "pending",
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      field: true,
+      appliedValue: true,
+      expiresAt: true,
+    },
+  });
+
+  return asCallResult({
+    ok: true,
+    status: mapSessionStatus(session.status),
+    sessionId: session.id,
+    agreedTime: session.agreedTime ? session.agreedTime.toISOString() : null,
+    // Reschedule history isn't persisted yet (reschedule-pipeline chunk);
+    // returning an empty array keeps the wire shape stable so agents don't
+    // have to branch on presence vs. absence once it lands.
+    rescheduleHistory: [],
+    pendingConsentRequests: consentRows.map((c) => ({
+      id: c.id,
+      field: c.field,
+      proposedValue: c.appliedValue,
+      expiresAt: c.expiresAt.toISOString(),
+    })),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Stub handlers for the 7 tools landing in later chunks. Registered so the
 // tool list is discoverable from day one; each returns a `not_implemented`
 // refusal until its chunk lands. Keeps the `.well-known/mcp.json` list
@@ -369,7 +472,8 @@ export function registerMcpTools(server: McpServer): void {
         ),
       get_availability: (args) =>
         handleGetAvailability(args as z.infer<typeof getAvailabilityInput>),
-      get_session_status: () => notImplemented("get_session_status"),
+      get_session_status: (args) =>
+        handleGetSessionStatus(args as z.infer<typeof getSessionStatusInput>),
       post_message: () => notImplemented("post_message"),
       propose_parameters: () => notImplemented("propose_parameters"),
       propose_lock: () => notImplemented("propose_lock"),

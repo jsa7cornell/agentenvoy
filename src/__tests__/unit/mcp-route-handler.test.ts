@@ -34,6 +34,10 @@ vi.mock("@/lib/prisma", () => ({
     },
     negotiationSession: {
       findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn(),
+    },
+    consentRequest: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
   },
 }));
@@ -284,6 +288,129 @@ describe("POST /api/mcp — get_availability happy path", () => {
     const sc = rpc.result?.structuredContent as { ok: boolean; slots: unknown[] };
     expect(sc.ok).toBe(true);
     expect(sc.slots).toEqual([]);
+  });
+});
+
+describe("POST /api/mcp — get_session_status", () => {
+  const mockSessionFind = prisma.negotiationSession
+    .findFirst as unknown as ReturnType<typeof vi.fn>;
+  const mockConsentFind = prisma.consentRequest
+    .findMany as unknown as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockSessionFind.mockReset();
+    mockConsentFind.mockReset().mockResolvedValue([]);
+  });
+
+  it("returns mapped status + agreedTime for an agreed session", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_1", userId: "u1", rules: {}, sourceRuleId: null },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    const agreedAt = new Date("2026-05-01T15:00:00Z");
+    mockSessionFind.mockResolvedValueOnce({
+      id: "sess_1",
+      status: "agreed",
+      agreedTime: agreedAt,
+    });
+
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("get_session_status", { meetingUrl: "/meet/abc" })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as {
+      ok: boolean;
+      status: string;
+      sessionId: string;
+      agreedTime: string | null;
+      rescheduleHistory: unknown[];
+      pendingConsentRequests: unknown[];
+    };
+    expect(sc.ok).toBe(true);
+    expect(sc.status).toBe("agreed");
+    expect(sc.sessionId).toBe("sess_1");
+    expect(sc.agreedTime).toBe(agreedAt.toISOString());
+    expect(sc.rescheduleHistory).toEqual([]);
+  });
+
+  it("maps internal 'escalated' → wire 'active'", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_1", userId: "u1", rules: {}, sourceRuleId: null },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockSessionFind.mockResolvedValueOnce({
+      id: "sess_1",
+      status: "escalated",
+      agreedTime: null,
+    });
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("get_session_status", { meetingUrl: "/meet/abc" })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as { status: string };
+    expect(sc.status).toBe("active");
+  });
+
+  it("no session on link → session_not_found refusal", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_1", userId: "u1", rules: {}, sourceRuleId: null },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockSessionFind.mockResolvedValueOnce(null);
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("get_session_status", { meetingUrl: "/meet/abc" })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as { ok: boolean; reason: string };
+    expect(sc.ok).toBe(false);
+    expect(sc.reason).toBe("session_not_found");
+  });
+
+  it("surfaces pending consent requests with proposedValue", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_1", userId: "u1", rules: {}, sourceRuleId: null },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    mockSessionFind.mockResolvedValueOnce({
+      id: "sess_1",
+      status: "active",
+      agreedTime: null,
+    });
+    const expiry = new Date(Date.now() + 60_000);
+    mockConsentFind.mockResolvedValueOnce([
+      {
+        id: "consent_1",
+        field: "format",
+        appliedValue: "phone",
+        expiresAt: expiry,
+      },
+    ]);
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("get_session_status", { meetingUrl: "/meet/abc" })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as {
+      pendingConsentRequests: Array<{ id: string; field: string; proposedValue: unknown }>;
+    };
+    expect(sc.pendingConsentRequests).toHaveLength(1);
+    expect(sc.pendingConsentRequests[0].field).toBe("format");
+    expect(sc.pendingConsentRequests[0].proposedValue).toBe("phone");
   });
 });
 
