@@ -1485,6 +1485,17 @@ export interface LinkRules {
       durations?: number[]; // minutes
     };
     tone?: string;
+    /**
+     * Host's single preferred format, within the guest-pickable allow-list.
+     * Surfaced on the MCP envelope as `format.preferred` under `delegated`
+     * mutability only, scoped by `preferred ∈ allowedValues`. Dropped if
+     * per-slot `subtractFormatFilters` narrows it out. Advisory-only —
+     * does NOT narrow what `propose_lock` will accept (that stays
+     * governed by `allowedValues`).
+     *
+     * See proposal 2026-04-20_mcp-envelope-preferred-primitive.
+     */
+    preferredFormat?: "video" | "phone" | "in-person";
   };
   /**
    * Location string (venue / address / "Zoom") — copied from
@@ -1711,6 +1722,15 @@ export function normalizeLinkRules(
       // Hard cap here too — the sanitizer at the action boundary already
       // trims, but defense-in-depth for anything written through a raw API.
       cleaned.tone = src.tone.trim().slice(0, 200);
+    }
+    // preferredFormat: one of the three FormatValue enum strings. Invalid
+    // values dropped silently (same pattern as guestPicks.format).
+    if (
+      src.preferredFormat === "video" ||
+      src.preferredFormat === "phone" ||
+      src.preferredFormat === "in-person"
+    ) {
+      cleaned.preferredFormat = src.preferredFormat;
     }
     if (Object.keys(cleaned).length) out.guestGuidance = cleaned;
     else delete out.guestGuidance;

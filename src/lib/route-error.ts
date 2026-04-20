@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { dispatch } from "@/lib/side-effects/dispatcher";
+import { getLogRecipients } from "@/lib/log-recipients";
 
-const ALERT_TO = "jsa7cornell@gmail.com";
 const ALERT_FROM = "AgentEnvoy Alerts <noreply@agentenvoy.ai>";
 /** Suppress duplicate alerts for the same route+errorClass within this window. */
 const THROTTLE_MS = 60 * 60 * 1000; // 1 hour
@@ -72,7 +72,7 @@ export function logRouteError(params: {
 
       await dispatch({
         kind: "email.send",
-        to: ALERT_TO,
+        to: getLogRecipients(),
         from: ALERT_FROM,
         subject: `[AgentEnvoy] Route error: ${method ?? ""} ${route}`.trim(),
         html: buildAlertHtml({

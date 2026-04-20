@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { buildDevStatsEmail } from "@/lib/emails/dev-stats";
 import { gatherDevStats } from "@/lib/emails/dev-stats-gather";
+import { getLogRecipients } from "@/lib/log-recipients";
 
 /**
  * GET /api/cron/dev-stats
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
 
   const stats = await gatherDevStats(windowStart, windowEnd);
 
-  const recipient = process.env.ADMIN_EMAIL || "jsa7cornell@gmail.com";
+  const recipient = getLogRecipients();
   const { subject, html } = buildDevStatsEmail(stats);
 
   const result = await dispatch({

@@ -277,3 +277,217 @@ describe("resolveParameters — guestPicks completeness (reviewer N1)", () => {
     }
   });
 });
+
+describe("resolveParameters — guestGuidance completeness (envelope-preferred 2026-04-20)", () => {
+  // Parallel guardrail to guestPicks: any new key on LinkRules.guestGuidance
+  // must either be read by a resolver branch OR be explicitly exempt here
+  // (e.g. `tone` is consumed by the greeting template, not the resolver).
+  // Added with the `preferredFormat` field; future `guestGuidance.preferred*`
+  // keys drop into the same guardrail without additional test churn.
+  it("every guestGuidance key has a resolver branch or is exempt", () => {
+    // Keys that the resolver actively consumes — must continue to do so.
+    const GUESTGUIDANCE_KEYS_WITH_RESOLVER = new Set([
+      "suggestions",     // consumed by resolveDuration, resolveLocation
+      "preferredFormat", // consumed by resolveFormat (delegated branches)
+    ]);
+    // Keys that are intentionally not resolver-scoped (consumed elsewhere).
+    const GUESTGUIDANCE_EXEMPT = new Set([
+      "tone",            // consumed by greeting-template render, not resolver
+    ]);
+    // Sample enumerating the TS shape — fails to compile if a key is dropped.
+    const sample: NonNullable<LinkRules["guestGuidance"]> = {
+      suggestions: { locations: ["Blue Bottle"], durations: [30] },
+      tone: "friendly",
+      preferredFormat: "in-person",
+    };
+    for (const key of Object.keys(sample)) {
+      const covered =
+        GUESTGUIDANCE_KEYS_WITH_RESOLVER.has(key) ||
+        GUESTGUIDANCE_EXEMPT.has(key);
+      expect(covered, `guestGuidance key "${key}" is neither wired nor exempt`).toBe(true);
+    }
+  });
+});
+
+describe("resolveParameters — preferred field (envelope-preferred 2026-04-20)", () => {
+  it("preferred absent when guestGuidance.preferredFormat unset", () => {
+    const r = run({ guestPicks: { format: ["video", "phone"] } });
+    expect(r.format.mutability).toBe("delegated");
+    expect(r.format.allowedValues).toEqual(["video", "phone"]);
+    expect(r.format.preferred).toBeUndefined();
+  });
+
+  it("preferred emitted when inside allowedValues — array branch", () => {
+    const r = run({
+      guestPicks: { format: ["video", "phone", "in-person"] },
+      guestGuidance: { preferredFormat: "in-person" },
+    });
+    expect(r.format.mutability).toBe("delegated");
+    expect(r.format.preferred).toBe("in-person");
+  });
+
+  it("preferred emitted when inside allowedValues — guestPicks.format=true branch", () => {
+    const r = run({
+      guestPicks: { format: true },
+      guestGuidance: { preferredFormat: "video" },
+    });
+    expect(r.format.mutability).toBe("delegated");
+    expect(r.format.allowedValues).toEqual(["video", "phone", "in-person"]);
+    expect(r.format.preferred).toBe("video");
+  });
+
+  it("preferred dropped silently when per-slot filter narrows it out", () => {
+    // Evening slot — formatFilters remove "in-person"; preferredFormat is
+    // "in-person" — silent-drop, invariant held.
+    const compiledRules: CompiledRules = {
+      blockedWindows: [],
+      allowWindows: [],
+      buffers: [],
+      priorityBuckets: [],
+      ambiguities: [],
+      compiledAt: "2026-04-20T00:00:00Z",
+      formatFilters: [
+        { start: "17:00", end: "23:59", disallowFormats: ["in-person"] },
+      ],
+    };
+    const slot = new Date("2026-05-02T02:00:00Z"); // 19:00 PT
+    const r = run(
+      {
+        guestPicks: { format: true },
+        guestGuidance: { preferredFormat: "in-person" },
+      },
+      null,
+      { slotStart: slot, compiledRules },
+    );
+    expect(r.format.allowedValues).toEqual(["video", "phone"]);
+    expect(r.format.preferred).toBeUndefined();
+  });
+
+  it("preferred NOT emitted under locked mutability (v1 scope: delegated-only)", () => {
+    const r = run({
+      format: "video",
+      guestGuidance: { preferredFormat: "video" },
+    });
+    expect(r.format.mutability).toBe("locked");
+    expect(r.format.preferred).toBeUndefined();
+  });
+
+  it("preferred NOT emitted under required mutability (pre-migration link)", () => {
+    // Neither host.format nor guestPicks.format — required branch. v1 does
+    // not emit preferred here even if preferredFormat is set.
+    const r = run({
+      guestGuidance: { preferredFormat: "video" },
+    });
+    expect(r.format.mutability).toBe("required");
+    expect(r.format.preferred).toBeUndefined();
+  });
+});
+
+describe("resolvedParametersSchema — preferred invariant (Zod defense-in-depth)", () => {
+  // The resolver drops `preferred` at emit time; the Zod refine catches
+  // hand-constructed bad envelopes (test fixtures, migration scripts) that
+  // bypass the resolver. Two different jobs, two layers.
+  it("rejects an envelope with preferred ∉ allowedValues", async () => {
+    const { resolvedParametersSchema } = await import("@/lib/mcp/schemas");
+    const bad = {
+      format: {
+        value: null,
+        origin: "link-rule",
+        mutability: "delegated",
+        allowedValues: ["video", "phone"],
+        preferred: "in-person",
+        guestMustResolve: true,
+      },
+      duration: {
+        value: 30,
+        origin: "system-default",
+        mutability: "host-filled",
+        guestMustResolve: false,
+      },
+      location: {
+        value: null,
+        origin: "unset",
+        mutability: "host-filled",
+        guestMustResolve: false,
+      },
+      timezone: {
+        value: "America/Los_Angeles",
+        origin: "host-profile-default",
+        mutability: "locked",
+        guestMustResolve: false,
+      },
+      guestMustResolve: [],
+    };
+    const parsed = resolvedParametersSchema.safeParse(bad);
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects an envelope with preferred but no allowedValues", async () => {
+    const { resolvedParametersSchema } = await import("@/lib/mcp/schemas");
+    const bad = {
+      format: {
+        value: null,
+        origin: "link-rule",
+        mutability: "delegated",
+        preferred: "video",
+        guestMustResolve: true,
+      },
+      duration: {
+        value: 30,
+        origin: "system-default",
+        mutability: "host-filled",
+        guestMustResolve: false,
+      },
+      location: {
+        value: null,
+        origin: "unset",
+        mutability: "host-filled",
+        guestMustResolve: false,
+      },
+      timezone: {
+        value: "America/Los_Angeles",
+        origin: "host-profile-default",
+        mutability: "locked",
+        guestMustResolve: false,
+      },
+      guestMustResolve: [],
+    };
+    const parsed = resolvedParametersSchema.safeParse(bad);
+    expect(parsed.success).toBe(false);
+  });
+
+  it("accepts a well-formed envelope with preferred ∈ allowedValues", async () => {
+    const { resolvedParametersSchema } = await import("@/lib/mcp/schemas");
+    const good = {
+      format: {
+        value: null,
+        origin: "link-rule",
+        mutability: "delegated",
+        allowedValues: ["video", "phone", "in-person"],
+        preferred: "in-person",
+        guestMustResolve: true,
+      },
+      duration: {
+        value: 30,
+        origin: "system-default",
+        mutability: "host-filled",
+        guestMustResolve: false,
+      },
+      location: {
+        value: null,
+        origin: "unset",
+        mutability: "host-filled",
+        guestMustResolve: false,
+      },
+      timezone: {
+        value: "America/Los_Angeles",
+        origin: "host-profile-default",
+        mutability: "locked",
+        guestMustResolve: false,
+      },
+      guestMustResolve: [],
+    };
+    const parsed = resolvedParametersSchema.safeParse(good);
+    expect(parsed.success).toBe(true);
+  });
+});

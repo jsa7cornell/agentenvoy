@@ -79,9 +79,31 @@ const envelopeOf = <T extends z.ZodTypeAny>(value: T) =>
       mutability: parameterMutability,
       allowedValues: z.array(value).optional(),
       suggestions: z.array(value).optional(),
+      // Host's single preferred value within `allowedValues`. Optional and
+      // advisory. Invariant (refine below): `preferred ∈ allowedValues`
+      // whenever both present; emitted only under `delegated` mutability
+      // in v1 (resolver enforces that half — this schema covers the
+      // invariant that prevents hand-constructed bad envelopes from
+      // slipping past `get_meeting_parameters`). See proposal
+      // 2026-04-20_mcp-envelope-preferred-primitive and SPEC §2.3.
+      preferred: value.optional(),
       guestMustResolve: z.boolean(),
     })
-    .strict();
+    .strict()
+    .refine(
+      (env) => {
+        if (env.preferred === undefined) return true;
+        // preferred present. It must appear in allowedValues — if allowedValues
+        // is absent the hint has no frame of reference and is rejected.
+        if (!env.allowedValues) return false;
+        return env.allowedValues.includes(env.preferred);
+      },
+      {
+        message:
+          "ParameterEnvelope invariant violated: `preferred` must be present in `allowedValues`",
+        path: ["preferred"],
+      },
+    );
 
 export const resolvedParametersSchema = z
   .object({
