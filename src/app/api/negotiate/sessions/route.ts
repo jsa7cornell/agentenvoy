@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authenticateRequest } from "@/lib/api-auth";
+import { displayStatusLabel } from "@/lib/status-label";
 
 // GET /api/negotiate/sessions
 // List all negotiation sessions for the current user
@@ -44,5 +45,18 @@ export async function GET(req: NextRequest) {
     orderBy: { updatedAt: "desc" },
   });
 
-  return NextResponse.json({ sessions });
+  // Suppress statusLabel on pre-engagement sessions (no guest interaction yet)
+  // so the meetings/archive lists don't show misleading "Waiting for X" or
+  // "Time change proposed by host" chips on never-shared links.
+  const shaped = sessions.map((s) => ({
+    ...s,
+    statusLabel: displayStatusLabel({
+      status: s.status,
+      statusLabel: s.statusLabel,
+      guestEmail: s.guestEmail,
+      guestName: s.guestName,
+    }),
+  }));
+
+  return NextResponse.json({ sessions: shaped });
 }

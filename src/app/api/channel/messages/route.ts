@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { shortTimezoneLabel } from "@/lib/timezone";
+import { displayStatusLabel } from "@/lib/status-label";
 
 // Always include onboarding rows regardless of the session window — once a
 // post-calibration ChannelSession opens, its startedAt is more recent than the
@@ -60,6 +61,8 @@ export async function GET() {
           title: true,
           status: true,
           statusLabel: true,
+          guestEmail: true,
+          guestName: true,
           type: true,
           meetingType: true,
           duration: true,
@@ -137,10 +140,22 @@ export async function GET() {
     const guestTz = msg.thread.guestTimezone;
     const guestTimezoneLabel = guestTz ? shortTimezoneLabel(guestTz, new Date()) : null;
 
+    // Suppress statusLabel on pre-engagement sessions — a chip like "Waiting
+    // for Sarah" or "Time change proposed by host" is misleading when the
+    // link has no engaged guest yet. The underlying DB row is unchanged;
+    // this is display-only.
+    const statusLabel = displayStatusLabel({
+      status: msg.thread.status,
+      statusLabel: msg.thread.statusLabel,
+      guestEmail: msg.thread.guestEmail,
+      guestName: msg.thread.guestName,
+    });
+
     const base = {
       ...msg,
       thread: {
         ...msg.thread,
+        statusLabel,
         isVip,
         guestTimezoneLabel,
       },

@@ -11,6 +11,7 @@ import { applyEventOverrides } from "@/lib/scoring";
 import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
+import { displayStatusLabel } from "@/lib/status-label";
 import {
   resolveSeedGuestTimezoneForCreate,
   resolveEffectiveGuestTimezone,
@@ -966,7 +967,12 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     sessionId: session.id,
     status: session.status,
-    statusLabel: session.statusLabel,
+    statusLabel: displayStatusLabel({
+      status: session.status,
+      statusLabel: session.statusLabel,
+      guestEmail: session.guestEmail,
+      guestName: session.guestName,
+    }),
     greeting,
     code: link.code || undefined,
     host: {
