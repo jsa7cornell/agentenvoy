@@ -807,8 +807,10 @@ async function handleCreateLink(
     !!rules.dateRange ||
     !!rules.preferredTimeStart ||
     !!rules.preferredTimeEnd ||
+    (Array.isArray(rules.preferredTimeWindows) && rules.preferredTimeWindows.length > 0) ||
     !!params.preferredTimeStart ||
-    !!params.preferredTimeEnd;
+    !!params.preferredTimeEnd ||
+    (Array.isArray(params.preferredTimeWindows) && params.preferredTimeWindows.length > 0);
   if (hasStructuredConstraints && !hostNote) {
     console.warn(
       `[create_link] hostNote missing for structured constraint — invitee=${inviteeName} rules=${JSON.stringify({
@@ -831,6 +833,12 @@ async function handleCreateLink(
   const allowWeekends = params.allowWeekends === true;
   const preferredTimeStart = typeof params.preferredTimeStart === "string" ? params.preferredTimeStart : undefined;
   const preferredTimeEnd = typeof params.preferredTimeEnd === "string" ? params.preferredTimeEnd : undefined;
+  // preferredTimeWindows — multi-window variant for "two separate spans on
+  // the same day" cases (e.g. "12–2 PM OR 4:30–6 PM today"). Accepted at
+  // top-level; normalizeLinkRules validates HH:MM shape and sorts.
+  const preferredTimeWindows = Array.isArray(params.preferredTimeWindows)
+    ? (params.preferredTimeWindows as Array<{ start: string; end: string }>)
+    : undefined;
 
   // Temporal constraints — previously these only came through if nested in
   // params.rules. Promote them to top-level params so the LLM's "next Monday"
@@ -924,6 +932,7 @@ async function handleCreateLink(
     ...(allowWeekends ? { allowWeekends: true } : {}),
     ...(preferredTimeStart ? { preferredTimeStart } : {}),
     ...(preferredTimeEnd ? { preferredTimeEnd } : {}),
+    ...(preferredTimeWindows ? { preferredTimeWindows } : {}),
     ...(preferredDays ? { preferredDays } : {}),
     ...(dateRange ? { dateRange } : {}),
     ...(location ? { location } : {}),
@@ -1360,6 +1369,11 @@ async function handleExpandLink(
   if (typeof params.allowWeekends === "boolean") patch.allowWeekends = params.allowWeekends;
   if (params.preferredTimeStart !== undefined) patch.preferredTimeStart = params.preferredTimeStart;
   if (params.preferredTimeEnd !== undefined) patch.preferredTimeEnd = params.preferredTimeEnd;
+  // Multi-window variant (2026-04-20). Pass `null` or `[]` to clear.
+  // normalizeLinkRules validates each entry's HH:MM shape.
+  if (params.preferredTimeWindows !== undefined) {
+    patch.preferredTimeWindows = params.preferredTimeWindows;
+  }
   // preferredDays accepts either short-name strings ("Mon","Tue") OR a
   // numeric daysOfWeek array ([0..6], Sun=0). The LLM tends to reach for
   // `daysOfWeek` when it thinks in calendar terms — accept both and

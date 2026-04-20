@@ -3,6 +3,7 @@ import {
   normalizeDayName,
   normalizeLinkRules,
   applyEventOverrides,
+  getTimeWindows,
   type ScoredSlot,
   type LinkRules,
 } from "@/lib/scoring";
@@ -208,5 +209,127 @@ describe("regression — eyajs5 preferredDays shape", () => {
     ];
     const out = applyEventOverrides(input, rules, "America/Los_Angeles");
     expect(out.length).toBe(2);
+  });
+});
+
+// ─── preferredTimeWindows ────────────────────────────────────────────────────
+
+describe("preferredTimeWindows normalization", () => {
+  it("keeps well-formed windows and sorts them by start", () => {
+    const out = normalizeLinkRules({
+      preferredTimeWindows: [
+        { start: "16:30", end: "18:00" },
+        { start: "12:00", end: "14:00" },
+      ],
+    });
+    expect(out.preferredTimeWindows).toEqual([
+      { start: "12:00", end: "14:00" },
+      { start: "16:30", end: "18:00" },
+    ]);
+  });
+
+  it("accepts 24:00 as an end-of-day sentinel", () => {
+    const out = normalizeLinkRules({
+      preferredTimeWindows: [{ start: "20:00", end: "24:00" }],
+    });
+    expect(out.preferredTimeWindows).toEqual([{ start: "20:00", end: "24:00" }]);
+  });
+
+  it("drops entries with bad shape, non-HH:MM strings, or start >= end", () => {
+    const out = normalizeLinkRules({
+      preferredTimeWindows: [
+        { start: "12:00", end: "14:00" }, // good
+        { start: "25:00", end: "26:00" }, // bad hour
+        { start: "12:60", end: "13:00" }, // bad minute
+        { start: "14:00", end: "12:00" }, // inverted
+        { start: "14:00", end: "14:00" }, // empty span
+        "not-an-object",
+        { start: 12, end: 14 },          // wrong types
+      ] as unknown as Array<{ start: string; end: string }>,
+    });
+    expect(out.preferredTimeWindows).toEqual([{ start: "12:00", end: "14:00" }]);
+  });
+
+  it("drops the field entirely when the array is non-array or cleans to empty", () => {
+    expect(normalizeLinkRules({ preferredTimeWindows: "oops" }).preferredTimeWindows).toBeUndefined();
+    expect(normalizeLinkRules({ preferredTimeWindows: [] }).preferredTimeWindows).toBeUndefined();
+    expect(
+      normalizeLinkRules({
+        preferredTimeWindows: [{ start: "x", end: "y" }],
+      }).preferredTimeWindows,
+    ).toBeUndefined();
+  });
+});
+
+describe("getTimeWindows precedence", () => {
+  it("returns the multi-window array when present and non-empty", () => {
+    const rules: LinkRules = {
+      preferredTimeStart: "09:00",
+      preferredTimeEnd: "17:00",
+      preferredTimeWindows: [
+        { start: "12:00", end: "14:00" },
+        { start: "16:30", end: "18:00" },
+      ],
+    };
+    expect(getTimeWindows(rules)).toEqual([
+      { start: "12:00", end: "14:00" },
+      { start: "16:30", end: "18:00" },
+    ]);
+  });
+
+  it("falls back to single-window pair when the array is absent", () => {
+    expect(
+      getTimeWindows({ preferredTimeStart: "09:00", preferredTimeEnd: "12:00" }),
+    ).toEqual([{ start: "09:00", end: "12:00" }]);
+  });
+
+  it("fills 00:00 / 24:00 when only one end of the single window is set", () => {
+    expect(getTimeWindows({ preferredTimeStart: "09:00" })).toEqual([
+      { start: "09:00", end: "24:00" },
+    ]);
+    expect(getTimeWindows({ preferredTimeEnd: "17:00" })).toEqual([
+      { start: "00:00", end: "17:00" },
+    ]);
+  });
+
+  it("returns [] when no window is set at all", () => {
+    expect(getTimeWindows({})).toEqual([]);
+  });
+});
+
+describe("applyEventOverrides filters on multi-window", () => {
+  const slot = (iso: string, duration = 30): ScoredSlot => ({
+    start: iso,
+    end: new Date(new Date(iso).getTime() + duration * 60_000).toISOString(),
+    score: 1,
+    reason: "biz hours",
+    kind: "open",
+    confidence: "high",
+    blockCost: "none",
+    firmness: "weak",
+  });
+
+  it("keeps slots inside ANY window and drops the gap between them", () => {
+    // All slots on Mon Apr 20, America/Los_Angeles (UTC-7 during PDT).
+    // 12:00 PDT = 19:00 UTC, 15:00 PDT = 22:00 UTC, 17:00 PDT = 00:00 UTC (+1d)
+    const rules: LinkRules = {
+      preferredTimeWindows: [
+        { start: "12:00", end: "14:00" },
+        { start: "16:30", end: "18:00" },
+      ],
+      dateRange: { start: "2026-04-20", end: "2026-04-20" },
+    };
+    const input = [
+      slot("2026-04-20T19:00:00.000Z"), // 12:00 PDT — in window 1
+      slot("2026-04-20T22:00:00.000Z"), // 15:00 PDT — between windows (gap)
+      slot("2026-04-21T00:00:00.000Z"), // 17:00 PDT — in window 2
+      slot("2026-04-21T02:00:00.000Z"), // 19:00 PDT — after both
+    ];
+    const out = applyEventOverrides(input, rules, "America/Los_Angeles");
+    const hours = out.map((s) => new Date(s.start).toISOString()).sort();
+    expect(hours).toEqual([
+      "2026-04-20T19:00:00.000Z",
+      "2026-04-21T00:00:00.000Z",
+    ]);
   });
 });
