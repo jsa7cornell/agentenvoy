@@ -4,6 +4,20 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { shortTimezoneLabel } from "@/lib/timezone";
 
+// Always include onboarding rows regardless of the session window — once a
+// post-calibration ChannelSession opens, its startedAt is more recent than the
+// onboarding turns, which would otherwise drop them from the feed and leave
+// the user staring at an empty channel after calibration completes.
+export function buildChannelMessagesWhere(channelId: string, sessionStart: Date) {
+  return {
+    channelId,
+    OR: [
+      { createdAt: { gte: sessionStart } },
+      { metadata: { path: ["kind"], equals: "onboarding" } },
+    ],
+  };
+}
+
 // GET /api/channel/messages
 // Returns channel messages with thread snapshots for ThreadCard rendering
 export async function GET() {
@@ -37,7 +51,7 @@ export async function GET() {
     : threeDaysAgo;
 
   const messages = (await prisma.channelMessage.findMany({
-    where: { channelId: channel.id, createdAt: { gte: sessionStart } },
+    where: buildChannelMessagesWhere(channel.id, sessionStart),
     orderBy: { createdAt: "asc" },
     include: {
       thread: {
