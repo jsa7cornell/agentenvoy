@@ -90,25 +90,36 @@ jobs:
 
       - name: Check schema.prisma matches DB (drift check)
         run: |
-          echo "Pulling DB schema to check for drift..."
-          # Save the current schema.prisma for comparison
-          cp prisma/schema.prisma prisma/schema.prisma.before
-
-          # Pull schema from DB (overwrites schema.prisma)
-          npx prisma db pull
-
-          # Diff — ignore datasource/generator blocks which change between
-          # environments. We only care about model definitions drifting.
-          DIFF=$(git diff prisma/schema.prisma | grep "^[+-]" | grep -v "^---\|^+++" | grep -v "^\(+\|-\)\s*url\s*=\|^\(+\|-\)\s*provider\s*=\|^\(+\|-\)\s*directUrl\s*=\|^\(+\|-\)\s*output\s*=" || true)
-
-          # Restore original schema.prisma (we don't want db pull changes committed)
-          cp prisma/schema.prisma.before prisma/schema.prisma
-          rm prisma/schema.prisma.before
-
-          if [ -n "$DIFF" ]; then
-            echo "::error::schema.prisma has model-level drift from what the migrations produce."
-            echo "::error::Run 'prisma db pull' locally to see the full diff."
-            echo "$DIFF"
+          echo "Checking semantic drift between schema.prisma and post-migration DB..."
+          # Use prisma's own migration engine to compute the diff. This is a
+          # SEMANTIC comparison (considers model structure, columns, indexes,
+          # FKs) and ignores cosmetic differences like comments, @db.Text on
+          # columns Postgres would store as TEXT anyway, and whitespace.
+          #
+          # --from-schema-datamodel: what schema.prisma says the DB should be
+          # --to-schema-datasource:  what the DB actually has after migrations
+          # --exit-code:             exit 2 if there's any drift, 0 if clean
+          #
+          # If this fails, run locally:
+          #   npx prisma migrate diff \
+          #     --from-schema-datamodel prisma/schema.prisma \
+          #     --to-schema-datasource  prisma/schema.prisma \
+          #     --script
+          # to see the SQL that would close the drift.
+          set +e
+          npx prisma migrate diff \
+            --from-schema-datamodel prisma/schema.prisma \
+            --to-schema-datasource  prisma/schema.prisma \
+            --exit-code
+          CODE=$?
+          set -e
+          if [ "$CODE" -eq 0 ]; then
+            echo "✓ schema.prisma matches DB after migrations (no drift)."
+          elif [ "$CODE" -eq 2 ]; then
+            echo "::error::Semantic drift detected between schema.prisma and migrated DB."
+            echo "::error::Either a migration is missing or schema.prisma was edited without a matching migration."
+            exit 1
+          else
+            echo "::error::prisma migrate diff failed with exit code $CODE (non-drift error)."
             exit 1
           fi
-          echo "✓ schema.prisma matches DB after migrations."

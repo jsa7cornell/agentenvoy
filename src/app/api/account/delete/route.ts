@@ -75,13 +75,15 @@ export async function POST(request: NextRequest) {
         where: { userId },
         data: { userId: null },
       }),
-      // Group-mode edge case: a session can have hostId = target while its
-      // NegotiationLink belongs to another user. `hostId` has no onDelete
-      // and is non-nullable, so we hard-delete those rows before the User
-      // delete to avoid a NO ACTION FK failure. Sessions hosted on the
-      // target's own links get cleaned up via the link cascade.
+      // `NegotiationSession.hostId` FK is RESTRICT (Prisma default when no
+      // onDelete is declared) and the column is non-nullable. Postgres checks
+      // RESTRICT on User delete BEFORE processing cascades on sibling FKs, so
+      // relying on the NegotiationLink→Session cascade to clear hosted
+      // sessions doesn't work — the User delete trips the hostId FK first.
+      // Delete every session this user hosts up front, regardless of which
+      // user owns the link.
       prisma.negotiationSession.deleteMany({
-        where: { hostId: userId, link: { userId: { not: userId } } },
+        where: { hostId: userId },
       }),
       // Cascades: Account, Session, ApiKey, Channel (+ messages, sessions),
       // CalendarCache, ComputedSchedule, NegotiationLink (+ sessions, messages,
