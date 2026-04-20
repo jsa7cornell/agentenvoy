@@ -22,6 +22,7 @@ import {
   applyEventOverrides,
   getTier,
   filterByDuration,
+  deriveTimingAnchor,
   type LinkRules,
   type UserPreferences,
   type CompiledRules,
@@ -165,11 +166,31 @@ export async function handleGetMeetingParameters(
     ok: true,
     meetingUrl: args.meetingUrl,
     parameters,
-    rules: {
-      ...(rules.activity ? { activity: rules.activity } : {}),
-      ...(rules.activityIcon ? { activityIcon: rules.activityIcon } : {}),
-      ...(rules.timingLabel ? { timingLabel: rules.timingLabel } : {}),
-    },
+    rules: (() => {
+      const r = rules as Record<string, unknown>;
+      const isVip = typeof r.isVip === "boolean" ? r.isVip : undefined;
+      const anchor = deriveTimingAnchor(rules.timingLabel);
+      const timingPreference =
+        rules.timingLabel !== undefined ? { anchor } : undefined;
+      const gpWindow = (r.guestPicks as { window?: unknown } | undefined)?.window;
+      const guestPicksWindow =
+        gpWindow &&
+        typeof (gpWindow as { startHour?: unknown }).startHour === "number" &&
+        typeof (gpWindow as { endHour?: unknown }).endHour === "number"
+          ? {
+              startHour: (gpWindow as { startHour: number }).startHour,
+              endHour: (gpWindow as { endHour: number }).endHour,
+            }
+          : undefined;
+      return {
+        ...(rules.activity ? { activity: rules.activity } : {}),
+        ...(rules.activityIcon ? { activityIcon: rules.activityIcon } : {}),
+        ...(rules.timingLabel ? { timingLabel: rules.timingLabel } : {}),
+        ...(isVip !== undefined ? { isVip } : {}),
+        ...(timingPreference ? { timingPreference } : {}),
+        ...(guestPicksWindow ? { guestPicksWindow } : {}),
+      };
+    })(),
   });
 }
 
@@ -327,11 +348,16 @@ export async function handleGetAvailability(
           : tier === "stretch2"
             ? "stretch2"
             : undefined;
+    // `preferred` mirrors the web greeting's `isPreferred` predicate
+    // (`score <= -1`) so guest agents get the same star-worthiness signal
+    // without hardcoding the threshold. SPEC invariant #9.
+    const preferred = s.score <= -1;
     return {
       start: s.start,
       end: s.end,
       score: s.score,
       ...(wireTier ? { tier: wireTier } : {}),
+      ...(preferred ? { preferred: true } : {}),
     };
   });
 

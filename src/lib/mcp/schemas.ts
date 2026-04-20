@@ -159,6 +159,32 @@ export const getMeetingParametersOutput = z.discriminatedUnion("ok", [
           activity: z.string().optional(),
           activityIcon: z.string().optional(),
           timingLabel: z.string().optional(),
+          // VIP classification, echoed so guest agents can explain their
+          // output ("your host prioritized these times because you're a VIP").
+          // Gates stretch1/stretch2 tier visibility server-side — see
+          // `handleGetAvailability`. Not a secret: intentionally echoed per
+          // SPEC invariant #9.
+          isVip: z.boolean().optional(),
+          // Structured anchor derived from `timingLabel`. Guest agents branch
+          // on this without re-implementing the regex; `timingLabel` is kept
+          // alongside for free-form nuance. Derivation lives in
+          // `src/lib/scoring.ts#deriveTimingAnchor` (single source of truth
+          // shared with the web greeting's prose opener).
+          timingPreference: z
+            .object({
+              anchor: z.enum(["this-week", "next-week"]).nullable(),
+            })
+            .optional(),
+          // Host's `guestPicks.window` (hour-of-day clamp), echoed so guest
+          // agents can explain "why am I only seeing slots after 9am." The
+          // server already applies it to the slot filter — this is the
+          // context for the guest-side narration. Hours are host-tz local.
+          guestPicksWindow: z
+            .object({
+              startHour: z.number().int().min(0).max(23),
+              endHour: z.number().int().min(1).max(24),
+            })
+            .optional(),
         })
         .partial()
         .passthrough(),
@@ -175,8 +201,26 @@ export const availabilitySlotSchema = z
   .object({
     start: z.iso.datetime(),
     end: z.iso.datetime(),
+    /**
+     * Slot protection score. Integer-valued by construction (every writer in
+     * `scoring.ts` emits an int literal). SPEC invariant #9 documents the
+     * bands: ≤ -1 host-preferred, 0–1 bookable, 2–3 VIP backup, ≥ 4 blocked
+     * (never emitted). The (-1, 0) band is empty by construction.
+     */
     score: z.number(),
+    /**
+     * Offerability tier. `first_offer` is the default bookable band (score
+     * ≤ 1); `stretch1`/`stretch2` are VIP-only deeper reaches. Only emitted
+     * when the link has `rules.isVip = true`.
+     */
     tier: z.enum(["first_offer", "stretch1", "stretch2"]).optional(),
+    /**
+     * True when this slot is a host-preferred pick (score ≤ -1). Within the
+     * first_offer tier, star these in UI and propose them first. Matches the
+     * web greeting's `isPreferred` predicate (see `greeting-template.ts`).
+     * Backward-compatible optional — absent for pre-2026-04-20 consumers.
+     */
+    preferred: z.boolean().optional(),
   })
   .strict();
 
