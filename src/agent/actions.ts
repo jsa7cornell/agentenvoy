@@ -1515,9 +1515,24 @@ async function handleExpandLink(
   // changed since they last looked. Intentionally an additive message
   // (not a greeting rewrite) — honors the chat-history model: what was
   // offered before still appears above, the update is news.
+  //
+  // HOWEVER: only post the update-proposal to sessions that already have
+  // a greeting (≥1 administrator message). For pre-engagement sessions
+  // (host created + edited the link before the guest ever visited), there
+  // is no greeting to "add to" yet — posting a bare "John updated the
+  // proposal…" as the guest's very first impression is confusing and makes
+  // them think something was replaced. Skip those; the first-visit
+  // greeting path in session/route.ts will compute a fresh greeting
+  // reflecting the latest link.rules, so the update is already baked into
+  // what they see. Fixes 2026-04-21 bug where Ginger's guest view showed
+  // only "John updated the proposal — duration now 2h" and no greeting.
   try {
     const activeSessions = await prisma.negotiationSession.findMany({
-      where: { linkId: link.id, status: { in: ["active", "pending"] } },
+      where: {
+        linkId: link.id,
+        status: { in: ["active", "pending"] },
+        messages: { some: { role: "administrator" } },
+      },
       select: { id: true },
     });
     if (activeSessions.length > 0) {
