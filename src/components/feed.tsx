@@ -315,29 +315,61 @@ export default function Feed() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input]);
 
-  // Scroll feed container to bottom. On new messages we pin to the bottom
-  // (stickToBottomRef), then a ResizeObserver on the inner content keeps us
-  // there as async card content finishes rendering (calendar cards, images,
-  // etc.) — without the observer the initial scrollTo fires before the final
-  // scrollHeight is known, leaving the newest card clipped under the composer.
+  // Scroll feed container to bottom. On new messages (OR on message-array
+  // identity changes — e.g., post-turn refetch that rehydrates `thread` data
+  // on the last Envoy message without changing array length), we pin to the
+  // bottom (stickToBottomRef). A ResizeObserver on the inner content pins
+  // again if async card content (ThreadCard, calendar, images) grows the
+  // wrapper. And a short rAF-retry loop pins on every frame for ~300ms after
+  // each message change — this is the fallback for late-rendering content
+  // that the observer's timing can miss (observer fires after React commit
+  // but before final browser paint; scrollHeight read may be stale).
+  //
+  // Reported 2026-04-21: prior two fixes (#46 adds observer + pb-8, #51
+  // instant-scroll) still left ThreadCards clipped under the composer because
+  // (a) the post-turn `setMessages` REPLACES the array at the same length, so
+  // the length-based scroll trigger didn't fire, and (b) pb-8 (32px) is less
+  // than a ThreadCard's full post-hydration height (~80px), so the observer
+  // was the only mechanism — and it sometimes missed.
   const prevMessageCount = useRef(0);
   const stickToBottomRef = useRef(true);
+  const prevMessagesRef = useRef<ChannelMsg[]>([]);
+
   useEffect(() => {
-    if (messages.length === 0) return;
+    if (messages.length === 0) {
+      prevMessageCount.current = 0;
+      prevMessagesRef.current = messages;
+      return;
+    }
     const container = scrollContainerRef.current;
     if (!container) return;
-    if (prevMessageCount.current === 0) {
+
+    const lengthGrew = messages.length > prevMessageCount.current;
+    const initial = prevMessageCount.current === 0;
+    // Array identity check — post-turn refetch replaces the array even when
+    // length is stable (e.g., the last Envoy message gets `thread` hydrated).
+    // That refetch often produces the biggest layout growth (ThreadCard) and
+    // therefore the most clipping risk; detect it here.
+    const arrayChanged = messages !== prevMessagesRef.current;
+
+    if (initial || lengthGrew || arrayChanged) {
       stickToBottomRef.current = true;
-      requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight;
-      });
-    } else if (messages.length > prevMessageCount.current) {
-      stickToBottomRef.current = true;
-      requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight;
-      });
+      // rAF retry loop — pin on every frame for ~300ms. Each tick is idempotent
+      // (no-op when scrollTop already equals scrollHeight). Catches async
+      // content that renders after the initial pin AND after the observer
+      // would have fired.
+      const deadline = performance.now() + 300;
+      const tick = () => {
+        if (!stickToBottomRef.current) return;
+        if (!scrollContainerRef.current) return;
+        const c = scrollContainerRef.current;
+        c.scrollTop = c.scrollHeight;
+        if (performance.now() < deadline) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
     }
     prevMessageCount.current = messages.length;
+    prevMessagesRef.current = messages;
   }, [messages]);
 
   useEffect(() => {
@@ -345,8 +377,11 @@ export default function Feed() {
     const end = messagesEndRef.current;
     if (!container || !end) return;
     const onScroll = () => {
+      // Widened from 24px to 96px (≈ composer height). User scrolled up by
+      // less than a composer's worth of pixels (trackpad overshoot, mobile
+      // momentum) still counts as "at the bottom, please keep pinning."
       const nearBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight < 24;
+        container.scrollHeight - container.scrollTop - container.clientHeight < 96;
       stickToBottomRef.current = nearBottom;
     };
     container.addEventListener("scroll", onScroll, { passive: true });
@@ -645,7 +680,7 @@ export default function Feed() {
       {/* Messages — scroll container spans full column width so the scrollbar
           lands at the sidebar divider; inner wrapper re-centers the content. */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
-        <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 pt-5 pb-8 flex flex-col gap-1.5">
+        <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 pt-5 pb-16 flex flex-col gap-1.5">
         {/* Empty state — only for calibrated users with no messages */}
         {messages.length === 0 && !loading && isCalibrated && (
           <div className="flex-1 flex items-center justify-center">
