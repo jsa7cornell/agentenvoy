@@ -13,6 +13,7 @@ import { TimeChipList, type TimeChipData } from "./time-chip-list";
 import { SendFeedbackLink } from "./send-feedback";
 import { formatDuration } from "@/lib/format-duration";
 import { stripRendererOnlyBlocks } from "@/lib/message-render";
+import { mergePollResult, type LiveSyncMessage } from "@/lib/deal-room-live-sync";
 import {
   getRoleStyles,
   computeExternalAgentSender,
@@ -84,6 +85,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  // Stage 1 live-sync (§8.4 B1 fold): suppress the 10s poll while a stream
+  // is in flight to avoid racing poll results against mid-stream temp-id
+  // bubbles. Flipped true at the top of handleSend before the POST fires;
+  // flipped false 500ms after the stream closes so the subsequent poll
+  // can observe the onFinish-persisted admin row.
+  const [isStreaming, setIsStreaming] = useState(false);
   const [hostName, setHostName] = useState("");
   const [isHost, setIsHost] = useState(false);
   // Bilateral: logged-in guest (authenticated User, not the host).
@@ -346,6 +353,94 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       .then((data) => { if (data) setGcalStatus(data); })
       .catch(() => {});
   }, [sessionId, isHost, confirmed]);
+
+  // Stage 1 live-sync (thread H) — §8.4 of the decided deal-room proposal
+  // (2026-04-21). Two viewers on the same deal-room should converge on the
+  // same transcript without a manual reload. The endpoint already returns
+  // every message without role filtering, so this is a pure client-side
+  // fetch-policy change.
+  //
+  // - 10s poll while the tab is visible and not streaming and not
+  //   confirmed.
+  // - Refetch immediately on `focus` and `visibilitychange` → visible.
+  // - Merge via mergePollResult: content-matched id-swap on temp-id rows,
+  //   standard id-dedup otherwise. See deal-room-live-sync.ts for the
+  //   B1-fold rationale (why we didn't do the server-id handshake).
+  useEffect(() => {
+    if (!sessionId || confirmed) return;
+
+    let cancelled = false;
+
+    async function pollOnce() {
+      if (cancelled) return;
+      if (isStreaming) return;
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      try {
+        const res = await fetch(`/api/negotiate/session?id=${sessionId}`);
+        if (!res.ok) return;
+        const { session: sess } = await res.json();
+        if (cancelled) return;
+        if (!sess || !Array.isArray(sess.messages)) return;
+        const serverMessages: LiveSyncMessage[] = sess.messages.map(
+          (m: { id: string; role: string; content: string; metadata?: unknown; createdAt?: string | Date }) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            metadata: m.metadata ?? null,
+            createdAt: typeof m.createdAt === "string"
+              ? m.createdAt
+              : m.createdAt instanceof Date
+                ? m.createdAt.toISOString()
+                : undefined,
+          }),
+        );
+        setMessages((prev) => mergePollResult(prev as LiveSyncMessage[], serverMessages) as Message[]);
+        // Mirror session status surfaces so the remote side's confirm /
+        // status changes land as well.
+        if (typeof sess.status === "string") setSessionStatus(sess.status);
+        if (typeof sess.statusLabel === "string") setSessionStatusLabel(sess.statusLabel);
+      } catch {
+        // Swallow transient network errors — next tick will retry.
+      }
+    }
+
+    // Only poll while visible + not streaming + not confirmed. Terminal
+    // confirmed state stops polling entirely (outer guard above).
+    const startInterval = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return null;
+      if (isStreaming) return null;
+      return window.setInterval(pollOnce, 10_000);
+    };
+
+    const intervalId: number | null = startInterval();
+
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        pollOnce();
+      }
+    };
+    const onFocus = () => {
+      pollOnce();
+    };
+
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", onFocus);
+    }
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null) window.clearInterval(intervalId);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", onFocus);
+      }
+    };
+  }, [sessionId, confirmed, isStreaming]);
 
   // T3c: detect host missing calendar.events write scope so the upsell
   // banner appears even after a page reload (when confirmData no longer
@@ -754,6 +849,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsSending(true);
+    // Block poll merges during the stream — see Stage 1 live-sync note
+    // on isStreaming state above.
+    setIsStreaming(true);
 
     try {
       const res = await fetch("/api/negotiate/message", {
@@ -785,6 +883,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         const body = await res.json();
         if (body.error) throw new Error(body.error);
         setIsSending(false);
+        // No stream happened — release the poll guard immediately.
+        setIsStreaming(false);
         return;
       }
 
@@ -803,7 +903,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          // Stage 1 live-sync (§8.4): flip isStreaming false 500ms after
+          // the stream closes. The 500ms window covers the race between
+          // onFinish's DB write (server-side admin row) and the next
+          // poll's read — without it, the first post-stream poll can
+          // fire before the server row exists and miss the content-match
+          // dedup path.
+          setTimeout(() => setIsStreaming(false), 500);
+          break;
+        }
 
         const chunk = decoder.decode(value, { stream: true });
         fullText += chunk;
@@ -852,6 +961,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         ...prev,
         { id: `error-${Date.now()}`, role: "system", content: errorContent },
       ]);
+      // Stream may have died before the done branch ran — release the
+      // poll guard so the next 10s tick can catch up.
+      setIsStreaming(false);
     } finally {
       setIsSending(false);
     }
