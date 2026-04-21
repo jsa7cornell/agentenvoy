@@ -33,6 +33,7 @@ import {
 import {
   deriveLegacy,
   hasExclusiveOverride,
+  isSingleSlotExclusive,
   readStoredSteering,
 } from "@/lib/intent";
 
@@ -1130,12 +1131,30 @@ export async function POST(req: NextRequest) {
       // inform structured fields (timingLabel, activity, etc.) but is never
       // displayed verbatim to guests.
 
-      // V5 prose-form (2026-04-20): when proseCandidate is non-null, fold
-      // the day list into a casual combined opener — "He's proposing 10
-      // minutes tomorrow or Thursday, or next week if needed." — and skip
-      // the bulleted schedule body. Shorter closing, no timezone line
-      // (same-tz gated by the prose helper itself).
-      if (proseCandidate && !isGeneric) {
+      // V6 exclusive-single-slot (2026-04-21): when the host narrowed to
+      // exactly one slot (`exclusive` tier + one slotOverrides[-2]), skip
+      // the bulleted body and render a prescriptive one-liner. The widget
+      // below already highlights the -2 slot as the sole offer, so the
+      // greeting's job is to frame it as a proposal, not a menu. Copy
+      // matches John's feedback on the Katie case (report cmo8w7er…):
+      // "We're proposing X. Confirmation below. Let me know if questions."
+      if (
+        !isGeneric &&
+        effectiveSteering === "exclusive" &&
+        isSingleSlotExclusive(linkRules)
+      ) {
+        const durStr = effectiveDuration
+          ? formatDuration(effectiveDuration)
+          : null;
+        const activityPart = activityText ? ` for ${activityText}` : "";
+        const locPart = linkLocationForOpener
+          ? ` at ${linkLocationForOpener}`
+          : "";
+        const durPart = durStr ? `${durStr}` : "some time";
+        const proposal = `We're proposing ${durPart}${activityPart}${locPart}.`;
+        const exclusiveHello = `👋 ${greeteeName}! ${proposal} I've pasted a confirmation button below — let me know if you have any questions.`;
+        greeting = exclusiveHello;
+      } else if (proseCandidate && !isGeneric) {
         const durCasual = durationForOpener
           ? formatDurationCasual(durationForOpener)
           : null;
