@@ -92,14 +92,22 @@ export function stripActionBlocks(text: string): string {
 
 /**
  * Execute all parsed actions sequentially. Each action is authorized and validated.
+ *
+ * Optional `onActionStart` is called synchronously just before each action runs.
+ * Channel-chat uses it to emit `executing` progress frames (proposal 2026-04-21).
+ * Callback errors are caught and logged — they never block action execution.
  */
 export async function executeActions(
   actions: ActionRequest[],
   userId: string,
-  context?: { sessionId?: string; meetSlug?: string }
+  context?: { sessionId?: string; meetSlug?: string; onActionStart?: (action: ActionRequest, index: number) => void }
 ): Promise<ActionResult[]> {
   const results: ActionResult[] = [];
-  for (const action of actions) {
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i];
+    if (context?.onActionStart) {
+      try { context.onActionStart(action, i); } catch (e) { console.error("onActionStart cb threw:", e); }
+    }
     try {
       const result = await executeAction(action, userId, context);
       results.push(result);
