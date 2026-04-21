@@ -2055,7 +2055,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         {/* Chat column — event card + messages */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {/* Desktop centered wrapper for left-side content */}
-          <div className="flex-1 min-h-0 overflow-hidden flex flex-col md:max-w-[640px] md:mx-auto md:w-full">
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col md:max-w-[640px] lg:max-w-[760px] xl:max-w-[880px] md:mx-auto md:w-full">
             {/* Event card — sticky inside chat column */}
             {eventCard}
 
