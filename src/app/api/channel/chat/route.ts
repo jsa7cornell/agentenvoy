@@ -18,6 +18,7 @@ import {
   type ProgressExecutingAction,
   type ProgressCopyInterpolation,
 } from "@/agent/progress-copy";
+import { runWithStageRotation } from "@/agent/progress-rotation";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -167,6 +168,12 @@ export async function POST(req: NextRequest) {
           }
         };
 
+        const withStageRotation = <T>(
+          stage: ProgressStage,
+          operation: () => Promise<T>,
+          options: { slots?: ProgressCopyInterpolation } = {},
+        ) => runWithStageRotation(emitStatus, stage, operation, options);
+
         try {
           // Detect if the host is asking us to re-check / refresh calendar
           const lowerMsg = message.toLowerCase();
@@ -175,8 +182,8 @@ export async function POST(req: NextRequest) {
           // Stage 1: scanning-calendar — fires BEFORE parallel-group-2. The
           // group does more than just fetch schedule but the calendar read is
           // the dominant wait, so we anchor the frame here (§2.1 table).
-          emitStatus("scanning-calendar");
-
+          // Within-stage rotation ticks every WITHIN_STAGE_ROTATION_MS while
+          // getOrComputeSchedule is in flight (proposal §2.2 R2 fold).
           const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
           const now = new Date();
 
@@ -188,7 +195,9 @@ export async function POST(req: NextRequest) {
               where: { channelId: safeChannel.id, closed: false },
               orderBy: { startedAt: "desc" },
             }),
-            getOrComputeSchedule(safeUser.id, { forceRefresh: isRefreshRequest }).catch((e) => {
+            withStageRotation("scanning-calendar", () =>
+              getOrComputeSchedule(safeUser.id, { forceRefresh: isRefreshRequest }),
+            ).catch((e) => {
               console.log("Schedule context error:", e);
               return null;
             }),
@@ -381,15 +390,16 @@ export async function POST(req: NextRequest) {
           const system = CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n");
           const modelId = "claude-sonnet-4-6";
 
-          // Stage 3: thinking — just before generateText.
-          emitStatus("thinking");
-
-          const first = await generateText({
-            model: envoyModel(modelId),
-            maxOutputTokens: 1024,
-            system,
-            messages,
-          });
+          // Stage 3: thinking — just before generateText. Within-stage
+          // rotation ticks while the LLM is generating (proposal §2.2 R2).
+          const first = await withStageRotation("thinking", () =>
+            generateText({
+              model: envoyModel(modelId),
+              maxOutputTokens: 1024,
+              system,
+              messages,
+            }),
+          );
           let fullText = first.text;
 
           if (needsActionEmissionRetry(fullText)) {
