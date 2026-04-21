@@ -356,7 +356,23 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        if (existingSession.messages.length > 0) {
+        // Only resume (return existing messages as the "greeting") if the
+        // session actually has an administrator greeting message. If the only
+        // messages are pre-engagement host-update system rows (e.g., from
+        // the host calling update_format / update_time / update_location on
+        // the link before any guest visit), fall through to the fresh-greeting
+        // generation path — the guest's first view should be a proper greeting,
+        // not a bare "Format updated to phone" system line.
+        //
+        // Reported 2026-04-21 (Marco link narh3f) — host said "find time with
+        // Marco" then "lets switch it to a call" before Marco visited. Marco
+        // loaded the deal room and saw only "✓ Format updated to phone" with
+        // no greeting. Same class as the update_link pre-engagement bug but
+        // via a different handler path.
+        const hasGreeting = existingSession.messages.some(
+          (m) => m.role === "administrator",
+        );
+        if (hasGreeting) {
           return NextResponse.json({
             sessionId: existingSession.id,
             status: existingSession.status,
@@ -378,8 +394,27 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        // Existing session with 0 messages — reuse it instead of creating a duplicate.
-        // Clean up any other empty sessions for this link first.
+        // Pre-engagement session (no greeting yet, with or without
+        // pre-engagement host-update system messages). Fall through to the
+        // fresh-greeting path. Before that, delete any host-edit artifacts
+        // so they don't precede the generated greeting chronologically — the
+        // guest shouldn't see "Format updated to phone" before any actual
+        // introduction. Only metadata.kind === "host_update" system rows are
+        // touched; any real content (shouldn't exist pre-engagement, but
+        // guarded anyway) is left alone.
+        if (existingSession.messages.length > 0) {
+          await prisma.message.deleteMany({
+            where: {
+              sessionId: existingSession.id,
+              role: "system",
+              AND: [
+                { metadata: { path: ["kind"], equals: "host_update" } },
+              ],
+            },
+          });
+        }
+
+        // Clean up any other empty sessions for this link.
         await prisma.negotiationSession.deleteMany({
           where: {
             linkId: link.id,
@@ -387,8 +422,7 @@ export async function POST(req: NextRequest) {
             messages: { none: {} },
           },
         });
-        // Fall through to generate greeting on this existing session
-        // Override the session creation below by using existingSession
+        // Reuse this session for the fresh-greeting generation below.
         reuseSessionId = existingSession.id;
       }
     }
