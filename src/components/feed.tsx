@@ -98,7 +98,13 @@ export default function Feed() {
   // queue four intermediate announcements; a single aria-live="polite"
   // "Response ready." fires at the text-frame boundary (§2.3 N9).
   const [statusCopy, setStatusCopy] = useState<string | null>(null);
-  const [responseReadyAnnouncement, setResponseReadyAnnouncement] = useState("");
+  // Nonce counter for the aria-live "Response ready." announcement. Bumping
+  // this re-mounts the aria-live region (via `key={announcementNonce}` on the
+  // div) so screen readers re-announce on consecutive turns — without having
+  // to put any unique identifier in the text content itself. Previous approach
+  // (`Response ready. ${Date.now()}`) leaked the timestamp to sighted users in
+  // production when `sr-only` didn't fully hide the region. Fixed 2026-04-21.
+  const [announcementNonce, setAnnouncementNonce] = useState(0);
   const [initialLoading, setInitialLoading] = useState(true);
   const [calendarConnected, setCalendarConnected] = useState(true);
   const [isCalibrated, setIsCalibrated] = useState(true);
@@ -548,7 +554,11 @@ export default function Feed() {
         };
         setMessages((prev) => [...prev, envoyMsg]);
         // Single polite announcement at the text-frame boundary (§2.3 N9).
-        setResponseReadyAnnouncement(`Response ready. ${Date.now()}`);
+        // Bumping the nonce forces the aria-live region to re-mount (via
+        // `key={announcementNonce}`) so screen readers re-announce without
+        // the visible text ever changing. Prevents the timestamp-in-text
+        // leak that was visible to sighted users in production.
+        setAnnouncementNonce((n) => n + 1);
 
         // Refresh messages to pick up thread cards created during streaming
         const refreshRes = await fetch("/api/channel/messages");
@@ -768,14 +778,38 @@ export default function Feed() {
         )}
         {/* Single polite announcement at the `type:"text"` frame boundary.
             Kept outside the loading row so removal of the row from the
-            accessibility tree can't re-read stale status text. */}
-        <div
-          aria-live="polite"
-          aria-atomic="true"
-          className="sr-only"
-        >
-          {responseReadyAnnouncement}
-        </div>
+            accessibility tree can't re-read stale status text.
+
+            Remounted via `key={announcementNonce}` on every turn so screen
+            readers re-announce the identical "Response ready." text. This
+            replaces the earlier pattern of appending Date.now() to the
+            announcement text — which leaked the timestamp to sighted users
+            in production when sr-only wasn't sufficient to hide the region.
+            Now the visible text is always constant; the nonce never touches
+            user-visible DOM. Belt-and-suspenders: also using inline styles
+            in case a CSS regression ever breaks sr-only.
+        */}
+        {announcementNonce > 0 && (
+          <div
+            key={announcementNonce}
+            aria-live="polite"
+            aria-atomic="true"
+            className="sr-only"
+            style={{
+              position: "absolute",
+              width: 1,
+              height: 1,
+              padding: 0,
+              margin: -1,
+              overflow: "hidden",
+              clip: "rect(0, 0, 0, 0)",
+              whiteSpace: "nowrap",
+              borderWidth: 0,
+            }}
+          >
+            Response ready.
+          </div>
+        )}
 
         <div ref={messagesEndRef} />
         </div>
