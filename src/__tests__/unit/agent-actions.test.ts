@@ -242,6 +242,7 @@ const mockPrisma = vi.hoisted(() => ({
   negotiationSession: {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
+    findMany: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
     create: vi.fn(),
@@ -1464,6 +1465,108 @@ describe("executeActions", () => {
       );
       expect(results[0].success).toBe(false);
       expect(results[0].message).toContain("Not authorized");
+    });
+  });
+
+  // --- update_link post-edit follow-up message gating ---
+  //
+  // Regression for 2026-04-21 "Ginger greeting nuked" bug. The follow-up
+  // message ("John updated the proposal — duration now 2h. Let me know
+  // if this changes anything on your side.") should ONLY be posted on
+  // sessions where the guest has already seen a greeting. For pre-engagement
+  // sessions (host created+edited the link before any guest visit), no
+  // follow-up — the guest's first visit will compute a fresh greeting
+  // reflecting the latest link.rules, so the update is already baked in.
+
+  describe("update_link — post-edit follow-up message gating", () => {
+    const linkBase = {
+      id: "link-update-fu",
+      userId: HOST_USER_ID,
+      code: "yaeeds",
+      inviteeName: "Ginger",
+      rules: { format: "video", duration: 60 },
+    };
+
+    it("skips follow-up on pre-engagement sessions (no greeting yet)", async () => {
+      mockPrisma.negotiationLink.findFirst.mockResolvedValue(linkBase);
+      mockPrisma.negotiationLink.update.mockResolvedValue({ id: linkBase.id });
+      mockPrisma.user.findUnique.mockResolvedValue({ name: "John Anderson" });
+      // The handler filters sessions to those with ≥1 administrator message.
+      // Pre-engagement sessions don't match the filter → findMany returns [].
+      mockPrisma.negotiationSession.findMany.mockResolvedValue([]);
+
+      await executeActions(
+        [{ action: "update_link", params: { code: "yaeeds", duration: 120 } }],
+        HOST_USER_ID,
+      );
+
+      // Follow-up message should NOT be written — the filter matched zero
+      // sessions, so the create loop never ran.
+      const adminMessageCreates = mockPrisma.message.create.mock.calls.filter(
+        (call: unknown[]) => {
+          const arg = call[0] as { data?: { role?: string; metadata?: { kind?: string } } };
+          return (
+            arg?.data?.role === "administrator" &&
+            arg?.data?.metadata?.kind === "host_update"
+          );
+        },
+      );
+      expect(adminMessageCreates).toHaveLength(0);
+    });
+
+    it("posts follow-up on engaged sessions (greeting already exists)", async () => {
+      mockPrisma.negotiationLink.findFirst.mockResolvedValue(linkBase);
+      mockPrisma.negotiationLink.update.mockResolvedValue({ id: linkBase.id });
+      mockPrisma.user.findUnique.mockResolvedValue({ name: "John Anderson" });
+      // Engaged session — greeting exists, so the handler's filter matches.
+      mockPrisma.negotiationSession.findMany.mockResolvedValue([
+        { id: "session-engaged-1" },
+      ]);
+
+      await executeActions(
+        [{ action: "update_link", params: { code: "yaeeds", duration: 120 } }],
+        HOST_USER_ID,
+      );
+
+      const hostUpdateCalls = mockPrisma.message.create.mock.calls.filter(
+        (call: unknown[]) => {
+          const arg = call[0] as { data?: { role?: string; metadata?: { kind?: string } } };
+          return (
+            arg?.data?.role === "administrator" &&
+            arg?.data?.metadata?.kind === "host_update"
+          );
+        },
+      );
+      expect(hostUpdateCalls).toHaveLength(1);
+      const call = hostUpdateCalls[0][0] as { data: { content: string; sessionId: string } };
+      expect(call.data.sessionId).toBe("session-engaged-1");
+      expect(call.data.content).toContain("John");
+      expect(call.data.content).toContain("updated the proposal");
+      expect(call.data.content).toContain("duration now");
+    });
+
+    it("uses the message-exists filter in the findMany query", async () => {
+      mockPrisma.negotiationLink.findFirst.mockResolvedValue(linkBase);
+      mockPrisma.negotiationLink.update.mockResolvedValue({ id: linkBase.id });
+      mockPrisma.user.findUnique.mockResolvedValue({ name: "John" });
+      mockPrisma.negotiationSession.findMany.mockResolvedValue([]);
+
+      await executeActions(
+        [{ action: "update_link", params: { code: "yaeeds", duration: 120 } }],
+        HOST_USER_ID,
+      );
+
+      const findManyCalls = mockPrisma.negotiationSession.findMany.mock.calls;
+      expect(findManyCalls.length).toBeGreaterThanOrEqual(1);
+      const query = findManyCalls[0][0] as {
+        where: {
+          linkId: string;
+          status: { in: string[] };
+          messages?: { some: { role: string } };
+        };
+      };
+      expect(query.where.linkId).toBe(linkBase.id);
+      expect(query.where.messages).toEqual({ some: { role: "administrator" } });
     });
   });
 
