@@ -24,10 +24,13 @@ import {
 import { runWithStageRotation } from "@/agent/progress-rotation";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { classifyChatIntent } from "@/agent/intent-classifier";
+import { normalizeChatIntent, type ChatIntent, type ChatIntentBlock } from "@/lib/intent";
 
 // Load playbooks once at module scope (same pattern as composer.ts)
 let personaPlaybook = "";
 let channelPlaybook = "";
+let inquirePlaybook = "";
 try {
   personaPlaybook = readFileSync(join(process.cwd(), "src", "agent", "playbooks", "persona.md"), "utf-8");
 } catch (e) {
@@ -39,8 +42,25 @@ try {
   console.error("Failed to load channel.md for channel chat:", e);
   throw e;
 }
+try {
+  inquirePlaybook = readFileSync(join(process.cwd(), "src", "agent", "playbooks", "inquire.md"), "utf-8");
+} catch (e) {
+  console.error("Failed to load inquire.md for channel chat:", e);
+  // Inquire playbook is new; fall back cleanly if it's missing rather than
+  // crash the module. The dispatch layer treats an empty playbook as "no
+  // guidance" and the scheduling path continues to work.
+  inquirePlaybook = "";
+}
 
 const CHANNEL_SYSTEM = `${personaPlaybook ? personaPlaybook + "\n\n---\n\n" : ""}${channelPlaybook}`;
+const INQUIRE_SYSTEM = `${personaPlaybook ? personaPlaybook + "\n\n---\n\n" : ""}${inquirePlaybook}`;
+
+// Templated stub replies for tiers without live handlers in v1.
+// Proposal §2.4 — fires as a single text frame, no LLM call.
+const STUB_REPLY_PROFILE =
+  "I can't edit profile defaults from chat yet — that's coming in a future release. For now, you can update defaults in Settings.";
+const STUB_REPLY_RULE =
+  "I can't add or edit availability rules from chat yet — that's coming in a future release. For now, you can manage rules in Settings.";
 
 // ---------------------------------------------------------------------------
 // Progress narration protocol (proposal decided 2026-04-21)
@@ -89,7 +109,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
     const safeUser = user;
-    const { message } = body;
+    const { message, userIntentHint: rawIntentHint } = body as {
+      message: string;
+      userIntentHint?: unknown;
+    };
+    // Hint from a clarifier quick-reply click — bypasses the classifier.
+    // Proposal §2.4, §2.6. Stub tiers are NOT accepted as hints (schema
+    // §2.2 restricts quick-replies to live tiers only).
+    const hintedIntent: ChatIntent | null = (() => {
+      const n = normalizeChatIntent(rawIntentHint);
+      if (n === "schedule" || n === "inquire") return n;
+      return null;
+    })();
 
     // Get or create channel
     let channel = await prisma.channel.findUnique({ where: { userId: safeUser.id } });
@@ -182,6 +213,129 @@ export async function POST(req: NextRequest) {
           const lowerMsg = message.toLowerCase();
           const isRefreshRequest = /\b(check again|re-?check|refresh|re-?pull|changed my (schedule|calendar)|updated my (schedule|calendar)|look again|try again|one more time)\b/i.test(lowerMsg);
 
+          // ------------------------------------------------------------
+          // Split-pass intent router (proposal 2026-04-21, decided 2026-
+          // 04-21 pm). Haiku classifier runs ahead of the scheduling pass
+          // so channel.md stays untouched. Stub/unclear tiers short-
+          // circuit without loading the calendar.
+          // ------------------------------------------------------------
+
+          // Persist user message immediately — independent of the tier
+          // decision. Fire and await so stub/unclear tiers still capture
+          // the utterance in channel history.
+          const userMsgPersist = prisma.channelMessage.create({
+            data: { channelId: safeChannel.id, role: "user", content: message },
+          });
+
+          // Run classifier in parallel with the user-message persist
+          // unless a quick-reply hint is present (then bypass entirely).
+          let intentBlock: ChatIntentBlock;
+          let classifierLatencyMs = 0;
+          let classifierRetried = false;
+          let rawClassifierKind: string | null = null;
+          if (hintedIntent) {
+            intentBlock = { kind: hintedIntent };
+          } else {
+            // Build a lightweight context snapshot for the classifier —
+            // active session titles help it resolve pronouns like "move
+            // it to Tuesday" (proposal §2.2 buildUserPrompt). Short by
+            // design: the classifier is cheap but not free.
+            const recentSessions = await prisma.negotiationSession.findMany({
+              where: { hostId: safeUser.id, archived: false },
+              select: {
+                id: true,
+                title: true,
+                guestEmail: true,
+                link: { select: { inviteeName: true } },
+              },
+              orderBy: { updatedAt: "desc" },
+              take: 5,
+            });
+            const activeSessionsSummary = recentSessions
+              .map((s) => {
+                const guest = s.link?.inviteeName || s.guestEmail || "unknown";
+                return `- "${s.title || "Untitled"}" (guest: ${guest})`;
+              })
+              .join("\n");
+
+            const classified = await classifyChatIntent(message, {
+              activeSessionsSummary: activeSessionsSummary || undefined,
+            });
+            intentBlock = classified.intent;
+            classifierLatencyMs = classified.latencyMs;
+            classifierRetried = classified.retried;
+            rawClassifierKind = classified.rawKind;
+          }
+          const intent = intentBlock.kind;
+
+          // Structured telemetry at the dispatch seam (proposal §3.4).
+          // userId + intent only — no utterance text, no PII beyond what
+          // existing log lines already carry.
+          console.log(
+            JSON.stringify({
+              event: "chat_intent",
+              userId: safeUser.id,
+              intent,
+              rawKind: rawClassifierKind,
+              hadClarifier: intent === "unclear" && !!intentBlock.clarifier,
+              userIntentHintUsed: !!hintedIntent,
+              classifierRetried,
+              classifierLatencyMs,
+            }),
+          );
+
+          // Tier dispatch — stub + unclear short-circuit before calendar load.
+          if (intent === "profile" || intent === "rule") {
+            await userMsgPersist;
+            const stub = intent === "profile" ? STUB_REPLY_PROFILE : STUB_REPLY_RULE;
+            await prisma.channelMessage.create({
+              data: { channelId: safeChannel.id, role: "envoy", content: stub },
+            });
+            controller.enqueue(
+              encoder.encode(JSON.stringify({ type: "text", content: stub }) + "\n"),
+            );
+            controller.close();
+            return;
+          }
+
+          if (intent === "unclear") {
+            await userMsgPersist;
+            const clarifierText =
+              intentBlock.clarifier ||
+              "I'm not sure what you're asking — could you clarify?";
+            const quickReplies = intentBlock.quickReplies ?? [];
+            // Persist the clarifier as an envoy message. The stream frame
+            // uses `type:"clarifier"` so the feed renders pill buttons;
+            // the stored message keeps the text for history rendering
+            // (stale clients without clarifier support still see the
+            // question as a normal bubble — N8 degrade mode).
+            await prisma.channelMessage.create({
+              data: {
+                channelId: safeChannel.id,
+                role: "envoy",
+                content: clarifierText,
+                metadata: {
+                  clarifier: { quickReplies },
+                } as Prisma.InputJsonValue,
+              },
+            });
+            controller.enqueue(
+              encoder.encode(
+                JSON.stringify({
+                  type: "clarifier",
+                  text: clarifierText,
+                  quickReplies,
+                }) + "\n",
+              ),
+            );
+            controller.close();
+            return;
+          }
+
+          // Schedule + inquire both need calendar context. Continue into
+          // the existing load pipeline.
+          const isInquireTier = intent === "inquire";
+
           // Stage 1: scanning-calendar — fires BEFORE parallel-group-2. The
           // group does more than just fetch schedule but the calendar read is
           // the dominant wait, so we anchor the frame here (§2.1 table).
@@ -191,9 +345,7 @@ export async function POST(req: NextRequest) {
           const now = new Date();
 
           const [, sessionResult, scheduleResult, activeSessions] = await Promise.all([
-            prisma.channelMessage.create({
-              data: { channelId: safeChannel.id, role: "user", content: message },
-            }),
+            userMsgPersist,
             prisma.channelSession.findFirst({
               where: { channelId: safeChannel.id, closed: false },
               orderBy: { startedAt: "desc" },
@@ -390,7 +542,11 @@ export async function POST(req: NextRequest) {
             console.warn(`[channel/chat] History sanitized | userId=${safeUser.id} | ${warnings.join("; ")}`);
           }
 
-          const system = CHANNEL_SYSTEM + "\n\nCONTEXT:\n" + contextParts.join("\n");
+          // Inquire tier uses a narrower readonly playbook. §2.5 — runtime
+          // playbook selection per dispatched tier. Proposal 3 will extend
+          // this pattern (update_profile + rule handlers).
+          const systemBase = isInquireTier ? INQUIRE_SYSTEM : CHANNEL_SYSTEM;
+          const system = systemBase + "\n\nCONTEXT:\n" + contextParts.join("\n");
           const modelId = "claude-sonnet-4-6";
 
           // Stage 3: thinking — just before generateText. Within-stage
@@ -405,7 +561,10 @@ export async function POST(req: NextRequest) {
           );
           let fullText = first.text;
 
-          if (needsActionEmissionRetry(fullText)) {
+          // Skip the action-emission retry for inquire — the inquire
+          // playbook forbids [ACTION] blocks by contract. A missing ACTION
+          // block is expected, not a drift signal.
+          if (!isInquireTier && needsActionEmissionRetry(fullText)) {
             console.warn(
               `[channel/chat] intent-without-emit detected for user ${safeUser.id}, forcing retry`
             );
@@ -462,7 +621,7 @@ export async function POST(req: NextRequest) {
             }
             if (promptSnapshotEnabled) {
               additions.promptContext = {
-                systemPrompt: CHANNEL_SYSTEM,
+                systemPrompt: systemBase,
                 contextBlock: contextParts.join("\n"),
                 modelId,
               };
@@ -471,7 +630,17 @@ export async function POST(req: NextRequest) {
           };
           const finalizeResponse = async (text: string): Promise<string> => {
             try {
-              const actions = parseActions(text);
+              const parsed = parseActions(text);
+              // Inquire contract: no [ACTION] blocks allowed. Strip + log
+              // if any slipped through — the playbook forbids them, but
+              // defend against drift so we don't dispatch a create_link
+              // during a readonly turn.
+              if (isInquireTier && parsed.length > 0) {
+                console.warn(
+                  `[channel/chat] inquire tier emitted ${parsed.length} action block(s); stripping. userId=${safeUser.id}`,
+                );
+              }
+              const actions = isInquireTier ? [] : parsed;
               let actionResults: ActionResult[] = [];
               let timedOut = false;
               if (actions.length > 0) {

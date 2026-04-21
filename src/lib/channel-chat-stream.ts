@@ -27,7 +27,25 @@ export type ChannelChatFrame =
       /** Optional action kind for `executing` stage — used by consumers that care. */
       action?: string;
     }
-  | { type: "text"; content: string };
+  | { type: "text"; content: string }
+  | {
+      /** Clarifier turn from the chat intent router when kind === "unclear".
+       *  Client renders the `text` as an envoy bubble with `quickReplies`
+       *  as pill buttons beneath. Clicking a reply re-submits the original
+       *  utterance with `userIntentHint` populated, bypassing the classifier.
+       *
+       *  Proposal: 2026-04-21_dashboard-chat-intent-router §2.6.
+       *
+       *  Stale-client degrade: old bundles that don't recognize `clarifier`
+       *  drop the whole frame — user sees no response and has to retype.
+       *  Documented degrade mode (N8 fold). */
+      type: "clarifier";
+      text: string;
+      quickReplies: Array<{
+        label: string;
+        intent: "schedule" | "inquire";
+      }>;
+    };
 
 export interface ParsedFrames {
   /** Fully-parsed frames extracted during this call. */
@@ -102,6 +120,25 @@ function parseFrame(line: string): ChannelChatFrame | null {
   if (type === "text") {
     const content = typeof obj.content === "string" ? obj.content : "";
     return { type: "text", content };
+  }
+  if (type === "clarifier") {
+    const text = typeof obj.text === "string" ? obj.text : "";
+    if (!text) return null;
+    const rawReplies = Array.isArray(obj.quickReplies) ? obj.quickReplies : [];
+    const quickReplies = rawReplies
+      .map((r) => {
+        if (!r || typeof r !== "object") return null;
+        const item = r as { label?: unknown; intent?: unknown };
+        const label = typeof item.label === "string" ? item.label : "";
+        const intent =
+          item.intent === "schedule" || item.intent === "inquire"
+            ? (item.intent as "schedule" | "inquire")
+            : null;
+        if (!label || !intent) return null;
+        return { label, intent };
+      })
+      .filter((r): r is { label: string; intent: "schedule" | "inquire" } => r !== null);
+    return { type: "clarifier", text, quickReplies };
   }
   return null;
 }
