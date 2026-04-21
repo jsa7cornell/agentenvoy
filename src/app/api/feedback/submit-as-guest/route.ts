@@ -19,6 +19,7 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
+import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { FeedbackSubmitAsGuestSchema } from "@/lib/feedback/schema";
 import { buildGuestFeedbackBundle } from "@/lib/feedback/build-guest-bundle";
@@ -62,29 +63,40 @@ function rateLimitHit(key: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const errorRef = randomBytes(6).toString("hex");
+
   const origin = request.headers.get("origin");
   if (!isAllowedOrigin(origin)) {
-    return NextResponse.json({ ok: false, error: "Invalid origin" }, { status: 403 });
+    return NextResponse.json(
+      { ok: false, error: "Invalid origin", errorRef },
+      { status: 403 },
+    );
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ ok: false, error: "Invalid body" }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "Invalid body", errorRef },
+      { status: 400 },
+    );
   }
 
   const parsed = FeedbackSubmitAsGuestSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { ok: false, error: "Invalid submission", issues: parsed.error.flatten() },
+      { ok: false, error: "Invalid submission", issues: parsed.error.flatten(), errorRef },
       { status: 400 },
     );
   }
   const submission = parsed.data;
 
   if (rateLimitHit(submission.linkCode)) {
-    return NextResponse.json({ ok: false, error: "Too many reports" }, { status: 429 });
+    return NextResponse.json(
+      { ok: false, error: "Too many reports", errorRef },
+      { status: 429 },
+    );
   }
 
   // Resolve linkCode → NegotiationLink + host. If the link doesn't exist,
@@ -99,7 +111,10 @@ export async function POST(request: NextRequest) {
     },
   });
   if (!link || !link.code) {
-    return NextResponse.json({ ok: false, error: "Link not found" }, { status: 404 });
+    return NextResponse.json(
+      { ok: false, error: "Link not found", errorRef },
+      { status: 404 },
+    );
   }
 
   // B3: sessionId → linkCode scope check. If sessionId is present, verify
@@ -127,7 +142,7 @@ export async function POST(request: NextRequest) {
     });
     if (!session || session.linkId !== link.id) {
       return NextResponse.json(
-        { ok: false, error: "Session does not belong to this link" },
+        { ok: false, error: "Session does not belong to this link", errorRef },
         { status: 400 },
       );
     }
@@ -158,11 +173,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     console.error("[feedback.submit-as-guest] bundle build failed", {
+      errorRef,
       linkCode: submission.linkCode,
       err,
     });
     return NextResponse.json(
-      { ok: false, error: "Could not build feedback bundle" },
+      { ok: false, error: "Could not build feedback bundle", errorRef },
       { status: 500 },
     );
   }
@@ -199,11 +215,12 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     console.error("[feedback.submit-as-guest] insert failed", {
+      errorRef,
       linkCode: submission.linkCode,
       err,
     });
     return NextResponse.json(
-      { ok: false, error: "Could not save feedback" },
+      { ok: false, error: "Could not save feedback", errorRef },
       { status: 500 },
     );
   }

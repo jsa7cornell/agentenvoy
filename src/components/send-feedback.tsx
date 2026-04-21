@@ -84,16 +84,23 @@ function contextSubtitle(mode: Mode): string {
   return "Attaches your recent messages, sessions, and any route errors in the last 24h. Calendar data is title+time only.";
 }
 
+function defaultAreaForMode(mode: Mode): FeedbackArea | "" {
+  if (mode === "guest-deal-room" || mode === "host-deal-room") return "deal_room_chat";
+  if (mode === "host") return "dashboard_chat";
+  return "";
+}
+
 function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
   const [userText, setUserText] = useState("");
   const [userTyped, setUserTyped] = useState(false);
   const [prefillLoading, setPrefillLoading] = useState(true);
   const [prefillDraft, setPrefillDraft] = useState<string | null>(null);
   const [includeContext, setIncludeContext] = useState(true);
-  const [area, setArea] = useState<FeedbackArea | "">("");
+  const [area, setArea] = useState<FeedbackArea | "">(() => defaultAreaForMode(mode));
   const [submitting, setSubmitting] = useState(false);
   const [submittedId, setSubmittedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorRef, setErrorRef] = useState<string | null>(null);
   const prefillController = useRef<AbortController | null>(null);
 
   // Prefill on mount. Race guard per N2 of the proposal: if the response
@@ -156,6 +163,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
     if (submitting) return;
     setSubmitting(true);
     setError(null);
+    setErrorRef(null);
     try {
       const url = typeof window !== "undefined" ? window.location.href : undefined;
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : undefined;
@@ -203,8 +211,14 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
           }),
         });
       }
-      const json = (await res.json()) as { ok: boolean; reportId?: string; error?: string };
+      const json = (await res.json()) as {
+        ok: boolean;
+        reportId?: string;
+        error?: string;
+        errorRef?: string;
+      };
       if (!res.ok || !json.ok) {
+        if (json.errorRef) setErrorRef(json.errorRef);
         throw new Error(json.error ?? `HTTP ${res.status}`);
       }
       setSubmittedId(json.reportId ?? "");
@@ -228,7 +242,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
@@ -268,7 +282,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
         ) : (
           <>
             <div className="mb-4 flex items-start justify-between">
-              <h2 className="text-lg font-semibold">Send feedback</h2>
+              <h2 className="text-lg font-semibold">Your feedback is a gift.</h2>
               <button
                 type="button"
                 onClick={onClose}
@@ -330,10 +344,19 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
               </label>
 
               <p className="text-xs text-zinc-400">
-                Feedback is a gift — thank you for taking the time. 💜
+                Thanks for taking the time, we really appreciate.
               </p>
 
-              {error ? <p className="text-xs text-red-400">{error}</p> : null}
+              {error ? (
+                <p className="text-xs text-red-400">
+                  {error}
+                  {errorRef ? (
+                    <span className="ml-1 font-mono text-[10px] text-red-300/80">
+                      (ref {errorRef})
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button

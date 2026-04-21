@@ -8,6 +8,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
+import { randomBytes } from "crypto";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { FeedbackSubmitSchema } from "@/lib/feedback/schema";
@@ -33,14 +34,22 @@ function isAllowedOrigin(origin: string | null): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const errorRef = randomBytes(6).toString("hex");
+
   const origin = request.headers.get("origin");
   if (!isAllowedOrigin(origin)) {
-    return NextResponse.json({ ok: false, error: "Invalid origin" }, { status: 403 });
+    return NextResponse.json(
+      { ok: false, error: "Invalid origin", errorRef },
+      { status: 403 },
+    );
   }
 
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, error: "Unauthorized", errorRef },
+      { status: 401 },
+    );
   }
   const userId = session.user.id;
 
@@ -48,13 +57,16 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ ok: false, error: "Invalid body" }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "Invalid body", errorRef },
+      { status: 400 },
+    );
   }
 
   const parsed = FeedbackSubmitSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { ok: false, error: "Invalid submission", issues: parsed.error.flatten() },
+      { ok: false, error: "Invalid submission", issues: parsed.error.flatten(), errorRef },
       { status: 400 },
     );
   }
@@ -68,9 +80,9 @@ export async function POST(request: NextRequest) {
       appVersion: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7),
     });
   } catch (err) {
-    console.error("[feedback.submit] bundle build failed", { userId, err });
+    console.error("[feedback.submit] bundle build failed", { errorRef, userId, err });
     return NextResponse.json(
-      { ok: false, error: "Could not build feedback bundle" },
+      { ok: false, error: "Could not build feedback bundle", errorRef },
       { status: 500 },
     );
   }
@@ -94,9 +106,9 @@ export async function POST(request: NextRequest) {
       select: { id: true },
     });
   } catch (err) {
-    console.error("[feedback.submit] insert failed", { userId, err });
+    console.error("[feedback.submit] insert failed", { errorRef, userId, err });
     return NextResponse.json(
-      { ok: false, error: "Could not save feedback" },
+      { ok: false, error: "Could not save feedback", errorRef },
       { status: 500 },
     );
   }
