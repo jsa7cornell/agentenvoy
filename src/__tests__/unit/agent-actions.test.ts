@@ -298,6 +298,10 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     // other side. Pre-engagement tests override these to null.
     guestEmail: "sarah@example.com",
     guestName: "Sarah",
+    calendarEventId: null,
+    // cancel-pipeline reads these — default to empty so the cascade runs
+    // the "no holds" branch. Tests that exercise hold-release override.
+    holds: [],
     link: {
       id: "link-1",
       type: "contextual",
@@ -496,8 +500,15 @@ describe("executeActions", () => {
   // --- Cancel ---
 
   describe("cancel", () => {
-    it("cancels a session and creates a system message", async () => {
-      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
+    // Post-2026-04-20 PR #16: handleCancel routes through the shared
+    // cancelSession() pipeline. statusLabel is always "Cancelled by host"
+    // for agent-initiated cancels (via statusLabelFor(initiator)); the old
+    // reason-as-statusLabel behavior moved into cancellationNote + the
+    // system-message content.
+    it("cancels a session, notes the reason, and posts a system message", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeSession({ calendarEventId: null })
+      );
 
       const results = await executeActions(
         [{ action: "cancel", params: { sessionId: "session-1", reason: "Host unavailable" } }],
@@ -506,10 +517,17 @@ describe("executeActions", () => {
 
       expect(results[0].success).toBe(true);
       expect(results[0].message).toContain("Sarah");
-      expect(mockPrisma.negotiationSession.update).toHaveBeenCalledWith({
-        where: { id: "session-1" },
-        data: { status: "cancelled", statusLabel: "Host unavailable" },
-      });
+      expect(mockPrisma.negotiationSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "session-1" },
+          data: expect.objectContaining({
+            status: "cancelled",
+            statusLabel: "Cancelled by host",
+            cancelledByRole: "agent",
+            cancellationNote: "Host unavailable",
+          }),
+        })
+      );
       expect(mockPrisma.message.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           sessionId: "session-1",
@@ -530,7 +548,10 @@ describe("executeActions", () => {
       expect(results[0].success).toBe(true);
       expect(mockPrisma.negotiationSession.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ statusLabel: "Cancelled by host" }),
+          data: expect.objectContaining({
+            statusLabel: "Cancelled by host",
+            cancellationNote: null,
+          }),
         })
       );
     });

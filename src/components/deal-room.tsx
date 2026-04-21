@@ -1186,9 +1186,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 </button>
               </>
             )}
-            {/* Propose changes — injects synthetic Envoy bubbles so the
+            {/* Find a new time — injects synthetic Envoy bubbles so the
                 guest can re-pick without typing. Each click adds another
-                pair (text + picker) at the bottom of the thread. */}
+                pair (text + picker) at the bottom of the thread.
+                Renamed from "Propose changes" per 2026-04-20 calendar-popup
+                proposal: both host and guest have the same goal (find a
+                new time) — naming it that way aligns wording across the
+                two surfaces (deal room + popup). */}
             <button
               onClick={() => {
                 setProposeChangesCount((n) => n + 1);
@@ -1201,7 +1205,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               }}
               className="text-xs text-indigo-400 hover:text-indigo-300 transition"
             >
-              Propose changes
+              Find a new time
             </button>
             {/* More details */}
             {hasExtraDetails && (
@@ -1215,6 +1219,39 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         )}
 
+
+        {/* Cancelled-state banner — per 2026-04-20 proposal §Q4, cancelled
+            sessions stay visible in the feed (NOT auto-archived) with a
+            banner that offers a fresh-start path for whoever's looking:
+            • host → dashboard to schedule something new
+            • guest → host's generic /meet/<slug> to reach out again
+            Keeps the prior messages accessible (scroll up) while making
+            the "this meeting is over; here's what to do next" moment
+            unambiguous. Host can still archive manually from the sidebar. */}
+        {eventStatus === "cancelled" && (
+          <div className="ml-5 mt-2.5 px-3 py-2.5 rounded-lg border border-red-500/20 bg-red-500/5">
+            <div className="text-xs text-secondary mb-2">
+              This meeting was cancelled. The deal room stays here for reference.
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {isHost ? (
+                <a
+                  href="/dashboard"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-500/90 hover:bg-indigo-500 text-white rounded-lg transition"
+                >
+                  Schedule something new →
+                </a>
+              ) : (
+                <a
+                  href={`/meet/${slug}`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-indigo-500/90 hover:bg-indigo-500 text-white rounded-lg transition"
+                >
+                  Reach {hostName ? hostName.split(" ")[0] : "them"} again →
+                </a>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Host management row — Add participant (non-confirmed) + GCal status (confirmed) + Archive/Cancel */}
         {isHost && eventStatus !== "cancelled" && (
@@ -1328,7 +1365,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         <ul className="text-xs text-secondary space-y-1 mb-4 ml-3 list-disc">
           <li>Delete the Google Calendar event and notify all attendees</li>
           <li>Release any holds blocking your calendar</li>
-          <li>Archive this deal room</li>
+          <li>Mark this deal room as cancelled (still visible in the feed)</li>
         </ul>
         <p className="text-xs text-zinc-500 mb-5">This can&apos;t be undone.</p>
         <div className="flex gap-2">
@@ -1350,7 +1387,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   body: JSON.stringify({ sessionId }),
                 });
                 if (res.ok) {
-                  window.location.href = "/dashboard";
+                  // Stay on the deal room — it now renders the cancelled
+                  // banner with a fresh-start CTA. Reload so the updated
+                  // session state (status, system message) is picked up.
+                  window.location.reload();
                 } else {
                   const data = await res.json();
                   alert(data.error || "Cancel failed — please try again.");
