@@ -95,10 +95,25 @@ export async function POST(req: NextRequest) {
       console.log("Schedule context error:", e);
       return null;
     }),
-    // Fetch active negotiation sessions
+    // Fetch active negotiation sessions. Include link.code + link.slug so
+    // the "Active sessions" context can surface the update_link identifier
+    // Envoy needs (see channel.md — update_link requires `code`). Before
+    // 2026-04-21 we only surfaced session ID; the LLM had to scrape the
+    // code from thread-card text in history and frequently hallucinated a
+    // wrong one → "Link not found" on host edits shortly after create.
     prisma.negotiationSession.findMany({
       where: { hostId: safeUser.id, archived: false },
-      include: { link: { select: { inviteeName: true, inviteeEmail: true, topic: true } } },
+      include: {
+        link: {
+          select: {
+            inviteeName: true,
+            inviteeEmail: true,
+            topic: true,
+            code: true,
+            slug: true,
+          },
+        },
+      },
       orderBy: { updatedAt: "desc" },
       take: 20,
     }),
@@ -201,12 +216,37 @@ export async function POST(req: NextRequest) {
     contextParts.push(`Host directives (highest priority):\n${(user.hostDirectives as string[]).map(d => `- ${d}`).join("\n")}`);
   }
 
-  // Active sessions context — use pre-fetched result
+  // Active sessions context — use pre-fetched result.
+  //
+  // Each row surfaces BOTH the sessionId (required for session-scoped
+  // actions: update_format / update_time / cancel / hold_slot / etc.) AND
+  // the link.code + url (required for link-scoped actions: update_link /
+  // expand_link). Before 2026-04-21 only sessionId was shown; the channel
+  // playbook told the LLM "use `code` from Active sessions context" but
+  // the context didn't actually contain it, so the LLM scraped thread-card
+  // text from history and routinely hallucinated a wrong code — "Link not
+  // found" bug reported 2026-04-21 (Josh Brown case).
   if (activeSessions.length > 0) {
-    const sessionList = activeSessions.map(s =>
-      `- "${s.title || 'Untitled'}" (ID: ${s.id}) — status: ${s.status}, guest: ${s.link.inviteeName || s.guestEmail || "unknown"}${s.statusLabel ? `, note: ${s.statusLabel}` : ""}`
-    ).join('\n');
-    contextParts.push(`Active sessions:\n${sessionList}\n\nYou can execute actions on these sessions using [ACTION] blocks.`);
+    const sessionList = activeSessions.map(s => {
+      const guest = s.link.inviteeName || s.guestEmail || "unknown";
+      const note = s.statusLabel ? `, note: ${s.statusLabel}` : "";
+      const code = s.link.code ?? null;
+      const url = s.link.slug && s.link.code
+        ? `/meet/${s.link.slug}/${s.link.code}`
+        : null;
+      const ids = [
+        `sessionId: ${s.id}`,
+        code ? `linkCode: ${code}` : null,
+        url ? `url: ${url}` : null,
+      ].filter(Boolean).join(", ");
+      return `- "${s.title || 'Untitled'}" (${ids}) — status: ${s.status}, guest: ${guest}${note}`;
+    }).join('\n');
+    contextParts.push(
+      `Active sessions:\n${sessionList}\n\n` +
+      `You can execute actions on these sessions using [ACTION] blocks. ` +
+      `For session-scoped actions (update_format / update_time / update_location / cancel / hold_slot / archive) pass sessionId. ` +
+      `For link-scoped actions (update_link / expand_link) pass linkCode — it's the 6-char string after /meet/{slug}/ in the url above.`
+    );
   } else {
     contextParts.push("Active sessions: None");
   }

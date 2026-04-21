@@ -249,6 +249,8 @@ const mockPrisma = vi.hoisted(() => ({
   negotiationLink: {
     create: vi.fn(),
     findFirst: vi.fn(),
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
     update: vi.fn(),
   },
   message: {
@@ -1349,7 +1351,59 @@ describe("executeActions", () => {
       expect(call.data.rules.preferredTimeStart).toBe("06:00");
     });
 
-    it("rejects when no identifying code or sessionId provided", async () => {
+    it("rejects when no identifying code or sessionId provided (and no recent drafts)", async () => {
+      // Exactly-one-recent-draft fallback (2026-04-21) only fires when there's
+      // a single unambiguous draft in the last 5 minutes. Zero drafts →
+      // original strict reject still applies.
+      mockPrisma.negotiationLink.findMany.mockResolvedValue([]);
+
+      const results = await executeActions(
+        [{ action: "expand_link", params: { isVip: true } }],
+        HOST_USER_ID
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toContain("code");
+    });
+
+    it("exactly-one-recent-draft fallback resolves update_link without identifier", async () => {
+      // Suzie case from feedback cmo85p0yq00071: LLM emitted update_link with
+      // no code/sessionId ~12min after creating the link. Narrow fallback:
+      // exactly one draft link in the last 5min → use it.
+      const recentLink = {
+        id: "link-recent",
+        code: "sfldk9",
+        userId: HOST_USER_ID,
+        rules: { format: "video", duration: 30 },
+        inviteeName: "Suzie",
+      };
+      mockPrisma.negotiationLink.findMany.mockResolvedValue([
+        { id: recentLink.id, code: recentLink.code },
+      ]);
+      mockPrisma.negotiationLink.findUnique.mockResolvedValue(recentLink);
+      mockPrisma.negotiationSession.findFirst.mockResolvedValue({ id: "session-recent" });
+      mockPrisma.negotiationLink.update.mockResolvedValue({
+        ...recentLink,
+        rules: { format: "video", duration: 60 },
+      });
+
+      const results = await executeActions(
+        [{ action: "update_link", params: { duration: 60 } }],
+        HOST_USER_ID
+      );
+
+      expect(results[0].success).toBe(true);
+      expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: recentLink.id } }),
+      );
+    });
+
+    it("rejects when multiple recent drafts exist (ambiguous)", async () => {
+      // Two drafts in the 5-min window — fallback refuses to guess.
+      mockPrisma.negotiationLink.findMany.mockResolvedValue([
+        { id: "link-a", code: "aaa111" },
+        { id: "link-b", code: "bbb222" },
+      ]);
+
       const results = await executeActions(
         [{ action: "expand_link", params: { isVip: true } }],
         HOST_USER_ID
