@@ -24,15 +24,15 @@ export function DealRoomConnectCtas({
   slug,
   code,
 }: Props) {
-  // returnUrl preserved for future flows that need to bounce back to the
-  // deal room after auth (e.g. read-only path if it returns).
-  void slug;
-  void code;
+  // sessionId no longer used — the callbackUrl below routes the user back
+  // to the deal-room they came from, where the now-connected calendar
+  // lights up the bilateral availability view immediately.
+  void sessionId;
 
   const signUpFlow = useOAuthSignIn({
     mode: "first-connect",
     entryPoint: "deal-room",
-    callbackUrl: `/dashboard?from=deal-room&sessionId=${encodeURIComponent(sessionId)}`,
+    callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
   });
 
   const wrapperClass =
