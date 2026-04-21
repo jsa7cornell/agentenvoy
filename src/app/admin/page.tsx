@@ -58,6 +58,12 @@ const TOOLS: Tool[] = [
     description: "One-off data-repair surfaces. Today: re-dispatch confirmed meetings that landed with dryrun-* eventIds from the EFFECT_MODE_CALENDAR config miss.",
     tag: "database",
   },
+  {
+    href: "/admin/access-log",
+    label: "Access Log",
+    description: "Break-glass audit trail — every admin read of user-specific data. Who looked, what path, which target user, when.",
+    tag: "audit",
+  },
 ];
 
 const TAG_COLORS: Record<string, string> = {

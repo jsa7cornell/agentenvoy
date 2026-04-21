@@ -5,11 +5,12 @@
  * 2026-04-17 Phase 2 calendar-dispatcher config miss. Future repair jobs
  * will accrete here; keep each one self-contained.
  *
- * OAuth-gated to ADMIN_EMAIL via requireAdminPage(); 404s otherwise.
+ * Admin-gated via requireAdminContext(); 404s otherwise.
  */
 
 import Link from "next/link";
-import { requireAdminPage } from "@/lib/admin-auth";
+import { requireAdminContext } from "@/lib/admin-auth";
+import { logAdminAccess } from "@/lib/admin/access-log";
 import { prisma } from "@/lib/prisma";
 import { DryrunRepairClient } from "./dryrun-repair-client";
 
@@ -17,7 +18,12 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function AdminRepairPage() {
-  await requireAdminPage("/admin/repair");
+  const admin = await requireAdminContext("/admin/repair");
+  await logAdminAccess({
+    adminId: admin.id,
+    path: "/admin/repair",
+    action: "list",
+  });
 
   // Server-fetch the list so the initial render doesn't flash empty.
   const broken = await prisma.negotiationSession.findMany({

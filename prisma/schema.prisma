@@ -76,6 +76,27 @@ model User {
   channel          Channel?
   calendarCaches   CalendarCache[]
   computedSchedule ComputedSchedule?
+  adminAccessLogs  AdminAccessLog[]     @relation("AdminAccessLogs")
+}
+
+/// Break-glass audit of every admin read of user-specific data (F5 of the
+/// feedback-loops proposal). Written via logAdminAccess() in src/lib/admin/
+/// access-log.ts. `path` stores the route template (literal ":id"), not the
+/// resolved path — targetUserId carries the resolved user. `/admin/access-log`
+/// itself is exempt from logging to avoid a self-filling loop.
+model AdminAccessLog {
+  id           String   @id @default(cuid())
+  adminId      String
+  admin        User     @relation("AdminAccessLogs", fields: [adminId], references: [id], onDelete: Cascade)
+  targetUserId String?
+  path         String
+  action       String // "view" | "list" | "export" — enforced at the logger boundary via Zod
+  contextJson  Json?
+  createdAt    DateTime @default(now())
+
+  @@index([adminId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([createdAt])
 }
 
 model ApiKey {

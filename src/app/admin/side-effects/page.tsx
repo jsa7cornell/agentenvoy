@@ -1,9 +1,10 @@
 /**
  * /admin/side-effects — side-effect dispatcher audit log.
- * OAuth-gated to ADMIN_EMAIL; non-admins get 404.
+ * Admin-gated via requireAdminContext(); non-admins get 404.
  */
 
-import { requireAdminPage } from "@/lib/admin-auth";
+import { requireAdminContext } from "@/lib/admin-auth";
+import { logAdminAccess } from "@/lib/admin/access-log";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 
@@ -20,7 +21,12 @@ export default async function AdminSideEffectsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireAdminPage();
+  const admin = await requireAdminContext();
+  await logAdminAccess({
+    adminId: admin.id,
+    path: "/admin/side-effects",
+    action: "list",
+  });
 
   const params = await searchParams;
   const filters: Record<string, string> = {};

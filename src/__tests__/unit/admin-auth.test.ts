@@ -1,16 +1,14 @@
 /**
  * admin-auth gate tests — F1 of the feedback-loops proposal (2026-04-20).
  *
- * The gate swapped from ADMIN_EMAIL-only to `User.userClass === "admin"`
- * with a 24-48h env-var fallback. Asserts:
- *   - userClass === "admin" passes the gate (authoritative path)
- *   - userClass === "user" + email matches ADMIN_EMAIL → passes (fallback)
- *   - userClass === "user" + non-matching email → fails (404/false)
- *   - no session → fails (redirect for pages, false for API)
- *   - email casing is normalized when matching the env-var fallback
- *
- * The fallback path will be removed in the very next PR once this ships
- * and John's row is confirmed flipped to "admin".
+ * Gate: `User.userClass === "admin"`. The 24-48h `ADMIN_EMAIL` env-var
+ * fallback that shipped with F1 was removed in the follow-up PR (#24);
+ * tests assert the single-path behavior:
+ *   - userClass === "admin" passes
+ *   - userClass === "user" fails (404/false)
+ *   - User row missing fails (404/false)
+ *   - no session fails (redirect for pages, false for API)
+ *   - requireAdminContext returns { id, email } for admins
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -48,21 +46,21 @@ import { prisma } from "@/lib/prisma";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.ADMIN_EMAIL = "jsa7cornell@gmail.com";
 });
 
 async function load() {
-  // Re-import under each test so module-level ADMIN_EMAIL picks up env changes.
   vi.resetModules();
   return import("@/lib/admin-auth");
 }
 
 describe("isAdminSession", () => {
-  it("returns true when userClass is 'admin' (authoritative path)", async () => {
+  it("returns true when userClass is 'admin'", async () => {
     vi.mocked(getServerSession).mockResolvedValue({
-      user: { email: "anyone@example.com" },
+      user: { email: "admin@example.com" },
     } as never);
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: "u_admin",
+      email: "admin@example.com",
       userClass: "admin",
     } as never);
 
@@ -70,35 +68,13 @@ describe("isAdminSession", () => {
     expect(await isAdminSession()).toBe(true);
   });
 
-  it("returns true on env-var fallback when userClass is 'user' but email matches ADMIN_EMAIL", async () => {
-    vi.mocked(getServerSession).mockResolvedValue({
-      user: { email: "jsa7cornell@gmail.com" },
-    } as never);
-    vi.mocked(prisma.user.findUnique).mockResolvedValue({
-      userClass: "user",
-    } as never);
-
-    const { isAdminSession } = await load();
-    expect(await isAdminSession()).toBe(true);
-  });
-
-  it("normalizes email casing when matching the env-var fallback", async () => {
-    vi.mocked(getServerSession).mockResolvedValue({
-      user: { email: "JSA7cornell@GMAIL.com" },
-    } as never);
-    vi.mocked(prisma.user.findUnique).mockResolvedValue({
-      userClass: "user",
-    } as never);
-
-    const { isAdminSession } = await load();
-    expect(await isAdminSession()).toBe(true);
-  });
-
-  it("returns false when userClass is 'user' and email does not match ADMIN_EMAIL", async () => {
+  it("returns false when userClass is 'user'", async () => {
     vi.mocked(getServerSession).mockResolvedValue({
       user: { email: "nobody@example.com" },
     } as never);
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: "u_nobody",
+      email: "nobody@example.com",
       userClass: "user",
     } as never);
 
@@ -106,7 +82,7 @@ describe("isAdminSession", () => {
     expect(await isAdminSession()).toBe(false);
   });
 
-  it("returns false when User row is missing and email does not match ADMIN_EMAIL", async () => {
+  it("returns false when User row is missing", async () => {
     vi.mocked(getServerSession).mockResolvedValue({
       user: { email: "ghost@example.com" },
     } as never);
@@ -121,11 +97,10 @@ describe("isAdminSession", () => {
 
     const { isAdminSession } = await load();
     expect(await isAdminSession()).toBe(false);
-    // No DB lookup performed when there's no email to key on.
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
-  it("returns false when there is no session at all", async () => {
+  it("returns false when there is no session", async () => {
     vi.mocked(getServerSession).mockResolvedValue(null);
 
     const { isAdminSession } = await load();
@@ -139,6 +114,8 @@ describe("requireAdminPage", () => {
       user: { email: "admin@example.com" },
     } as never);
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: "u_admin",
+      email: "admin@example.com",
       userClass: "admin",
     } as never);
 
@@ -146,11 +123,13 @@ describe("requireAdminPage", () => {
     await expect(requireAdminPage()).resolves.toBe("admin@example.com");
   });
 
-  it("calls notFound() when authenticated but userClass is 'user' and email does not match fallback", async () => {
+  it("calls notFound() when authenticated but userClass is 'user'", async () => {
     vi.mocked(getServerSession).mockResolvedValue({
       user: { email: "nobody@example.com" },
     } as never);
     vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: "u_nobody",
+      email: "nobody@example.com",
       userClass: "user",
     } as never);
 
@@ -166,5 +145,38 @@ describe("requireAdminPage", () => {
     await expect(requireAdminPage("/admin/failures")).rejects.toThrow(
       /NEXT_REDIRECT:\/api\/auth\/signin\?callbackUrl=%2Fadmin%2Ffailures/,
     );
+  });
+});
+
+describe("requireAdminContext", () => {
+  it("returns { id, email } on admin success", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({
+      user: { email: "admin@example.com" },
+    } as never);
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: "u_admin",
+      email: "admin@example.com",
+      userClass: "admin",
+    } as never);
+
+    const { requireAdminContext } = await load();
+    await expect(requireAdminContext()).resolves.toEqual({
+      id: "u_admin",
+      email: "admin@example.com",
+    });
+  });
+
+  it("calls notFound() when userClass is 'user'", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({
+      user: { email: "nobody@example.com" },
+    } as never);
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: "u_nobody",
+      email: "nobody@example.com",
+      userClass: "user",
+    } as never);
+
+    const { requireAdminContext } = await load();
+    await expect(requireAdminContext()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 });
