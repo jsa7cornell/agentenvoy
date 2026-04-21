@@ -11,6 +11,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
 import { sanitizeHistory } from "@/lib/conversation";
+import { mergeChannelMetadata } from "@/lib/channel/metadata-schema";
+import type { ChannelMessageMetadata } from "@/lib/channel/metadata-schema";
 
 const VALID_STATUSES = ["active", "proposed", "cancelled", "escalated"];
 
@@ -238,7 +240,14 @@ export async function POST(req: NextRequest) {
   console.log(`[negotiate/message] start | session=${sessionId} | role=${messageRole} | slots=${scoredSlots.length} | history=${history.length}`);
 
   const { streamAgentResponse } = await import("@/agent/administrator");
+  // Captured via onInvocation; used to snapshot the prompt that produced
+  // this turn's response for feedback-pipeline debug reads.
+  const promptSnapshotEnabled = process.env.PROMPT_SNAPSHOT_ENABLED !== "false";
+  let invocationInfo: { systemPrompt: string; modelId: string } | null = null;
   const streamResult = await streamAgentResponse(context, {
+    onInvocation(info) {
+      invocationInfo = info;
+    },
     async onFinish({ text: responseText }) {
       try {
         const responseLen = responseText?.length || 0;
@@ -248,9 +257,10 @@ export async function POST(req: NextRequest) {
 
         // Parse and execute [ACTION] blocks
         const actions = parseActions(responseText);
+        let actionResults: Awaited<ReturnType<typeof executeActions>> = [];
         if (actions.length > 0) {
           console.log(`[negotiate/message] actions | session=${sessionId} | ${actions.map(a => a.action).join(",")}`);
-          await executeActions(actions, session.hostId, { sessionId });
+          actionResults = await executeActions(actions, session.hostId, { sessionId });
         }
 
         // Strip all structured blocks from the display text
@@ -267,9 +277,48 @@ export async function POST(req: NextRequest) {
         const delegateSpeaker = parseDelegateSpeaker(displayText);
         displayText = stripDelegateSpeaker(displayText);
 
+        // Compose the administrator-turn metadata: parsed actions + their
+        // results, plus a prompt snapshot so feedback bundles can show the
+        // instructions that produced this turn. Host-only — deal-room guest
+        // render already filters these via GUEST_METADATA_ALLOWLIST.
+        const additions: Partial<ChannelMessageMetadata> = {};
+        if (actions.length > 0) {
+          additions.actions = actions.map((a) => ({
+            action: a.action,
+            params: (a.params ?? {}) as Record<string, unknown>,
+          }));
+          additions.actionResults = actions.map((a, i) => {
+            const r = actionResults[i];
+            if (!r) {
+              return { action: a.action, success: false, message: "no_result" };
+            }
+            return {
+              action: a.action,
+              success: r.success,
+              message: r.message,
+              ...(r.data ? { data: r.data } : {}),
+            };
+          });
+        }
+        if (promptSnapshotEnabled && invocationInfo) {
+          additions.promptContext = {
+            systemPrompt: invocationInfo.systemPrompt,
+            modelId: invocationInfo.modelId,
+          };
+        }
+        const adminMetadata = mergeChannelMetadata(null, additions);
+        const hasMetadata = Object.keys(adminMetadata).length > 0;
+
         // Save the response (stripped of all blocks)
         await prisma.message.create({
-          data: { sessionId, role: "administrator", content: displayText },
+          data: {
+            sessionId,
+            role: "administrator",
+            content: displayText,
+            ...(hasMetadata
+              ? { metadata: adminMetadata as Prisma.InputJsonValue }
+              : {}),
+          },
         });
 
         if (delegateSpeaker) {
