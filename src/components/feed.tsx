@@ -334,7 +334,7 @@ export default function Feed() {
     } else if (messages.length > prevMessageCount.current) {
       stickToBottomRef.current = true;
       requestAnimationFrame(() => {
-        container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+        container.scrollTop = container.scrollHeight;
       });
     }
     prevMessageCount.current = messages.length;
