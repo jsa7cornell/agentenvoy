@@ -12,23 +12,27 @@ CREATE INDEX IF NOT EXISTS "FeedbackReport_status_createdAt_idx"
 CREATE INDEX IF NOT EXISTS "FeedbackReport_area_createdAt_idx"
   ON "FeedbackReport"("area", "createdAt");
 
-CREATE TABLE IF NOT EXISTS "AgentAccessToken" (
-  "id"          TEXT PRIMARY KEY,
-  "reportId"    TEXT NOT NULL REFERENCES "FeedbackReport"("id") ON DELETE CASCADE,
-  "mintedById"  TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE,
-  "jti"         TEXT NOT NULL,
-  "expiresAt"   TIMESTAMP(3) NOT NULL,
-  "usedAt"      TIMESTAMP(3),
-  "fetchCount"  INTEGER NOT NULL DEFAULT 0,
-  "revokedAt"   TIMESTAMP(3),
-  "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT NOW()
+CREATE TABLE "AgentAccessToken" (
+    "id"          TEXT NOT NULL,
+    "reportId"    TEXT NOT NULL,
+    "mintedById"  TEXT NOT NULL,
+    "jti"         TEXT NOT NULL,
+    "expiresAt"   TIMESTAMP(3) NOT NULL,
+    "usedAt"      TIMESTAMP(3),
+    "fetchCount"  INTEGER NOT NULL DEFAULT 0,
+    "revokedAt"   TIMESTAMP(3),
+    "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AgentAccessToken_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS "AgentAccessToken_jti_key"
-  ON "AgentAccessToken"("jti");
-CREATE INDEX IF NOT EXISTS "AgentAccessToken_reportId_idx"
-  ON "AgentAccessToken"("reportId");
-CREATE INDEX IF NOT EXISTS "AgentAccessToken_mintedById_idx"
-  ON "AgentAccessToken"("mintedById");
-CREATE INDEX IF NOT EXISTS "AgentAccessToken_expiresAt_idx"
-  ON "AgentAccessToken"("expiresAt");
+CREATE UNIQUE INDEX "AgentAccessToken_jti_key" ON "AgentAccessToken"("jti");
+CREATE INDEX "AgentAccessToken_reportId_idx" ON "AgentAccessToken"("reportId");
+CREATE INDEX "AgentAccessToken_mintedById_idx" ON "AgentAccessToken"("mintedById");
+CREATE INDEX "AgentAccessToken_expiresAt_idx" ON "AgentAccessToken"("expiresAt");
+
+ALTER TABLE "AgentAccessToken" ADD CONSTRAINT "AgentAccessToken_reportId_fkey"
+    FOREIGN KEY ("reportId") REFERENCES "FeedbackReport"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE "AgentAccessToken" ADD CONSTRAINT "AgentAccessToken_mintedById_fkey"
+    FOREIGN KEY ("mintedById") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
