@@ -134,6 +134,12 @@ export async function parsePreferences(
 - inviteeTimezone: IANA timezone string when the host declares where the invitee is (e.g. "Sarah is on EST" → "America/New_York", "she's in Tokyo" → "Asia/Tokyo"). Omit if not explicitly stated. This is a seed for the deal-room greeting — wrong values produce wrong times, so only emit when the host names a concrete location or zone.
 - topic: string or null
 - notes: string or null
+- steering: "open" | "soft" | "narrow" | "exclusive" — host-intent tier (proposal 2026-04-21). Optional (omit if truly unclear; the downstream default is "open"). Apply the 4-step discriminator ladder:
+  1. Did the user name ANY preference? If no → "open" (e.g. "get time with X", "grab X", "anytime next two weeks", "whenever works").
+  2. Did they signal fallback (else/preferred/ideally/but/or)? If yes → "soft" (e.g. "Wed ideally else Thu", "afternoons preferred, morning is fine").
+  3. Did they name specific slots, not a window (2+ enumerated offerings)? If yes → "exclusive" (e.g. "3pm Tuesday or 4pm Wednesday").
+  4. Otherwise → "narrow" (e.g. "Tuesday afternoon only", "Mon-Wed next week", "5-8pm tonight").
+  Cost asymmetry — WHEN IN DOUBT, PICK OPEN. Narrow-side errors produce a verbose bulleted greeting for an offer the host didn't actually narrow; open-side errors degrade gracefully (widget + scoring still carry the narrowing via field presence).
 
 VIP RULES (critical — isVip is a single binary flag, not a tier ladder):
 - Default is NOT VIP. Emit isVip only when the host gives a clear signal.

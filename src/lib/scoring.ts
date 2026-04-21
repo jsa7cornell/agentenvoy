@@ -1519,6 +1519,24 @@ export interface LinkRules {
    * the *label*, those are the *filter*.
    */
   timingLabel?: string;
+  /**
+   * Host intent, captured at `create_link` time by the LLM (proposal
+   * 2026-04-21_host-intent-capture). Drives greeting presentation:
+   *   - `open` / `soft` → skip bulleted body, lean on calendar widget
+   *   - `narrow` / `exclusive` → render bulleted body (the specifics ARE
+   *     the offer)
+   *
+   * Cross-layer invariant (§4.8): `exclusive` REQUIRES at least one
+   * `slotOverrides` entry with `score === -2`. The create-time validator
+   * (`validateIntent` in `lib/intent.ts`) steps `exclusive` down to
+   * `narrow` when the override is missing; a runtime mismatch at render
+   * time is a hard bug, not a display choice.
+   *
+   * Optional at the transport layer — missing → `deriveLegacy(rules)` (the
+   * pre-intent predicate shim). The shim's delete trigger is telemetry-
+   * based (§4.10) and lives in a follow-up PR.
+   */
+  intent?: { steering: "open" | "soft" | "narrow" | "exclusive" };
 }
 
 // Canonical short day-name table. All persisted `preferredDays` / `lastResort` /
@@ -1736,6 +1754,22 @@ export function normalizeLinkRules(
     else delete out.guestGuidance;
   } else {
     delete out.guestGuidance;
+  }
+
+  // intent: host-intent steering enum (proposal 2026-04-21). Drop invalid
+  // shapes defensively so a mis-emitted value can never poison the greeting
+  // renderer. `validateIntent` from lib/intent.ts applies the asymmetric
+  // step-down rule; this block is purely shape hygiene.
+  const intent = input.intent;
+  if (intent && typeof intent === "object" && !Array.isArray(intent)) {
+    const raw = (intent as Record<string, unknown>).steering;
+    if (raw === "open" || raw === "soft" || raw === "narrow" || raw === "exclusive") {
+      out.intent = { steering: raw };
+    } else {
+      delete out.intent;
+    }
+  } else {
+    delete out.intent;
   }
 
   return out;
