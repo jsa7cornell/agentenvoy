@@ -38,6 +38,7 @@ export interface MintResult {
   ttlSeconds: number;
   fetchUrl: string;
   curl: string;
+  prompt: string;
 }
 
 export function AdminActionsPanel(props: {
@@ -53,6 +54,17 @@ export function AdminActionsPanel(props: {
   const [mintResult, setMintResult] = useState<MintResult | null>(null);
   const [mintError, setMintError] = useState<string | null>(null);
   const [minting, setMinting] = useState(false);
+  const [copied, setCopied] = useState<"curl" | "prompt" | null>(null);
+
+  async function copy(kind: "curl" | "prompt", value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(kind);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      /* ignore */
+    }
+  }
 
   const [, startTransition] = useTransition();
 
@@ -183,23 +195,52 @@ export function AdminActionsPanel(props: {
           </div>
 
           {mintResult ? (
-            <div className="mt-2 rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-xs">
-              <p className="mb-2 text-sky-200">
+            <div className="mt-2 space-y-3 rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-xs">
+              <p className="text-sky-200">
                 Token minted. Expires{" "}
                 <span className="font-mono">
                   {new Date(mintResult.expiresAt).toISOString().replace("T", " ").slice(0, 19)}Z
                 </span>
                 . Copy now — not shown again.
               </p>
-              <label className="block">
-                <span className="text-zinc-400">curl</span>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-zinc-400">curl</span>
+                  <button
+                    type="button"
+                    onClick={() => copy("curl", mintResult.curl)}
+                    className="rounded border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-white/10"
+                  >
+                    {copied === "curl" ? "Copied ✓" : "Copy"}
+                  </button>
+                </div>
                 <textarea
                   readOnly
                   rows={3}
                   value={mintResult.curl}
-                  className="mt-1 w-full resize-none rounded border border-white/10 bg-black/60 px-2 py-1 font-mono text-[11px] text-zinc-200"
+                  className="w-full resize-none rounded border border-white/10 bg-black/60 px-2 py-1 font-mono text-[11px] text-zinc-200"
                 />
-              </label>
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-zinc-400">
+                    Prompt for a fresh agent session
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => copy("prompt", mintResult.prompt)}
+                    className="rounded border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-white/10"
+                  >
+                    {copied === "prompt" ? "Copied ✓" : "Copy"}
+                  </button>
+                </div>
+                <textarea
+                  readOnly
+                  rows={8}
+                  value={mintResult.prompt}
+                  className="w-full resize-none rounded border border-white/10 bg-black/60 px-2 py-1 font-mono text-[11px] text-zinc-200"
+                />
+              </div>
             </div>
           ) : null}
         </div>

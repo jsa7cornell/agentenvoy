@@ -138,8 +138,11 @@ export default async function AdminFeedbackDetailPage({
                     {report.guestEmail}
                   </span>
                 )}
-                <span className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400">
-                  {report.id.slice(0, 10)}…
+                <span
+                  className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 select-all"
+                  title={report.id}
+                >
+                  {report.id}
                 </span>
               </div>
             </div>
@@ -251,7 +254,7 @@ export default async function AdminFeedbackDetailPage({
         ) : null}
 
         <section className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
-          <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">Request headers</h2>
+          <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">Client</h2>
           <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2 text-sm">
             <dt className="text-zinc-500">URL</dt>
             <dd className="break-all text-zinc-200">
@@ -312,13 +315,9 @@ export default async function AdminFeedbackDetailPage({
         </section>
 
         <footer className="mt-10 text-xs text-zinc-500">
-          Viewing this page is logged in{" "}
+          View audited in{" "}
           <Link href="/admin/access-log" className="text-sky-400 hover:underline">
             /admin/access-log
-          </Link>
-          . Back to{" "}
-          <Link href="/admin/feedback" className="text-sky-400 hover:underline">
-            /admin/feedback
           </Link>
           .
         </footer>

@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { FeedbackSubmitSchema } from "@/lib/feedback/schema";
 import { buildFeedbackBundle } from "@/lib/feedback/bundle-builder";
 import { track } from "@/lib/analytics/track";
+import { isAdminSession } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -128,5 +129,7 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  return NextResponse.json({ ok: true, reportId: report.id });
+  const isAdmin = await isAdminSession();
+
+  return NextResponse.json({ ok: true, reportId: report.id, isAdmin });
 }

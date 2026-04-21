@@ -139,70 +139,40 @@ export default async function AdminFeedbackPage({
 
   return (
     <main className="mx-auto max-w-6xl p-6 font-mono text-sm">
-      <header className="mb-6 flex items-baseline justify-between">
+      <header className="mb-6">
         <h1 className="text-xl font-bold">Admin · Feedback</h1>
-        <p className="text-zinc-500">
-          Signed in as <code>{admin.email}</code> · Range: <code>{label}</code> · Showing:{" "}
-          <code>{resolvedFilter}</code>
-          {statusFilter !== "all" && <> · status=<code>{statusFilter}</code></>}
-          {areaFilter !== "all" && <> · area=<code>{areaFilter}</code></>}
+        <p className="text-xs text-zinc-500">
+          {rows.length} report{rows.length === 1 ? "" : "s"} · {admin.email}
         </p>
       </header>
 
-      <section className="mb-4 flex flex-wrap gap-2 text-xs">
-        <RangeLink label="24h" current={label} target="24h" resolved={resolvedFilter} source={sourceFilter} status={statusFilter} area={areaFilter} />
-        <RangeLink label="7d" current={label} target="7d" resolved={resolvedFilter} source={sourceFilter} status={statusFilter} area={areaFilter} />
-        <RangeLink label="30d" current={label} target="30d" resolved={resolvedFilter} source={sourceFilter} status={statusFilter} area={areaFilter} />
-        <RangeLink label="all" current={label} target="all" resolved={resolvedFilter} source={sourceFilter} status={statusFilter} area={areaFilter} />
-        <span className="mx-2 text-zinc-600">·</span>
-        <ResolvedLink label="open" current={resolvedFilter} target="open" range={label} source={sourceFilter} status={statusFilter} area={areaFilter} />
-        <ResolvedLink label="resolved" current={resolvedFilter} target="resolved" range={label} source={sourceFilter} status={statusFilter} area={areaFilter} />
-        <ResolvedLink label="all" current={resolvedFilter} target="all" range={label} source={sourceFilter} status={statusFilter} area={areaFilter} />
-        <span className="mx-2 text-zinc-600">·</span>
-        <SourceLink label="all" current={sourceFilter} target="all" range={label} resolved={resolvedFilter} status={statusFilter} area={areaFilter} />
-        <SourceLink label="dashboard" current={sourceFilter} target="dashboard" range={label} resolved={resolvedFilter} status={statusFilter} area={areaFilter} />
-        <SourceLink label="deal-room" current={sourceFilter} target="deal-room" range={label} resolved={resolvedFilter} status={statusFilter} area={areaFilter} />
-      </section>
-
-      <section className="mb-4 flex flex-wrap gap-2 text-xs">
-        <span className="mr-1 text-zinc-500">status:</span>
-        {STATUS_VALUES.map((s) => (
-          <StatusLink
-            key={s}
-            label={s}
-            current={statusFilter}
-            target={s}
-            range={label}
-            resolved={resolvedFilter}
-            source={sourceFilter}
-            area={areaFilter}
-          />
-        ))}
-      </section>
-
-      <section className="mb-4 flex flex-wrap gap-2 text-xs">
-        <span className="mr-1 text-zinc-500">area:</span>
-        <AreaLink
-          label="all"
-          current={areaFilter}
-          target="all"
-          range={label}
-          resolved={resolvedFilter}
-          source={sourceFilter}
-          status={statusFilter}
-        />
-        {FEEDBACK_AREAS.map((a) => (
-          <AreaLink
-            key={a}
-            label={a}
-            current={areaFilter}
-            target={a}
-            range={label}
-            resolved={resolvedFilter}
-            source={sourceFilter}
-            status={statusFilter}
-          />
-        ))}
+      <section className="mb-5 space-y-1.5 text-xs">
+        <FilterRow label="range">
+          {(["24h", "7d", "30d", "all"] as const).map((t) => (
+            <RangeLink key={t} label={t} current={label} target={t} resolved={resolvedFilter} source={sourceFilter} status={statusFilter} area={areaFilter} />
+          ))}
+        </FilterRow>
+        <FilterRow label="show">
+          {(["open", "resolved", "all"] as const).map((t) => (
+            <ResolvedLink key={t} label={t} current={resolvedFilter} target={t} range={label} source={sourceFilter} status={statusFilter} area={areaFilter} />
+          ))}
+        </FilterRow>
+        <FilterRow label="source">
+          {(["all", "dashboard", "deal-room"] as const).map((t) => (
+            <SourceLink key={t} label={t} current={sourceFilter} target={t} range={label} resolved={resolvedFilter} status={statusFilter} area={areaFilter} />
+          ))}
+        </FilterRow>
+        <FilterRow label="status">
+          {STATUS_VALUES.map((s) => (
+            <StatusLink key={s} label={s} current={statusFilter} target={s} range={label} resolved={resolvedFilter} source={sourceFilter} area={areaFilter} />
+          ))}
+        </FilterRow>
+        <FilterRow label="area">
+          <AreaLink label="all" current={areaFilter} target="all" range={label} resolved={resolvedFilter} source={sourceFilter} status={statusFilter} />
+          {FEEDBACK_AREAS.map((a) => (
+            <AreaLink key={a} label={a} current={areaFilter} target={a} range={label} resolved={resolvedFilter} source={sourceFilter} status={statusFilter} />
+          ))}
+        </FilterRow>
       </section>
 
       {rows.length === 0 ? (
@@ -232,7 +202,7 @@ export default async function AdminFeedbackPage({
                   : text
                 : <span className="text-zinc-600 italic">(no text)</span>;
               return (
-                <tr key={r.id} className="border-b border-zinc-800 align-top">
+                <tr key={r.id} className="border-b border-zinc-800 align-top hover:bg-zinc-900/40">
                   <td className="py-2 pr-4 whitespace-nowrap text-zinc-500">
                     {r.createdAt.toISOString().replace("T", " ").slice(0, 19)}
                   </td>
@@ -294,6 +264,21 @@ export default async function AdminFeedbackPage({
         </p>
       </footer>
     </main>
+  );
+}
+
+function FilterRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="w-14 shrink-0 text-zinc-500">{label}</span>
+      {children}
+    </div>
   );
 }
 
