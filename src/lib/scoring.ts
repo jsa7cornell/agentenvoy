@@ -1869,10 +1869,39 @@ export function applyEventOverrides(
   // preferredTimeStart/End directly.
   const timeWindows = getTimeWindows(rules);
   if (timeWindows.length > 0) {
+    // Step 1 — filter to slots inside the explicit window.
     slots = slots.filter((s) => {
       const { hour, minute } = getLocalParts(new Date(s.start), tz);
       const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
       return timeWindows.some((w) => timeStr >= w.start && timeStr < w.end);
+    });
+
+    // Step 2 — explicit-window unlock. Off-hours slots (score 2-3, kind
+    // "off_hours") that land inside the host's explicitly-set window get
+    // promoted to offerable (score 0). The host pre-authorized these
+    // hours, so the default off-hours penalty no longer applies.
+    //
+    // Pre-2026-04-21 this unlock only lived in `getTier()` (line ~1011),
+    // which runs AFTER the widget + greeting filters have already dropped
+    // score > 1 slots. Result: a "tonight 5–8pm" link had zero offerable
+    // slots on the guest side even though the host had clearly offered
+    // that window (bug reported 2026-04-21, link q6vcyv). By promoting
+    // the score at scoring time, every downstream score-based filter
+    // naturally includes these slots without having to know about
+    // explicit-window semantics.
+    //
+    // Guardrails:
+    //   - Only score 2-3 off_hours gets promoted. Score ≤ 1 stays as-is
+    //     (already offerable). Score ≥ 4 ("sleep hours", "early morning /
+    //     late evening") stays blocked — explicit window can't override
+    //     the deepest off-hours band, matching the existing getTier rule.
+    //   - Only `kind === "off_hours"` gets promoted. Weekend slots
+    //     (`kind === "weekend"`) stay gated by `allowWeekends`;
+    //     event-occupied slots stay blocked by their real conflict.
+    slots = slots.map((s) => {
+      if (s.score < 2 || s.score > 3) return s;
+      if (s.kind !== "off_hours") return s;
+      return { ...s, score: 0, reason: `${s.reason ?? "off-hours"} (host window)` };
     });
   }
 

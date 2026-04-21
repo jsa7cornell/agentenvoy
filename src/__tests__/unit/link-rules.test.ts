@@ -422,3 +422,144 @@ describe("applyEventOverrides filters on multi-window", () => {
     ]);
   });
 });
+
+// ─── applyEventOverrides — explicit-window unlock of off-hours ───────────────
+
+describe("applyEventOverrides — explicit-window unlock", () => {
+  // Host says "tonight" → preferredTimeStart=17:00, preferredTimeEnd=20:00.
+  // The scoring engine's base scoring marks 5pm-8pm slots as off_hours
+  // (score 2-3) because they fall outside default business hours. When the
+  // host explicitly sets a preferredTime window, those slots should be
+  // promoted to offerable (score 0) so downstream score ≤ 1 filters include
+  // them. Regression for 2026-04-21 q6vcyv "no open times" bug.
+
+  /** Slot at a given UTC iso with explicit score + kind. */
+  function offHoursSlot(iso: string, score: 2 | 3): ScoredSlot {
+    return {
+      start: iso,
+      end: new Date(new Date(iso).getTime() + 30 * 60_000).toISOString(),
+      score,
+      reason: score === 2 ? "just outside business hours" : "off hours",
+      kind: "off_hours",
+      confidence: "high",
+      blockCost: "preference",
+      firmness: score === 3 ? "strong" : "weak",
+    };
+  }
+
+  it("promotes score-3 off-hours slot inside preferredTime window to offerable (score 0)", () => {
+    // 2026-04-21T18:00Z = 11 AM PDT (daytime). For an evening case, use
+    // 2026-04-22T02:00Z = 19:00 PDT on Tue, which is off-hours by default.
+    const eveningSlot = offHoursSlot("2026-04-22T02:00:00.000Z", 3);
+    const rules: LinkRules = {
+      preferredTimeStart: "17:00",
+      preferredTimeEnd: "20:00",
+    };
+    const out = applyEventOverrides([eveningSlot], rules, "America/Los_Angeles");
+    expect(out).toHaveLength(1);
+    expect(out[0].score).toBe(0);
+    expect(out[0].reason).toContain("host window");
+  });
+
+  it("promotes score-2 off-hours slot inside preferredTime window", () => {
+    const eveningSlot = offHoursSlot("2026-04-22T02:00:00.000Z", 2);
+    const rules: LinkRules = {
+      preferredTimeStart: "17:00",
+      preferredTimeEnd: "20:00",
+    };
+    const out = applyEventOverrides([eveningSlot], rules, "America/Los_Angeles");
+    expect(out).toHaveLength(1);
+    expect(out[0].score).toBe(0);
+  });
+
+  it("leaves already-offerable slot (score ≤ 1) unchanged", () => {
+    const daytimeSlot: ScoredSlot = {
+      start: "2026-04-22T02:00:00.000Z", // 19:00 PDT Tue
+      end: "2026-04-22T02:30:00.000Z",
+      score: 0,
+      reason: "open",
+      kind: "open",
+      confidence: "high",
+      blockCost: "none",
+      firmness: "weak",
+    };
+    const rules: LinkRules = {
+      preferredTimeStart: "17:00",
+      preferredTimeEnd: "20:00",
+    };
+    const out = applyEventOverrides([daytimeSlot], rules, "America/Los_Angeles");
+    expect(out).toHaveLength(1);
+    expect(out[0].score).toBe(0); // unchanged
+    expect(out[0].reason).toBe("open"); // unchanged
+  });
+
+  it("does NOT promote score-4 sleep-hours slot even if in window", () => {
+    // score 4 ("early morning / late evening") stays blocked. Host's explicit
+    // window can't unlock the deepest off-hours band — matches getTier's
+    // existing `score <= 3` gate.
+    const deepOffHours: ScoredSlot = {
+      start: "2026-04-22T02:00:00.000Z",
+      end: "2026-04-22T02:30:00.000Z",
+      score: 4,
+      reason: "early morning / late evening",
+      kind: "off_hours",
+      confidence: "high",
+      blockCost: "preference",
+      firmness: "strong",
+    };
+    const rules: LinkRules = {
+      preferredTimeStart: "17:00",
+      preferredTimeEnd: "20:00",
+    };
+    const out = applyEventOverrides([deepOffHours], rules, "America/Los_Angeles");
+    expect(out).toHaveLength(1);
+    expect(out[0].score).toBe(4); // unchanged
+  });
+
+  it("does NOT promote weekend slot in window — allowWeekends handles that separately", () => {
+    // Saturday 7 PM PDT = 2026-04-25T02:00Z, kind "weekend".
+    // Even inside preferredTime window, weekend kind stays gated by allowWeekends.
+    const weekendSlot: ScoredSlot = {
+      start: "2026-04-25T02:00:00.000Z",
+      end: "2026-04-25T02:30:00.000Z",
+      score: 3,
+      reason: "weekend",
+      kind: "weekend",
+      confidence: "high",
+      blockCost: "preference",
+      firmness: "strong",
+    };
+    const rules: LinkRules = {
+      preferredTimeStart: "17:00",
+      preferredTimeEnd: "20:00",
+    };
+    const out = applyEventOverrides([weekendSlot], rules, "America/Los_Angeles");
+    expect(out).toHaveLength(1);
+    expect(out[0].score).toBe(3); // unchanged
+  });
+
+  it("q6vcyv regression: evening window (17-20) unlocks tonight/tomorrow slots", () => {
+    // Mimics real q6vcyv rules. Mon 6 PM + Tue 6:30 PM should all end up
+    // offerable after applyEventOverrides — with or without the explicit
+    // window unlock, they'd be filtered in by dateRange but scored off-hours
+    // (score 3). Without the unlock, downstream score ≤ 1 filters drop them.
+    const slots: ScoredSlot[] = [
+      offHoursSlot("2026-04-22T01:30:00.000Z", 3), // Tue 6:30 PM PDT
+      offHoursSlot("2026-04-22T02:30:00.000Z", 3), // Tue 7:30 PM PDT
+    ];
+    const rules: LinkRules = {
+      format: "phone",
+      duration: 30,
+      dateRange: { start: "2026-04-21", end: "2026-05-01" },
+      preferredDays: ["Tue", "Wed", "Mon"],
+      preferredTimeStart: "17:00",
+      preferredTimeEnd: "20:00",
+    };
+    const out = applyEventOverrides(slots, rules, "America/Los_Angeles");
+    // All slots should have score ≤ 0 now (preferredDays also boosts Tue → -1).
+    expect(out.length).toBe(2);
+    for (const s of out) {
+      expect(s.score).toBeLessThanOrEqual(0);
+    }
+  });
+});
