@@ -60,16 +60,13 @@ export type ProgressExecutingAction =
 // Registry
 // ---------------------------------------------------------------------------
 
-const SIMPLE_STAGES = [
-  "scanning-calendar",
-  "scoring",
-  "thinking",
-  "drafting",
-  "finalizing",
-  "retrying",
-] as const;
-
-type SimpleStage = (typeof SIMPLE_STAGES)[number];
+type SimpleStage =
+  | "scanning-calendar"
+  | "scoring"
+  | "thinking"
+  | "drafting"
+  | "finalizing"
+  | "retrying";
 
 const SIMPLE_COPY: Record<SimpleStage, readonly ProgressCopyTemplate[]> = {
   "scanning-calendar": [
@@ -142,7 +139,6 @@ export const PROGRESS_COPY = {
 // Slot interpolation
 // ---------------------------------------------------------------------------
 
-const SLOT_NAMES: readonly ProgressCopySlot[] = ["day", "guest", "count", "tz"];
 const SLOT_REGEX = /\{(day|guest|count|tz)\}/g;
 
 /** Returns the list of slot names referenced by `template`. */

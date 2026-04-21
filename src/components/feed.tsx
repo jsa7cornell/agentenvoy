@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ThreadCard from "./thread-card";
+import { ChannelChatStreamParser, type ChannelChatFrame } from "@/lib/channel-chat-stream";
 import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-status";
 import { formatDuration } from "@/lib/format-duration";
 import { QuickReplies } from "./onboarding/quick-replies";
@@ -90,6 +91,14 @@ export default function Feed() {
   const [messages, setMessages] = useState<ChannelMsg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  // Progress narration status row (proposal decided 2026-04-21). Shows a
+  // rotating calendar-themed status line while the server moves through
+  // pipeline stages. Replaced by the final envoy bubble on the `text` frame.
+  // Screen-reader behaviour: the visible row is aria-live="off" so we don't
+  // queue four intermediate announcements; a single aria-live="polite"
+  // "Response ready." fires at the text-frame boundary (§2.3 N9).
+  const [statusCopy, setStatusCopy] = useState<string | null>(null);
+  const [responseReadyAnnouncement, setResponseReadyAnnouncement] = useState("");
   const [initialLoading, setInitialLoading] = useState(true);
   const [calendarConnected, setCalendarConnected] = useState(true);
   const [isCalibrated, setIsCalibrated] = useState(true);
@@ -453,19 +462,79 @@ export default function Feed() {
           setMessages(refreshData.messages || []);
         }
       } else {
-        const responseText = await res.text();
-        let content = responseText;
-        try {
-          const lines = responseText.split("\n").filter(Boolean);
-          const parsed = lines.map((line) => {
-            if (line.startsWith("0:")) {
-              return JSON.parse(line.slice(2));
+        // JSON-lines stream (application/x-ndjson). Status frames update the
+        // inline status row; the terminating text frame renders the final
+        // envoy bubble. Proposal: envoy-progress-reasoning-narration
+        // (decided 2026-04-21). Minimum 400ms dwell: a status update that
+        // would be superseded by the next frame within 400ms is skipped.
+        //
+        // Duplicate seq is allowed (renders twice, cosmetic only — §2.4 N7).
+        // Garbage lines are ignored by the parser; we treat zero frames as
+        // a silent success with empty text.
+        const MIN_DWELL_MS = 400;
+        const parser = new ChannelChatStreamParser();
+        let finalText: string | null = null;
+        let pendingCopy: string | null = null;
+        let pendingAt = 0;
+        let rafTimer: ReturnType<typeof setTimeout> | null = null;
+        const maybeRender = () => {
+          const now = Date.now();
+          const since = now - pendingAt;
+          if (pendingCopy === null) return;
+          if (since >= MIN_DWELL_MS) {
+            setStatusCopy(pendingCopy);
+            pendingCopy = null;
+            if (rafTimer) { clearTimeout(rafTimer); rafTimer = null; }
+          } else {
+            if (rafTimer) clearTimeout(rafTimer);
+            rafTimer = setTimeout(() => {
+              if (pendingCopy !== null) {
+                setStatusCopy(pendingCopy);
+                pendingCopy = null;
+              }
+              rafTimer = null;
+            }, MIN_DWELL_MS - since);
+          }
+        };
+        const handleFrames = (frames: ChannelChatFrame[]) => {
+          for (const f of frames) {
+            if (f.type === "text") {
+              finalText = f.content;
+              continue;
             }
-            return line;
-          });
-          content = parsed.join("");
-        } catch {}
+            // status frame — supersede any pending one; dwell-gate on render.
+            pendingCopy = f.copy;
+            pendingAt = Date.now();
+            maybeRender();
+          }
+        };
 
+        const reader = res.body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            const { frames } = parser.feed(chunk);
+            handleFrames(frames);
+          }
+          const tail = parser.flush();
+          handleFrames(tail.frames);
+        } else {
+          // Body-less response — fall through to empty content.
+          const txt = await res.text();
+          const { frames } = parser.feed(txt);
+          handleFrames(frames);
+          const tail = parser.flush();
+          handleFrames(tail.frames);
+        }
+
+        if (rafTimer) { clearTimeout(rafTimer); rafTimer = null; }
+        setStatusCopy(null);
+
+        const content = finalText ?? "";
         const displayContent = content
           .replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "")
           .replace(/\s*\[ACTION\].*?\[\/ACTION\]\s*/g, "")
@@ -478,6 +547,8 @@ export default function Feed() {
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, envoyMsg]);
+        // Single polite announcement at the text-frame boundary (§2.3 N9).
+        setResponseReadyAnnouncement(`Response ready. ${Date.now()}`);
 
         // Refresh messages to pick up thread cards created during streaming
         const refreshRes = await fetch("/api/channel/messages");
@@ -500,6 +571,7 @@ export default function Feed() {
       ]);
     } finally {
       setLoading(false);
+      setStatusCopy(null);
     }
   };
 
@@ -672,14 +744,38 @@ export default function Feed() {
           </div>
         )}
 
-        {/* Typing indicator */}
+        {/* Typing indicator + progress narration status row. When the server
+            has emitted a status frame, show the copy in place of the spinner.
+            aria-live="off" on the visible row (see §2.3 N9) — we announce
+            only the terminal "Response ready" via the hidden polite region
+            below, to avoid screen-reader queue-drain on JAWS/NVDA/VoiceOver. */}
         {loading && (
-          <div className="self-start bg-black/5 dark:bg-white/7 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-muted animate-bounce" style={{ animationDelay: "0ms" }} />
-            <div className="w-1.5 h-1.5 rounded-full bg-muted animate-bounce" style={{ animationDelay: "150ms" }} />
-            <div className="w-1.5 h-1.5 rounded-full bg-muted animate-bounce" style={{ animationDelay: "300ms" }} />
+          <div
+            className="self-start bg-black/5 dark:bg-white/7 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-2"
+            aria-live="off"
+            role="presentation"
+          >
+            {statusCopy ? (
+              <span className="text-xs italic text-muted">{statusCopy}</span>
+            ) : (
+              <>
+                <div className="w-1.5 h-1.5 rounded-full bg-muted animate-bounce" style={{ animationDelay: "0ms" }} />
+                <div className="w-1.5 h-1.5 rounded-full bg-muted animate-bounce" style={{ animationDelay: "150ms" }} />
+                <div className="w-1.5 h-1.5 rounded-full bg-muted animate-bounce" style={{ animationDelay: "300ms" }} />
+              </>
+            )}
           </div>
         )}
+        {/* Single polite announcement at the `type:"text"` frame boundary.
+            Kept outside the loading row so removal of the row from the
+            accessibility tree can't re-read stale status text. */}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        >
+          {responseReadyAnnouncement}
+        </div>
 
         <div ref={messagesEndRef} />
         </div>
