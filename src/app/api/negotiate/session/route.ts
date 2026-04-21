@@ -393,12 +393,23 @@ export async function POST(req: NextRequest) {
       }
     }
   } else {
-    // Generic link: auto-create a contextual link so the session persists
+    // Bare-slug visit (`/meet/<slug>` with no code): mint a fresh link +
+    // session so the URL has something to persist against. Stamped as
+    // `type: "generic"` so downstream greeting rendering and guest-facing
+    // UI reach the right branches — these links have no inviteeName, no
+    // host-personalization, and shouldn't read as "John proposes…" to the
+    // guest. Pre-2026-04-21 this was mis-stamped as "contextual" (with a
+    // comment apologizing for it); fixed after feedback cmo8d9eqs.
+    //
+    // Link-rules mirroring (actions.ts:patchLinkRulesForContextual,
+    // update-gcal:141) intentionally skips "generic" type — per-visit
+    // mints don't benefit from rule mirroring anyway (no shared link,
+    // no future guests on the same URL).
     const autoCode = generateCode();
     link = await prisma.negotiationLink.create({
       data: {
         userId: user.id,
-        type: "contextual",
+        type: "generic",
         slug: user.meetSlug!,
         code: autoCode,
       },
