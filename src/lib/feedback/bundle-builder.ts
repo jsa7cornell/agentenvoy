@@ -70,13 +70,18 @@ export async function buildFeedbackBundle(
   // Replay is load-bearing for widget-display bugs: recentLinks[].rulesJson
   // is the rule (input), replay.slotsByDay is what the scoring engine would
   // serve RIGHT NOW. Agents correlating "what guest saw" need both.
-  const replay =
-    submission.area === "deal_room_chat" && submission.sessionId
-      ? await fetchSlotsReplay({
-          sessionId: submission.sessionId,
-          origin,
-        })
-      : null;
+  let replay: Awaited<ReturnType<typeof fetchSlotsReplay>> = null;
+  if (submission.area === "deal_room_chat" && submission.sessionId) {
+    try {
+      replay = await fetchSlotsReplay({
+        sessionId: submission.sessionId,
+        origin,
+      });
+    } catch (err) {
+      console.warn("[feedback.bundle] replay fetch threw — dropping replay slice", { userId, err });
+      replay = null;
+    }
+  }
 
   const [rawMessages, sessions, calendar, routeErrors] = await Promise.all([
     checklistState.messages ? loadRecentMessagesWithMeta(userId) : Promise.resolve([]),
@@ -130,7 +135,13 @@ export async function buildFeedbackBundle(
     replay: replay ?? undefined,
   };
 
-  return FeedbackBundleSchema.parse(bundle);
+  const firstParse = FeedbackBundleSchema.safeParse(bundle);
+  if (firstParse.success) return firstParse.data;
+  console.warn("[feedback.bundle] schema parse failed — retrying without replay", {
+    userId,
+    issues: firstParse.error.flatten(),
+  });
+  return FeedbackBundleSchema.parse({ ...bundle, replay: undefined });
 }
 
 type MessageWithMeta = NonNullable<FeedbackBundleV2["messages"]>["recentTurns"][number];

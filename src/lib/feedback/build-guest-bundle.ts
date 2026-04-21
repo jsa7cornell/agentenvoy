@@ -83,10 +83,15 @@ export async function buildGuestFeedbackBundle(
   // Replay is load-bearing for widget-display bugs. Same guest symmetry
   // invariant as elsewhere: replay runs against the session the guest is
   // viewing, which the guest is already authorized to see.
-  const replay =
-    submission.area === "deal_room_chat" && session?.id
-      ? await fetchSlotsReplay({ sessionId: session.id, origin })
-      : null;
+  let replay: Awaited<ReturnType<typeof fetchSlotsReplay>> = null;
+  if (submission.area === "deal_room_chat" && session?.id) {
+    try {
+      replay = await fetchSlotsReplay({ sessionId: session.id, origin });
+    } catch (err) {
+      console.warn("[feedback.bundle.guest] replay fetch threw — dropping replay slice", { err });
+      replay = null;
+    }
+  }
 
   const rawMessages = submission.includeContext
     ? await loadSharedChannelMessagesWithMeta(host.id, session?.id ?? null)
@@ -146,7 +151,12 @@ export async function buildGuestFeedbackBundle(
     // consoleLines (not captured on guest path).
   };
 
-  return FeedbackBundleSchema.parse(bundle);
+  const firstParse = FeedbackBundleSchema.safeParse(bundle);
+  if (firstParse.success) return firstParse.data;
+  console.warn("[feedback.bundle.guest] schema parse failed — retrying without replay", {
+    issues: firstParse.error.flatten(),
+  });
+  return FeedbackBundleSchema.parse({ ...bundle, replay: undefined });
 }
 
 type MessageWithMeta = NonNullable<FeedbackBundleV2["sharedChannel"]>["recentTurns"][number];
