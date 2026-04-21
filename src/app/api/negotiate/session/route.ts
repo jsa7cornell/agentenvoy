@@ -784,32 +784,27 @@ export async function POST(req: NextRequest) {
     const openerTimingClause = timingLabel ? ` for ${timingLabel}` : "";
 
     const buildProposalSentence = (): string | null => {
-      // Fragments assemble into: "He's proposing [timing] [and] [dur min] [for activity] [in loc]."
+      // Fragments assemble into: "He's proposing [dur min] [for activity] [in loc]."
+      //
+      // timingLabel is intentionally NOT included here — it's already rendered
+      // in the opener via `openerTimingClause` ("scheduling time with you and
+      // John *for tomorrow*"). Including it again produced awkward duplication
+      // like: "…for tonight if possible, else tomorrow or next week. He's
+      // proposing tonight if possible, else tomorrow or next week and 30 min."
+      // (bug reported 2026-04-21, link q6vcyv). The proposal sentence focuses
+      // purely on substance (duration / activity / location); timing lives
+      // exclusively in the opener.
       const durStr = durationForOpener ? formatDuration(durationForOpener) : null;
       if (activityText) {
-        const lead = timingLabel && durStr
-          ? `${timingLabel} and ${durStr}`
-          : timingLabel
-          ? timingLabel
-          : durStr
-          ? durStr
-          : null;
         const tail = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
-        if (lead) return `He's proposing ${lead} for ${activityText}${tail}.`;
+        if (durStr) return `He's proposing ${durStr} for ${activityText}${tail}.`;
         return `He's proposing a${/^[aeiou]/i.test(activityText) ? "n" : ""} ${activityText}${tail}.`;
       }
-      // No activity — fall back to duration/format/location framing.
-      if (durStr || linkLocationForOpener || timingLabel) {
-        const parts: string[] = [];
-        if (timingLabel) parts.push(timingLabel);
-        if (durStr) parts.push(durStr);
-        const leadJoined = parts.join(" and ");
+      // No activity — fall back to duration/location framing.
+      if (durStr || linkLocationForOpener) {
         const locTail = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
-        return leadJoined
-          ? `He's proposing ${leadJoined}${locTail}.`
-          : linkLocationForOpener
-          ? `He's proposing to meet in ${linkLocationForOpener}.`
-          : null;
+        if (durStr) return `He's proposing ${durStr}${locTail}.`;
+        if (linkLocationForOpener) return `He's proposing to meet in ${linkLocationForOpener}.`;
       }
       return null;
     };
