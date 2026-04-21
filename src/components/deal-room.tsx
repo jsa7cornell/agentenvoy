@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { MatchPulse } from "./match-pulse";
@@ -10,10 +10,12 @@ import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
 import { TimezonePicker } from "./timezone-picker";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
+import { OfferCard } from "./deal-room/offer-card";
 import { SendFeedbackLink } from "./send-feedback";
 import { formatDuration } from "@/lib/format-duration";
 import { stripRendererOnlyBlocks } from "@/lib/message-render";
 import { mergePollResult, type LiveSyncMessage } from "@/lib/deal-room-live-sync";
+import { deriveMode, type DealRoomMode } from "@/lib/deal-room-mode";
 import {
   getRoleStyles,
   computeExternalAgentSender,
@@ -220,6 +222,32 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // Triggers a longer celebratory glow on the top event card right after
   // confirm. Kept separate from statusAnimating (1.5s, existing status pulse).
   const [justConfirmedGlow, setJustConfirmedGlow] = useState(false);
+
+  // ─── Deal-room state machine (Stage 2, proposal
+  // 2026-04-21_deal-room-widget-state-machine-and-agent-dialog-clarity) ──
+  // `guestRequestedMoreOptions` is the sticky escape-hatch flag: once the
+  // guest clicks "Pick a different time" in the offer card OR hits a
+  // slot_no_longer_offered 409 from the server, we flip into negotiate and
+  // stay there for the rest of the session. The flag is intentionally NOT
+  // persisted — a fresh session re-evaluates mode from slot shape.
+  //
+  // `transitionReason` drives the one-line narration above the chooser when
+  // we arrive in `negotiate` from `offer`:
+  //   "user-pick" → "No problem — here's the full week."
+  //   "slot-gone" → "That time isn't available anymore — here are the
+  //                  current options."
+  //   null         → no narration (fresh negotiate, not an arrival).
+  const [guestRequestedMoreOptions, setGuestRequestedMoreOptions] = useState(false);
+  const [transitionReason, setTransitionReason] = useState<
+    "user-pick" | "slot-gone" | null
+  >(null);
+  // `link.intent.steering` — surfaced by /api/negotiate/session so the
+  // client can use it as one of the mode-derivation inputs (N7 fold).
+  // Pre-PR-58 links have no intent blob; this stays null and `deriveMode`
+  // falls through to slot-count / same-day rules.
+  const [linkIntentSteering, setLinkIntentSteering] = useState<
+    "open" | "soft" | "narrow" | "exclusive" | string | null
+  >(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -590,6 +618,29 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       });
       const data = await res.json();
       if (!res.ok) {
+        // N2 fold (proposal 2026-04-21_deal-room-widget-state-machine):
+        // server says this slot isn't in the current offered set anymore
+        // (host edited the link, calendar shifted, sibling consumed it).
+        // Drop the user into negotiate mode with an explanatory narration
+        // and clear the stale pendingProposal so the offer card collapses.
+        if (res.status === 409 && data?.reason === "slot_no_longer_offered") {
+          setPendingProposal(null);
+          setConfirmFormExpanded(false);
+          setTransitionReason("slot-gone");
+          setGuestRequestedMoreOptions(true);
+          // Kick the slots fetch so the chooser shows the current set.
+          if (sessionId) {
+            fetch(
+              `/api/negotiate/slots?sessionId=${sessionId}${viewerTimezone ? `&tz=${encodeURIComponent(viewerTimezone)}` : ""}`,
+            )
+              .then((r) => (r.ok ? r.json() : null))
+              .then((d) => {
+                if (d?.slotsByDay) setSlotsByDay(d.slotsByDay);
+              })
+              .catch(() => {});
+          }
+          return;
+        }
         if (data.error === "Session already confirmed") {
           setConfirmed(true);
           setSessionStatus("agreed");
@@ -740,6 +791,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setLinkActivity(typeof data.link?.activity === "string" && data.link.activity.trim() ? data.link.activity.trim() : null);
         setLinkActivityIcon(typeof data.link?.activityIcon === "string" && data.link.activityIcon.trim() ? data.link.activityIcon.trim() : null);
         setLinkTimingLabel(typeof data.link?.timingLabel === "string" && data.link.timingLabel.trim() ? data.link.timingLabel.trim() : null);
+        // Stage 2 state-machine input (N7 fold): surface intent.steering so
+        // deriveMode() can pick the exclusive-single-slot offer branch. Null
+        // on pre-PR-58 links — mode derivation falls through to the generic
+        // slot-count / same-day rule.
+        {
+          const rawIntent = (data.link as { intent?: { steering?: unknown } } | null | undefined)?.intent;
+          const steering = rawIntent && typeof rawIntent === "object" && "steering" in rawIntent
+            ? (rawIntent as { steering?: unknown }).steering
+            : null;
+          setLinkIntentSteering(
+            typeof steering === "string" && steering.length > 0 ? steering : null,
+          );
+        }
         setInviteeName(data.link?.inviteeName || "");
         // Pre-fill the confirm-card form from any info we already have so the
         // guest doesn't have to retype their name/email if Envoy captured it.
@@ -1009,6 +1073,48 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     if (format === "in-person") return "🤝";
     return "📅";
   }
+
+  // ─── Stage 2 mode derivation ──────────────────────────────────────────
+  // Memoized on the exact input set specified in §3.1 of the decided
+  // proposal: (sessionStatus, availableSlots, guestRequestedMoreOptions,
+  // link.intent?.steering, session.viewerTimezone). `confirmed` is folded
+  // into the first argument so the `agreed` terminal state resolves right.
+  //
+  // `availableSlots` is flattened from `slotsByDay` — only `start` is read
+  // by the derivation (it's the "same local day" axis). If slotsByDay
+  // hasn't loaded yet, the array is empty and mode defaults to negotiate.
+  //
+  // Hooks must run on every render — keep these above the early returns
+  // (archived / error) below.
+  const availableSlotStarts = useMemo(() => {
+    if (!slotsByDay) return [] as Array<{ start: string }>;
+    const out: Array<{ start: string }> = [];
+    for (const day of Object.values(slotsByDay)) {
+      for (const s of day) out.push({ start: s.start });
+    }
+    return out;
+  }, [slotsByDay]);
+
+  const dealRoomMode: DealRoomMode = useMemo(() => {
+    return deriveMode(
+      {
+        status: confirmed ? "agreed" : sessionStatus,
+        viewerTimezone: viewerTimezone ?? null,
+      },
+      {
+        availableSlots: availableSlotStarts,
+        guestRequestedMoreOptions,
+        link: { intent: linkIntentSteering ? { steering: linkIntentSteering } : null },
+      },
+    );
+  }, [
+    confirmed,
+    sessionStatus,
+    viewerTimezone,
+    availableSlotStarts,
+    guestRequestedMoreOptions,
+    linkIntentSteering,
+  ]);
 
   // --- Archived state ---
   if (archivedData) {
@@ -1552,8 +1658,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // message thread. Used (1) once after the first administrator message so
   // guests see the picker without it floating above, and (2) every time the
   // guest clicks "Propose changes" on a confirmed meeting.
+  //
+  // Stage 2 state-machine: in `offer` mode the OfferCard replaces this
+  // picker entirely — see the OfferCard render below. Suppress the picker
+  // here to avoid rendering two widgets. Host-view and confirmed-view keep
+  // the picker as today.
   const renderPickerBubble = (keyPrefix: string) => {
     if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
+    if (dealRoomMode === "offer" && !confirmed && !isHost) return null;
     // Timezone picker (shipped 2026-04-21 per guest-tz-ux-three-primitives).
     // Sits above any other header content. Rendered whenever the guest is a
     // human viewer and we know the host's tz (not for host-viewing-own-room).
@@ -1591,9 +1703,49 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     })();
 
     const headerSlot = connectCta ? <>{connectCta}</> : null;
+
+    // Stage 2 transition narration — shown when the guest lands in
+    // `negotiate` mode after arriving from `offer`. Two variants:
+    //   user-pick → user clicked "Pick a different time" on the OfferCard.
+    //   slot-gone → confirm server returned slot_no_longer_offered (N2).
+    // "Back to the suggested time" link only shows on user-pick (slot-gone
+    // means the offered slot is gone — flipping back would be a lie).
+    const narrationLine =
+      !isHost && !confirmed && guestRequestedMoreOptions && transitionReason
+        ? transitionReason === "slot-gone"
+          ? "That time isn't available anymore — here are the current options."
+          : "No problem — here's the full week."
+        : null;
+    const showBackToOffer =
+      !isHost && !confirmed && transitionReason === "user-pick";
+
     return (
       <div key={keyPrefix} className="flex justify-start">
         <div className="max-w-[85%] w-full min-w-0 rounded-2xl px-3 py-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
+          {narrationLine && (
+            <div
+              className="text-xs text-secondary leading-snug mb-2 px-1"
+              role="status"
+              aria-live="polite"
+            >
+              {narrationLine}
+              {showBackToOffer && (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    className="underline text-emerald-400 hover:text-emerald-300 transition"
+                    onClick={() => {
+                      setGuestRequestedMoreOptions(false);
+                      setTransitionReason(null);
+                    }}
+                  >
+                    Back to the suggested time
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           <MatchPulse
             justMatched={justMatched}
             matchCount={bilateralByDay ? Object.values(bilateralByDay).reduce((n, v) => n + v.length, 0) : 0}
@@ -1973,12 +2125,120 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             </div>
           )}
 
+        {/* Stage 2 offer-mode card (proposal 2026-04-21_deal-room-widget-
+            state-machine §4). Shown when `deriveMode(...)` resolves to
+            `offer` — exclusive single-slot OR small same-local-day set.
+            Replaces the chooser + bottom proposal card so the guest sees
+            one focused confirm instead of a chooser + proposal pair. The
+            card collapse itself IS the "we converged" celebration (§4.4).
+            On confirm we reuse `handleConfirm` so the guest-name / email
+            capture form (below) still lives in this component. On "pick a
+            different time" we flip `guestRequestedMoreOptions=true`, which
+            transitions the mode to `negotiate` and renders the existing
+            chooser with the "No problem — here's the full week." narration. */}
+        {!confirmed && !isHost && dealRoomMode === "offer" && availableSlotStarts.length > 0 && (() => {
+          // Pick the offer slot: prefer the lone -2 exclusive if present,
+          // otherwise the first slot in the small same-day set. We read
+          // from the full slotsByDay to recover the `end` field the
+          // OfferCard uses for duration display fallback.
+          const allSlots = (() => {
+            const out: Array<{ start: string; end: string }> = [];
+            if (!slotsByDay) return out;
+            for (const day of Object.values(slotsByDay)) {
+              for (const s of day) out.push({ start: s.start, end: s.end });
+            }
+            return out;
+          })();
+          if (allSlots.length === 0) return null;
+          const offerSlot = allSlots[0];
+          const duration =
+            slotDuration && slotDuration > 0
+              ? slotDuration
+              : Math.max(
+                  15,
+                  Math.round(
+                    (new Date(offerSlot.end).getTime() -
+                      new Date(offerSlot.start).getTime()) /
+                      60000,
+                  ),
+                );
+          const fmt = linkFormat || "video";
+          const tz = slotTimezone || viewerTimezone || "UTC";
+          return (
+            <OfferCard
+              slot={offerSlot}
+              durationMin={duration}
+              format={fmt}
+              location={linkLocation}
+              timezone={tz}
+              isConfirming={isConfirming}
+              onConfirm={() => {
+                // Reuse the existing pendingProposal flow so the name/email
+                // form lives in one place. If we already have name+email
+                // (from prior capture or link pre-fill), submit straight
+                // through; otherwise surface the form on the card below
+                // that collects them, then confirm.
+                const nameOk = formGuestName.trim().length > 0;
+                const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+                  formGuestEmail.trim(),
+                );
+                setPendingProposal({
+                  dateTime: offerSlot.start,
+                  duration,
+                  format: fmt,
+                  location: linkLocation,
+                });
+                if (nameOk && emailOk) {
+                  handleConfirm(
+                    {
+                      dateTime: offerSlot.start,
+                      duration,
+                      format: fmt,
+                      location: linkLocation,
+                    },
+                    {
+                      guestName: formGuestName.trim(),
+                      guestEmail: formGuestEmail.trim(),
+                      wantsReminder: formWantsReminder,
+                      guestNote: formGuestNote.trim() || undefined,
+                    },
+                  );
+                } else {
+                  // Expand the name/email form on the existing proposal
+                  // card so the user can complete the capture and submit.
+                  setConfirmFormExpanded(true);
+                  requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                      setTimeout(() => {
+                        messagesEndRef.current?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "end",
+                        });
+                      }, 80);
+                    });
+                  });
+                }
+              }}
+              onPickDifferent={() => {
+                // Sticky escape-hatch: once flipped, the mode stays
+                // `negotiate` for the rest of the session. The narration
+                // above the chooser is keyed by `transitionReason`.
+                setTransitionReason("user-pick");
+                setGuestRequestedMoreOptions(true);
+              }}
+            />
+          );
+        })()}
+
         {/* Single proposal + confirm card (direct-confirm flow, 2026-04-17).
             Reads local pendingProposal first (set on chip click) then falls
             back to Envoy's most recent CONFIRMATION_PROPOSAL message. Shows
             only when there's something to confirm and the session isn't
-            already agreed. */}
-        {!confirmed && !isHost && latestProposal && (() => {
+            already agreed. Suppressed in `offer` mode since the OfferCard
+            above carries the confirm primitive in that state. The card
+            re-surfaces in `offer` mode ONLY when the form is already
+            expanded (name/email capture in-flight after OfferCard click). */}
+        {!confirmed && !isHost && latestProposal && (dealRoomMode !== "offer" || confirmFormExpanded) && (() => {
           const effective = latestProposal;
           const dt = new Date(effective.dateTime);
           const inPast = dt.getTime() <= Date.now();
