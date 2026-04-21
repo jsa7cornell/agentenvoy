@@ -64,12 +64,20 @@ const TOOLS: Tool[] = [
     description: "Break-glass audit trail — every admin read of user-specific data. Who looked, what path, which target user, when.",
     tag: "audit",
   },
+  {
+    href: "/admin/feedback",
+    label: "Feedback",
+    description: "User-submitted feedback reports with attached bundles (messages, sessions, calendar, errors). Opening a detail view is audited.",
+    tag: "feedback",
+  },
 ];
 
 const TAG_COLORS: Record<string, string> = {
   monitoring: "bg-sky-500/10 text-sky-400 border-sky-500/30",
   email: "bg-violet-500/10 text-violet-400 border-violet-500/30",
   database: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+  audit: "bg-rose-500/10 text-rose-400 border-rose-500/30",
+  feedback: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
 };
 
 export default async function AdminPage() {

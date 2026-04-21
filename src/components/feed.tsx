@@ -7,6 +7,7 @@ import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-stat
 import { formatDuration } from "@/lib/format-duration";
 import { QuickReplies } from "./onboarding/quick-replies";
 import { GcalUpdateCard } from "./gcal-update-card";
+import { SendFeedbackLink } from "./send-feedback";
 import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
 
 interface ChannelMsg {
@@ -720,6 +721,9 @@ export default function Feed() {
           >
             &uarr;
           </button>
+        </div>
+        <div className="mt-2 flex justify-end">
+          <SendFeedbackLink />
         </div>
         </div>
       </div>
