@@ -1,26 +1,48 @@
 /**
  * Single source of truth for the OAuth scope sets the app declares to Google.
  *
- * Two clients are intentional (see proposals/2026-04-20_oauth-onboarding-hygiene…):
- *   - Host signin (NextAuth) requests read + write so confirmed meetings can
- *     land on the user's calendar.
- *   - Guest connect (`/api/auth/guest-calendar`) requests read-only — anonymous
- *     viewers shouldn't grant write access just to find a mutual time.
+ * Asymmetric by entry point (decision 2026-04-20):
+ *   - **Front door** (`/login`, homepage CTA, header sign-in) — read + write
+ *     upfront. A user entering via the front door is signing up to host. Asking
+ *     for write later in a second consent screen is friction without benefit.
+ *   - **Deal-room CTA** (anonymous viewer joining a host's deal room) — read
+ *     only. They're connecting their calendar to help a host pick a time, not
+ *     to write meetings. They can upgrade to write later if they ever become
+ *     a host themselves (via the `upgrade-scope` modal mode).
+ *   - **Guest connect** (`/api/auth/guest-calendar`) — unchanged. Anonymous
+ *     read-only OAuth that creates no user account. Reserved for future use.
  *
  * Detection consumers (the NextAuth `signIn` callback, the guest-calendar
- * callback) read `Account.scope` returned by Google and check it against
- * `*_REQUIRED` to decide whether the grant is sufficient. Anything in the
- * `*_REQUIRED` set that is missing means the user unticked a box on Google's
- * consent screen.
+ * callback) read `Account.scope` returned by Google and check it against the
+ * appropriate `*_REQUIRED` set to decide whether the grant is sufficient.
+ * Anything in the required set that is missing means the user unticked a box
+ * on Google's consent screen.
  */
 
 export const OPENID_BASE = ["openid", "email", "profile"] as const;
 
-export const HOST_REQUIRED = [
+export const HOST_READ_SCOPE =
+  "https://www.googleapis.com/auth/calendar.readonly";
+export const HOST_WRITE_SCOPE =
+  "https://www.googleapis.com/auth/calendar.events";
+
+export const HOST_REQUIRED_FRONT_DOOR = [
   ...OPENID_BASE,
-  "https://www.googleapis.com/auth/calendar.events",
-  "https://www.googleapis.com/auth/calendar.readonly",
+  HOST_WRITE_SCOPE,
+  HOST_READ_SCOPE,
 ] as const;
+
+export const HOST_REQUIRED_FROM_DEAL_ROOM = [
+  ...OPENID_BASE,
+  HOST_READ_SCOPE,
+] as const;
+
+/**
+ * Back-compat alias. Most callers want the full host scope set; only the
+ * NextAuth `signIn` audit needs to vary by entry point. Prefer the explicit
+ * names in new code.
+ */
+export const HOST_REQUIRED = HOST_REQUIRED_FRONT_DOOR;
 
 /**
  * Reserved for future scopes that improve the host experience but are not
@@ -29,10 +51,18 @@ export const HOST_REQUIRED = [
  */
 export const HOST_OPTIONAL: readonly string[] = [];
 
-export const GUEST_REQUIRED = [
-  ...OPENID_BASE,
-  "https://www.googleapis.com/auth/calendar.readonly",
-] as const;
+export const GUEST_REQUIRED = [...OPENID_BASE, HOST_READ_SCOPE] as const;
+
+export type HostEntryPoint = "front-door" | "deal-room";
+
+/** Returns the scope set we *expect* a host to have granted, given how they
+ *  entered the app. Used by the signIn audit so the dashboard interstitial
+ *  doesn't fire for deal-room users (we never asked them for write). */
+export function hostRequiredFor(entryPoint: HostEntryPoint): readonly string[] {
+  return entryPoint === "deal-room"
+    ? HOST_REQUIRED_FROM_DEAL_ROOM
+    : HOST_REQUIRED_FRONT_DOOR;
+}
 
 export type ScopeAudit = {
   granted: string[];
@@ -55,12 +85,7 @@ export function auditScopes(
   return { granted, missingRequired, satisfied: missingRequired.length === 0 };
 }
 
-/**
- * The single scope whose absence we surface most prominently — it's the one
- * that breaks the "AgentEnvoy puts confirmed meetings on your calendar"
- * promise. Used as the `?scopeMissing=` query value when the host denied it.
- */
-export const HOST_WRITE_SCOPE =
-  "https://www.googleapis.com/auth/calendar.events";
-export const HOST_READ_SCOPE =
-  "https://www.googleapis.com/auth/calendar.readonly";
+/** Cookie name read by the signIn callback to learn how the user entered.
+ *  Set client-side just before `signIn()` is called; auto-expires after 5
+ *  minutes so a stale value can't poison a later sign-in. */
+export const ENTRY_POINT_COOKIE = "oauth_entry_point";

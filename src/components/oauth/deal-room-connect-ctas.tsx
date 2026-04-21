@@ -40,6 +40,7 @@ export function DealRoomConnectCtas({
 
   const signUpFlow = useOAuthSignIn({
     mode: "first-connect",
+    entryPoint: "deal-room",
     callbackUrl: `/dashboard?from=deal-room&sessionId=${encodeURIComponent(sessionId)}`,
   });
 
