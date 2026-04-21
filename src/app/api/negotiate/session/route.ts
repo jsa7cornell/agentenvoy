@@ -1006,24 +1006,30 @@ export async function POST(req: NextRequest) {
       // Closing — V3 keeps it to one line and NEVER asks for email up front
       // (the confirmation card collects it when the guest locks a time). If
       // we're missing name/topic, fold just those into the sentence.
-      // Generic links: pluralize "preferences" and append a "typical slot"
-      // hint inviting the guest to suggest a different length/format.
+      //
+      // Generic links: third-person voice ("{host}'s typical slot is…") +
+      // always include both duration and format in the hint so the guest
+      // knows they can adjust either axis. When format isn't declared at link
+      // creation (typical for bare-slug generic visits), default the "typical"
+      // framing to video — most common host default. Per John's 2026-04-21
+      // feedback: "John's typical slot is 30 mins and VC, but if a different
+      // length and meeting method (call, f2f) is appropriate, just let me
+      // know and we can make that happen."
       const isGeneric = link.type === "generic";
       const closing = isGeneric
         ? (() => {
-            const base = `Choose a slot from the calendar below or reply to me with your preferences to get it booked.`;
-            const durStr = effectiveDuration ? formatDuration(effectiveDuration) : null;
-            const fmt = fmtLabel;
-            if (durStr && fmt) {
-              return `${base}\n\nA typical slot is ${durStr} ${fmt}, but if you think a different length and type is appropriate (eg phone or even in person), let me know.`;
-            }
-            if (durStr) {
-              return `${base}\n\nA typical slot is ${durStr}, but if you think a different length is appropriate, let me know.`;
-            }
-            if (fmt) {
-              return `${base}\n\nA typical slot is ${fmt}, but if you think a different type is appropriate (eg phone or even in person), let me know.`;
-            }
-            return base;
+            const base = `Choose a slot from the calendar below or reply with what works best for you.`;
+            const durStr = effectiveDuration ? formatDuration(effectiveDuration) : "30 min";
+            const fmt = fmtLabel || "video";
+            // Alt-formats line that stays honest: mention what's NOT the
+            // declared/default so the guest sees the full menu.
+            const altFormats =
+              fmt === "video"
+                ? "phone or in person"
+                : fmt === "phone"
+                ? "video or in person"
+                : "phone or video";
+            return `${base}\n\n${hostFirstName}'s typical slot is ${durStr} ${fmt}, but if a different length or meeting type (${altFormats}) works better for you, just let me know — we can make that happen.`;
           })()
         : `Choose a slot from the calendar below or reply to me with your preference to get it booked.`;
 
@@ -1063,7 +1069,15 @@ export async function POST(req: NextRequest) {
         if (tzLine) headerLines.push(tzLine);
         const header = headerLines.join("\n");
 
-        greeting = [header, scheduleBody, closing].join("\n\n");
+        // Generic links skip the bulleted schedule body and lean on the
+        // calendar widget below. Per John's 2026-04-21 feedback: "lean more
+        // on the calendar selector, don't need to put slots here." The
+        // generic closing already has "Choose a slot from the calendar
+        // below…" + the customization hint, so the greeting body is
+        // intentionally just header + closing with a blank line between.
+        greeting = isGeneric
+          ? [header, closing].join("\n\n")
+          : [header, scheduleBody, closing].join("\n\n");
       }
     }
   }
