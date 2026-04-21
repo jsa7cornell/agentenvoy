@@ -353,6 +353,44 @@ export const FeedbackBundleV2Schema = z.object({
       email: z.string().nullable(),
     })
     .optional(),
+  /** Widget-display replay: computed availability at submit time. Populated
+   *  only when area === "deal_room_chat" and sessionId is in scope. */
+  replay: z
+    .object({
+      computedAt: z.string(),
+      sessionId: z.string(),
+      slotsByDay: z.record(
+        z.string(),
+        z.array(
+          z.object({
+            start: z.string(),
+            end: z.string(),
+            score: z.number(),
+            isShortSlot: z.boolean().optional(),
+            isStretch: z.boolean().optional(),
+          }),
+        ),
+      ),
+      bilateralByDay: z
+        .record(
+          z.string(),
+          z.array(
+            z.object({
+              start: z.string(),
+              end: z.string(),
+              color: z.enum(["green", "orange"]),
+            }),
+          ),
+        )
+        .optional(),
+      timezone: z.string(),
+      hostTimezone: z.string().optional(),
+      duration: z.number().optional(),
+      minDuration: z.number().optional(),
+      isVip: z.boolean().optional(),
+      note: z.string().optional(),
+    })
+    .optional(),
 });
 export type FeedbackBundleV2 = z.infer<typeof FeedbackBundleV2Schema>;
 

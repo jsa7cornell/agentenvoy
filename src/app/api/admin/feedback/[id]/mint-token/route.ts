@@ -87,7 +87,18 @@ export async function POST(
   const prompt = [
     curl,
     ``,
-    `Run the curl above to fetch { report, bundle } for AgentEnvoy feedback report ${report.id}, then follow agentenvoy/PLAYBOOK.md → "Debug bundle handling".`,
+    `Run the curl above to fetch { report, bundle } for AgentEnvoy feedback report ${report.id}.`,
+    ``,
+    `Bundle triage map — start where the complaint points:`,
+    `  • Widget offered wrong slots / today missing → bundle.replay.slotsByDay is what the scoring engine serves now. bundle.recentLinks[].rulesJson is the rule that drove it. Compare replay vs. rule + guestPicks.window.`,
+    `  • Greeting / first-message wrong → bundle.messages.recentTurns[0] (or sharedChannel.recentTurns[0] for guest bundles).`,
+    `  • Timezone confusion → bundle.clientState.viewerTimezone vs. the host tz implied by replay.hostTimezone.`,
+    `  • Link went to wrong place → scan messages for action.params.url / action.params.linkCode.`,
+    `  • Classification / intent bugs → bundle.filingContext.suspectedIncidentTurn + recentLinks[].rulesJson.`,
+    ``,
+    `What the bundle does NOT carry: raw Google Calendar events (only title+time via bundle.calendar), secrets, cross-user data. If you need something outside the bundle, say so — do not fabricate it.`,
+    ``,
+    `Then follow agentenvoy/PLAYBOOK.md → "Debug bundle handling".`,
   ].join("\n");
 
   return NextResponse.json(

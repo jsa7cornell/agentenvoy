@@ -170,6 +170,7 @@ export async function POST(request: NextRequest) {
       session: sessionRow,
       submission,
       appVersion: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7),
+      origin: request.headers.get("origin") ?? new URL(request.url).origin,
     });
   } catch (err) {
     console.error("[feedback.submit-as-guest] bundle build failed", {

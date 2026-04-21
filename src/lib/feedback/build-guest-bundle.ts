@@ -37,6 +37,7 @@ import {
   computeRecentTurnsCount,
   type FilingMessage,
 } from "@/lib/feedback/build-filing-context";
+import { fetchSlotsReplay } from "@/lib/feedback/replay-slots";
 
 const MAX_MESSAGES = 40;
 const RECENT_TURNS_BASELINE = 10;
@@ -68,13 +69,24 @@ export interface BuildGuestBundleInput {
   } | null;
   submission: FeedbackSubmitAsGuestInput;
   appVersion?: string;
+  /** Request origin — needed for internal slots-replay fetch. Falls back to
+   *  NEXTAUTH_URL. Scoped to the guest's deal-room session. */
+  origin?: string | null;
 }
 
 export async function buildGuestFeedbackBundle(
   input: BuildGuestBundleInput,
 ): Promise<FeedbackBundle> {
-  const { link, host, session, submission, appVersion } = input;
+  const { link, host, session, submission, appVersion, origin } = input;
   const filedAt = new Date();
+
+  // Replay is load-bearing for widget-display bugs. Same guest symmetry
+  // invariant as elsewhere: replay runs against the session the guest is
+  // viewing, which the guest is already authorized to see.
+  const replay =
+    submission.area === "deal_room_chat" && session?.id
+      ? await fetchSlotsReplay({ sessionId: session.id, origin })
+      : null;
 
   const rawMessages = submission.includeContext
     ? await loadSharedChannelMessagesWithMeta(host.id, session?.id ?? null)
@@ -128,6 +140,7 @@ export async function buildGuestFeedbackBundle(
         }
       : undefined,
     clientState: submission.clientState,
+    replay: replay ?? undefined,
     // Explicitly NOT set: messages (host-path), recentLinks (host-only),
     // calendar (cross-trust-boundary), routeErrors (host-scoped),
     // consoleLines (not captured on guest path).

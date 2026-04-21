@@ -37,6 +37,7 @@ import {
   computeRecentTurnsCount,
   type FilingMessage,
 } from "@/lib/feedback/build-filing-context";
+import { fetchSlotsReplay } from "@/lib/feedback/replay-slots";
 
 const MAX_MESSAGES = 40;
 const RECENT_TURNS_BASELINE = 10;
@@ -54,14 +55,28 @@ export interface BuildBundleInput {
   /** Truncated app version (git sha prefix) — helpful for correlating with
    *  deploys. Optional; set by the API route from env. */
   appVersion?: string;
+  /** Request origin — needed for internal slots-replay fetch. Falls back to
+   *  NEXTAUTH_URL. If neither is set, replay is skipped. */
+  origin?: string | null;
 }
 
 export async function buildFeedbackBundle(
   input: BuildBundleInput,
 ): Promise<FeedbackBundle> {
-  const { userId, submission, appVersion } = input;
+  const { userId, submission, appVersion, origin } = input;
   const { checklistState, consoleLines, url, userAgent, clientState } = submission;
   const filedAt = new Date();
+
+  // Replay is load-bearing for widget-display bugs: recentLinks[].rulesJson
+  // is the rule (input), replay.slotsByDay is what the scoring engine would
+  // serve RIGHT NOW. Agents correlating "what guest saw" need both.
+  const replay =
+    submission.area === "deal_room_chat" && submission.sessionId
+      ? await fetchSlotsReplay({
+          sessionId: submission.sessionId,
+          origin,
+        })
+      : null;
 
   const [rawMessages, sessions, calendar, routeErrors] = await Promise.all([
     checklistState.messages ? loadRecentMessagesWithMeta(userId) : Promise.resolve([]),
@@ -112,6 +127,7 @@ export async function buildFeedbackBundle(
       ? (consoleLines ?? []).slice(0, MAX_CONSOLE_LINES)
       : undefined,
     clientState,
+    replay: replay ?? undefined,
   };
 
   return FeedbackBundleSchema.parse(bundle);
