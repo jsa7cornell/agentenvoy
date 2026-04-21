@@ -24,6 +24,11 @@ import { prisma } from "@/lib/prisma";
 import { FeedbackSubmitAsGuestSchema } from "@/lib/feedback/schema";
 import { buildGuestFeedbackBundle } from "@/lib/feedback/build-guest-bundle";
 import { track } from "@/lib/analytics/track";
+import { isAdminSession } from "@/lib/admin-auth";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { signAgentToken } from "@/lib/feedback/agent-token";
+import { logAdminAccess } from "@/lib/admin/access-log";
 
 export const dynamic = "force-dynamic";
 
@@ -241,5 +246,57 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  return NextResponse.json({ ok: true, reportId: report.id });
+  // Admin convenience: if the submitter happens to be logged in as an admin
+  // (John testing from a deal-room as a guest), auto-mint an agent token so
+  // the Thank-you screen can show the copy-prompt shortcut. Same semantics
+  // as the authenticated submit path.
+  const session = await getServerSession(authOptions);
+  const isAdmin = session?.user?.id ? await isAdminSession() : false;
+  let agentPrompt: string | undefined;
+  if (isAdmin && session?.user?.id) {
+    try {
+      const minted = signAgentToken({ reportId: report.id });
+      await prisma.agentAccessToken.create({
+        data: {
+          reportId: report.id,
+          mintedById: session.user.id,
+          jti: minted.jti,
+          expiresAt: minted.expiresAt,
+        },
+      });
+      await logAdminAccess({
+        adminId: session.user.id,
+        path: "/api/feedback/submit-as-guest",
+        action: "view",
+        targetUserId: link.userId,
+        context: {
+          feedbackReportId: report.id,
+          tokenJti: minted.jti,
+          action: "auto_mint_on_submit",
+        },
+      });
+      const reqOrigin = request.headers.get("origin") || new URL(request.url).origin;
+      const fetchUrl = `${reqOrigin}/api/agent/feedback/${report.id}?token=${minted.token}`;
+      agentPrompt = [
+        `curl -s '${fetchUrl}'`,
+        ``,
+        `Run the curl above to fetch { report, bundle } for AgentEnvoy feedback report ${report.id}.`,
+        ``,
+        `Bundle triage map — start where the complaint points:`,
+        `  • Widget offered wrong slots / today missing → bundle.replay.slotsByDay is what the scoring engine serves now. bundle.recentLinks[].rulesJson is the rule that drove it. Compare replay vs. rule + guestPicks.window.`,
+        `  • Greeting / first-message wrong → bundle.messages.recentTurns[0] (or sharedChannel.recentTurns[0] for guest bundles).`,
+        `  • Timezone confusion → bundle.clientState.viewerTimezone vs. the host tz implied by replay.hostTimezone.`,
+        `  • Link went to wrong place → scan messages for action.params.url / action.params.linkCode.`,
+        `  • Classification / intent bugs → bundle.filingContext.suspectedIncidentTurn + recentLinks[].rulesJson.`,
+        ``,
+        `What the bundle does NOT carry: raw Google Calendar events (only title+time via bundle.calendar), secrets, cross-user data. If you need something outside the bundle, say so — do not fabricate it.`,
+        ``,
+        `Then follow agentenvoy/PLAYBOOK.md → "Debug bundle handling".`,
+      ].join("\n");
+    } catch (err) {
+      console.error("[feedback.submit-as-guest] auto-mint failed", { err });
+    }
+  }
+
+  return NextResponse.json({ ok: true, reportId: report.id, isAdmin, agentPrompt });
 }
