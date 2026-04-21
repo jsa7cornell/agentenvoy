@@ -6,7 +6,14 @@ import { Prisma } from "@prisma/client";
 import { google } from "googleapis";
 import { prisma } from "./prisma";
 import { dispatchWelcomeEmailOnce } from "@/lib/emails/welcome";
-import { HOST_REQUIRED, auditScopes } from "@/lib/oauth/required-scopes";
+import { cookies } from "next/headers";
+import {
+  ENTRY_POINT_COOKIE,
+  HOST_WRITE_SCOPE,
+  auditScopes,
+  hostRequiredFor,
+  type HostEntryPoint,
+} from "@/lib/oauth/required-scopes";
 
 // Dev-only credentials provider — NEVER available in production
 const devProvider =
@@ -87,16 +94,28 @@ export const authOptions: NextAuthOptions = {
       // expired refresh_tokens, and outdated scopes in the DB. This block
       // fixes that by updating the Account record with fresh credentials
       // every time the user signs in via Google.
+      // Entry point — determines which scope set we *expected* the user to
+      // grant. Set client-side just before signIn() by useOAuthSignIn. Default
+      // is front-door (read+write); deal-room is read-only.
+      let entryPoint: HostEntryPoint = "front-door";
+      try {
+        const ep = cookies().get(ENTRY_POINT_COOKIE)?.value;
+        if (ep === "deal-room") entryPoint = "deal-room";
+      } catch {
+        // cookies() throws if called outside a request scope — fall back to
+        // front-door, which is the safer default (audits against the full set).
+      }
+
       if (account?.provider === "google" && account.providerAccountId) {
         // Scope audit (T3a): log partial-permission grants so we have a
         // single signal for telemetry and the dashboard interstitial can
         // surface a reconnect prompt. We never reject the sign-in — half
         // permissions are still useful; the host just won't be able to
         // write events until they upgrade. (Q5 / T3c — degrade not block.)
-        const audit = auditScopes(account.scope, HOST_REQUIRED);
+        const audit = auditScopes(account.scope, hostRequiredFor(entryPoint));
         if (!audit.satisfied) {
           console.warn(
-            `[signIn] host scope audit: missing ${audit.missingRequired.join(",")} for ${account.providerAccountId}`,
+            `[signIn] host scope audit (entry=${entryPoint}): missing ${audit.missingRequired.join(",")} for ${account.providerAccountId}`,
           );
         }
 
@@ -121,14 +140,19 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
-      // T3b: when host granted partial permissions (write scope missing),
-      // route them to the dashboard with `?scopeMissing=calendar.events` so
-      // the interstitial surfaces a reconnect action immediately. Returning
+      // T3b: when a *front-door* host granted partial permissions (write scope
+      // missing), route them to the dashboard with `?scopeMissing=calendar.events`
+      // so the interstitial surfaces a reconnect action immediately. Returning
       // a URL string from `signIn` overrides callbackUrl per NextAuth v4.
+      //
+      // Deal-room entry skips this — we never asked for write, so its absence
+      // isn't a partial grant; it's the intended state. The user upgrades
+      // later via the upgrade-scope modal when they confirm their first meeting.
       if (
+        entryPoint === "front-door" &&
         account?.provider === "google" &&
         account.scope &&
-        !account.scope.includes("https://www.googleapis.com/auth/calendar.events")
+        !account.scope.includes(HOST_WRITE_SCOPE)
       ) {
         return "/dashboard?scopeMissing=calendar.events";
       }
