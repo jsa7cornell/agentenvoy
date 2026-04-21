@@ -18,8 +18,20 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { captureClientState } from "@/lib/feedback/capture-client-state";
+import { FEEDBACK_AREAS, type FeedbackArea } from "@/lib/feedback/schema";
 
 type Mode = "host" | "host-deal-room" | "guest-deal-room";
+
+const AREA_LABELS: Record<FeedbackArea, string> = {
+  dashboard_chat: "Dashboard chat",
+  deal_room_chat: "Deal room chat",
+  link_creation: "Link creation",
+  meeting_editing: "Meeting editing",
+  calendar_sync: "Calendar sync",
+  confirmation_flow: "Confirmation flow",
+  other: "Something else",
+};
 
 interface SendFeedbackLinkProps {
   className?: string;
@@ -78,6 +90,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
   const [prefillLoading, setPrefillLoading] = useState(true);
   const [prefillDraft, setPrefillDraft] = useState<string | null>(null);
   const [includeContext, setIncludeContext] = useState(true);
+  const [area, setArea] = useState<FeedbackArea | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [submittedId, setSubmittedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +161,8 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : undefined;
       // If the user never typed, the gray prefill draft submits verbatim.
       const textToSend = (userText.trim() || prefillDraft || "").trim();
+      const clientState = captureClientState();
+      const areaField = area || undefined;
 
       let res: Response;
       if (mode === "guest-deal-room") {
@@ -158,10 +173,12 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
           body: JSON.stringify({
             linkCode,
             userText: textToSend || undefined,
+            area: areaField,
             includeContext,
             sessionId: sessionId ?? undefined,
             url,
             userAgent,
+            clientState,
           }),
         });
       } else {
@@ -177,10 +194,12 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userText: textToSend || undefined,
+            area: areaField,
             checklistState: checklist,
             sessionId: sessionId ?? undefined,
             url,
             userAgent,
+            clientState,
           }),
         });
       }
@@ -194,11 +213,11 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
     } finally {
       setSubmitting(false);
     }
-  }, [mode, linkCode, sessionId, userText, prefillDraft, includeContext, submitting]);
+  }, [mode, linkCode, sessionId, userText, prefillDraft, includeContext, area, submitting]);
 
   const placeholder = prefillLoading
     ? "Reading recent activity…"
-    : "Describe what happened…";
+    : "What did you click? What did you expect to happen?";
 
   // Styling: when the textarea shows a prefill draft the user hasn't
   // touched, render it gray so the user feels free to type over it.
@@ -219,10 +238,23 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
         {submittedId !== null ? (
           <div className="space-y-3">
             <h2 className="text-lg font-semibold">Thank you 🙏</h2>
-            <p className="text-sm text-zinc-300">
-              Every report makes AgentEnvoy better, and we&rsquo;re grateful you took the
-              time to send this one. 💜
-            </p>
+            {mode === "guest-deal-room" ? (
+              <p className="text-sm text-zinc-300">
+                Thanks — email{" "}
+                <a
+                  href="mailto:support@agentenvoy.com"
+                  className="underline decoration-dotted underline-offset-4 hover:text-zinc-100"
+                >
+                  support@agentenvoy.com
+                </a>{" "}
+                if you want to follow up.
+              </p>
+            ) : (
+              <p className="text-sm text-zinc-300">
+                Every report makes AgentEnvoy better, and we&rsquo;re grateful you took the
+                time to send this one. 💜
+              </p>
+            )}
             <div className="flex justify-end pt-2">
               <button
                 type="button"
@@ -248,6 +280,24 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
             </div>
 
             <div className="space-y-3">
+              <label className="block">
+                <span className="text-xs uppercase tracking-wide text-zinc-400">
+                  Area (optional)
+                </span>
+                <select
+                  value={area}
+                  onChange={(e) => setArea(e.target.value as FeedbackArea | "")}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500/60 focus:outline-none"
+                >
+                  <option value="">— pick an area —</option>
+                  {FEEDBACK_AREAS.map((a) => (
+                    <option key={a} value={a}>
+                      {AREA_LABELS[a]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <label className="block">
                 <span className="text-xs uppercase tracking-wide text-zinc-400">
                   What happened? (optional)
