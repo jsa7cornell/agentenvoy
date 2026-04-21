@@ -22,6 +22,7 @@ interface AvailabilityCalendarProps {
   duration?: number;
   minDuration?: number;
   headerSlot?: React.ReactNode;
+  footerSlot?: React.ReactNode;
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
@@ -208,6 +209,7 @@ function WeekView({
   duration,
   minDuration,
   headerSlot,
+  footerSlot,
 }: Omit<AvailabilityCalendarProps, "view">) {
   const now = new Date();
   const todayStr = toDateStr(now);
@@ -389,9 +391,9 @@ function WeekView({
         <LocationNotice currentLocation={currentLocation} onClearLocation={onClearLocation} />
       )}
 
-      {/* Timezone */}
-      <div className="mt-2">
-        <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />
+      {/* Footer: timezone picker (if provided) replaces the static label */}
+      <div className="mt-3 pt-3 border-t border-DEFAULT">
+        {footerSlot ?? <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />}
       </div>
     </div>
   );
@@ -409,6 +411,7 @@ function MonthView({
   duration,
   minDuration,
   headerSlot,
+  footerSlot,
 }: Omit<AvailabilityCalendarProps, "view">) {
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
@@ -569,9 +572,9 @@ function MonthView({
         <LocationNotice currentLocation={currentLocation} onClearLocation={onClearLocation} />
       )}
 
-      {/* Timezone */}
-      <div className="mt-3">
-        <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />
+      {/* Footer: timezone picker (if provided) replaces the static label */}
+      <div className="mt-3 pt-3 border-t border-DEFAULT">
+        {footerSlot ?? <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />}
       </div>
     </div>
   );

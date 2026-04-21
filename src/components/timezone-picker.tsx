@@ -1,14 +1,18 @@
 "use client";
 
 /**
- * Calendar-card timezone picker.
+ * Calendar-card timezone picker — C2 footer pill.
  *
- * Shipped with the guest-tz-ux-three-primitives rework (2026-04-21). Renders:
+ * Rendered under the slot chips as a single, compact line:
  *
- *   ┌───────────────────────────────────────────────────────┐
- *   │ Showing in Eastern Time · John is in Pacific          │
- *   │ [PT]  [ET*]  [CT]  [MT]  [Other…]                     │
- *   └───────────────────────────────────────────────────────┘
+ *   Times in Pacific Time · John's in Eastern.   [ Switch to Eastern Time ▾ ]
+ *
+ * The bordered pill on the right is a native <select> styled as a dropdown
+ * button. Its default option is the suggested zone (the viewer's browser tz
+ * if it differs from the current display tz; otherwise the host's tz if it
+ * differs; otherwise "Change timezone" with no preselection). The rest of the
+ * options are a curated IANA list. Native <select> means the mobile UI is
+ * the OS picker — fast, accessible, no layout pressure on the card.
  *
  * Responsibilities:
  *
@@ -17,29 +21,19 @@
  *     decision #11 this means `viewerTimezone` is never null after first
  *     load, so downstream dual-tz checks in composer.ts are well-defined.
  *
- *   • Picker tap: optimistically swap the active chip, re-fetch slots with
- *     `?tz=` so the widget regroups by the chosen calendar day, and POST to
- *     persist the choice as the picker-authoritative viewer tz.
- *
- *   • "Other…" opens a full IANA browser-native <select>.
- *
- * The component is source-of-truth-free: it owns transient UI state only.
- * The canonical tz lives on NegotiationSession.viewerTimezone in the DB,
- * surfaced back via the session fetch and slot responses.
+ *   • Pick: optimistically swap the display tz, re-fetch slots with `?tz=`
+ *     so the widget regroups by the chosen calendar day, and POST to persist
+ *     the choice as the picker-authoritative viewer tz.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  longTimezoneLabel,
-  shortTimezoneLabel,
-  smartQuickPicks,
-} from "@/lib/timezone";
+import { longTimezoneLabel, shortTimezoneLabel } from "@/lib/timezone";
 
 interface TimezonePickerProps {
   sessionId: string;
-  /** Host's IANA timezone — always present in the chip list. */
+  /** Host's IANA timezone. */
   hostTimezone: string;
-  /** Host's first name, for the "{host} is in {host-tz}" secondary label. */
+  /** Host's first name, for the "{host}'s in {host-tz}" secondary label. */
   hostFirstName: string;
   /** Whatever the server most recently told us the viewer tz is. Null before
    * first-render seed completes. */
@@ -52,8 +46,8 @@ interface TimezonePickerProps {
 }
 
 /**
- * Stable IANA-prefix list of common user-selectable zones for the "Other…"
- * fallback. Mirrors the full IANA set minus obscure/historical zones.
+ * Full IANA picker list. Covers common zones across all regions, same set
+ * the old "Other…" dropdown used.
  */
 const OTHER_ZONES: Array<{ tz: string; label: string }> = [
   { tz: "Pacific/Honolulu", label: "Honolulu (HST)" },
@@ -78,7 +72,7 @@ const OTHER_ZONES: Array<{ tz: string; label: string }> = [
   { tz: "Pacific/Auckland", label: "Auckland (NZST/NZDT)" },
 ];
 
-/** Human-friendly long label for the header — "Eastern Time" etc. */
+/** Human-friendly long label — "Eastern Time" etc. */
 function longLabel(tz: string, now: Date): string {
   try {
     const parts = new Intl.DateTimeFormat("en-US", {
@@ -86,7 +80,7 @@ function longLabel(tz: string, now: Date): string {
       timeZoneName: "long",
     }).formatToParts(now);
     const name = parts.find((p) => p.type === "timeZoneName")?.value;
-    if (name) return name.replace(/\s+Time$/, " Time");
+    if (name) return name;
     return longTimezoneLabel(tz);
   } catch {
     return longTimezoneLabel(tz);
@@ -130,8 +124,6 @@ export function TimezonePicker({
     [detectedBrowserTz],
   );
 
-  // Resolved "current viewer tz" — prefer server state, fall back to
-  // detect-and-default. Stable within a render pass.
   const activeTz = useMemo(() => {
     if (viewerTimezone) return viewerTimezone;
     if (browserTz && browserTz !== hostTimezone) return browserTz;
@@ -140,25 +132,17 @@ export function TimezonePicker({
 
   const [selected, setSelected] = useState(activeTz);
 
-  // Keep internal `selected` in sync with external viewerTimezone changes.
   useEffect(() => {
     setSelected(activeTz);
   }, [activeTz]);
 
-  // First-render seed (decision #11 / B1 fix): when the server reports
-  // viewerTimezone === null, persist the default immediately so the column
-  // is never null from the first page view onward. This removes the silent
-  // dual-tz-trigger ambiguity the reviewer caught.
+  // First-render seed: persist default immediately so the column is never
+  // null from first page view onward.
   useEffect(() => {
     if (viewerTimezone !== null) return;
     if (!sessionId || !activeTz) return;
     void persistViewerTimezone(sessionId, activeTz);
   }, [viewerTimezone, sessionId, activeTz]);
-
-  const chips = useMemo(
-    () => smartQuickPicks(hostTimezone, browserTz),
-    [hostTimezone, browserTz],
-  );
 
   const now = useMemo(() => new Date(), []);
   const viewerLong = longLabel(selected, now);
@@ -166,9 +150,17 @@ export function TimezonePicker({
 
   const sameAsHost = selected === hostTimezone;
 
+  // Suggestion: prefer browser tz if different from current; else host tz.
+  const suggestedTz = useMemo(() => {
+    if (browserTz && browserTz !== selected) return browserTz;
+    if (hostTimezone !== selected) return hostTimezone;
+    return null;
+  }, [browserTz, hostTimezone, selected]);
+  const suggestedLong = suggestedTz ? longLabel(suggestedTz, now) : null;
+
   const handlePick = useCallback(
     (tz: string) => {
-      if (tz === selected) return;
+      if (!tz || tz === selected) return;
       setSelected(tz);
       onTimezoneChange(tz);
       void persistViewerTimezone(sessionId, tz);
@@ -176,62 +168,80 @@ export function TimezonePicker({
     [selected, onTimezoneChange, sessionId],
   );
 
+  // Build option list with the suggested zone pinned to the top (if any),
+  // followed by the curated IANA list. Drop duplicates.
+  const options = useMemo(() => {
+    const out: Array<{ tz: string; label: string }> = [];
+    const seen = new Set<string>();
+    if (suggestedTz && suggestedLong) {
+      out.push({ tz: suggestedTz, label: suggestedLong });
+      seen.add(suggestedTz);
+    }
+    for (const z of OTHER_ZONES) {
+      if (seen.has(z.tz)) continue;
+      out.push(z);
+      seen.add(z.tz);
+    }
+    if (!seen.has(selected)) {
+      out.unshift({ tz: selected, label: viewerLong });
+    }
+    return out;
+  }, [suggestedTz, suggestedLong, selected, viewerLong]);
+
   return (
-    <div className="flex flex-col gap-2 text-[11px] leading-snug">
-      <div className="text-secondary">
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] leading-snug text-muted">
+      <div className="min-w-0">
         {sameAsHost ? (
           <>
-            {viewerLong} (you and {hostFirstName})
+            <span className="text-primary font-medium">{viewerLong}</span>
+            <span className="text-muted"> (you and {hostFirstName})</span>
           </>
         ) : (
           <>
-            Showing in <span className="text-primary font-medium">{viewerLong}</span>
-            {" · "}
-            {hostFirstName} is in {hostShort}
+            Times in <span className="text-primary font-medium">{viewerLong}</span>
+            <span className="text-muted">
+              {" · "}
+              {hostFirstName}&rsquo;s in {hostShort}
+            </span>
           </>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Timezone picker">
-        {chips.map((tz) => {
-          const active = tz === selected;
-          const label = shortTimezoneLabel(tz, now);
-          return (
-            <button
-              key={tz}
-              type="button"
-              onClick={() => handlePick(tz)}
-              aria-pressed={active}
-              className={[
-                "px-2 py-1 rounded-full border text-[11px] transition-colors",
-                active
-                  ? "bg-accent text-on-accent border-transparent"
-                  : "bg-surface-elevated border-DEFAULT text-primary hover:bg-surface-hover",
-              ].join(" ")}
-            >
-              {label}
-            </button>
-          );
-        })}
-        <label className="relative">
-          <span className="sr-only">Other timezone</span>
-          <select
-            aria-label="Pick another timezone"
-            value={chips.includes(selected) ? "" : selected}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v) handlePick(v);
-            }}
-            className="px-2 py-1 rounded-full border border-DEFAULT bg-surface-elevated text-[11px] text-primary hover:bg-surface-hover appearance-none cursor-pointer"
-          >
-            <option value="">Other…</option>
-            {OTHER_ZONES.map((z) => (
-              <option key={z.tz} value={z.tz}>
-                {z.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+
+      <label className="relative inline-flex items-center gap-1.5 self-start sm:self-auto px-2.5 py-1 rounded-md border border-DEFAULT bg-surface-elevated hover:bg-surface-hover hover:border-purple-400/60 text-purple-400 hover:text-purple-300 transition cursor-pointer whitespace-nowrap">
+        <span className="sr-only">Change timezone</span>
+        <span aria-hidden="true">
+          {suggestedLong ? (
+            <>
+              <span className="text-muted">Switch to </span>
+              <span className="font-medium">{suggestedLong}</span>
+            </>
+          ) : (
+            <span className="font-medium">Change timezone</span>
+          )}
+        </span>
+        <svg
+          aria-hidden="true"
+          width="12"
+          height="12"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          className="opacity-80 flex-shrink-0"
+        >
+          <path d="M5 7l5 6 5-6H5z" />
+        </svg>
+        <select
+          aria-label="Pick a timezone"
+          value={selected}
+          onChange={(e) => handlePick(e.target.value)}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer appearance-none"
+        >
+          {options.map((z) => (
+            <option key={z.tz} value={z.tz}>
+              {z.label}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }

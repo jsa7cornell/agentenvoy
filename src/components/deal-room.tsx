@@ -1424,15 +1424,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     // human viewer and we know the host's tz (not for host-viewing-own-room).
     const tzPicker =
       sessionId && hostTimezone && !isHost ? (
-        <div className="mb-2 px-3 py-2 rounded-md bg-surface-elevated border border-DEFAULT">
-          <TimezonePicker
-            sessionId={sessionId}
-            hostTimezone={hostTimezone}
-            hostFirstName={(hostName || "").split(/\s+/)[0] || "the host"}
-            viewerTimezone={viewerTimezone}
-            onTimezoneChange={(tz) => setViewerTimezoneState(tz)}
-          />
-        </div>
+        <TimezonePicker
+          sessionId={sessionId}
+          hostTimezone={hostTimezone}
+          hostFirstName={(hostName || "").split(/\s+/)[0] || "the host"}
+          viewerTimezone={viewerTimezone}
+          onTimezoneChange={(tz) => setViewerTimezoneState(tz)}
+        />
       ) : null;
 
     const connectCta = (() => {
@@ -1464,12 +1462,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       );
     })();
 
-    const headerSlot = tzPicker || connectCta ? (
-      <>
-        {tzPicker}
-        {connectCta}
-      </>
-    ) : null;
+    const headerSlot = connectCta ? <>{connectCta}</> : null;
     return (
       <div key={keyPrefix} className="flex justify-start">
         <div className="max-w-[85%] w-full min-w-0 rounded-2xl px-3 py-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
@@ -1494,6 +1487,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
             }}
             headerSlot={headerSlot}
+            footerSlot={tzPicker}
           />
           </MatchPulse>
         </div>

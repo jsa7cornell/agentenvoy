@@ -40,123 +40,151 @@ export default async function AdminFeedbackDetailPage({
 
   const checklist = report.checklistState as Record<string, boolean> | null;
   const bundle = report.bundle as Record<string, unknown> | null;
+  const filedWhen = report.createdAt.toISOString().replace("T", " ").slice(0, 19);
+  const hostEmail = report.user?.email ?? report.userId;
 
   return (
-    <main className="mx-auto max-w-4xl p-6 font-mono text-sm">
-      <header className="mb-6 flex items-baseline justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Feedback · {report.id.slice(0, 10)}…</h1>
-          <p className="mt-1 text-zinc-500">
-            Filed{" "}
-            <code>{report.createdAt.toISOString().replace("T", " ").slice(0, 19)}</code>
-            {report.filedByGuest ? (
-              <>
-                {" "}by guest{" "}
-                <code>{report.guestName || report.guestEmail || "(unknown)"}</code>
-                {" "}in host{" "}
-                <code>{report.user?.email ?? report.userId}</code>&rsquo;s deal room
-              </>
-            ) : (
-              <>
-                {" "}by <code>{report.user?.email ?? report.userId}</code>
-              </>
-            )}
-          </p>
-          {report.filedByGuest && (
-            <div className="mt-1 flex gap-1.5">
-              <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-300">
-                guest-filed
-              </span>
-              {report.guestEmail && (
-                <span className="text-[10px] text-zinc-500">{report.guestEmail}</span>
+    <main className="min-h-screen bg-zinc-950 text-zinc-100">
+      <div className="mx-auto max-w-4xl p-6">
+        <header className="mb-6">
+          <Link href="/admin/feedback" className="text-xs text-sky-400 hover:underline">
+            &larr; /admin/feedback
+          </Link>
+          <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold">Feedback report</h1>
+              <p className="mt-1 text-xs text-zinc-400">
+                <span className="font-mono">{filedWhen}</span>
+                <span className="mx-2 text-zinc-700">·</span>
+                {report.filedByGuest ? (
+                  <>
+                    by guest{" "}
+                    <span className="text-zinc-200">
+                      {report.guestName || report.guestEmail || "(unknown)"}
+                    </span>{" "}
+                    in <span className="text-zinc-200">{hostEmail}</span>&rsquo;s deal room
+                  </>
+                ) : (
+                  <>
+                    by <span className="text-zinc-200">{hostEmail}</span>
+                  </>
+                )}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {report.filedByGuest && (
+                  <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300">
+                    guest-filed
+                  </span>
+                )}
+                {report.filedByGuest && report.guestEmail && (
+                  <span className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                    {report.guestEmail}
+                  </span>
+                )}
+                <span className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400">
+                  {report.id.slice(0, 10)}…
+                </span>
+              </div>
+            </div>
+            <div>
+              {report.resolved ? (
+                <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-emerald-300">
+                  resolved
+                </span>
+              ) : (
+                <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-amber-300">
+                  open
+                </span>
               )}
             </div>
-          )}
-        </div>
-        <div>
-          {report.resolved ? (
-            <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">
-              resolved
-            </span>
+          </div>
+        </header>
+
+        <section className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
+          <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">What happened?</h2>
+          {report.userText ? (
+            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-100">
+              {report.userText}
+            </p>
           ) : (
-            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">
-              open
-            </span>
+            <p className="italic text-zinc-500">
+              (No text — user submitted with empty field or prefill-only.)
+            </p>
           )}
-        </div>
-      </header>
+          {report.triedToDoText ? (
+            <>
+              <h2 className="mt-5 mb-3 text-xs uppercase tracking-wider text-zinc-500">
+                What they were trying to do
+              </h2>
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-100">
+                {report.triedToDoText}
+              </p>
+            </>
+          ) : null}
+        </section>
 
-      <section className="mb-6 rounded border border-zinc-800 bg-zinc-900/40 p-4">
-        <h2 className="mb-2 text-xs uppercase tracking-wide text-zinc-400">What happened?</h2>
-        {report.userText ? (
-          <pre className="whitespace-pre-wrap text-sm text-zinc-100">{report.userText}</pre>
-        ) : (
-          <p className="text-sm italic text-zinc-600">(No text — user submitted with empty field or prefill-only.)</p>
-        )}
-        {report.triedToDoText ? (
-          <>
-            <h2 className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">
-              What they were trying to do
-            </h2>
-            <pre className="whitespace-pre-wrap text-sm text-zinc-100">{report.triedToDoText}</pre>
-          </>
-        ) : null}
-      </section>
+        <section className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
+          <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">Request headers</h2>
+          <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2 text-sm">
+            <dt className="text-zinc-500">URL</dt>
+            <dd className="break-all text-zinc-200">
+              {report.url ?? <em className="text-zinc-600">—</em>}
+            </dd>
+            <dt className="text-zinc-500">User-Agent</dt>
+            <dd className="break-all font-mono text-xs text-zinc-300">
+              {report.userAgent ?? <em className="font-sans text-zinc-600">—</em>}
+            </dd>
+            <dt className="text-zinc-500">Session</dt>
+            <dd className="text-zinc-200">
+              {report.sessionId ? (
+                <code className="font-mono text-xs">{report.sessionId}</code>
+              ) : (
+                <em className="text-zinc-600">—</em>
+              )}
+            </dd>
+          </dl>
+        </section>
 
-      <section className="mb-6 rounded border border-zinc-800 bg-zinc-900/40 p-4">
-        <h2 className="mb-2 text-xs uppercase tracking-wide text-zinc-400">Request headers</h2>
-        <dl className="grid grid-cols-[140px_1fr] gap-y-1 text-xs">
-          <dt className="text-zinc-500">URL</dt>
-          <dd className="text-zinc-200 break-all">{report.url ?? <em className="text-zinc-600">—</em>}</dd>
-          <dt className="text-zinc-500">User-Agent</dt>
-          <dd className="text-zinc-200 break-all">
-            {report.userAgent ?? <em className="text-zinc-600">—</em>}
-          </dd>
-          <dt className="text-zinc-500">Session</dt>
-          <dd className="text-zinc-200">
-            {report.sessionId ? (
-              <code>{report.sessionId}</code>
-            ) : (
-              <em className="text-zinc-600">—</em>
-            )}
-          </dd>
-        </dl>
-      </section>
+        <section className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
+          <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">Checklist (consent)</h2>
+          {checklist ? (
+            <ul className="space-y-1 text-sm">
+              {Object.entries(checklist).map(([k, v]) => (
+                <li key={k} className="flex items-center gap-2">
+                  <span
+                    className={`inline-block h-4 w-4 rounded border text-center text-[10px] leading-4 ${
+                      v
+                        ? "border-emerald-500/60 bg-emerald-500/20 text-emerald-300"
+                        : "border-zinc-700 bg-zinc-900 text-zinc-600"
+                    }`}
+                  >
+                    {v ? "✓" : ""}
+                  </span>
+                  <span className={v ? "text-zinc-200" : "text-zinc-500"}>{k}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-zinc-500">—</p>
+          )}
+        </section>
 
-      <section className="mb-6 rounded border border-zinc-800 bg-zinc-900/40 p-4">
-        <h2 className="mb-2 text-xs uppercase tracking-wide text-zinc-400">Checklist (consent)</h2>
-        {checklist ? (
-          <ul className="space-y-0.5 text-xs">
-            {Object.entries(checklist).map(([k, v]) => (
-              <li key={k}>
-                <code className={v ? "text-emerald-400" : "text-zinc-600"}>
-                  {v ? "[x]" : "[ ]"} {k}
-                </code>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-zinc-600">—</p>
-        )}
-      </section>
+        <section className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xs uppercase tracking-wider text-zinc-500">Attached bundle</h2>
+            <span className="text-[10px] text-zinc-600">JSONB · schema v1</span>
+          </div>
+          <details>
+            <summary className="cursor-pointer text-sm text-sky-400 hover:text-sky-300">
+              Expand full JSON
+            </summary>
+            <pre className="mt-3 max-h-[600px] overflow-auto whitespace-pre-wrap break-all rounded border border-zinc-800 bg-black/60 p-3 text-[11px] leading-relaxed text-zinc-300">
+              {JSON.stringify(bundle, null, 2)}
+            </pre>
+          </details>
+        </section>
 
-      <section className="mb-6 rounded border border-zinc-800 bg-zinc-900/40 p-4">
-        <h2 className="mb-2 flex items-center justify-between text-xs uppercase tracking-wide text-zinc-400">
-          <span>Attached bundle</span>
-          <span className="text-[10px] text-zinc-600">JSONB · schema v1</span>
-        </h2>
-        <details>
-          <summary className="cursor-pointer text-sky-400 hover:text-sky-300">
-            Expand full JSON
-          </summary>
-          <pre className="mt-3 max-h-[600px] overflow-auto whitespace-pre-wrap break-all rounded bg-black/40 p-3 text-[11px] leading-relaxed text-zinc-300">
-            {JSON.stringify(bundle, null, 2)}
-          </pre>
-        </details>
-      </section>
-
-      <footer className="mt-8 text-xs text-zinc-500">
-        <p>
+        <footer className="mt-10 text-xs text-zinc-500">
           Viewing this page is logged in{" "}
           <Link href="/admin/access-log" className="text-sky-400 hover:underline">
             /admin/access-log
@@ -166,8 +194,8 @@ export default async function AdminFeedbackDetailPage({
             /admin/feedback
           </Link>
           .
-        </p>
-      </footer>
+        </footer>
+      </div>
     </main>
   );
 }
