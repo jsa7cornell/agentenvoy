@@ -75,6 +75,44 @@ describe("ChannelChatStreamParser", () => {
     expect(skipped).toBe(1);
   });
 
+  it("parses clarifier frame with schedule+inquire quick-replies", () => {
+    const p = new ChannelChatStreamParser();
+    const line =
+      '{"type":"clarifier","text":"Did you mean to schedule or inquire?","quickReplies":[{"label":"Book it","intent":"schedule"},{"label":"My defaults","intent":"inquire"}]}\n';
+    const { frames } = p.feed(line);
+    expect(frames).toHaveLength(1);
+    const f = frames[0];
+    expect(f.type).toBe("clarifier");
+    if (f.type === "clarifier") {
+      expect(f.text).toBe("Did you mean to schedule or inquire?");
+      expect(f.quickReplies).toEqual([
+        { label: "Book it", intent: "schedule" },
+        { label: "My defaults", intent: "inquire" },
+      ]);
+    }
+  });
+
+  it("drops stub-tier quick-replies in clarifier frames", () => {
+    const p = new ChannelChatStreamParser();
+    const line =
+      '{"type":"clarifier","text":"?","quickReplies":[{"label":"Profile","intent":"profile"},{"label":"Rule","intent":"rule"},{"label":"Book","intent":"schedule"}]}\n';
+    const { frames } = p.feed(line);
+    expect(frames).toHaveLength(1);
+    const f = frames[0];
+    if (f.type === "clarifier") {
+      expect(f.quickReplies).toEqual([{ label: "Book", intent: "schedule" }]);
+    }
+  });
+
+  it("skips clarifier frame with empty text", () => {
+    const p = new ChannelChatStreamParser();
+    const { frames, skipped } = p.feed(
+      '{"type":"clarifier","text":"","quickReplies":[]}\n',
+    );
+    expect(frames).toHaveLength(0);
+    expect(skipped).toBe(1);
+  });
+
   it("flush() consumes a trailing line without newline", () => {
     const p = new ChannelChatStreamParser();
     p.feed('{"type":"status","stage":"x","copy":"y"}');

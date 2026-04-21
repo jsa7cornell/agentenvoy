@@ -105,6 +105,14 @@ export default function Feed() {
   // (`Response ready. ${Date.now()}`) leaked the timestamp to sighted users in
   // production when `sr-only` didn't fully hide the region. Fixed 2026-04-21.
   const [announcementNonce, setAnnouncementNonce] = useState(0);
+  // Clarifier quick-replies from the intent router's `unclear` tier. When set,
+  // quick-reply pills render beneath the most-recent envoy bubble; click
+  // re-submits `originalText` with the selected `userIntentHint`, bypassing
+  // the classifier. Proposal: 2026-04-21_dashboard-chat-intent-router §2.6.
+  const [clarifierState, setClarifierState] = useState<{
+    originalText: string;
+    replies: Array<{ label: string; intent: "schedule" | "inquire" }>;
+  } | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [calendarConnected, setCalendarConnected] = useState(true);
   const [isCalibrated, setIsCalibrated] = useState(true);
@@ -432,9 +440,14 @@ export default function Feed() {
   }
 
   // Send message
-  const handleSend = async () => {
-    const text = input.trim();
+  const handleSend = async (
+    overrideText?: string,
+    intentHint?: "schedule" | "inquire",
+  ) => {
+    const text = (overrideText ?? input).trim();
     if (!text || loading) return;
+    // Any new turn invalidates previous clarifier quick-replies.
+    setClarifierState(null);
 
     // ── Onboarding freeform input (about_you, protection_blocks, etc.) ──
     if (isOnboarding && onboardingPhase) {
@@ -488,7 +501,10 @@ export default function Feed() {
       const res = await fetch("/api/channel/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          message: text,
+          ...(intentHint ? { userIntentHint: intentHint } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -544,6 +560,14 @@ export default function Feed() {
         const MIN_DWELL_MS = 400;
         const parser = new ChannelChatStreamParser();
         let finalText: string | null = null;
+        // Wrapped in an object so TS retains narrow typing through closure
+        // mutation — a bare `let` reassigned inside handleFrames narrows to
+        // `never` at the post-stream check.
+        const clarifierBox: {
+          value: {
+            replies: Array<{ label: string; intent: "schedule" | "inquire" }>;
+          } | null;
+        } = { value: null };
         let pendingCopy: string | null = null;
         let pendingAt = 0;
         let rafTimer: ReturnType<typeof setTimeout> | null = null;
@@ -570,6 +594,11 @@ export default function Feed() {
           for (const f of frames) {
             if (f.type === "text") {
               finalText = f.content;
+              continue;
+            }
+            if (f.type === "clarifier") {
+              finalText = f.text;
+              clarifierBox.value = { replies: f.quickReplies };
               continue;
             }
             // status frame — supersede any pending one; dwell-gate on render.
@@ -617,6 +646,12 @@ export default function Feed() {
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, envoyMsg]);
+        if (clarifierBox.value) {
+          setClarifierState({
+            originalText: text,
+            replies: clarifierBox.value.replies,
+          });
+        }
         // Single polite announcement at the text-frame boundary (§2.3 N9).
         // Bumping the nonce forces the aria-live region to re-mount (via
         // `key={announcementNonce}`) so screen readers re-announce without
@@ -818,6 +853,29 @@ export default function Feed() {
           </div>
         )}
 
+        {/* Intent-clarifier quick-replies — rendered after an `unclear`-tier
+            turn from the chat intent router. Clicking a pill re-submits the
+            original utterance with the chosen `userIntentHint`, bypassing
+            the classifier. Proposal: 2026-04-21_dashboard-chat-intent-router. */}
+        {clarifierState && clarifierState.replies.length > 0 && !loading && (
+          <div className="self-start flex flex-wrap gap-2 mt-1">
+            {clarifierState.replies.map((reply, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  const { originalText, replies } = clarifierState;
+                  const chosen = replies[i];
+                  setClarifierState(null);
+                  handleSend(originalText, chosen.intent);
+                }}
+                className="px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 text-xs font-medium rounded-full transition"
+              >
+                {reply.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Typing indicator + progress narration status row. When the server
             has emitted a status frame, show the copy in place of the spinner.
             aria-live="off" on the visible row (see §2.3 N9) — we announce
@@ -909,7 +967,7 @@ export default function Feed() {
             className="flex-1 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-primary placeholder-muted resize-none outline-none focus:border-purple-500/50 min-h-[44px] max-h-[120px]"
           />
           <button
-            onClick={handleSend}
+            onClick={() => handleSend()}
             disabled={!input.trim() || loading}
             className="w-11 h-11 rounded-xl bg-purple-600 text-white flex items-center justify-center flex-shrink-0 hover:bg-purple-700 transition-colors disabled:opacity-30 disabled:cursor-default text-lg"
           >

@@ -251,3 +251,117 @@ export function readStoredSteering(rules: MaybeRules): Steering | null {
   const steering = (intent as { steering?: unknown }).steering;
   return normalizeSteering(steering) ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Chat-turn intent (split-pass router)
+//
+// Proposal: 2026-04-21_dashboard-chat-intent-router (decided 2026-04-21 pm).
+//
+// Extends PR #58's closed-enum classifier pattern one layer up: classifies
+// the *turn-level intent* of a host's utterance into a 5-tier enum. The
+// classifier runs as a dedicated Haiku call ahead of the scheduling pass —
+// NOT inline with scheduling. See §1.3 of the proposal for why (256-line
+// channel.md too dense to absorb a second classifier).
+// ---------------------------------------------------------------------------
+
+export const CHAT_INTENT_VALUES = [
+  "schedule",
+  "profile",
+  "rule",
+  "inquire",
+  "unclear",
+] as const;
+
+export type ChatIntent = (typeof CHAT_INTENT_VALUES)[number];
+
+const CHAT_INTENT_SET = new Set<string>(CHAT_INTENT_VALUES);
+
+/**
+ * Quick-reply shape emitted by the classifier when `kind === "unclear"`.
+ * Per N2 fold: stub tiers are NOT allowed as quick-reply targets in v1 —
+ * clicking a profile/rule option would dead-end on a "coming soon" stub.
+ * The schema enumerates `["schedule", "inquire"]` only.
+ */
+export type ChatIntentQuickReply = {
+  label: string;
+  intent: "schedule" | "inquire";
+};
+
+export type ChatIntentBlock = {
+  kind: ChatIntent;
+  /** Rendered verbatim as the clarifier turn when kind = "unclear". Ignored
+   *  for other kinds. */
+  clarifier?: string;
+  quickReplies?: ChatIntentQuickReply[];
+};
+
+/**
+ * Coerce unknown input (Haiku tool-use output, `userIntentHint` from POST)
+ * into a valid ChatIntent. Returns the tier string if valid, else null.
+ */
+export function normalizeChatIntent(input: unknown): ChatIntent | null {
+  if (typeof input !== "string") return null;
+  return CHAT_INTENT_SET.has(input) ? (input as ChatIntent) : null;
+}
+
+/**
+ * Validate a raw classifier block. Schema-forced by the API boundary, so
+ * this is defense-in-depth — a malformed tool-use response is a
+ * provider-contract failure, not semantic ambiguity.
+ *
+ * Semantic ambiguity (§1.5 "WHEN IN DOUBT PICK unclear") lives in the
+ * classifier playbook prompt; this validator handles structural edge
+ * cases only:
+ *   - missing/invalid `kind` → `unclear` with generic clarifier text
+ *   - `kind === "unclear"` but no clarifier text → `schedule` (matches
+ *     today's behavior; avoids a dead-end empty clarifier bubble)
+ *   - quick-replies with invalid/stub-tier intent → dropped
+ */
+export function validateChatIntent(raw: unknown): ChatIntentBlock {
+  if (!raw || typeof raw !== "object") {
+    return { kind: "unclear", clarifier: GENERIC_CLARIFIER };
+  }
+  const block = raw as {
+    kind?: unknown;
+    clarifier?: unknown;
+    quickReplies?: unknown;
+  };
+  const kind = normalizeChatIntent(block.kind);
+  if (!kind) {
+    return { kind: "unclear", clarifier: GENERIC_CLARIFIER };
+  }
+
+  if (kind === "unclear") {
+    const clarifier =
+      typeof block.clarifier === "string" && block.clarifier.trim()
+        ? block.clarifier.trim()
+        : null;
+    // Unclear without clarifier text = dead-end bubble. Fall back to
+    // schedule (today's behavior) rather than render an empty prompt.
+    if (!clarifier) return { kind: "schedule" };
+
+    const quickReplies = Array.isArray(block.quickReplies)
+      ? block.quickReplies
+          .map((q) => {
+            if (!q || typeof q !== "object") return null;
+            const item = q as { label?: unknown; intent?: unknown };
+            const label = typeof item.label === "string" ? item.label.trim() : "";
+            const intent = normalizeChatIntent(item.intent);
+            // Stub tiers (profile, rule) dropped per N2 — no dead-end CTAs.
+            if (!label || !intent || (intent !== "schedule" && intent !== "inquire")) {
+              return null;
+            }
+            return { label, intent } as ChatIntentQuickReply;
+          })
+          .filter((x): x is ChatIntentQuickReply => x !== null)
+          .slice(0, 3)
+      : [];
+
+    return { kind, clarifier, quickReplies };
+  }
+
+  return { kind };
+}
+
+const GENERIC_CLARIFIER =
+  "I'm not sure what you're asking — could you clarify?";
