@@ -1,70 +1,41 @@
 "use client";
 
 /**
- * "Send feedback" quick-action + transparent include-list modal (F3).
+ * "Send feedback" quick-action + single-field modal with Haiku prefill.
  *
- * The checkboxes ARE the consent moment — every row plainly states what
- * will be attached. Calendar events in the bundle go through the
- * server-side redactor (src/lib/feedback/redact-calendar.ts) — this
- * component renders the UX; the server enforces the payload shape.
+ * The italic disclosure line is the consent moment. The checkbox preserves
+ * F3's per-incident consent commitment with less UI. See the decided
+ * proposal: 2026-04-21_deal-room-send-feedback-symmetry.
+ *
+ * Three mount modes:
+ *   - "host"              : NextAuth host, uses /api/feedback/submit.
+ *                           F3 bundle (channel + sessions + errors + cal).
+ *   - "host-deal-room"    : NextAuth host viewing own deal room. Same
+ *                           endpoint/bundle as "host" — only disclosure
+ *                           copy and subtitle change.
+ *   - "guest-deal-room"   : linkCode auth, uses /api/feedback/submit-as-guest.
+ *                           Narrower bundle (channel messages only).
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-type CheckboxKey = "messages" | "sessions" | "calendar" | "errors" | "console";
+type Mode = "host" | "host-deal-room" | "guest-deal-room";
 
-interface ChecklistItem {
-  key: CheckboxKey;
-  label: string;
-  description: string;
-  defaultChecked: boolean;
+interface SendFeedbackLinkProps {
+  className?: string;
+  mode?: Mode;
+  /** Required when mode === "guest-deal-room". */
+  linkCode?: string;
+  /** NegotiationSession.id in the current deal room (if known). */
+  sessionId?: string | null;
 }
 
-const CHECKLIST: ChecklistItem[] = [
-  {
-    key: "messages",
-    label: "Last 30 messages with Envoy",
-    description: "Your recent conversation with the assistant.",
-    defaultChecked: true,
-  },
-  {
-    key: "sessions",
-    label: "Your active sessions (titles + status only)",
-    description: "Session titles, statuses, and agreed times — no message content.",
-    defaultChecked: true,
-  },
-  {
-    key: "calendar",
-    label: "Calendar events from the last 7 days (titles + times only)",
-    description:
-      "Only titles and times. Descriptions, attachments, and non-participant attendee emails are stripped automatically; attendee count is preserved for debugging.",
-    defaultChecked: false,
-  },
-  {
-    key: "errors",
-    label: "Route errors in the last 24h",
-    description: "Server errors tied to your account. No user content.",
-    defaultChecked: true,
-  },
-  {
-    key: "console",
-    label: "Browser console logs (last 50 entries)",
-    description:
-      "Captured from this tab. May contain component state — review before submitting. Off by default.",
-    defaultChecked: false,
-  },
-];
-
-type ChecklistState = Record<CheckboxKey, boolean>;
-
-function initialChecklist(): ChecklistState {
-  return CHECKLIST.reduce<ChecklistState>(
-    (acc, item) => ({ ...acc, [item.key]: item.defaultChecked }),
-    {} as ChecklistState,
-  );
-}
-
-export function SendFeedbackLink({ className }: { className?: string }) {
+export function SendFeedbackLink({
+  className,
+  mode = "host",
+  linkCode,
+  sessionId,
+}: SendFeedbackLinkProps) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -75,66 +46,152 @@ export function SendFeedbackLink({ className }: { className?: string }) {
       >
         Send feedback
       </button>
-      {open ? <SendFeedbackModal onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        <SendFeedbackModal
+          mode={mode}
+          linkCode={linkCode}
+          sessionId={sessionId ?? null}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
     </>
   );
 }
 
 interface ModalProps {
+  mode: Mode;
+  linkCode?: string;
+  sessionId: string | null;
   onClose: () => void;
 }
 
-function captureConsoleLines(): string[] {
-  // We don't patch console globally; instead we rely on whatever the
-  // user had open. This is a best-effort read of any error/warn we can
-  // see in performance entries as a fallback. In v1 this is empty and
-  // the checkbox is off by default — the UI plumbing exists for a v2
-  // where we wrap console. Leaving the shape stable keeps the server
-  // schema honest either way.
-  return [];
+function disclosureText(mode: Mode): string {
+  if (mode === "guest-deal-room") {
+    return "Submitting sends your message and the recent conversation to AgentEnvoy's team to help us debug. You can email support to delete your report.";
+  }
+  // Host paths — ToS-level consent already in place; short reminder.
+  return "Submitting sends your message and the attached activity to AgentEnvoy's team. You can email support to delete your report.";
 }
 
-function SendFeedbackModal({ onClose }: ModalProps) {
+function contextSubtitle(mode: Mode): string {
+  if (mode === "guest-deal-room") {
+    return "Attaches the last 30 messages in this thread and your session state. No calendar data, no other conversations.";
+  }
+  return "Attaches your recent messages, sessions, and any route errors in the last 24h. Calendar data is title+time only.";
+}
+
+function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
   const [userText, setUserText] = useState("");
-  const [triedToDo, setTriedToDo] = useState("");
-  const [checklist, setChecklist] = useState<ChecklistState>(initialChecklist);
-  const [showPreview, setShowPreview] = useState(false);
+  const [userTyped, setUserTyped] = useState(false);
+  const [prefillLoading, setPrefillLoading] = useState(true);
+  const [prefillDraft, setPrefillDraft] = useState<string | null>(null);
+  const [includeContext, setIncludeContext] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submittedId, setSubmittedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const prefillController = useRef<AbortController | null>(null);
 
-  const toggle = useCallback((key: CheckboxKey) => {
-    setChecklist((prev) => ({ ...prev, [key]: !prev[key] }));
+  // Prefill on mount. Race guard per N2 of the proposal: if the response
+  // arrives after the user has typed, DROP it — never overwrite typed
+  // content. abort() is best-effort; userTyped is the authoritative gate.
+  useEffect(() => {
+    const controller = new AbortController();
+    prefillController.current = controller;
+    let cancelled = false;
+
+    const run = async () => {
+      try {
+        const res = await fetch("/api/feedback/prefill", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            linkCode: mode === "guest-deal-room" ? linkCode : undefined,
+            sessionId: sessionId ?? undefined,
+            url: typeof window !== "undefined" ? window.location.href : undefined,
+          }),
+        });
+        if (cancelled) return;
+        const json = (await res.json()) as { ok: boolean; draft?: string };
+        if (cancelled) return;
+        const draft = json.ok ? (json.draft ?? "").trim() : "";
+        // Race guard: if user has already typed, drop the response entirely.
+        setUserTyped((typedNow) => {
+          if (!typedNow && draft) {
+            setPrefillDraft(draft);
+            setUserText(draft);
+          }
+          return typedNow;
+        });
+      } catch {
+        // Aborted or network error — leave textarea empty.
+      } finally {
+        if (!cancelled) setPrefillLoading(false);
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [mode, linkCode, sessionId]);
+
+  const onTextChange = useCallback((value: string) => {
+    setUserText(value);
+    setUserTyped(true);
+    // Invalidate the prefill draft once the user types — future submit
+    // treats the text as user-authored, not prefilled.
+    setPrefillDraft(null);
+    prefillController.current?.abort();
   }, []);
 
-  const previewSummary = useMemo(() => {
-    const parts: string[] = [];
-    if (checklist.messages) parts.push("up to 30 recent messages");
-    if (checklist.sessions) parts.push("up to 10 recent sessions (titles + status only)");
-    if (checklist.calendar) parts.push("calendar events in the last 7 days (titles + times only)");
-    if (checklist.errors) parts.push("route errors in the last 24h");
-    if (checklist.console) parts.push("console lines (empty in v1)");
-    if (parts.length === 0) return "No context attached — just your message.";
-    return parts.join(" · ");
-  }, [checklist]);
-
   const submit = useCallback(async () => {
-    if (!userText.trim() || submitting) return;
+    if (submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch("/api/feedback/submit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userText: userText.trim(),
-          triedToDoText: triedToDo.trim() || undefined,
-          checklistState: checklist,
-          consoleLines: checklist.console ? captureConsoleLines() : undefined,
-          url: typeof window !== "undefined" ? window.location.href : undefined,
-          userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
-        }),
-      });
+      const url = typeof window !== "undefined" ? window.location.href : undefined;
+      const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : undefined;
+      // If the user never typed, the gray prefill draft submits verbatim.
+      const textToSend = (userText.trim() || prefillDraft || "").trim();
+
+      let res: Response;
+      if (mode === "guest-deal-room") {
+        if (!linkCode) throw new Error("Missing linkCode");
+        res = await fetch("/api/feedback/submit-as-guest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            linkCode,
+            userText: textToSend || undefined,
+            includeContext,
+            sessionId: sessionId ?? undefined,
+            url,
+            userAgent,
+          }),
+        });
+      } else {
+        const checklist = {
+          messages: includeContext,
+          sessions: includeContext,
+          calendar: false,
+          errors: includeContext,
+          console: false,
+        };
+        res = await fetch("/api/feedback/submit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userText: textToSend || undefined,
+            checklistState: checklist,
+            sessionId: sessionId ?? undefined,
+            url,
+            userAgent,
+          }),
+        });
+      }
       const json = (await res.json()) as { ok: boolean; reportId?: string; error?: string };
       if (!res.ok || !json.ok) {
         throw new Error(json.error ?? `HTTP ${res.status}`);
@@ -145,7 +202,18 @@ function SendFeedbackModal({ onClose }: ModalProps) {
     } finally {
       setSubmitting(false);
     }
-  }, [userText, triedToDo, checklist, submitting]);
+  }, [mode, linkCode, sessionId, userText, prefillDraft, includeContext, submitting]);
+
+  const placeholder = prefillLoading
+    ? "Reading recent activity…"
+    : "Describe what happened…";
+
+  // Styling: when the textarea shows a prefill draft the user hasn't
+  // touched, render it gray so the user feels free to type over it.
+  const textareaClass =
+    !userTyped && prefillDraft && userText === prefillDraft
+      ? "mt-1 w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-500 italic focus:border-purple-500/60 focus:text-zinc-100 focus:not-italic focus:outline-none"
+      : "mt-1 w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500/60 focus:outline-none";
 
   return (
     <div
@@ -160,7 +228,8 @@ function SendFeedbackModal({ onClose }: ModalProps) {
           <div className="space-y-3">
             <h2 className="text-lg font-semibold">Thanks — we got it.</h2>
             <p className="text-sm text-zinc-400">
-              Report ID <code className="text-zinc-300">{submittedId}</code>. Our team will take a look.
+              Report ID <code className="text-zinc-300">{submittedId}</code>. AgentEnvoy&rsquo;s
+              team will take a look.
             </p>
             <div className="flex justify-end pt-2">
               <button
@@ -189,76 +258,40 @@ function SendFeedbackModal({ onClose }: ModalProps) {
             <div className="space-y-3">
               <label className="block">
                 <span className="text-xs uppercase tracking-wide text-zinc-400">
-                  What happened?
+                  What happened? (optional)
                 </span>
                 <textarea
                   value={userText}
-                  onChange={(e) => setUserText(e.target.value)}
-                  rows={3}
-                  placeholder="Describe what you saw…"
-                  className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm focus:border-purple-500/60 focus:outline-none"
+                  onChange={(e) => onTextChange(e.target.value)}
+                  rows={4}
+                  placeholder={placeholder}
+                  className={textareaClass}
                 />
               </label>
 
-              <label className="block">
-                <span className="text-xs uppercase tracking-wide text-zinc-400">
-                  What were you trying to do? (optional)
+              <label className="flex items-start gap-2 rounded-lg border border-white/10 bg-zinc-900/60 p-3">
+                <input
+                  type="checkbox"
+                  id="fb-include-context"
+                  checked={includeContext}
+                  onChange={() => setIncludeContext((v) => !v)}
+                  className="mt-0.5 h-4 w-4 accent-purple-500"
+                />
+                <span className="flex-1">
+                  <span className="block text-sm text-zinc-200">
+                    Include recent activity
+                  </span>
+                  <span className="block text-[11px] text-zinc-500 mt-0.5">
+                    {contextSubtitle(mode)}
+                  </span>
                 </span>
-                <textarea
-                  value={triedToDo}
-                  onChange={(e) => setTriedToDo(e.target.value)}
-                  rows={2}
-                  placeholder="e.g. confirm a meeting on Friday at 2pm…"
-                  className="mt-1 w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm focus:border-purple-500/60 focus:outline-none"
-                />
               </label>
 
-              <div className="rounded-lg border border-white/10 bg-zinc-900/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-zinc-400">
-                  Context to attach
-                </p>
-                <p className="mt-1 text-[11px] text-zinc-500">
-                  Every item below is off by default unless listed as on. You can toggle any of them — we only send what you check.
-                </p>
-                <ul className="mt-3 space-y-2">
-                  {CHECKLIST.map((item) => (
-                    <li key={item.key} className="flex items-start gap-2">
-                      <input
-                        type="checkbox"
-                        id={`fb-${item.key}`}
-                        checked={checklist[item.key]}
-                        onChange={() => toggle(item.key)}
-                        className="mt-0.5 h-4 w-4 accent-purple-500"
-                      />
-                      <label htmlFor={`fb-${item.key}`} className="flex-1">
-                        <div className="text-sm text-zinc-200">{item.label}</div>
-                        <div className="text-[11px] text-zinc-500">{item.description}</div>
-                      </label>
-                    </li>
-                  ))}
-                </ul>
+              <p className="text-[11px] italic text-zinc-500">
+                {disclosureText(mode)}
+              </p>
 
-                <button
-                  type="button"
-                  onClick={() => setShowPreview((s) => !s)}
-                  className="mt-3 text-xs text-sky-400 hover:text-sky-300"
-                >
-                  {showPreview ? "Hide" : "Preview"} what will be sent
-                </button>
-                {showPreview ? (
-                  <pre className="mt-2 whitespace-pre-wrap rounded bg-black/40 p-2 text-[11px] leading-relaxed text-zinc-300">
-                    URL: {typeof window !== "undefined" ? window.location.href : "(server)"}
-                    {"\n"}User-Agent: {typeof navigator !== "undefined" ? navigator.userAgent : "(server)"}
-                    {"\n"}Captured at: (server time on submit)
-                    {"\n"}
-                    {"\n"}Context: {previewSummary}
-                  </pre>
-                ) : null}
-              </div>
-
-              {error ? (
-                <p className="text-xs text-red-400">{error}</p>
-              ) : null}
+              {error ? <p className="text-xs text-red-400">{error}</p> : null}
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
@@ -271,7 +304,7 @@ function SendFeedbackModal({ onClose }: ModalProps) {
                 <button
                   type="button"
                   onClick={submit}
-                  disabled={submitting || !userText.trim()}
+                  disabled={submitting}
                   className="rounded-lg bg-purple-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-purple-500 disabled:opacity-40"
                 >
                   {submitting ? "Sending…" : "Send feedback"}

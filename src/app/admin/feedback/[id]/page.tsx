@@ -48,9 +48,30 @@ export default async function AdminFeedbackDetailPage({
           <h1 className="text-xl font-bold">Feedback · {report.id.slice(0, 10)}…</h1>
           <p className="mt-1 text-zinc-500">
             Filed{" "}
-            <code>{report.createdAt.toISOString().replace("T", " ").slice(0, 19)}</code> by{" "}
-            <code>{report.user?.email ?? report.userId}</code>
+            <code>{report.createdAt.toISOString().replace("T", " ").slice(0, 19)}</code>
+            {report.filedByGuest ? (
+              <>
+                {" "}by guest{" "}
+                <code>{report.guestName || report.guestEmail || "(unknown)"}</code>
+                {" "}in host{" "}
+                <code>{report.user?.email ?? report.userId}</code>&rsquo;s deal room
+              </>
+            ) : (
+              <>
+                {" "}by <code>{report.user?.email ?? report.userId}</code>
+              </>
+            )}
           </p>
+          {report.filedByGuest && (
+            <div className="mt-1 flex gap-1.5">
+              <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-300">
+                guest-filed
+              </span>
+              {report.guestEmail && (
+                <span className="text-[10px] text-zinc-500">{report.guestEmail}</span>
+              )}
+            </div>
+          )}
         </div>
         <div>
           {report.resolved ? (
@@ -67,7 +88,11 @@ export default async function AdminFeedbackDetailPage({
 
       <section className="mb-6 rounded border border-zinc-800 bg-zinc-900/40 p-4">
         <h2 className="mb-2 text-xs uppercase tracking-wide text-zinc-400">What happened?</h2>
-        <pre className="whitespace-pre-wrap text-sm text-zinc-100">{report.userText}</pre>
+        {report.userText ? (
+          <pre className="whitespace-pre-wrap text-sm text-zinc-100">{report.userText}</pre>
+        ) : (
+          <p className="text-sm italic text-zinc-600">(No text — user submitted with empty field or prefill-only.)</p>
+        )}
         {report.triedToDoText ? (
           <>
             <h2 className="mt-4 mb-2 text-xs uppercase tracking-wide text-zinc-400">

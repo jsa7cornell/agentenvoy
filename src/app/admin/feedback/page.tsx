@@ -16,6 +16,7 @@ export const revalidate = 0;
 interface SearchParams {
   range?: string;
   resolved?: string; // "open" | "resolved" | "all" — default "open"
+  source?: string; // "all" | "dashboard" | "deal-room" — default "all"
 }
 
 function parseRange(range: string | undefined): { since: Date; label: string } {
@@ -35,6 +36,11 @@ function parseRange(range: string | undefined): { since: Date; label: string } {
 
 function parseResolved(v: string | undefined): "open" | "resolved" | "all" {
   return v === "resolved" || v === "all" ? v : "open";
+}
+
+type SourceFilter = "all" | "dashboard" | "deal-room";
+function parseSource(v: string | undefined): SourceFilter {
+  return v === "dashboard" || v === "deal-room" ? v : "all";
 }
 
 type ChecklistLike = Record<string, unknown> | null;
@@ -59,19 +65,25 @@ export default async function AdminFeedbackPage({
   const params = await searchParams;
   const { since, label } = parseRange(params.range);
   const resolvedFilter = parseResolved(params.resolved);
+  const sourceFilter = parseSource(params.source);
 
   await logAdminAccess({
     adminId: admin.id,
     path: "/admin/feedback",
     action: "list",
     targetUserId: null,
-    context: { range: label, resolved: resolvedFilter },
+    context: { range: label, resolved: resolvedFilter, source: sourceFilter },
   });
 
   const rows = await prisma.feedbackReport.findMany({
     where: {
       createdAt: { gte: since },
       ...(resolvedFilter === "all" ? {} : { resolved: resolvedFilter === "resolved" }),
+      ...(sourceFilter === "deal-room"
+        ? { url: { contains: "/meet/" } }
+        : sourceFilter === "dashboard"
+          ? { NOT: { url: { contains: "/meet/" } } }
+          : {}),
     },
     orderBy: { createdAt: "desc" },
     take: 200,
@@ -83,6 +95,8 @@ export default async function AdminFeedbackPage({
       userId: true,
       checklistState: true,
       url: true,
+      filedByGuest: true,
+      guestName: true,
     },
   });
 
@@ -107,14 +121,18 @@ export default async function AdminFeedbackPage({
       </header>
 
       <section className="mb-4 flex flex-wrap gap-2 text-xs">
-        <RangeLink label="24h" current={label} target="24h" resolved={resolvedFilter} />
-        <RangeLink label="7d" current={label} target="7d" resolved={resolvedFilter} />
-        <RangeLink label="30d" current={label} target="30d" resolved={resolvedFilter} />
-        <RangeLink label="all" current={label} target="all" resolved={resolvedFilter} />
+        <RangeLink label="24h" current={label} target="24h" resolved={resolvedFilter} source={sourceFilter} />
+        <RangeLink label="7d" current={label} target="7d" resolved={resolvedFilter} source={sourceFilter} />
+        <RangeLink label="30d" current={label} target="30d" resolved={resolvedFilter} source={sourceFilter} />
+        <RangeLink label="all" current={label} target="all" resolved={resolvedFilter} source={sourceFilter} />
         <span className="mx-2 text-zinc-600">·</span>
-        <ResolvedLink label="open" current={resolvedFilter} target="open" range={label} />
-        <ResolvedLink label="resolved" current={resolvedFilter} target="resolved" range={label} />
-        <ResolvedLink label="all" current={resolvedFilter} target="all" range={label} />
+        <ResolvedLink label="open" current={resolvedFilter} target="open" range={label} source={sourceFilter} />
+        <ResolvedLink label="resolved" current={resolvedFilter} target="resolved" range={label} source={sourceFilter} />
+        <ResolvedLink label="all" current={resolvedFilter} target="all" range={label} source={sourceFilter} />
+        <span className="mx-2 text-zinc-600">·</span>
+        <SourceLink label="all" current={sourceFilter} target="all" range={label} resolved={resolvedFilter} />
+        <SourceLink label="dashboard" current={sourceFilter} target="dashboard" range={label} resolved={resolvedFilter} />
+        <SourceLink label="deal-room" current={sourceFilter} target="deal-room" range={label} resolved={resolvedFilter} />
       </section>
 
       {rows.length === 0 ? (
@@ -126,7 +144,7 @@ export default async function AdminFeedbackPage({
           <thead>
             <tr className="border-b border-zinc-700 text-left">
               <th className="py-2 pr-4">When</th>
-              <th className="py-2 pr-4">User</th>
+              <th className="py-2 pr-4">From</th>
               <th className="py-2 pr-4">Status</th>
               <th className="py-2 pr-4">Slices</th>
               <th className="py-2 pr-4">Text</th>
@@ -135,15 +153,41 @@ export default async function AdminFeedbackPage({
           </thead>
           <tbody>
             {rows.map((r) => {
-              const email = emailById.get(r.userId) ?? r.userId;
+              const hostEmail = emailById.get(r.userId) ?? r.userId;
               const slices = slicesFromChecklist(r.checklistState as ChecklistLike);
-              const preview = r.userText.length > 90 ? `${r.userText.slice(0, 90)}…` : r.userText;
+              const text = r.userText ?? "";
+              const preview = text
+                ? text.length > 90
+                  ? `${text.slice(0, 90)}…`
+                  : text
+                : <span className="text-zinc-600 italic">(no text)</span>;
               return (
                 <tr key={r.id} className="border-b border-zinc-800 align-top">
                   <td className="py-2 pr-4 whitespace-nowrap text-zinc-500">
                     {r.createdAt.toISOString().replace("T", " ").slice(0, 19)}
                   </td>
-                  <td className="py-2 pr-4 text-zinc-300">{email}</td>
+                  <td className="py-2 pr-4">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-zinc-300">
+                        {r.filedByGuest
+                          ? (r.guestName || "Guest (unknown)")
+                          : hostEmail}
+                      </span>
+                      {r.filedByGuest && (
+                        <span
+                          className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-300"
+                          title={`Host: ${hostEmail}`}
+                        >
+                          guest
+                        </span>
+                      )}
+                      {r.url?.includes("/meet/") && !r.filedByGuest && (
+                        <span className="rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-sky-300">
+                          deal-room
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="py-2 pr-4">
                     {r.resolved ? (
                       <span className="text-emerald-400">resolved</span>
@@ -183,29 +227,35 @@ export default async function AdminFeedbackPage({
   );
 }
 
+function filterPillClass(active: boolean): string {
+  return `rounded border px-2 py-0.5 ${
+    active
+      ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+      : "border-zinc-700 text-zinc-400 hover:text-zinc-200"
+  }`;
+}
+
 function RangeLink({
   label,
   current,
   target,
   resolved,
+  source,
 }: {
   label: string;
   current: string;
   target: string;
   resolved: string;
+  source: string;
 }) {
   const qs = new URLSearchParams();
   qs.set("range", target);
   qs.set("resolved", resolved);
-  const active = current === target;
+  qs.set("source", source);
   return (
     <Link
       href={`/admin/feedback?${qs.toString()}`}
-      className={`rounded border px-2 py-0.5 ${
-        active
-          ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
-          : "border-zinc-700 text-zinc-400 hover:text-zinc-200"
-      }`}
+      className={filterPillClass(current === target)}
     >
       {label}
     </Link>
@@ -217,24 +267,49 @@ function ResolvedLink({
   current,
   target,
   range,
+  source,
 }: {
   label: string;
   current: string;
   target: string;
   range: string;
+  source: string;
 }) {
   const qs = new URLSearchParams();
   qs.set("range", range);
   qs.set("resolved", target);
-  const active = current === target;
+  qs.set("source", source);
   return (
     <Link
       href={`/admin/feedback?${qs.toString()}`}
-      className={`rounded border px-2 py-0.5 ${
-        active
-          ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
-          : "border-zinc-700 text-zinc-400 hover:text-zinc-200"
-      }`}
+      className={filterPillClass(current === target)}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function SourceLink({
+  label,
+  current,
+  target,
+  range,
+  resolved,
+}: {
+  label: string;
+  current: string;
+  target: string;
+  range: string;
+  resolved: string;
+}) {
+  const qs = new URLSearchParams();
+  qs.set("range", range);
+  qs.set("resolved", resolved);
+  qs.set("source", target);
+  return (
+    <Link
+      href={`/admin/feedback?${qs.toString()}`}
+      className={filterPillClass(current === target)}
     >
       {label}
     </Link>

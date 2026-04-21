@@ -93,17 +93,38 @@ model User {
 /// agreed to attach, `bundle` is the server-generated redacted payload.
 /// Calendar events in `bundle` are redacted at the sink
 /// (src/lib/feedback/redact-calendar.ts).
+///
+/// Host-keyed: `userId` is the LINK OWNER, not the filer. For guest-filed
+/// reports (filedByGuest=true), the filer's identity is guestName/guestEmail.
+/// Deal-room guest submissions key to the host because (a) host owns the
+/// room, (b) host's account-delete cascade is the correct retention story,
+/// (c) nothing else is stable to key on for a guest. See
+/// proposals/2026-04-21_deal-room-send-feedback-symmetry_reviewed-2026-04-21_decided-2026-04-21.md.
 model FeedbackReport {
   id             String    @id @default(cuid())
   userId         String
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessionId      String?
-  userText       String    @db.Text
+  /// Free-text user message. Optional because Haiku prefill may submit
+  /// verbatim without the user typing anything (deal-room symmetry proposal,
+  /// 2026-04-21). Before that proposal this field was required.
+  userText       String?   @db.Text
   triedToDoText  String?   @db.Text
   userAgent      String?
   url            String?
   checklistState Json
   bundle         Json
+  /// True when submitted via the linkCode-authenticated guest endpoint
+  /// (`/api/feedback/submit-as-guest`). Server-authoritative — set at the
+  /// endpoint boundary, never read from the request body.
+  filedByGuest   Boolean   @default(false)
+  /// Guest identity at time of report — SNAPSHOT, intentionally not a join.
+  /// Server-derived from NegotiationSession state (what the guest volunteered
+  /// in join/greeting flow). Never accepted from request body. Null when
+  /// filedByGuest=false or when the guest never provided it.
+  guestName      String?
+  /// See guestName. Snapshot, server-derived.
+  guestEmail     String?
   resolved       Boolean   @default(false)
   resolvedAt     DateTime?
   resolvedBy     String?
@@ -112,6 +133,7 @@ model FeedbackReport {
   @@index([userId])
   @@index([createdAt])
   @@index([resolved, createdAt])
+  @@index([filedByGuest, createdAt])
 }
 
 /// Break-glass audit of every admin read of user-specific data (F5 of the

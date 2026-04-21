@@ -20,22 +20,44 @@ export const ChecklistStateSchema = z.object({
 });
 export type ChecklistState = z.infer<typeof ChecklistStateSchema>;
 
+/**
+ * Host-path submission (NextAuth session). `userText` is optional as of
+ * 2026-04-21 — the Haiku-prefilled gray draft submits verbatim if the user
+ * doesn't type. `triedToDoText` is retained for schema back-compat with
+ * any outstanding client but the new UI never populates it.
+ */
 export const FeedbackSubmitSchema = z.object({
-  userText: z.string().min(1).max(4000),
+  userText: z.string().max(4000).optional(),
   triedToDoText: z.string().max(4000).optional(),
   checklistState: ChecklistStateSchema,
   sessionId: z.string().max(200).optional(),
   url: z.string().max(500).optional(),
   userAgent: z.string().max(500).optional(),
-  /** Console logs captured by the client. Free-text → bounded and only
-   *  attached when the `console` checkbox is checked. Server truncates
-   *  individual lines that exceed 1KB. Off by default in the UI. */
   consoleLines: z
     .array(z.string().max(2000))
     .max(100)
     .optional(),
 });
 export type FeedbackSubmitInput = z.infer<typeof FeedbackSubmitSchema>;
+
+/**
+ * Guest-path submission (linkCode auth, no session). Closed schema —
+ * `guestName`/`guestEmail`/`filedByGuest` are explicitly NOT here because
+ * they are server-derived (B1 of the decided proposal, 2026-04-21). Zod
+ * `.strict()` rejects unknown keys so a malicious body that includes them
+ * is rejected at the boundary.
+ */
+export const FeedbackSubmitAsGuestSchema = z
+  .object({
+    linkCode: z.string().min(1).max(200),
+    userText: z.string().max(4000).optional(),
+    includeContext: z.boolean(),
+    sessionId: z.string().max(200).optional(),
+    url: z.string().max(500).optional(),
+    userAgent: z.string().max(500).optional(),
+  })
+  .strict();
+export type FeedbackSubmitAsGuestInput = z.infer<typeof FeedbackSubmitAsGuestSchema>;
 
 const RedactedCalendarEventSchema = z.object({
   id: z.string(),
@@ -96,5 +118,45 @@ export const FeedbackBundleSchema = z.object({
     )
     .optional(),
   consoleLines: z.array(z.string()).optional(),
+  /** Guest-bundle shape (deal-room symmetry, 2026-04-21). When present,
+   *  the bundle is a guest-filed report and the scope is narrower than a
+   *  host bundle — channel-only messages + optional session, no calendar,
+   *  no cross-session data, no RouteError. Mutually exclusive with the
+   *  host-path slices above in practice (the guest bundle builder never
+   *  sets calendar/routeErrors/etc.). */
+  sharedChannel: z
+    .object({
+      messages: z.array(
+        z.object({
+          id: z.string(),
+          role: z.string(),
+          createdAt: z.string(),
+          content: z.string(),
+        }),
+      ),
+    })
+    .optional(),
+  session: z
+    .object({
+      id: z.string(),
+      title: z.string().nullable(),
+      status: z.string(),
+      proposedSlots: z.unknown().optional(),
+      agreedTime: z.string().nullable(),
+    })
+    .optional(),
+  link: z
+    .object({
+      code: z.string(),
+      hostEmail: z.string().nullable(),
+    })
+    .optional(),
+  filedByGuest: z.boolean().optional(),
+  guestIdentity: z
+    .object({
+      name: z.string().nullable(),
+      email: z.string().nullable(),
+    })
+    .optional(),
 });
 export type FeedbackBundle = z.infer<typeof FeedbackBundleSchema>;
