@@ -91,12 +91,14 @@ function defaultAreaForMode(mode: Mode): FeedbackArea | "" {
 }
 
 function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
+  const inferredArea = defaultAreaForMode(mode);
   const [userText, setUserText] = useState("");
   const [userTyped, setUserTyped] = useState(false);
   const [prefillLoading, setPrefillLoading] = useState(true);
   const [prefillDraft, setPrefillDraft] = useState<string | null>(null);
   const [includeContext, setIncludeContext] = useState(true);
-  const [area, setArea] = useState<FeedbackArea | "">(() => defaultAreaForMode(mode));
+  const [area, setArea] = useState<FeedbackArea | "">(inferredArea);
+  const [showAreaPicker, setShowAreaPicker] = useState(inferredArea === "");
   const [submitting, setSubmitting] = useState(false);
   const [submittedId, setSubmittedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -269,6 +271,12 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
                 time to send this one. 💜
               </p>
             )}
+            {submittedId ? (
+              <p className="pt-1 text-[11px] text-zinc-500">
+                Report ID:{" "}
+                <code className="font-mono text-zinc-400 select-all">{submittedId}</code>
+              </p>
+            ) : null}
             <div className="flex justify-end pt-2">
               <button
                 type="button"
@@ -294,23 +302,37 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
             </div>
 
             <div className="space-y-3">
-              <label className="block">
-                <span className="text-xs uppercase tracking-wide text-zinc-400">
-                  Area (optional)
-                </span>
-                <select
-                  value={area}
-                  onChange={(e) => setArea(e.target.value as FeedbackArea | "")}
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500/60 focus:outline-none"
-                >
-                  <option value="">— pick an area —</option>
-                  {FEEDBACK_AREAS.map((a) => (
-                    <option key={a} value={a}>
-                      {AREA_LABELS[a]}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {showAreaPicker ? (
+                <label className="block">
+                  <span className="text-xs uppercase tracking-wide text-zinc-400">
+                    Area (optional)
+                  </span>
+                  <select
+                    value={area}
+                    onChange={(e) => setArea(e.target.value as FeedbackArea | "")}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500/60 focus:outline-none"
+                  >
+                    <option value="">— pick an area —</option>
+                    {FEEDBACK_AREAS.map((a) => (
+                      <option key={a} value={a}>
+                        {AREA_LABELS[a]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : area ? (
+                <p className="text-[11px] text-zinc-500">
+                  Area: <span className="text-zinc-300">{AREA_LABELS[area as FeedbackArea]}</span>
+                  {" · "}
+                  <button
+                    type="button"
+                    onClick={() => setShowAreaPicker(true)}
+                    className="underline decoration-dotted underline-offset-2 hover:text-zinc-300"
+                  >
+                    change
+                  </button>
+                </p>
+              ) : null}
 
               <label className="block">
                 <span className="text-xs uppercase tracking-wide text-zinc-400">
