@@ -6,7 +6,7 @@ export default function PrivacyPage() {
       <PublicHeader />
       <div className="max-w-3xl mx-auto px-6 py-16">
         <h1 className="text-3xl font-bold mb-2">Privacy at AgentEnvoy</h1>
-        <p className="text-sm text-muted mb-12">Last updated: April 19, 2026</p>
+        <p className="text-sm text-muted mb-12">Last updated: April 20, 2026</p>
 
         <div className="prose prose-invert prose-zinc max-w-none space-y-10 text-sm leading-relaxed text-secondary dark:text-zinc-300">
 
@@ -84,6 +84,15 @@ export default function PrivacyPage() {
               </li>
             </ul>
             <p className="mt-2">
+              Which scopes we ask for depends on how you sign in. If you sign up through our front
+              door &mdash; the header, homepage, or <code className="text-xs">/login</code> page
+              &mdash; we request read and write together, since you&apos;re signing up to host
+              meetings. If you connect a calendar from within a meeting link someone shared with
+              you, we request read-only; you&apos;ll only be asked for write later if you become a
+              host yourself. The goal is to ask for the narrowest access that fits what you&apos;re
+              actually doing.
+            </p>
+            <p className="mt-2">
               By default Envoy reasons only about <strong>when</strong> you are busy &mdash; not{" "}
               <strong>why</strong>. We see &ldquo;busy 9&ndash;10am,&rdquo; not &ldquo;Doctor
               appointment with Dr. Smith.&rdquo; You may choose to let Envoy also consider event
@@ -106,6 +115,40 @@ export default function PrivacyPage() {
               Messages you send to Envoy during a negotiation, preferences you set (meeting
               duration, phone number, video provider, scheduling rules), and any knowledge you
               explicitly teach Envoy about how you prefer to work.
+            </p>
+
+            <h3 className="text-base font-semibold text-primary mt-6">Patterns Envoy learns about you</h3>
+            <p>
+              As you use AgentEnvoy, Envoy derives a set of scheduling preferences from how your
+              calendar actually looks &mdash; the hours you tend to be working, buffers around
+              focus time, and which people you make time for most easily. These derived patterns
+              are stored against your account so Envoy can make smarter proposals on your behalf.
+              They&apos;re available for you to review and edit on your dashboard, and they&apos;re
+              deleted when you delete your account.
+            </p>
+
+            <h3 className="text-base font-semibold text-primary mt-6">Product-usage events</h3>
+            <p>
+              We record a small set of product-usage events (for example, &ldquo;you finished
+              onboarding,&rdquo; &ldquo;you confirmed a meeting&rdquo;) on our own database so we
+              can see which parts of the product work and which don&apos;t. Event names are
+              enumerated in our source code under an allowlist, and event properties are limited
+              to short primitive values (strings, numbers, booleans). Calendar content, message
+              text, and free-text input are never captured through this channel. We do not
+              currently send these events to any third-party analytics vendor; if that ever
+              changes, we&apos;ll update this policy and list the vendor here before any data
+              leaves our infrastructure.
+            </p>
+
+            <h3 className="text-base font-semibold text-primary mt-6">When you send us feedback</h3>
+            <p>
+              There&apos;s a &ldquo;Send feedback&rdquo; link in the product. When you use it, you
+              can optionally include recent activity (your latest messages, active sessions, and
+              any route errors from the last day) so we can see what you were seeing. Calendar
+              event contents are redacted before anything is stored &mdash; we keep times, titles,
+              status, and participant counts; we strip descriptions, attachments, non-participant
+              emails, and URL-shaped locations. If you opt to share, we gather only what you
+              chose to share. Feedback is a gift &mdash; thank you for taking the time. 💜
             </p>
           </section>
 
@@ -217,9 +260,9 @@ export default function PrivacyPage() {
                 agentenvoy.ai.
               </li>
               <li>
-                <strong>Access within AgentEnvoy:</strong> only the small set of maintainers operating
-                the service can access production systems, and only for diagnostic or support purposes.
-                We do not browse your calendar or messages as a matter of course.
+                <strong>Access within AgentEnvoy:</strong> see &ldquo;Internal access audit&rdquo;
+                below &mdash; every internal read of user-specific data is logged, and
+                team access to your thread or calendar requires your explicit opt-in.
               </li>
               <li>
                 <strong>Scope minimization:</strong> we request the narrowest Google OAuth scopes that
@@ -227,6 +270,31 @@ export default function PrivacyPage() {
                 own booked events. Nothing broader.
               </li>
             </ul>
+          </section>
+
+          {/* --- INTERNAL ACCESS AUDIT --- */}
+          <section>
+            <h2 className="text-lg font-semibold text-primary">Internal Access Audit</h2>
+            <p>
+              Every internal admin read of user-specific data &mdash; feedback reports, user
+              drawers, event streams &mdash; writes a row to an internal audit log
+              (<code className="text-xs">AdminAccessLog</code>). The log records which admin,
+              which route, and when. This is a structural control: the audit exists by
+              construction, not by policy. If you&apos;d like a copy of your own log entries,
+              email{" "}
+              <a href="mailto:privacy@agentenvoy.ai" className="text-indigo-400 hover:text-indigo-300">
+                privacy@agentenvoy.ai
+              </a>
+              .
+            </p>
+            <p className="mt-2">
+              When our team needs to read your specific thread or calendar to help you with a
+              bug, we ask for your explicit opt-in via the Privacy section of your{" "}
+              <a href="/dashboard/account" className="text-indigo-400 hover:text-indigo-300">
+                Account page
+              </a>
+              . The consent is revocable at any time, and every access is still logged.
+            </p>
           </section>
 
           {/* --- RETENTION AND DELETION --- (Google: Data Retention & Deletion) */}
