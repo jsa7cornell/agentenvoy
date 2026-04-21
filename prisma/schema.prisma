@@ -63,6 +63,13 @@ model User {
   /// row is seeded to "admin" in the same migration. Env-var fallback stays
   /// for 24–48h, removed in the next PR.
   userClass                   String    @default("user")
+  /// F4 — beta-cohort debug consent. When true, admins may read this user's
+  /// thread + calendar via admin drawers without per-incident consent. Checked
+  /// fresh per-request (not cached). Revocation is immediate — flip to false
+  /// and `debugConsentRevokedAt` gets stamped; audit rows are kept by F5.
+  debugConsent                Boolean   @default(false)
+  debugConsentAt              DateTime?
+  debugConsentRevokedAt       DateTime?
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 
