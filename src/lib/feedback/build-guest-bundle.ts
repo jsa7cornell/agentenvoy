@@ -42,7 +42,12 @@ import { fetchSlotsReplay } from "@/lib/feedback/replay-slots";
 const MAX_MESSAGES = 40;
 const RECENT_TURNS_BASELINE = 10;
 
+// Must match what the deal-room feed renders to guests (see feed.tsx).
+// Server-side roles: guest messages are stored as "user"; AI replies as
+// "envoy"; "system" is hidden at render and excluded here to match.
 const GUEST_VISIBLE_ROLES = new Set([
+  "user",
+  "envoy",
   "host",
   "guest",
   "administrator",
