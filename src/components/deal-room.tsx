@@ -163,11 +163,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // the deal room. After a successful round-trip the bilateral chips appear
   // just like they do for logged-in guests (same compute path, different
   // storage). Dismissal persists per-session in localStorage.
-  const [anonCalCtaDismissed, setAnonCalCtaDismissed] = useState(false);
   // Post-confirm signup upsell dismissal (client-only state)
   const [signupUpsellDismissed, setSignupUpsellDismissed] = useState(false);
-  // Mobile chip CTA expanded state
-  const [chipCtaExpanded, setChipCtaExpanded] = useState(false);
   // Signup-upsell modal "Connect with Google" pre-consent step. Uses
   // reconnect mode because the upsell modal already shows the value-prop;
   // here we just need a thin "Continue to Google" affirmation.
@@ -293,20 +290,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     }
   }, [sessionId]);
 
-  // Same hydration for the anon-calendar CTA dismissal (Slice 8).
-  useEffect(() => {
-    if (!sessionId || typeof window === "undefined") return;
-    try {
-      const key = `anon-cal-cta-dismissed:${sessionId}`;
-      if (window.localStorage.getItem(key) === "1") {
-        setAnonCalCtaDismissed(true);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [sessionId]);
-
-  // After OAuth returns with ?calendarConnected=true, refetch slots so the
+// After OAuth returns with ?calendarConnected=true, refetch slots so the
   // bilateral chips surface. Strip the query param so a later reload doesn't
   // re-trigger the refresh.
   useEffect(() => {
@@ -1436,7 +1420,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       ) : null;
 
     const connectCta = (() => {
-      if (isHost || isGuest || confirmed || anonCalCtaDismissed || !sessionId) return null;
+      if (isHost || isGuest || confirmed || !sessionId) return null;
       if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
       if (calendarDenied) {
         return (
@@ -1453,13 +1437,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           sessionId={sessionId}
           slug={slug}
           code={code}
-          expanded={chipCtaExpanded}
-          onExpand={() => setChipCtaExpanded(true)}
-          onCollapse={() => setChipCtaExpanded(false)}
-          onDismiss={() => {
-            setAnonCalCtaDismissed(true);
-            try { window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1"); } catch { /* ignore */ }
-          }}
         />
       );
     })();
@@ -2188,7 +2165,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               renderPickerBubble) — this banner only surfaces the
               "Auto-match calendars" CTA for anonymous guests. */}
           {(() => {
-            if (isHost || isGuest || confirmed || anonCalCtaDismissed || !sessionId) return null;
+            if (isHost || isGuest || confirmed || !sessionId) return null;
             if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
             if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
             if (calendarDenied) {
@@ -2206,17 +2183,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 sessionId={sessionId}
                 slug={slug}
                 code={code}
-                expanded={chipCtaExpanded}
-                onExpand={() => setChipCtaExpanded(true)}
-                onCollapse={() => setChipCtaExpanded(false)}
-                onDismiss={() => {
-                  setAnonCalCtaDismissed(true);
-                  try {
-                    if (typeof window !== "undefined") {
-                      window.localStorage.setItem(`anon-cal-cta-dismissed:${sessionId}`, "1");
-                    }
-                  } catch { /* ignore */ }
-                }}
               />
             );
           })()}
