@@ -106,6 +106,8 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submittedId, setSubmittedId] = useState<string | null>(null);
   const [submittedIsAdmin, setSubmittedIsAdmin] = useState(false);
+  const [submittedPrompt, setSubmittedPrompt] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorRef, setErrorRef] = useState<string | null>(null);
   const prefillController = useRef<AbortController | null>(null);
@@ -272,6 +274,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
         ok: boolean;
         reportId?: string;
         isAdmin?: boolean;
+        agentPrompt?: string;
         error?: string;
         errorRef?: string;
       };
@@ -281,6 +284,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
       }
       setSubmittedId(json.reportId ?? "");
       setSubmittedIsAdmin(Boolean(json.isAdmin));
+      setSubmittedPrompt(json.agentPrompt ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send feedback");
     } finally {
@@ -343,13 +347,30 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
             {submittedId && submittedIsAdmin ? (
               <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-[11px]">
                 <span className="text-sky-200">Admin:</span>
+                {submittedPrompt ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(submittedPrompt);
+                        setPromptCopied(true);
+                        setTimeout(() => setPromptCopied(false), 2000);
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 font-medium text-sky-100 hover:bg-sky-500/20"
+                  >
+                    {promptCopied ? "Copied ✓" : "Copy agent prompt (15 min)"}
+                  </button>
+                ) : null}
                 <a
                   href={`/admin/feedback/${submittedId}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 font-medium text-sky-100 hover:bg-sky-500/20"
                 >
-                  Open report → mint agent prompt
+                  Open report →
                 </a>
               </div>
             ) : null}

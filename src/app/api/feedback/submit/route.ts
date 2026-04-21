@@ -15,6 +15,8 @@ import { FeedbackSubmitSchema } from "@/lib/feedback/schema";
 import { buildFeedbackBundle } from "@/lib/feedback/bundle-builder";
 import { track } from "@/lib/analytics/track";
 import { isAdminSession } from "@/lib/admin-auth";
+import { signAgentToken } from "@/lib/feedback/agent-token";
+import { logAdminAccess } from "@/lib/admin/access-log";
 
 export const dynamic = "force-dynamic";
 
@@ -131,5 +133,45 @@ export async function POST(request: NextRequest) {
 
   const isAdmin = await isAdminSession();
 
-  return NextResponse.json({ ok: true, reportId: report.id, isAdmin });
+  // Admin convenience: auto-mint an agent token on submit so the Thank-you
+  // screen can show a ready-to-paste prompt. Same semantics as the manual
+  // mint at /api/admin/feedback/[id]/mint-token — row + audit + 15-min TTL.
+  let agentPrompt: string | undefined;
+  if (isAdmin) {
+    try {
+      const minted = signAgentToken({ reportId: report.id });
+      await prisma.agentAccessToken.create({
+        data: {
+          reportId: report.id,
+          mintedById: userId,
+          jti: minted.jti,
+          expiresAt: minted.expiresAt,
+        },
+      });
+      await logAdminAccess({
+        adminId: userId,
+        path: "/api/feedback/submit",
+        action: "view",
+        targetUserId: userId,
+        context: {
+          feedbackReportId: report.id,
+          tokenJti: minted.jti,
+          action: "auto_mint_on_submit",
+        },
+      });
+      const origin = request.headers.get("origin") || new URL(request.url).origin;
+      const fetchUrl = `${origin}/api/agent/feedback/${report.id}?token=${minted.token}`;
+      agentPrompt = [
+        `curl -s '${fetchUrl}'`,
+        ``,
+        `Run the curl above to fetch { report, bundle } for AgentEnvoy feedback report ${report.id}, then follow agentenvoy/PLAYBOOK.md → "Debug bundle handling".`,
+      ].join("\n");
+    } catch (err) {
+      // Non-fatal: if mint fails (e.g. AGENT_TOKEN_SECRET unset), the Thank-you
+      // screen still shows the Open-report link as a fallback path.
+      console.error("[feedback.submit] auto-mint failed", { userId, err });
+    }
+  }
+
+  return NextResponse.json({ ok: true, reportId: report.id, isAdmin, agentPrompt });
 }
