@@ -11,11 +11,21 @@ import { TimezonePicker } from "./timezone-picker";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
 import { OfferCard } from "./deal-room/offer-card";
+import { ExternalAgentPrimer } from "./deal-room/external-agent-primer";
 import { SendFeedbackLink } from "./send-feedback";
 import { formatDuration } from "@/lib/format-duration";
 import { stripRendererOnlyBlocks } from "@/lib/message-render";
 import { mergePollResult, type LiveSyncMessage } from "@/lib/deal-room-live-sync";
 import { deriveMode, type DealRoomMode } from "@/lib/deal-room-mode";
+import {
+  hasSeenPrimer,
+  markPrimerSeen,
+  cleanupPrimersForSession,
+} from "@/lib/primer-state";
+import {
+  isExternalAgentMetaNarration,
+  agentIdentityFrom,
+} from "@/lib/external-agent-meta";
 import {
   getRoleStyles,
   computeExternalAgentSender,
@@ -249,9 +259,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     "open" | "soft" | "narrow" | "exclusive" | string | null
   >(null);
 
+  // Stage 3 V2 — external_agent primer. Set of agentIdentity strings for
+  // which the primer has been dismissed (either "Got it" click this render,
+  // or already seen in a previous session mount). Used alongside
+  // `hasSeenPrimer` (localStorage) — the state bump is just so the render
+  // re-runs when a user dismisses. Gated by sessionId so we can clean up
+  // on `confirmed` via `cleanupPrimersForSession`.
+  const [dismissedPrimers, setDismissedPrimers] = useState<Set<string>>(
+    () => new Set(),
+  );
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Stage 3 V2 — cleanup primer keys on the terminal `confirmed` state.
+  // Best-effort; keys are session-scoped so this is belt-and-suspenders.
+  useEffect(() => {
+    if (confirmed && sessionId) {
+      cleanupPrimersForSession(sessionId);
+    }
+  }, [confirmed, sessionId]);
 
   // Detect [TIMEZONE_SWITCH] in messages and update widget timezone
   useEffect(() => {
@@ -1116,6 +1144,26 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     linkIntentSteering,
   ]);
 
+  // Stage 3 V2 — first-occurrence map: for each external_agent identity
+  // (delegateSpeaker.name or "unknown-agent"), the earliest index in the
+  // transcript. The primer renders above the bubble at that index if the
+  // viewer hasn't already seen the primer for that pair. Computed at the
+  // top level so the hook call stays stable across early returns below.
+  const firstExternalAgentIdxByIdentity = useMemo(() => {
+    const out = new Map<string, number>();
+    messages.forEach((m, i) => {
+      if (m.role !== "external_agent") return;
+      const identity = agentIdentityFrom(
+        m.metadata as
+          | { delegateSpeaker?: { name?: string | null } | null | undefined }
+          | null
+          | undefined,
+      );
+      if (!out.has(identity)) out.set(identity, i);
+    });
+    return out;
+  }, [messages]);
+
   // --- Archived state ---
   if (archivedData) {
     const hostFirst = archivedData.hostName?.split(" ")[0] || "the host";
@@ -1844,6 +1892,35 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               return null;
             }
 
+            // Stage 3 V4 — mode-aware meta-narration suppression.
+            // In `offer` or `confirmed` mode, hide administrator bubbles
+            // whose body is prose meta-commentary about an external_agent
+            // turn (e.g. "This is from another AI agent — noted"). The
+            // structural banner + primer (V1 + V2) carries that signal
+            // without breaking the celebratory framing of offer-mode.
+            //
+            // In `negotiate` mode Envoy narrating context is allowed, so
+            // this suppression is off.
+            //
+            // Narrowly scoped: only `administrator` role, only when the
+            // content matches the conservative regex set in
+            // external-agent-meta.ts. Transition narrations fired by the
+            // mode-transition observer (N9 fold) route through a separate
+            // state (`transitionReason`) and render outside this list.
+            if (
+              msg.role === "administrator" &&
+              dealRoomMode !== "negotiate" &&
+              isExternalAgentMetaNarration(msg.content)
+            ) {
+              if (typeof console !== "undefined" && console.debug) {
+                console.debug(
+                  "[deal-room V4] suppressed meta-narration bubble",
+                  { id: msg.id, mode: dealRoomMode },
+                );
+              }
+              return null;
+            }
+
             // Host notes — only visible to host
             if (msg.role === "host_note") {
               if (!isHost) return null;
@@ -1961,21 +2038,90 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             // (ai_agent, human_assistant, or unknown). Render a small
             // "via {name}" footer below the bubble so the host can
             // tell at a glance that the message came through a proxy.
+            //
+            // Stage 3 V1 — for external_agent bubbles we upgrade the
+            // footer copy to the proposal's explicit phrasing: "via
+            // {name}'s AI agent" (or "via an AI agent" when name is
+            // missing). Footer only, no inline prefix in the body.
             const delegateSpeaker = msg.metadata?.delegateSpeaker;
-            const delegateBadge = delegateSpeaker ? (
-              <div
-                className={`text-[10px] mt-1 italic ${rightAligned ? "text-right text-white/60" : "text-muted"}`}
-                data-testid="delegate-speaker-badge"
-              >
-                via {delegateSpeaker.name || (
-                  delegateSpeaker.kind === "ai_agent"
-                    ? "AI agent"
-                    : delegateSpeaker.kind === "human_assistant"
-                    ? "assistant"
-                    : "proxy"
-                )}
-              </div>
-            ) : null;
+            let delegateBadge: React.ReactNode = null;
+            if (isExternalAgent) {
+              const name = delegateSpeaker?.name?.trim();
+              const footerText = name
+                ? `via ${name}'s AI agent`
+                : "via an AI agent";
+              delegateBadge = (
+                <div
+                  className={`text-[10px] mt-1 italic ${rightAligned ? "text-right text-white/60" : "text-muted"}`}
+                  data-testid="delegate-speaker-badge"
+                >
+                  {footerText}
+                </div>
+              );
+            } else if (delegateSpeaker) {
+              delegateBadge = (
+                <div
+                  className={`text-[10px] mt-1 italic ${rightAligned ? "text-right text-white/60" : "text-muted"}`}
+                  data-testid="delegate-speaker-badge"
+                >
+                  via {delegateSpeaker.name || (
+                    delegateSpeaker.kind === "ai_agent"
+                      ? "AI agent"
+                      : delegateSpeaker.kind === "human_assistant"
+                      ? "assistant"
+                      : "proxy"
+                  )}
+                </div>
+              );
+            }
+
+            // Stage 3 V2 — once-per-(session, identity) primer banner.
+            // Shown ABOVE the first external_agent bubble for each agent
+            // identity, unless the viewer already dismissed it (localStorage)
+            // or dismissed in the current render cycle. Shared-channel
+            // primers render for both sides; the dismiss is per-viewer.
+            let primerBanner: React.ReactNode = null;
+            if (isExternalAgent && sessionId) {
+              const identity = agentIdentityFrom(
+                msg.metadata as
+                  | { delegateSpeaker?: { name?: string | null } | null | undefined }
+                  | null
+                  | undefined,
+              );
+              const isFirstForIdentity =
+                firstExternalAgentIdxByIdentity.get(identity) === idx;
+              if (
+                isFirstForIdentity &&
+                !dismissedPrimers.has(identity) &&
+                !hasSeenPrimer(sessionId, identity)
+              ) {
+                // Counterpart the agent represents — prefer delegateSpeaker
+                // name, fall back to invitee. From the host viewer the
+                // delegate is the guest's agent; from the guest viewer it's
+                // whoever the message is posted on behalf of.
+                const counterpartName =
+                  (delegateSpeaker?.name && delegateSpeaker.name.trim()) ||
+                  (isHost ? inviteeName : hostName) ||
+                  null;
+                primerBanner = (
+                  <div className="flex justify-start">
+                    <div className="max-w-[85%] min-w-0">
+                      <ExternalAgentPrimer
+                        counterpartName={counterpartName}
+                        onDismiss={() => {
+                          markPrimerSeen(sessionId, identity);
+                          setDismissedPrimers((prev) => {
+                            const next = new Set(prev);
+                            next.add(identity);
+                            return next;
+                          });
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              }
+            }
 
             const showPickerAfter = idx === firstAdminIdx;
 
@@ -2000,6 +2146,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             return (
               <React.Fragment key={msg.id}>
                 {dateSeparator}
+                {primerBanner}
                 <div className={`flex min-w-0 ${rightAligned ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 text-sm leading-relaxed ${messageStyle}`}>
                     {isExternalAgent
