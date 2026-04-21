@@ -12,6 +12,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { FeedbackSubmitSchema } from "@/lib/feedback/schema";
 import { buildFeedbackBundle } from "@/lib/feedback/bundle-builder";
+import { track } from "@/lib/analytics/track";
 
 export const dynamic = "force-dynamic";
 
@@ -96,6 +97,20 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+
+  await track({
+    name: "feedback.report_submitted",
+    userId,
+    sessionId: submission.sessionId ?? null,
+    props: {
+      messages: submission.checklistState.messages,
+      sessions: submission.checklistState.sessions,
+      calendar: submission.checklistState.calendar,
+      errors: submission.checklistState.errors,
+      console: submission.checklistState.console,
+      hasTriedToDoText: Boolean(submission.triedToDoText),
+    },
+  });
 
   return NextResponse.json({ ok: true, reportId: report.id });
 }

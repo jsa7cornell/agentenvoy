@@ -78,6 +78,7 @@ model User {
   computedSchedule ComputedSchedule?
   adminAccessLogs  AdminAccessLog[]     @relation("AdminAccessLogs")
   feedbackReports  FeedbackReport[]
+  productEvents    ProductEvent[]
 }
 
 /// User-submitted feedback bundle (F3 of the feedback-loops proposal).
@@ -123,6 +124,29 @@ model AdminAccessLog {
 
   @@index([adminId, createdAt])
   @@index([targetUserId, createdAt])
+  @@index([createdAt])
+}
+
+/// Always-on product analytics event stream (F2 of the feedback-loops
+/// proposal, 2026-04-20 — revised 2026-04-21 to replace PostHog with a
+/// self-hosted Supabase table). Written via src/lib/analytics/track.ts,
+/// which enforces a name allowlist and a scalar-only prop shape so
+/// free-text content cannot leak into the stream by construction.
+///
+/// `userId` is raw (not hashed) — the internal stack already sees it,
+/// the stream stays on Supabase, and hashing would just add indirection.
+/// Anonymous pre-auth events carry null.
+model ProductEvent {
+  id        String   @id @default(cuid())
+  name      String // e.g. "onboarding.phase_entered" — enforced against allowlist at write time
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId String? // web-session correlator (nullable for anonymous + server events)
+  props     Json? // scalar-only bag: { phase: "defaults_format" }, { reason: "scope_denied" }
+  createdAt DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([userId, createdAt])
   @@index([createdAt])
 }
 

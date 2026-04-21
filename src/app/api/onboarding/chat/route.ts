@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { invalidateSchedule } from "@/lib/calendar";
+import { track } from "@/lib/analytics/track";
 import {
   OnboardingPhase,
   OnboardingContext,
@@ -407,6 +408,11 @@ async function savePhase(userId: string, phase: OnboardingPhase) {
     where: { id: userId },
     data: { onboardingPhase: phase },
   });
+  await track({
+    name: "onboarding.phase_entered",
+    userId,
+    props: { phase },
+  });
 }
 
 async function getFreshPrefs(userId: string) {
@@ -489,4 +495,5 @@ async function completeOnboarding(userId: string) {
   });
 
   await invalidateSchedule(userId);
+  await track({ name: "onboarding.completed", userId });
 }
