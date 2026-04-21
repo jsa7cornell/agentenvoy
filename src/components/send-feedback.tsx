@@ -65,14 +65,6 @@ interface ModalProps {
   onClose: () => void;
 }
 
-function disclosureText(mode: Mode): string {
-  if (mode === "guest-deal-room") {
-    return "Submitting sends your message and the recent conversation to AgentEnvoy's team to help us debug. You can email support to delete your report.";
-  }
-  // Host paths — ToS-level consent already in place; short reminder.
-  return "Submitting sends your message and the attached activity to AgentEnvoy's team. You can email support to delete your report.";
-}
-
 function contextSubtitle(mode: Mode): string {
   if (mode === "guest-deal-room") {
     return "Attaches the last 30 messages in this thread and your session state. No calendar data, no other conversations.";
@@ -226,10 +218,10 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
       >
         {submittedId !== null ? (
           <div className="space-y-3">
-            <h2 className="text-lg font-semibold">Thanks — we got it.</h2>
-            <p className="text-sm text-zinc-400">
-              Report ID <code className="text-zinc-300">{submittedId}</code>. AgentEnvoy&rsquo;s
-              team will take a look.
+            <h2 className="text-lg font-semibold">Thank you 🙏</h2>
+            <p className="text-sm text-zinc-300">
+              Every report makes AgentEnvoy better, and we&rsquo;re grateful you took the
+              time to send this one. 💜
             </p>
             <div className="flex justify-end pt-2">
               <button
@@ -287,8 +279,8 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
                 </span>
               </label>
 
-              <p className="text-[11px] italic text-zinc-500">
-                {disclosureText(mode)}
+              <p className="text-xs text-zinc-400">
+                Feedback is a gift — thank you for taking the time. 💜
               </p>
 
               {error ? <p className="text-xs text-red-400">{error}</p> : null}
