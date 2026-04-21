@@ -215,6 +215,15 @@ export async function POST(req: NextRequest) {
     guestName: session.link.inviteeName || undefined,
     guestEmail:
       session.guestEmail || session.link.inviteeEmail || undefined,
+    guestTimezone: session.guestTimezone || undefined,
+    // Viewer-authoritative tz — drives dual-tz follow-up rendering + the
+    // deterministic parser when guest messages reference bare times.
+    // Decisions #8 and #9 of the 2026-04-21 guest-tz-ux-three-primitives.
+    viewerTimezone: session.viewerTimezone,
+    // Current turn's guest message — fed to the parser only when dual-tz is
+    // active. Host turns (messageRole === "host") skip the parser because
+    // the host is presumed to speak in host tz, not viewer tz.
+    guestMessage: messageRole === "guest" ? content : undefined,
     topic: session.link.topic || undefined,
     rules: (session.link.rules as Record<string, unknown>) || {},
     calendarContext,

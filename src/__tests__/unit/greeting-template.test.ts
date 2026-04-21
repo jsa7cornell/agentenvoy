@@ -129,41 +129,37 @@ describe("formatAvailabilityWindows", () => {
   });
 });
 
-// ─── formatAvailabilityWindows — guest timezone dual rendering ──────────────
+// ─── formatAvailabilityWindows — host-canonical always ──────────────────────
+// Dual-tz rendering removed 2026-04-21 (decision #10). The greeting stays
+// host-canonical; viewer-tz presentation lives on the card picker + Envoy
+// follow-up chat. Tests below assert the host-only output when a guest tz
+// is passed (legacy callers): the param is now a no-op.
 
-describe("formatAvailabilityWindows — guest timezone", () => {
+describe("formatAvailabilityWindows — host-canonical always", () => {
   // Slots on 4/15 17:00Z → 10 AM PT → 7 PM CEST
   const slots = run([2026, 4, 15], 17, 0, 4, 1);
 
-  it("renders time range primary in guest TZ with host TZ in parens", () => {
+  it("renders in host tz only even when a guest tz is passed", () => {
     const out = formatAvailabilityWindows(slots, TZ, NOW, "Europe/Paris");
     expect(out.lines).toHaveLength(1);
-    // 10:00 UTC on Apr 15 in Paris is 6 PM CEST (CEST is UTC+2). Primary
-    // should be the CEST range, parens should hold the PT range.
     const line = out.lines[0];
-    // Primary (CEST range) comes first
-    expect(line).toMatch(/7–9 PM/);
-    // Host (PT) range in parens
-    expect(line).toMatch(/\(10 AM–12 PM/);
-    // Short labels: "CEST" and "PT" (or similar native abbreviations)
-    expect(line).toMatch(/CEST|CET|GMT/);
-    expect(line).toMatch(/PT|PDT|PST/);
+    // Host (PT) range only — no CEST segment, no parenthetical dual label.
+    expect(line).toMatch(/10 AM–12 PM/);
+    expect(line).not.toMatch(/CEST|CET/);
+    expect(line).not.toContain("(");
   });
 
-  it("groups by guest-local day when guest TZ differs", () => {
-    // A slot at 2026-04-15 06:30 UTC falls at:
-    //   Host PT: 2026-04-14 23:30 (late night)  → "Tue Apr 14"
-    //   Guest CEST: 2026-04-15 08:30 (morning)  → "Wed Apr 15"
-    // With guest-local grouping the day label should reference Apr 15.
+  it("groups by host-local day even when a guest tz is passed", () => {
+    // Slot at 2026-04-15 06:30 UTC is 2026-04-14 23:30 PT — host-local day
+    // is Apr 14. Post-decision-#10 we always group host-local.
     const earlyAm = slot([2026, 4, 15], 6, 30, 1);
     const out = formatAvailabilityWindows([earlyAm], TZ, NOW, "Europe/Paris");
     expect(out.lines).toHaveLength(1);
-    expect(out.lines[0]).toContain("Apr 15");
+    expect(out.lines[0]).toContain("Apr 14");
   });
 
-  it("falls back to single-TZ rendering when guest TZ equals host TZ", () => {
+  it("is a no-op when guest tz equals host tz (unchanged contract)", () => {
     const out = formatAvailabilityWindows(slots, TZ, NOW, "America/Los_Angeles");
-    // Same TZ — should behave identically to no guestTz arg (no parens, no CEST)
     expect(out.lines[0]).not.toContain("(");
     expect(out.lines[0]).not.toContain("CEST");
   });
@@ -302,14 +298,19 @@ describe("formatAvailabilitySlotList — block range labels", () => {
     expect(bullets[0]).toContain("7:00 AM");
   });
 
-  it("renders dual-timezone range when guest tz differs", () => {
+  // Dual-tz rendering removed 2026-04-21 (decision #10 of the guest-tz-ux
+  // rework). The greeting is always host-canonical; viewer-tz presentation
+  // happens on the card picker and in Envoy's follow-up chat instead.
+  it("stays host-canonical even when guest tz differs", () => {
     const slots = run([2026, 4, 28], 14, 0, 6, 0); // 7–10 AM PT (3h)
     const out = formatAvailabilitySlotList(slots, TZ, NOW, "America/New_York");
     const bullets = out.lines.filter((l) => l.startsWith("•"));
     expect(bullets).toHaveLength(1);
-    // Guest (ET) range shown first, host (PT) range in slash-delimited
-    expect(bullets[0]).toMatch(/10:00 AM\s*–\s*1:00 PM.*EDT/);
-    expect(bullets[0]).toMatch(/7:00 AM\s*–\s*10:00 AM.*PDT/);
+    // Host (PT) range only — no EDT segment, no slash-delimited dual label.
+    expect(bullets[0]).toMatch(/7:00 AM\s*–\s*10:00 AM.*P(?:D|S)?T/);
+    expect(bullets[0]).not.toMatch(/EDT|EST/);
+    expect(bullets[0]).not.toContain(" / ");
+    expect(out.isDualTimezone).toBe(false);
   });
 });
 
