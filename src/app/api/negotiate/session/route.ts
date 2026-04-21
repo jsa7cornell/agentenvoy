@@ -633,6 +633,33 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // guestPicks.window clamp (2026-04-20): mirror what slots-route.ts already
+  // does for the widget — clamp offered slots to the host-tz hour window
+  // ("afternoon" = 12–17). Historically this lived only in the widget's slot
+  // filter, which meant the greeting saw unclamped slots. Safe now because
+  // with a pure `window` constraint (no guest picks for date/duration/location)
+  // we route through the standard prose/bulleted path instead of the
+  // open-window template, so the greeting must see the same clamp the widget
+  // does or they disagree.
+  {
+    const gpWindow = (linkRules as Record<string, unknown>).guestPicks as
+      | { window?: { startHour?: number; endHour?: number } }
+      | undefined;
+    const win = gpWindow?.window;
+    if (
+      win &&
+      typeof win.startHour === "number" &&
+      typeof win.endHour === "number" &&
+      win.endHour > win.startHour
+    ) {
+      const { slotStartInWindow } = await import("@/lib/time-of-day");
+      const clampWindow = { startHour: win.startHour, endHour: win.endHour };
+      filteredSlots = filteredSlots.filter((s) =>
+        slotStartInWindow(s.start, clampWindow, hostTimezone),
+      );
+    }
+  }
+
   // Format availability as the V2 Danny-spec bullet list. Dual-timezone is
   // inline ("6:00 AM PT / 9:00 AM ET"), same-timezone collapses to one label,
   // days are bold markdown headers, cap 5 bullets per day.
@@ -805,9 +832,17 @@ export async function POST(req: NextRequest) {
     const guestGuidance = (linkRules as Record<string, unknown>).guestGuidance as
       | { suggestions?: { locations?: string[]; durations?: number[] }; tone?: string }
       | undefined;
+    // Open-window template only fires when the guest actually has to pick
+    // something structural (date / duration / location). A pure `window`
+    // constraint from the host is just a time-of-day clamp on availability —
+    // already applied to filteredSlots above — so the standard prose/bulleted
+    // path handles it. This keeps the opener consistent with other 1:1 links
+    // and ensures the duration renders (buildOpenWindowGreeting drops it when
+    // the guest isn't picking duration). Changed 2026-04-20 per Katie/vf9dwx
+    // feedback: "duration missing from greeting."
     const hasGuestPicks =
       !!guestPicks &&
-      !!(guestPicks.window || guestPicks.date || guestPicks.duration || guestPicks.location);
+      !!(guestPicks.date || guestPicks.duration || guestPicks.location);
 
     if (hasGuestPicks) {
       // Anchor date: use the earliest filteredSlot's host-tz date as the "when"
