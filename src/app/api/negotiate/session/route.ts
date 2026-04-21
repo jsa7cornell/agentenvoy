@@ -30,6 +30,11 @@ import {
   buildGuestGreeting,
   extractGuestPreferencesSummary,
 } from "@/lib/guest-greeting-template";
+import {
+  deriveLegacy,
+  hasExclusiveOverride,
+  readStoredSteering,
+} from "@/lib/intent";
 
 const GENERIC_TOPICS = new Set([
   "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
@@ -1049,6 +1054,14 @@ export async function POST(req: NextRequest) {
         return days < 5;
       })();
 
+      // Legacy syntactic predicate — retained in this PR as
+      // defense-in-depth and as the telemetry signal that gates its own
+      // deletion. Per §4.10 the delete trigger is
+      // `legacyFallbackRate < 1%` over 7 consecutive days (follow-up PR).
+      // This PR no longer consults `hasMeaningfulSteering` for the
+      // render decision; the single `effectiveSteering` enum below is
+      // authoritative. Kept as `void`'d so the predicate is still
+      // inspectable during diagnosis without tripping lint.
       const hasMeaningfulSteering =
         !!unsteeredRules.preferredDays ||
         !!unsteeredRules.preferredTimeStart ||
@@ -1060,7 +1073,35 @@ export async function POST(req: NextRequest) {
         !!unsteeredRules.allowWeekends ||
         !!unsteeredRules.isVip ||
         !!unsteeredRules.guestPicks;
-      const useGenericBody = isGeneric || !hasMeaningfulSteering;
+      void hasMeaningfulSteering;
+
+      // Host-intent steering (proposal 2026-04-21). Read the LLM-classified
+      // `intent.steering` directly — replacing the predicate chain above
+      // with a single enum read. `hasMeaningfulSteering` stays in place as
+      // defense-in-depth and as the backing predicate for `deriveLegacy`;
+      // the predicate chain's deletion is telemetry-gated (§4.10) and ships
+      // in a follow-up PR.
+      //
+      // - `open` / `soft`       → generic body (skip bulleted list; lean on
+      //                           the calendar widget below)
+      // - `narrow` / `exclusive` → bulleted body (those specifics ARE the
+      //                             offer)
+      // Missing intent → fall back to `deriveLegacy`, which applies the
+      // syntactic predicate above and returns a best-guess tier.
+      //
+      // Belt-and-suspenders: even with intent present, a stored tier of
+      // `exclusive` that somehow has no score-(-2) override gets a render-
+      // time console.error — see §4.8. The display still falls through to
+      // the bulleted body so the guest isn't stranded.
+      const storedSteering = readStoredSteering(linkRules);
+      const effectiveSteering = storedSteering ?? deriveLegacy(linkRules);
+      if (effectiveSteering === "exclusive" && !hasExclusiveOverride(linkRules)) {
+        console.error(
+          `[greeting] intent=exclusive with no slotOverrides[-2] (sessionId=${session.id}, linkCode=${link.code ?? "?"})`,
+        );
+      }
+      const useGenericBody =
+        isGeneric || effectiveSteering === "open" || effectiveSteering === "soft";
 
       const closing = useGenericBody
         ? (() => {

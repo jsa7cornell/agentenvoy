@@ -4,6 +4,14 @@ import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { normalizeLinkRules } from "@/lib/scoring";
+import {
+  deriveLegacy,
+  hasMaterialNarrowingChange,
+  normalizeSteering,
+  readStoredSteering,
+  validateIntent,
+  type Steering,
+} from "@/lib/intent";
 import { createTentativeHoldEvent, deleteCalendarEvent } from "@/lib/calendar";
 import { cancelSession } from "@/lib/cancel-pipeline";
 import { parseTimeOfDay, TIME_OF_DAY_WINDOWS } from "@/lib/time-of-day";
@@ -936,7 +944,19 @@ async function handleCreateLink(
     if (Object.keys(cleaned).length) guidanceOut = cleaned;
   }
 
-  const linkRules = normalizeLinkRules({
+  // Host-intent steering (proposal 2026-04-21): the LLM classifies the
+  // host's phrasing into one of four tiers at create_link time. Accept
+  // either top-level `params.intent: { steering }` or bare `params.steering`
+  // (some older playbook revisions may emit it flat). Missing → default to
+  // `open` per §4.9 / N6 — misclassification cost is asymmetric and the
+  // safe fallback is the less-narrow tier.
+  const intentParam = params.intent && typeof params.intent === "object" && !Array.isArray(params.intent)
+    ? (params.intent as Record<string, unknown>).steering
+    : undefined;
+  const rawSteering = normalizeSteering(intentParam ?? params.steering);
+  const declaredSteering: Steering = rawSteering ?? "open";
+
+  const linkRulesPreIntent = normalizeLinkRules({
     ...rules,
     ...(format ? { format } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
@@ -954,6 +974,16 @@ async function handleCreateLink(
     ...(timingLabel ? { timingLabel } : {}),
     ...(guestPicksOut ? { guestPicks: guestPicksOut } : {}),
     ...(guidanceOut ? { guestGuidance: guidanceOut } : {}),
+  });
+
+  // Asymmetric validator (§4.6): step DOWN when the LLM's intent
+  // over-narrows the fields; never step UP. Trust intent when it
+  // under-narrows — that's the motivating "anytime next two weeks" case
+  // where `dateRange` is a bracket, not a narrowing.
+  const validatedSteering = validateIntent(declaredSteering, linkRulesPreIntent, { linkCode: code });
+  const linkRules = normalizeLinkRules({
+    ...linkRulesPreIntent,
+    intent: { steering: validatedSteering },
   });
   // Silence unused-import warnings for constants referenced only in playbooks.
   void TIME_OF_DAY_WINDOWS;
@@ -1469,14 +1499,71 @@ async function handleExpandLink(
     patch.location = loc || undefined;
   }
 
-  if (Object.keys(patch).length === 0) {
+  // Host-intent steering (proposal 2026-04-21). Accept nested `intent` or
+  // bare `steering`; invalid values are silently dropped (§4.6 validator
+  // runs downstream regardless). Ignored from the "needs at least one
+  // field to change" gate — a bare steering update without any other edit
+  // is almost certainly a mistake; if the LLM wants to reclassify without
+  // changing rule fields, it's doing something that the split rule §4.7
+  // handles via the direct-UI path instead.
+  if (params.intent && typeof params.intent === "object" && !Array.isArray(params.intent)) {
+    const s = normalizeSteering((params.intent as Record<string, unknown>).steering);
+    if (s) patch.intent = { steering: s };
+  } else if (typeof params.steering === "string") {
+    const s = normalizeSteering(params.steering);
+    if (s) patch.steering = s;
+  }
+
+  // Guard: only `intent`/`steering` alone doesn't count as a meaningful
+  // update — every other field does.
+  const patchKeysForGate = Object.keys(patch).filter(
+    (k) => k !== "intent" && k !== "steering",
+  );
+  if (patchKeysForGate.length === 0) {
     return {
       success: false,
       message: "update_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredDays/daysOfWeek, lastResort, dateRange, timingLabel, format, duration, activity, activityIcon, location)",
     };
   }
 
-  const mergedRules = normalizeLinkRules({ ...existingRules, ...patch });
+  const mergedRulesPreIntent = normalizeLinkRules({ ...existingRules, ...patch });
+
+  // §4.7 split rule — this handler is only reached from the agent action
+  // path (LLM emitted `[ACTION]{update_link}`), so by definition the edit
+  // is LLM-driven: always reclassify. Three sources for the new steering,
+  // in priority order:
+  //   1. LLM supplied it explicitly in params (`{intent:{steering}}` or
+  //      bare `steering`) — trust but validate.
+  //   2. Prior intent is present AND the edit isn't a material narrowing
+  //      shift — keep prior (§4.7 "LLM-driven always reclassify" is the
+  //      default; but if the playbook didn't emit a new steering AND the
+  //      shape didn't shift materially, the prior is still authoritative).
+  //   3. Fall back to `deriveLegacy` of the merged rules.
+  // Every path runs through `validateIntent` so the asymmetric step-down
+  // applies uniformly — a wide-dateRange narrow stays `soft`, an exclusive
+  // without a score-(-2) override steps down to `narrow`, etc.
+  const patchIntent = (patch as Record<string, unknown>).intent;
+  const patchSteeringRaw =
+    patchIntent && typeof patchIntent === "object" && !Array.isArray(patchIntent)
+      ? (patchIntent as Record<string, unknown>).steering
+      : (patch as Record<string, unknown>).steering;
+  const patchSteering = normalizeSteering(patchSteeringRaw);
+  const priorSteering = readStoredSteering(existingRules);
+  const material = hasMaterialNarrowingChange(existingRules, mergedRulesPreIntent);
+
+  let nextSteering: Steering;
+  if (patchSteering) {
+    nextSteering = validateIntent(patchSteering, mergedRulesPreIntent, { linkCode: link.code });
+  } else if (priorSteering && !material) {
+    nextSteering = validateIntent(priorSteering, mergedRulesPreIntent, { linkCode: link.code });
+  } else {
+    nextSteering = validateIntent(deriveLegacy(mergedRulesPreIntent), mergedRulesPreIntent, { linkCode: link.code });
+  }
+
+  const mergedRules = normalizeLinkRules({
+    ...mergedRulesPreIntent,
+    intent: { steering: nextSteering },
+  });
 
   await prisma.negotiationLink.update({
     where: { id: link.id },
