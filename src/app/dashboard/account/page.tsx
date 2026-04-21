@@ -37,6 +37,12 @@ export default function AccountPage() {
   const [defaultLocation, setDefaultLocation] = useState("");
   const [savedDefaultLocation, setSavedDefaultLocation] = useState("");
 
+  // Privacy — F4 debugConsent toggle (beta-cohort access gate).
+  const [debugConsent, setDebugConsent] = useState<boolean | null>(null);
+  const [debugConsentAt, setDebugConsentAt] = useState<string | null>(null);
+  const [savingPrivacy, setSavingPrivacy] = useState(false);
+  const [privacyError, setPrivacyError] = useState("");
+
   // Calendar modals
   const [calendarModal, setCalendarModal] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -82,6 +88,16 @@ export default function AccountPage() {
           setTimezone(data.timezone); setSavedTimezone(data.timezone);
           const loc = typeof data.defaultLocation === "string" ? data.defaultLocation : "";
           setDefaultLocation(loc); setSavedDefaultLocation(loc);
+        }
+      })
+      .catch(() => {});
+
+    fetch("/api/account/privacy")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.ok) {
+          setDebugConsent(Boolean(data.debugConsent));
+          setDebugConsentAt(data.debugConsentAt ?? null);
         }
       })
       .catch(() => {});
@@ -147,6 +163,34 @@ export default function AccountPage() {
       setSaveMessage("Failed to save");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTogglePrivacy(next: boolean) {
+    if (savingPrivacy) return;
+    setSavingPrivacy(true);
+    setPrivacyError("");
+    try {
+      const res = await fetch("/api/account/privacy", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ debugConsent: next }),
+      });
+      const json = (await res.json()) as {
+        ok: boolean;
+        debugConsent?: boolean;
+        debugConsentAt?: string | null;
+        error?: string;
+      };
+      if (!res.ok || !json.ok) {
+        throw new Error(json.error ?? `HTTP ${res.status}`);
+      }
+      setDebugConsent(Boolean(json.debugConsent));
+      setDebugConsentAt(json.debugConsentAt ?? null);
+    } catch (err) {
+      setPrivacyError(err instanceof Error ? err.message : "Could not update");
+    } finally {
+      setSavingPrivacy(false);
     }
   }
 
@@ -443,6 +487,52 @@ export default function AccountPage() {
           </h2>
           <div className="bg-surface-inset/50 border border-secondary rounded-xl px-4 py-3">
             <ThemeToggle />
+          </div>
+        </section>
+
+        {/* Privacy — F4 debugConsent */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
+            Privacy
+          </h2>
+          <div className="bg-surface-inset/50 border border-secondary rounded-xl p-4 space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <p className="text-sm text-primary font-medium">Friends of AgentEnvoy</p>
+                <p className="text-[11px] text-muted mt-1 leading-relaxed">
+                  AgentEnvoy is still a small beta. If you&apos;re helping us test, opt in to
+                  let our team see your thread and calendar when you report a bug or ask for help.
+                  Off by default. Every admin read is logged and you can change this any time.
+                </p>
+                {debugConsent && debugConsentAt ? (
+                  <p className="text-[10px] text-emerald-500 mt-2">
+                    Opted in {new Date(debugConsentAt).toLocaleDateString()}.
+                  </p>
+                ) : null}
+                {privacyError ? (
+                  <p className="text-[10px] text-red-400 mt-2">{privacyError}</p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={debugConsent === true}
+                aria-label="Toggle Friends of AgentEnvoy access"
+                disabled={savingPrivacy || debugConsent === null}
+                onClick={() => handleTogglePrivacy(!debugConsent)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border transition disabled:opacity-40 ${
+                  debugConsent
+                    ? "bg-purple-600 border-purple-500"
+                    : "bg-surface-secondary/60 border-surface-tertiary/60"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                    debugConsent ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
           </div>
         </section>
 
