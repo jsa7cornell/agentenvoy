@@ -45,6 +45,18 @@ CALENDAR_SEND_UPDATES=all
 # Token for /api/admin/smoke — also stored in Vercel prod env + GitHub Actions secret.
 ADMIN_SMOKE_TOKEN=op://Secrets/ADMIN_SMOKE_TOKEN/credential
 
+# ─── Agent-accessible feedback pipeline (2026-04-21) ──────
+# HS256 JWT signing key for per-report short-lived agent tokens. 15-min TTL,
+# 10-fetch cap. Mint from /admin/feedback/:id. See PLAYBOOK "Debug bundle
+# handling" and proposals/2026-04-21_agent-accessible-feedback-pipeline §6.2.
+# Rotation: put the outgoing secret in AGENT_TOKEN_SECRET_PREVIOUS for 15 min.
+AGENT_TOKEN_SECRET=op://Secrets/AGENT_TOKEN_SECRET/credential
+# AGENT_TOKEN_SECRET_PREVIOUS= (unset by default; set only during rotation)
+
+# Prompt-snapshot capture on the incident turn (T2a). Default ON; set "false"
+# to disable capture at write-time (does not affect already-stored snapshots).
+# PROMPT_SNAPSHOT_ENABLED=true
+
 # ─── Dev Auth (non-secret, dev-only) ──────────────────────
 DEV_AUTH_SECRET=dev-test-secret-local-only
 NEXT_PUBLIC_DEV_AUTH_SECRET=dev-test-secret-local-only

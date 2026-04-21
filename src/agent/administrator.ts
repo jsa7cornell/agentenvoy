@@ -72,13 +72,21 @@ function buildComposeOptions(context: AgentContext) {
 
 export async function streamAgentResponse(
   context: AgentContext,
-  options?: { onFinish?: (result: { text: string }) => void | Promise<void> }
+  options?: {
+    onFinish?: (result: { text: string }) => void | Promise<void>;
+    /** Called once with the composed system prompt + modelId, right before
+     *  streamText kicks off. Callers use this to snapshot the prompt onto
+     *  Message.metadata.promptContext for post-hoc debug (feedback pipeline). */
+    onInvocation?: (info: { systemPrompt: string; modelId: string }) => void;
+  }
 ) {
   const opts = buildComposeOptions(context);
   const systemPrompt = composeSystemPrompt(opts);
+  const modelId = getModelForDomain(opts.domain);
+  options?.onInvocation?.({ systemPrompt, modelId });
 
   return streamText({
-    model: envoyModel(getModelForDomain(opts.domain)),
+    model: envoyModel(modelId),
     maxOutputTokens: 2048,
     system: systemPrompt,
     messages: context.conversationHistory.map((m) => ({

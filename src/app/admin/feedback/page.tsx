@@ -9,14 +9,31 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireAdminContext } from "@/lib/admin-auth";
 import { logAdminAccess } from "@/lib/admin/access-log";
+import { FEEDBACK_AREAS, type FeedbackArea } from "@/lib/feedback/schema";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const STATUS_VALUES = ["all", "new", "acknowledged", "in_progress", "resolved", "wontfix"] as const;
+type StatusFilter = (typeof STATUS_VALUES)[number];
 
 interface SearchParams {
   range?: string;
   resolved?: string; // "open" | "resolved" | "all" — default "open"
   source?: string; // "all" | "dashboard" | "deal-room" — default "all"
+  status?: string;
+  area?: string;
+}
+
+function parseStatus(v: string | undefined): StatusFilter {
+  return STATUS_VALUES.includes(v as StatusFilter) ? (v as StatusFilter) : "all";
+}
+
+function parseArea(v: string | undefined): FeedbackArea | "all" {
+  if (!v) return "all";
+  return (FEEDBACK_AREAS as readonly string[]).includes(v)
+    ? (v as FeedbackArea)
+    : "all";
 }
 
 function parseRange(range: string | undefined): { since: Date; label: string } {
@@ -66,19 +83,29 @@ export default async function AdminFeedbackPage({
   const { since, label } = parseRange(params.range);
   const resolvedFilter = parseResolved(params.resolved);
   const sourceFilter = parseSource(params.source);
+  const statusFilter = parseStatus(params.status);
+  const areaFilter = parseArea(params.area);
 
   await logAdminAccess({
     adminId: admin.id,
     path: "/admin/feedback",
     action: "list",
     targetUserId: null,
-    context: { range: label, resolved: resolvedFilter, source: sourceFilter },
+    context: {
+      range: label,
+      resolved: resolvedFilter,
+      source: sourceFilter,
+      status: statusFilter,
+      area: areaFilter,
+    },
   });
 
   const rows = await prisma.feedbackReport.findMany({
     where: {
       createdAt: { gte: since },
       ...(resolvedFilter === "all" ? {} : { resolved: resolvedFilter === "resolved" }),
+      ...(statusFilter === "all" ? {} : { status: statusFilter }),
+      ...(areaFilter === "all" ? {} : { area: areaFilter }),
       ...(sourceFilter === "deal-room"
         ? { url: { contains: "/meet/" } }
         : sourceFilter === "dashboard"
@@ -117,22 +144,65 @@ export default async function AdminFeedbackPage({
         <p className="text-zinc-500">
           Signed in as <code>{admin.email}</code> · Range: <code>{label}</code> · Showing:{" "}
           <code>{resolvedFilter}</code>
+          {statusFilter !== "all" && <> · status=<code>{statusFilter}</code></>}
+          {areaFilter !== "all" && <> · area=<code>{areaFilter}</code></>}
         </p>
       </header>
 
       <section className="mb-4 flex flex-wrap gap-2 text-xs">
-        <RangeLink label="24h" current={label} target="24h" resolved={resolvedFilter} source={sourceFilter} />
-        <RangeLink label="7d" current={label} target="7d" resolved={resolvedFilter} source={sourceFilter} />
-        <RangeLink label="30d" current={label} target="30d" resolved={resolvedFilter} source={sourceFilter} />
-        <RangeLink label="all" current={label} target="all" resolved={resolvedFilter} source={sourceFilter} />
+        <RangeLink label="24h" current={label} target="24h" resolved={resolvedFilter} source={sourceFilter} status={statusFilter} area={areaFilter} />
+        <RangeLink label="7d" current={label} target="7d" resolved={resolvedFilter} source={sourceFilter} status={statusFilter} area={areaFilter} />
+        <RangeLink label="30d" current={label} target="30d" resolved={resolvedFilter} source={sourceFilter} status={statusFilter} area={areaFilter} />
+        <RangeLink label="all" current={label} target="all" resolved={resolvedFilter} source={sourceFilter} status={statusFilter} area={areaFilter} />
         <span className="mx-2 text-zinc-600">·</span>
-        <ResolvedLink label="open" current={resolvedFilter} target="open" range={label} source={sourceFilter} />
-        <ResolvedLink label="resolved" current={resolvedFilter} target="resolved" range={label} source={sourceFilter} />
-        <ResolvedLink label="all" current={resolvedFilter} target="all" range={label} source={sourceFilter} />
+        <ResolvedLink label="open" current={resolvedFilter} target="open" range={label} source={sourceFilter} status={statusFilter} area={areaFilter} />
+        <ResolvedLink label="resolved" current={resolvedFilter} target="resolved" range={label} source={sourceFilter} status={statusFilter} area={areaFilter} />
+        <ResolvedLink label="all" current={resolvedFilter} target="all" range={label} source={sourceFilter} status={statusFilter} area={areaFilter} />
         <span className="mx-2 text-zinc-600">·</span>
-        <SourceLink label="all" current={sourceFilter} target="all" range={label} resolved={resolvedFilter} />
-        <SourceLink label="dashboard" current={sourceFilter} target="dashboard" range={label} resolved={resolvedFilter} />
-        <SourceLink label="deal-room" current={sourceFilter} target="deal-room" range={label} resolved={resolvedFilter} />
+        <SourceLink label="all" current={sourceFilter} target="all" range={label} resolved={resolvedFilter} status={statusFilter} area={areaFilter} />
+        <SourceLink label="dashboard" current={sourceFilter} target="dashboard" range={label} resolved={resolvedFilter} status={statusFilter} area={areaFilter} />
+        <SourceLink label="deal-room" current={sourceFilter} target="deal-room" range={label} resolved={resolvedFilter} status={statusFilter} area={areaFilter} />
+      </section>
+
+      <section className="mb-4 flex flex-wrap gap-2 text-xs">
+        <span className="mr-1 text-zinc-500">status:</span>
+        {STATUS_VALUES.map((s) => (
+          <StatusLink
+            key={s}
+            label={s}
+            current={statusFilter}
+            target={s}
+            range={label}
+            resolved={resolvedFilter}
+            source={sourceFilter}
+            area={areaFilter}
+          />
+        ))}
+      </section>
+
+      <section className="mb-4 flex flex-wrap gap-2 text-xs">
+        <span className="mr-1 text-zinc-500">area:</span>
+        <AreaLink
+          label="all"
+          current={areaFilter}
+          target="all"
+          range={label}
+          resolved={resolvedFilter}
+          source={sourceFilter}
+          status={statusFilter}
+        />
+        {FEEDBACK_AREAS.map((a) => (
+          <AreaLink
+            key={a}
+            label={a}
+            current={areaFilter}
+            target={a}
+            range={label}
+            resolved={resolvedFilter}
+            source={sourceFilter}
+            status={statusFilter}
+          />
+        ))}
       </section>
 
       {rows.length === 0 ? (
@@ -235,26 +305,42 @@ function filterPillClass(active: boolean): string {
   }`;
 }
 
+function buildQs(opts: {
+  range: string;
+  resolved: string;
+  source: string;
+  status: string;
+  area: string;
+}): string {
+  const qs = new URLSearchParams();
+  qs.set("range", opts.range);
+  qs.set("resolved", opts.resolved);
+  qs.set("source", opts.source);
+  qs.set("status", opts.status);
+  qs.set("area", opts.area);
+  return qs.toString();
+}
+
 function RangeLink({
   label,
   current,
   target,
   resolved,
   source,
+  status,
+  area,
 }: {
   label: string;
   current: string;
   target: string;
   resolved: string;
   source: string;
+  status: string;
+  area: string;
 }) {
-  const qs = new URLSearchParams();
-  qs.set("range", target);
-  qs.set("resolved", resolved);
-  qs.set("source", source);
   return (
     <Link
-      href={`/admin/feedback?${qs.toString()}`}
+      href={`/admin/feedback?${buildQs({ range: target, resolved, source, status, area })}`}
       className={filterPillClass(current === target)}
     >
       {label}
@@ -268,20 +354,20 @@ function ResolvedLink({
   target,
   range,
   source,
+  status,
+  area,
 }: {
   label: string;
   current: string;
   target: string;
   range: string;
   source: string;
+  status: string;
+  area: string;
 }) {
-  const qs = new URLSearchParams();
-  qs.set("range", range);
-  qs.set("resolved", target);
-  qs.set("source", source);
   return (
     <Link
-      href={`/admin/feedback?${qs.toString()}`}
+      href={`/admin/feedback?${buildQs({ range, resolved: target, source, status, area })}`}
       className={filterPillClass(current === target)}
     >
       {label}
@@ -295,20 +381,74 @@ function SourceLink({
   target,
   range,
   resolved,
+  status,
+  area,
 }: {
   label: string;
   current: string;
   target: string;
   range: string;
   resolved: string;
+  status: string;
+  area: string;
 }) {
-  const qs = new URLSearchParams();
-  qs.set("range", range);
-  qs.set("resolved", resolved);
-  qs.set("source", target);
   return (
     <Link
-      href={`/admin/feedback?${qs.toString()}`}
+      href={`/admin/feedback?${buildQs({ range, resolved, source: target, status, area })}`}
+      className={filterPillClass(current === target)}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function StatusLink({
+  label,
+  current,
+  target,
+  range,
+  resolved,
+  source,
+  area,
+}: {
+  label: string;
+  current: string;
+  target: string;
+  range: string;
+  resolved: string;
+  source: string;
+  area: string;
+}) {
+  return (
+    <Link
+      href={`/admin/feedback?${buildQs({ range, resolved, source, status: target, area })}`}
+      className={filterPillClass(current === target)}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function AreaLink({
+  label,
+  current,
+  target,
+  range,
+  resolved,
+  source,
+  status,
+}: {
+  label: string;
+  current: string;
+  target: string;
+  range: string;
+  resolved: string;
+  source: string;
+  status: string;
+}) {
+  return (
+    <Link
+      href={`/admin/feedback?${buildQs({ range, resolved, source, status, area: target })}`}
       className={filterPillClass(current === target)}
     >
       {label}

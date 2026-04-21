@@ -19,7 +19,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 
-const ActionSchema = z.enum(["view", "list", "export"]);
+const ActionSchema = z.enum(["view", "list", "export", "view_denied"]);
 export type AdminAccessAction = z.infer<typeof ActionSchema>;
 
 // The access-log page reads its own rows; logging its own reads would
@@ -44,7 +44,7 @@ export async function logAdminAccess(input: LogAdminAccessInput): Promise<void> 
   } else {
     if (process.env.NODE_ENV !== "production") {
       throw new Error(
-        `logAdminAccess: invalid action "${String(input.action)}" (expected "view" | "list" | "export")`,
+        `logAdminAccess: invalid action "${String(input.action)}" (expected "view" | "list" | "export" | "view_denied")`,
       );
     }
     console.error("[admin.access-log] invalid action, coercing to 'view'", {

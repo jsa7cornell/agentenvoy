@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -11,6 +12,8 @@ import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions
 import type { ActionRequest, ActionResult } from "@/agent/actions";
 import { narrateFailures, narrateTimeout, narrateFinalizeError } from "@/agent/action-narration";
 import { sanitizeHistory } from "@/lib/conversation";
+import { mergeChannelMetadata } from "@/lib/channel/metadata-schema";
+import type { ChannelMessageMetadata } from "@/lib/channel/metadata-schema";
 import { needsActionEmissionRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
 import {
   selectVariant,
@@ -428,6 +431,44 @@ export async function POST(req: NextRequest) {
           // the `text` frame is only emitted AFTER all actions resolve and
           // failure narration (if any) has replaced the LLM draft inline.
           const ACTION_TIMEOUT_MS = 15_000;
+          // Prompt snapshot default-on (proposal Q8). Host can opt out by
+          // setting PROMPT_SNAPSHOT_ENABLED=false — a reader noticing missing
+          // promptContext on incident turns should check this env first.
+          const promptSnapshotEnabled =
+            process.env.PROMPT_SNAPSHOT_ENABLED !== "false";
+          const buildEnvoyMetadata = (
+            actions: ActionRequest[],
+            actionResults: ActionResult[],
+            base?: Record<string, unknown>,
+          ): ChannelMessageMetadata => {
+            const additions: Partial<ChannelMessageMetadata> = {};
+            if (actions.length > 0) {
+              additions.actions = actions.map((a) => ({
+                action: a.action,
+                params: (a.params ?? {}) as Record<string, unknown>,
+              }));
+              additions.actionResults = actions.map((a, i) => {
+                const r = actionResults[i];
+                if (!r) {
+                  return { action: a.action, success: false, message: "timed_out" };
+                }
+                return {
+                  action: a.action,
+                  success: r.success,
+                  message: r.message,
+                  ...(r.data ? { data: r.data } : {}),
+                };
+              });
+            }
+            if (promptSnapshotEnabled) {
+              additions.promptContext = {
+                systemPrompt: CHANNEL_SYSTEM,
+                contextBlock: contextParts.join("\n"),
+                modelId,
+              };
+            }
+            return mergeChannelMetadata(base ?? null, additions);
+          };
           const finalizeResponse = async (text: string): Promise<string> => {
             try {
               const actions = parseActions(text);
@@ -486,9 +527,14 @@ export async function POST(req: NextRequest) {
                 }
               }
 
-              const metadata = overriddenNarration
+              const baseOverride = overriddenNarration
                 ? { overriddenNarration }
-                : undefined;
+                : null;
+              const envoyMetadata = buildEnvoyMetadata(
+                actions,
+                actionResults,
+                baseOverride ?? undefined,
+              );
 
               const createLinkResult = actionResults.find((r) => r.success && r.data?.url);
               if (createLinkResult?.data) {
@@ -500,7 +546,7 @@ export async function POST(req: NextRequest) {
                     role: "envoy",
                     content: envoyText,
                     threadId: d.sessionId as string,
-                    ...(metadata ? { metadata } : {}),
+                    metadata: envoyMetadata as Prisma.InputJsonValue,
                   },
                 });
                 return envoyText;
@@ -524,7 +570,7 @@ export async function POST(req: NextRequest) {
                     role: "envoy",
                     content: envoyText,
                     threadId: sid,
-                    ...(metadata ? { metadata } : {}),
+                    metadata: envoyMetadata as Prisma.InputJsonValue,
                   },
                 });
                 if (summary && displayText) {
@@ -554,7 +600,7 @@ export async function POST(req: NextRequest) {
                   channelId: safeChannel.id,
                   role: "envoy",
                   content: finalText,
-                  ...(metadata ? { metadata } : {}),
+                  metadata: envoyMetadata as Prisma.InputJsonValue,
                 },
               });
               return finalText;
