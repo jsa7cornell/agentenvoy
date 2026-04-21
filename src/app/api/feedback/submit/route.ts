@@ -81,12 +81,13 @@ export async function POST(request: NextRequest) {
       data: {
         userId,
         sessionId: submission.sessionId ?? null,
-        userText: submission.userText,
+        userText: submission.userText?.trim() ? submission.userText : null,
         triedToDoText: submission.triedToDoText ?? null,
         userAgent: submission.userAgent ?? null,
         url: submission.url ?? null,
         checklistState: submission.checklistState as never,
         bundle: bundle as never,
+        filedByGuest: false,
       },
       select: { id: true },
     });
@@ -109,6 +110,7 @@ export async function POST(request: NextRequest) {
       errors: submission.checklistState.errors,
       console: submission.checklistState.console,
       hasTriedToDoText: Boolean(submission.triedToDoText),
+      hasUserText: Boolean(submission.userText?.trim()),
     },
   });
 

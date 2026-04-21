@@ -10,6 +10,7 @@ import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
 import { TimezonePicker } from "./timezone-picker";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
+import { SendFeedbackLink } from "./send-feedback";
 import { formatDuration } from "@/lib/format-duration";
 import {
   getRoleStyles,
@@ -2004,11 +2005,21 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             Send
           </button>
         </div>
-        {isHost && (
-          <p className="text-[10px] text-muted mt-1.5">
-            Prefix with <code className="text-muted">::</code> for private notes to Envoy
-          </p>
-        )}
+        <div className="mt-1.5 flex items-center justify-between gap-3">
+          {isHost ? (
+            <p className="text-[10px] text-muted">
+              Prefix with <code className="text-muted">::</code> for private notes to Envoy
+            </p>
+          ) : (
+            <span />
+          )}
+          <SendFeedbackLink
+            mode={isHost ? "host-deal-room" : "guest-deal-room"}
+            linkCode={code}
+            sessionId={sessionId}
+            className="text-[10px]"
+          />
+        </div>
       </form>
     </>
   );
