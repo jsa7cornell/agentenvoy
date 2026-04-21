@@ -55,6 +55,17 @@ interface PreferenceData {
 
 const DAY_NAMES_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+/** Next YYYY-MM-DD for a given day-of-week (0=Sun). Today counts. */
+function nextOccurrenceISO(dayOfWeek: number): string {
+  const now = new Date();
+  const diff = (dayOfWeek - now.getDay() + 7) % 7;
+  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff);
+  const y = target.getFullYear();
+  const m = String(target.getMonth() + 1).padStart(2, "0");
+  const d = String(target.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function formatHour(h: number): string {
   if (h === 0) return "12 AM";
   if (h < 12) return `${h} AM`;
@@ -868,6 +879,37 @@ function ConfirmationCard({
                   </span>
                 </>
               )
+            )}
+            {/* Recurring toggle — lets the user flip a parsed rule between
+                one-time ("block Thursday") and weekly ("every Thursday").
+                Only shown for editable day-scoped rules (not office_hours,
+                which has its own start/end date pickers). */}
+            {editing
+              && rule.action !== "office_hours"
+              && rule.daysOfWeek && rule.daysOfWeek.length > 0 && (
+              <>
+                <span className="text-muted">Repeats</span>
+                <label className="flex items-center gap-1.5 text-xs text-primary cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={rule.type === "recurring"}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        onUpdateRule({ type: "recurring", effectiveDate: undefined });
+                      } else {
+                        const firstDay = (rule.daysOfWeek ?? [new Date().getDay()])[0];
+                        onUpdateRule({
+                          type: "one-time",
+                          daysOfWeek: [firstDay],
+                          effectiveDate: nextOccurrenceISO(firstDay),
+                        });
+                      }
+                    }}
+                    className="accent-accent"
+                  />
+                  Every week
+                </label>
+              </>
             )}
             {/* Office hours: always-visible start/end date fields */}
             {rule.action === "office_hours" ? (
