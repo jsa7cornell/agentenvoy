@@ -70,6 +70,12 @@ const TOOLS: Tool[] = [
     description: "User-submitted feedback reports with attached bundles (messages, sessions, calendar, errors). Opening a detail view is audited.",
     tag: "feedback",
   },
+  {
+    href: "/admin/events",
+    label: "Events",
+    description: "Self-hosted product-event stream (ProductEvent). Funnel counts + last 200 rows with range/name filters. Reads are audited.",
+    tag: "analytics",
+  },
 ];
 
 const TAG_COLORS: Record<string, string> = {
@@ -78,6 +84,7 @@ const TAG_COLORS: Record<string, string> = {
   database: "bg-amber-500/10 text-amber-400 border-amber-500/30",
   audit: "bg-rose-500/10 text-rose-400 border-rose-500/30",
   feedback: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+  analytics: "bg-cyan-500/10 text-cyan-400 border-cyan-500/30",
 };
 
 export default async function AdminPage() {
