@@ -12,6 +12,7 @@ import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
 import { SendFeedbackLink } from "./send-feedback";
 import { formatDuration } from "@/lib/format-duration";
+import { stripRendererOnlyBlocks } from "@/lib/message-render";
 import {
   getRoleStyles,
   computeExternalAgentSender,
@@ -518,7 +519,38 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       }
     } catch (error) {
       console.error("Confirm error:", error);
-      setConfirmError("Failed to confirm meeting. Please try again.");
+      // Heal pass: the confirm pipeline may have completed server-side
+      // (Google event inserted, session moved to `agreed`) even though the
+      // client request failed or timed out — reported 2026-04-21 by Danny
+      // on link j6ep75 (cmo909lkz): "nothing happened" in the UI but the
+      // event landed in his calendar. Check the session's truth once
+      // before surfacing the generic error so we don't strand the user.
+      let healed = false;
+      if (sessionId) {
+        try {
+          const sessionRes = await fetch(
+            `/api/negotiate/session?id=${sessionId}`,
+          );
+          if (sessionRes.ok) {
+            const { session: sess } = await sessionRes.json();
+            if (sess?.status === "agreed") {
+              setConfirmed(true);
+              setSessionStatus("agreed");
+              setSessionStatusLabel("");
+              setPendingProposal(null);
+              setConfirmFormExpanded(false);
+              setJustConfirmedGlow(true);
+              setTimeout(() => setJustConfirmedGlow(false), 3000);
+              healed = true;
+            }
+          }
+        } catch {
+          // fall through to error banner
+        }
+      }
+      if (!healed) {
+        setConfirmError("Failed to confirm meeting. Please try again.");
+      }
     } finally {
       setIsConfirming(false);
     }
@@ -775,9 +807,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
         const chunk = decoder.decode(value, { stream: true });
         fullText += chunk;
+        // Strip structured blocks client-side so mid-stream partials don't
+        // flash raw `[DELEGATE_SPEAKER]...[/DELEGATE_SPEAKER]` / `[ACTION]`
+        // / `[STATUS_UPDATE]` tags at the guest. Server re-strips in
+        // onFinish before persisting — this is the client mirror so the
+        // visible state matches the persisted state without a reload.
+        // Bug reported 2026-04-21 by Danny on link j6ep75 (cmo909lkz).
+        const rendered = stripRendererOnlyBlocks(fullText);
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId ? { ...m, content: fullText } : m
+            m.id === assistantId ? { ...m, content: rendered } : m
           )
         );
       }

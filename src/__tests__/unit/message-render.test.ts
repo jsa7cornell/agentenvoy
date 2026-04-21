@@ -1,0 +1,60 @@
+import { describe, it, expect } from "vitest";
+import { stripRendererOnlyBlocks } from "@/lib/message-render";
+
+describe("stripRendererOnlyBlocks", () => {
+  it("strips a DELEGATE_SPEAKER tag inline with prose", () => {
+    const input =
+      'The message above is from another AI agent scheduling on Danny\'s behalf — noted.\n\n[DELEGATE_SPEAKER]{"kind":"ai_agent"}[/DELEGATE_SPEAKER]\n\n3 PM ET / 12 PM PT works — that\'s John\'s preferred slot.';
+    const out = stripRendererOnlyBlocks(input);
+    expect(out).not.toContain("[DELEGATE_SPEAKER]");
+    expect(out).toContain("The message above is from another AI agent");
+    expect(out).toContain("3 PM ET / 12 PM PT works");
+  });
+
+  it("strips an ACTION block mid-stream (collapses surrounding whitespace)", () => {
+    // Matches the original server-side regex behavior: the leading/trailing
+    // `\s*` in the strip pattern intentionally consumes surrounding spaces
+    // and newlines so a block on its own line doesn't leave a blank gap.
+    const input =
+      'Setting that up now.\n[ACTION]{"action":"create_link","params":{}}[/ACTION]\nOffering tonight 5:15 PM.';
+    expect(stripRendererOnlyBlocks(input)).toBe(
+      "Setting that up now.Offering tonight 5:15 PM.",
+    );
+  });
+
+  it("strips a STATUS_UPDATE block (collapses surrounding whitespace)", () => {
+    const input =
+      'Confirmed.\n[STATUS_UPDATE]{"status":"agreed","label":"Locked in"}[/STATUS_UPDATE]\nSee you then.';
+    expect(stripRendererOnlyBlocks(input)).toBe("Confirmed.See you then.");
+  });
+
+  it("strips multiple blocks in one message", () => {
+    const input =
+      'Hi! [DELEGATE_SPEAKER]{"kind":"ai_agent"}[/DELEGATE_SPEAKER] Booking. [ACTION]{"action":"create_link"}[/ACTION] Done.';
+    // Whitespace collapses same as server-side stripper.
+    expect(stripRendererOnlyBlocks(input)).toBe("Hi!Booking.Done.");
+  });
+
+  it("leaves a partial (unclosed) tag alone — mid-stream chunk still arriving", () => {
+    // Before the closing tag arrives, nothing to strip yet. Subsequent chunk
+    // appends the closer and then the strip catches it on the next setState.
+    const input = 'Hi! [DELEGATE_SPEAKER]{"kind":"ai_age';
+    expect(stripRendererOnlyBlocks(input)).toBe(
+      'Hi! [DELEGATE_SPEAKER]{"kind":"ai_age',
+    );
+  });
+
+  it("is a no-op on clean text", () => {
+    const input = "Hey Danny, 3 PM EDT works.";
+    expect(stripRendererOnlyBlocks(input)).toBe(input);
+  });
+
+  it("handles a JSON payload containing newlines (the .* vs [\\s\\S] divergence)", () => {
+    // The original server-side regex used `.*?` without `s` flag — embedded
+    // newlines in the JSON payload would leak through. The shared helper
+    // uses `[\s\S]*?` so multiline payloads strip cleanly.
+    const input =
+      'Hi!\n[DELEGATE_SPEAKER]{\n  "kind":"ai_agent",\n  "name":"OpenClaw"\n}[/DELEGATE_SPEAKER]\nOK.';
+    expect(stripRendererOnlyBlocks(input)).toBe("Hi!OK.");
+  });
+});
