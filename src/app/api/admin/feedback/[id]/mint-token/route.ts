@@ -84,20 +84,10 @@ export async function POST(
   const fetchUrl = `${origin}/api/agent/feedback/${report.id}?token=${minted.token}`;
   const curl = `curl -s '${fetchUrl}'`;
 
-  const ttlMinutes = Math.round(AGENT_TOKEN_TTL_SECONDS / 60);
   const prompt = [
-    `You're debugging AgentEnvoy (Next.js + Prisma + Supabase). A feedback report needs investigation.`,
-    ``,
-    `Report ID: ${report.id}`,
-    `Admin page: ${origin}/admin/feedback/${report.id}`,
-    ``,
-    `Fetch the debug bundle (token expires in ${ttlMinutes} min, ${10} fetches max):`,
-    ``,
     curl,
     ``,
-    `The response has { report, bundle } — bundle includes messages, sessions, recentLinks, calendar, routeErrors, consoleLines, clientState.`,
-    ``,
-    `Read agentenvoy/PLAYBOOK.md → "Debug bundle handling" before acting. Summarize findings, propose a root cause, and quote specific bundle lines as evidence before writing code.`,
+    `Run the curl above to fetch { report, bundle } for AgentEnvoy feedback report ${report.id}, then follow agentenvoy/PLAYBOOK.md → "Debug bundle handling".`,
   ].join("\n");
 
   return NextResponse.json(

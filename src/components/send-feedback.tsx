@@ -106,7 +106,6 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submittedId, setSubmittedId] = useState<string | null>(null);
   const [submittedIsAdmin, setSubmittedIsAdmin] = useState(false);
-  const [promptCopied, setPromptCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorRef, setErrorRef] = useState<string | null>(null);
   const prefillController = useRef<AbortController | null>(null);
@@ -350,33 +349,8 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
                   rel="noopener noreferrer"
                   className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 font-medium text-sky-100 hover:bg-sky-500/20"
                 >
-                  Open report →
+                  Open report → mint agent prompt
                 </a>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const origin =
-                      typeof window !== "undefined" ? window.location.origin : "";
-                    const prompt = [
-                      `I just filed AgentEnvoy feedback report ${submittedId}. Investigate it.`,
-                      ``,
-                      `1. Open ${origin}/admin/feedback/${submittedId}`,
-                      `2. Click "Share with agent (15 min)" to mint a JWT and copy the curl.`,
-                      `3. Run the curl to fetch { report, bundle }.`,
-                      `4. Follow agentenvoy/PLAYBOOK.md → "Debug bundle handling".`,
-                    ].join("\n");
-                    try {
-                      await navigator.clipboard.writeText(prompt);
-                      setPromptCopied(true);
-                      setTimeout(() => setPromptCopied(false), 2000);
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                  className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 font-medium text-sky-100 hover:bg-sky-500/20"
-                >
-                  {promptCopied ? "Copied ✓" : "Copy prompt"}
-                </button>
               </div>
             ) : null}
             <div className="flex justify-end pt-2">
