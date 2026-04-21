@@ -1018,23 +1018,43 @@ export async function POST(req: NextRequest) {
       const isGeneric = link.type === "generic";
 
       // "Essentially-unsteered" contextual link: the host named a guest but
-      // didn't narrow the offer in any meaningful way (no preferredDays, no
-      // preferredTime*, no dateRange, no activity, no VIP, no guestPicks, no
-      // lastResort, no allowWeekends). The bulleted schedule body would just
-      // dump "here's my whole calendar" — noisy, redundant with the calendar
-      // widget below. Treat body + closing as generic even though the link is
-      // contextual; keep the personalized hello since we still have an invitee.
-      // Reported 2026-04-21 by John on link 6dngnf ("get time w/ suzie again").
+      // didn't narrow the offer in any meaningful way. The bulleted schedule
+      // body would just dump "here's my whole calendar" — noisy, redundant
+      // with the calendar widget below. Treat body + closing as generic
+      // even though the link is contextual; keep the personalized hello
+      // since we still have an invitee.
+      //
+      // First reported 2026-04-21 (Suzie link 6dngnf — "get time w/ suzie
+      // again" → no rules at all). Refined same day (Bob link 8hryrv —
+      // "create new event for bob - anytime next week" → dateRange set to
+      // Mon–Fri of next week, nothing else). A wide-ish dateRange alone is
+      // NOT meaningful steering; it's labeling a week, not narrowing the
+      // offer. Threshold: dateRange spans < 5 calendar days → counts as
+      // steering. ≥ 5 days (work week or wider) → doesn't count.
       const unsteeredRules = linkRules as Record<string, unknown>;
       const ptw = Array.isArray(unsteeredRules.preferredTimeWindows)
         ? unsteeredRules.preferredTimeWindows
         : [];
+
+      // Compute dateRange span in calendar days (inclusive). Narrow spans
+      // (specific day, "Tue-Thu") still count as steering because they're
+      // genuinely narrowing what's on offer.
+      const isNarrowDateRange = (() => {
+        const dr = unsteeredRules.dateRange as { start?: unknown; end?: unknown } | undefined;
+        if (!dr || typeof dr.start !== "string" || typeof dr.end !== "string") return false;
+        const startMs = Date.parse(`${dr.start}T00:00:00Z`);
+        const endMs = Date.parse(`${dr.end}T00:00:00Z`);
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
+        const days = Math.floor((endMs - startMs) / 86_400_000) + 1;
+        return days < 5;
+      })();
+
       const hasMeaningfulSteering =
         !!unsteeredRules.preferredDays ||
         !!unsteeredRules.preferredTimeStart ||
         !!unsteeredRules.preferredTimeEnd ||
         ptw.length > 0 ||
-        !!unsteeredRules.dateRange ||
+        isNarrowDateRange ||
         !!unsteeredRules.activity ||
         !!unsteeredRules.lastResort ||
         !!unsteeredRules.allowWeekends ||
