@@ -19,10 +19,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { captureClientState } from "@/lib/feedback/capture-client-state";
-import { FEEDBACK_AREAS, type FeedbackArea } from "@/lib/feedback/schema";
+// Area picker hidden for now; keeping imports so re-enabling is a one-line flip.
+// import { FEEDBACK_AREAS, type FeedbackArea } from "@/lib/feedback/schema";
+import type { FeedbackArea } from "@/lib/feedback/schema";
 
 type Mode = "host" | "host-deal-room" | "guest-deal-room";
 
+// Area labels — kept (not currently rendered) so re-enabling the picker is
+// trivial. eslint-disable-next-line is cheaper than code deletion + restore.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const AREA_LABELS: Record<FeedbackArea, string> = {
   dashboard_chat: "Dashboard chat",
   deal_room_chat: "Deal room chat",
@@ -97,8 +102,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
   const [prefillLoading, setPrefillLoading] = useState(true);
   const [prefillDraft, setPrefillDraft] = useState<string | null>(null);
   const [includeContext, setIncludeContext] = useState(true);
-  const [area, setArea] = useState<FeedbackArea | "">(inferredArea);
-  const [showAreaPicker, setShowAreaPicker] = useState(inferredArea === "");
+  const [area] = useState<FeedbackArea | "">(inferredArea);
   const [submitting, setSubmitting] = useState(false);
   const [submittedId, setSubmittedId] = useState<string | null>(null);
   const [submittedIsAdmin, setSubmittedIsAdmin] = useState(false);
@@ -106,6 +110,56 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [errorRef, setErrorRef] = useState<string | null>(null);
   const prefillController = useRef<AbortController | null>(null);
+
+  // Draggable on desktop (pointer events fall back gracefully on touch).
+  // Drag is initiated only from the title bar — close button and form fields
+  // carry data-no-drag so they stay interactive.
+  const [drag, setDrag] = useState({ x: 0, y: 0 });
+  const dragStart = useRef<{
+    px: number;
+    py: number;
+    ox: number;
+    oy: number;
+  } | null>(null);
+  const onDragPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+      dragStart.current = { px: e.clientX, py: e.clientY, ox: drag.x, oy: drag.y };
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    },
+    [drag.x, drag.y],
+  );
+  const onDragPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!dragStart.current) return;
+      setDrag({
+        x: dragStart.current.ox + (e.clientX - dragStart.current.px),
+        y: dragStart.current.oy + (e.clientY - dragStart.current.py),
+      });
+    },
+    [],
+  );
+  const onDragPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      dragStart.current = null;
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
+  const dragHandleProps = {
+    onPointerDown: onDragPointerDown,
+    onPointerMove: onDragPointerMove,
+    onPointerUp: onDragPointerUp,
+    onPointerCancel: onDragPointerUp,
+  };
 
   // Prefill on mount. Race guard per N2 of the proposal: if the response
   // arrives after the user has typed, DROP it — never overwrite typed
@@ -243,8 +297,8 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
   // touched, render it gray so the user feels free to type over it.
   const textareaClass =
     !userTyped && prefillDraft && userText === prefillDraft
-      ? "mt-1 w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-500 italic focus:border-purple-500/60 focus:text-zinc-100 focus:not-italic focus:outline-none"
-      : "mt-1 w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500/60 focus:outline-none";
+      ? "mt-1 w-full min-h-[96px] resize-y rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-500 italic focus:border-purple-500/60 focus:text-zinc-100 focus:not-italic focus:outline-none"
+      : "mt-1 w-full min-h-[96px] resize-y rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500/60 focus:outline-none";
 
   return (
     <div
@@ -254,10 +308,16 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
       <div
         className="relative w-full max-w-xl rounded-2xl border border-white/10 bg-zinc-950 p-6 text-sm text-zinc-100 shadow-xl"
         onClick={(e) => e.stopPropagation()}
+        style={{ transform: `translate(${drag.x}px, ${drag.y}px)` }}
       >
         {submittedId !== null ? (
           <div className="space-y-3">
-            <h2 className="text-lg font-semibold">Thank you 🙏</h2>
+            <h2
+              className="cursor-move select-none text-lg font-semibold"
+              {...dragHandleProps}
+            >
+              Thank you 🙏
+            </h2>
             {mode === "guest-deal-room" ? (
               <p className="text-sm text-zinc-300">
                 Thanks — email{" "}
@@ -331,11 +391,15 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
           </div>
         ) : (
           <>
-            <div className="mb-4 flex items-start justify-between">
-              <h2 className="text-lg font-semibold">Your feedback is a gift.</h2>
+            <div
+              className="mb-4 flex cursor-move select-none items-start justify-between"
+              {...dragHandleProps}
+            >
+              <h2 className="text-lg font-semibold">❤️ Feedback as a Gift</h2>
               <button
                 type="button"
                 onClick={onClose}
+                data-no-drag
                 className="text-xl leading-none text-zinc-500 hover:text-zinc-200"
                 aria-label="Close"
               >
@@ -343,38 +407,10 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
               </button>
             </div>
 
-            <div className="space-y-3">
-              {showAreaPicker ? (
-                <label className="block">
-                  <span className="text-xs uppercase tracking-wide text-zinc-400">
-                    Area (optional)
-                  </span>
-                  <select
-                    value={area}
-                    onChange={(e) => setArea(e.target.value as FeedbackArea | "")}
-                    className="mt-1 w-full rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-purple-500/60 focus:outline-none"
-                  >
-                    <option value="">— pick an area —</option>
-                    {FEEDBACK_AREAS.map((a) => (
-                      <option key={a} value={a}>
-                        {AREA_LABELS[a]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : area ? (
-                <p className="text-[11px] text-zinc-500">
-                  Area: <span className="text-zinc-300">{AREA_LABELS[area as FeedbackArea]}</span>
-                  {" · "}
-                  <button
-                    type="button"
-                    onClick={() => setShowAreaPicker(true)}
-                    className="underline decoration-dotted underline-offset-2 hover:text-zinc-300"
-                  >
-                    change
-                  </button>
-                </p>
-              ) : null}
+            <div className="space-y-3" data-no-drag>
+              {/* Area picker intentionally hidden for now — inferredArea is
+                  still submitted with every report, so admin filtering still
+                  works. Flip this block back on if we want user override. */}
 
               <label className="block">
                 <span className="text-xs uppercase tracking-wide text-zinc-400">
@@ -406,10 +442,6 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
                   </span>
                 </span>
               </label>
-
-              <p className="text-xs text-zinc-400">
-                Thanks for taking the time, we really appreciate.
-              </p>
 
               {error ? (
                 <p className="text-xs text-red-400">
