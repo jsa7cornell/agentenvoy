@@ -1016,7 +1016,33 @@ export async function POST(req: NextRequest) {
       // length and meeting method (call, f2f) is appropriate, just let me
       // know and we can make that happen."
       const isGeneric = link.type === "generic";
-      const closing = isGeneric
+
+      // "Essentially-unsteered" contextual link: the host named a guest but
+      // didn't narrow the offer in any meaningful way (no preferredDays, no
+      // preferredTime*, no dateRange, no activity, no VIP, no guestPicks, no
+      // lastResort, no allowWeekends). The bulleted schedule body would just
+      // dump "here's my whole calendar" — noisy, redundant with the calendar
+      // widget below. Treat body + closing as generic even though the link is
+      // contextual; keep the personalized hello since we still have an invitee.
+      // Reported 2026-04-21 by John on link 6dngnf ("get time w/ suzie again").
+      const unsteeredRules = linkRules as Record<string, unknown>;
+      const ptw = Array.isArray(unsteeredRules.preferredTimeWindows)
+        ? unsteeredRules.preferredTimeWindows
+        : [];
+      const hasMeaningfulSteering =
+        !!unsteeredRules.preferredDays ||
+        !!unsteeredRules.preferredTimeStart ||
+        !!unsteeredRules.preferredTimeEnd ||
+        ptw.length > 0 ||
+        !!unsteeredRules.dateRange ||
+        !!unsteeredRules.activity ||
+        !!unsteeredRules.lastResort ||
+        !!unsteeredRules.allowWeekends ||
+        !!unsteeredRules.isVip ||
+        !!unsteeredRules.guestPicks;
+      const useGenericBody = isGeneric || !hasMeaningfulSteering;
+
+      const closing = useGenericBody
         ? (() => {
             const base = `Choose a slot from the calendar below or reply with what works best for you.`;
             const durStr = effectiveDuration ? formatDuration(effectiveDuration) : "30 min";
