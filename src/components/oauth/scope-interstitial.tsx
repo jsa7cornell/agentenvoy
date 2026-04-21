@@ -21,10 +21,11 @@ export function ScopeInterstitial() {
   const [missingWrite, setMissingWrite] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
+  // `upgrade-scope` mode already forces prompt=consent in `promptForMode`,
+  // so the explicit signInParams override is redundant.
   const reconnect = useOAuthSignIn({
     mode: "upgrade-scope",
     callbackUrl: "/dashboard",
-    signInParams: { prompt: "consent" },
   });
 
   useEffect(() => {

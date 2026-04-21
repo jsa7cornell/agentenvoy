@@ -48,8 +48,12 @@ export default function Home() {
     }
   }, [status, session, router]);
 
+  // `mode: "login"` serves both new and returning users. First-timers (no
+  // `ae_returning` cookie) see the first-connect trust modal; returning users
+  // skip it entirely and `prompt: "select_account"` preserves their refresh
+  // token. Same CTA handles Get Started + Log in without branching.
   const { trigger: handleSignIn, modal: signInModal } = useOAuthSignIn({
-    mode: "first-connect",
+    mode: "login",
     callbackUrl: "/dashboard",
   });
 
@@ -71,6 +75,12 @@ export default function Home() {
             <a href="#demo" className="hidden md:inline text-sm text-secondary hover:text-primary transition">Demo</a>
             <a href="#how-it-works" className="hidden md:inline text-sm text-secondary hover:text-primary transition">How It Works</a>
             <a href="/agents" className="hidden md:inline text-sm text-secondary hover:text-primary transition">For Agents</a>
+            <button
+              onClick={handleSignIn}
+              className="text-sm text-secondary hover:text-primary transition"
+            >
+              Log in
+            </button>
             <button
               onClick={handleSignIn}
               className="inline-flex items-center gap-2 bg-accent hover:bg-accent-hover text-white px-4 py-2 rounded-lg text-sm font-semibold transition shadow-accent-glow group"

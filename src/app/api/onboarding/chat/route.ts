@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -12,6 +13,7 @@ import {
   getTimezonePickerMessages,
   getTimezoneInputMessages,
   getDefaultsFormatMessages,
+  getDefaultsConfirmMessages,
   getPhoneNumberMessages,
   getZoomLinkMessages,
   getDefaultsDurationMessages,
@@ -28,6 +30,15 @@ import { safeTimezone, getUserTimezone } from "@/lib/timezone";
 import { generateOnboardingCalendarRead } from "@/lib/calendar-read";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
 import { parseCustomBusinessHours } from "./_parse-business-hours";
+import {
+  emitOnboardingEntered,
+  emitOnboardingCompleted,
+} from "@/lib/onboarding/events";
+import {
+  ENTRY_POINT_COOKIE,
+  type HostEntryPoint,
+} from "@/lib/oauth/required-scopes";
+import { buildSeededExplicit } from "@/lib/onboarding/seed-defaults";
 
 interface UserPreferences {
   timezone?: string;
@@ -50,7 +61,7 @@ interface UserPreferences {
 /**
  * GET /api/onboarding/chat — returns current onboarding state + initial messages
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -84,10 +95,21 @@ export async function GET() {
     userName: user.name || undefined,
     detectedTimezone: tz,
     meetSlug: user.meetSlug || undefined,
+    seededDefaults: mergeSeededDefaults(prefs.explicit),
   };
 
   // Resume at saved phase or start fresh
+  const isFreshRun = !user.onboardingPhase;
   const phase = (user.onboardingPhase as OnboardingPhase) || "intro";
+
+  // Fire onboarding.entered once per fresh run. The events helper dedupes
+  // within 24h via the OnboardingEvent table, so double-GETs (StrictMode,
+  // refresh) don't double-count.
+  if (isFreshRun) {
+    const entryPoint = readEntryPointCookie();
+    const hasReturnTo = req.nextUrl.searchParams.get("hasReturnTo") === "1";
+    void emitOnboardingEntered({ userId: user.id, entryPoint, hasReturnTo });
+  }
 
   // Wow-factor calendar read — best-effort, only on the intro phase.
   // Generated fresh on each GET so a user who refreshes gets a new riff;
@@ -184,6 +206,7 @@ export async function POST(req: NextRequest) {
     userName: user.name || undefined,
     detectedTimezone: tz,
     meetSlug: user.meetSlug || undefined,
+    seededDefaults: mergeSeededDefaults(explicit),
   };
 
   // ── Handle response for current phase ─────────────────────────────────
@@ -217,6 +240,16 @@ export async function POST(req: NextRequest) {
       await updatePrefs(user.id, prefs, explicit, { timezone: validatedTz });
       ctx.detectedTimezone = validatedTz;
       break;
+    }
+
+    case "defaults_confirm": {
+      // Seed-and-show: user reviewed defaults and confirmed. Complete
+      // onboarding here — no further phases. If they wanted to tune them,
+      // they clicked through to /dashboard/tuner which doesn't POST here.
+      await completeOnboarding(user.id);
+      result = getCompleteMessages(ctx);
+      await savePhase(user.id, "complete");
+      return await respondWithPersist(user.id, result, { onboardingComplete: true });
     }
 
     case "defaults_format": {
@@ -390,6 +423,7 @@ export async function POST(req: NextRequest) {
 function getMessagesForPhase(phase: OnboardingPhase, ctx: OnboardingContext): PhaseResult {
   switch (phase) {
     case "intro": return getIntroMessages(ctx);
+    case "defaults_confirm": return getDefaultsConfirmMessages(ctx);
     case "defaults_format": return getDefaultsFormatMessages();
     case "phone_number": return getPhoneNumberMessages();
     case "zoom_link": return getZoomLinkMessages();
@@ -496,4 +530,64 @@ async function completeOnboarding(userId: string) {
 
   await invalidateSchedule(userId);
   await track({ name: "onboarding.completed", userId });
+  await emitOnboardingCompleted({ userId });
+
+  // Cookie-hint for returning users. Presence of `ae_returning=1` lets
+  // `useOAuthSignIn` skip the pre-consent explainer on `mode: "login"` and
+  // use `prompt: "select_account"` instead of forcing consent every sign-in.
+  try {
+    cookies().set(RETURNING_COOKIE, "1", {
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      httpOnly: false,
+    });
+  } catch {
+    // cookies().set throws outside request scope — onboarding completes
+    // inside a request, but belt-and-suspenders for future callers.
+  }
+}
+
+const RETURNING_COOKIE = "ae_returning";
+
+function readEntryPointCookie(): HostEntryPoint {
+  try {
+    const ep = cookies().get(ENTRY_POINT_COOKIE)?.value;
+    if (ep === "deal-room" || ep === "deal-room-upsell") return ep;
+  } catch {
+    // fall through
+  }
+  return "front-door";
+}
+
+/**
+ * Merge explicit prefs into the defaults-confirm view shape. Falls back to
+ * `buildSeededExplicit()` values so the confirm card has something sensible
+ * to render even if the createUser seed didn't run (e.g. very-old users).
+ */
+function mergeSeededDefaults(
+  explicit: UserPreferences["explicit"] | undefined,
+): OnboardingContext["seededDefaults"] {
+  const seed = buildSeededExplicit({});
+  return {
+    businessHoursStart:
+      (explicit?.businessHoursStart as number | undefined) ??
+      (seed.businessHoursStart as number | undefined),
+    businessHoursEnd:
+      (explicit?.businessHoursEnd as number | undefined) ??
+      (seed.businessHoursEnd as number | undefined),
+    defaultFormat:
+      (explicit?.defaultFormat as string | undefined) ??
+      (seed.defaultFormat as string | undefined),
+    videoProvider:
+      (explicit?.videoProvider as string | undefined) ??
+      (seed.videoProvider as string | undefined),
+    defaultDuration:
+      (explicit?.defaultDuration as number | undefined) ??
+      (seed.defaultDuration as number | undefined),
+    bufferMinutes:
+      (explicit?.bufferMinutes as number | undefined) ??
+      (seed.bufferMinutes as number | undefined),
+  };
 }

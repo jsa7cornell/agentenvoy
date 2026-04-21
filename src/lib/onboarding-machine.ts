@@ -18,6 +18,11 @@ import { shortTimezoneLabel, longTimezoneLabel, getTimezoneEntry } from "./timez
 
 export type OnboardingPhase =
   | "intro"
+  | "defaults_confirm"
+  // Legacy phase values — no longer part of the active PHASE_ORDER after the
+  // 2026-04-21 lean-onboarding trim, but kept in the union so that stored
+  // `User.onboardingPhase` values from in-flight users still type-check.
+  // `nextPhase()` auto-promotes any of these to `defaults_confirm`.
   | "defaults_format"
   | "phone_number"
   | "zoom_link"
@@ -63,6 +68,21 @@ export interface OnboardingContext {
    * onboarding proceeds normally without the paragraph.
    */
   calendarReadParagraph?: string;
+  /**
+   * Seeded defaults surfaced by the `defaults_confirm` phase (proposal §2.7).
+   * Route handler reads `User.preferences.explicit` (which was seeded at
+   * createUser-time by `buildSeededExplicit`) and merges in any user
+   * modifications before passing this to the state machine. Any missing
+   * field falls back to the seed value in `getDefaultsConfirmMessages`.
+   */
+  seededDefaults?: {
+    businessHoursStart?: number;
+    businessHoursEnd?: number;
+    defaultFormat?: string;
+    videoProvider?: string;
+    defaultDuration?: number;
+    bufferMinutes?: number;
+  };
 }
 
 // ── Phase handlers ─────────────────────────────────────────────────────
@@ -300,6 +320,59 @@ export function getCalendarEveningsMessages(): PhaseResult {
   };
 }
 
+// Phase 2: Defaults confirm (seed-and-show — proposal §2.7)
+// Renders the seeded defaults as a bullet list in a single Envoy message and
+// asks the user to confirm or branch out to edit. One quick-reply button —
+// "Looks good, let's go" — advances to `complete`. A markdown link to the
+// tuner page is inlined for users who want to change values now.
+function formatHourRange(start?: number, end?: number): string {
+  const s = typeof start === "number" ? start : 9;
+  const e = typeof end === "number" ? end : 17;
+  const fmt = (h: number) => {
+    const ampm = h >= 12 ? "pm" : "am";
+    const hh = h % 12 === 0 ? 12 : h % 12;
+    return `${hh}${ampm}`;
+  };
+  return `${fmt(s)}–${fmt(e)}`;
+}
+
+function formatFormat(defaultFormat?: string, videoProvider?: string): string {
+  if (defaultFormat === "phone") return "Phone";
+  if (defaultFormat === "in_person") return "In-person";
+  // "video" (or unset) → name the provider for specificity
+  if (videoProvider === "zoom") return "Zoom";
+  return "Google Meet";
+}
+
+export function getDefaultsConfirmMessages(ctx: OnboardingContext): PhaseResult {
+  const d = ctx.seededDefaults ?? {};
+  const hours = formatHourRange(d.businessHoursStart, d.businessHoursEnd);
+  const format = formatFormat(d.defaultFormat, d.videoProvider);
+  const duration = typeof d.defaultDuration === "number" ? d.defaultDuration : 30;
+  const buffer = typeof d.bufferMinutes === "number" ? d.bufferMinutes : 0;
+  const bufferText = buffer === 0 ? "No buffer" : `${buffer}-min buffer`;
+
+  const content =
+    `I've seeded you with sensible defaults so you can start scheduling right away:\n\n` +
+    `• **Meeting hours:** ${hours}\n` +
+    `• **Format:** ${format}\n` +
+    `• **Duration:** ${duration} minutes\n` +
+    `• **Buffer between meetings:** ${bufferText}\n\n` +
+    `You can change any of these anytime — just tell me in chat ("no, make my hours 10–6") or tweak them on the [preferences page ↗](/dashboard/tuner).`;
+
+  return {
+    phase: "defaults_confirm",
+    messages: [
+      {
+        content,
+        options: [
+          { number: 1, label: "Looks good, let's go", value: "confirm" },
+        ],
+      },
+    ],
+  };
+}
+
 // Phase 4: Complete
 export function getCompleteMessages(ctx: OnboardingContext): PhaseResult {
   const slug = ctx.meetSlug || "you";
@@ -316,22 +389,25 @@ export function getCompleteMessages(ctx: OnboardingContext): PhaseResult {
 
 // ── Phase transition map ───────────────────────────────────────────────
 
+// PHASE_ORDER is the active sequence for new users (post-2026-04-21 lean
+// onboarding proposal). Legacy phase handlers above are retained in the
+// file for Proposal 3 (Progressive Profiling) reuse, but they no longer
+// appear here — new users never enter them. Mid-flow users whose stored
+// `User.onboardingPhase` holds a removed value are auto-promoted past the
+// trim via nextPhase() — see proposal §2.1.1.
 const PHASE_ORDER: OnboardingPhase[] = [
   "intro",
-  "defaults_format",
-  "phone_number",
-  "zoom_link",
-  "defaults_duration",
-  "defaults_buffer",
-  "calendar_rules",
-  "calendar_rules_custom",
-  "calendar_evenings",
+  "defaults_confirm",
   "complete",
 ];
 
 export function nextPhase(current: OnboardingPhase): OnboardingPhase {
   const idx = PHASE_ORDER.indexOf(current);
-  if (idx === -1 || idx >= PHASE_ORDER.length - 1) return "complete";
+  // Legacy phase not in the active list → jump to defaults_confirm (the
+  // first active phase after intro). Preserves any data already written;
+  // the confirm card reads whatever values exist plus seed fallbacks.
+  if (idx === -1) return "defaults_confirm";
+  if (idx >= PHASE_ORDER.length - 1) return "complete";
   return PHASE_ORDER[idx + 1];
 }
 

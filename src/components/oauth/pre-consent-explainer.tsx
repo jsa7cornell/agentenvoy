@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { GoogleButton } from "./google-button";
 
-export type PreConsentMode = "first-connect" | "reconnect" | "upgrade-scope";
+export type PreConsentMode = "first-connect" | "reconnect" | "upgrade-scope" | "login";
 
 interface Props {
   open: boolean;
@@ -22,6 +22,9 @@ interface Props {
  *   - first-connect → agent-first value-prop, personalization lead, "Continue with Google" Google-branded button
  *   - reconnect     → one-sentence banner, immediate Continue (sub-second)
  *   - upgrade-scope → explains what new permission we need and why
+ *   - login         → same as first-connect UI when shown (cookie-hint absent
+ *                     → probable first-time visitor). Returning users (cookie
+ *                     present) skip this modal entirely via `useOAuthSignIn`.
  */
 export function PreConsentExplainer({ open, mode, onConfirm, onCancel }: Props) {
   useEffect(() => {
@@ -35,7 +38,11 @@ export function PreConsentExplainer({ open, mode, onConfirm, onCancel }: Props) 
 
   if (!open) return null;
 
-  const isFirstConnect = mode === "first-connect";
+  // When we DO show the modal for mode: "login" (cookie-hint absent →
+  // probable first-time user), render the trust-building first-connect
+  // content. Cookie-present returning users skip the modal entirely via
+  // `useOAuthSignIn`'s trigger gate.
+  const isFirstConnect = mode === "first-connect" || mode === "login";
 
   return (
     <div

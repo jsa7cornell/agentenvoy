@@ -12,8 +12,11 @@ import { useOAuthSignIn } from "./oauth/use-oauth-signin";
  * routes new vs existing users automatically, so one link serves both intents.
  */
 export function PublicHeader() {
+  // `mode: "login"` — the same button serves new AND returning users. Cookie
+  // presence gates whether the pre-consent modal shows (first-timer) or is
+  // skipped entirely (returning user).
   const { trigger, modal } = useOAuthSignIn({
-    mode: "first-connect",
+    mode: "login",
     callbackUrl: "/dashboard",
   });
 

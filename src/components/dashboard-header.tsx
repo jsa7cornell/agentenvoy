@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoFull } from "./logo";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
+import { onboardingCallbackUrl } from "@/lib/onboarding/return-to";
 
 interface ConnectionStatus {
   google: {
@@ -65,11 +66,17 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
   const isDashboard = pathname === "/dashboard" || pathname === "/dashboard/";
   const isSignedIn = sessionStatus === "authenticated" && !!session?.user;
 
+  // `mode: "login"` — anonymous viewers on a logged-in-host surface (deal
+  // room, etc.) are likely returning users. `useOAuthSignIn` suppresses the
+  // pre-consent modal when the `ae_returning` cookie is present and uses
+  // `prompt: "select_account"` so returning users don't re-grant. First-time
+  // visitors still see the first-connect trust copy via the modal fallback.
+  const rawCallback =
+    signInCallbackUrl ||
+    (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/");
   const anonSignIn = useOAuthSignIn({
-    mode: "first-connect",
-    callbackUrl:
-      signInCallbackUrl ||
-      (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/"),
+    mode: "login",
+    callbackUrl: onboardingCallbackUrl(rawCallback),
   });
 
   // Anonymous variant — same layout, but logo links home and the right side
