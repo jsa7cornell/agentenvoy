@@ -26,7 +26,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { SESv2Client, GetAccountCommand } from "@aws-sdk/client-sesv2";
+import { probeSesAccount } from "@/lib/side-effects/handlers/email-probe";
 import { readdirSync } from "fs";
 import { join } from "path";
 
@@ -221,37 +221,6 @@ async function probeGoogleOauth(): Promise<ProbeResult> {
       latencyMs,
       discovery: "reachable",
       client_id_configured: clientIdSet,
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      latencyMs: Date.now() - start,
-      detail: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-async function probeSesAccount(): Promise<ProbeResult> {
-  const start = Date.now();
-  const keyId = process.env.AWS_SES_ACCESS_KEY_ID;
-  const secret = process.env.AWS_SES_SECRET_ACCESS_KEY;
-  if (!keyId || !secret) {
-    return { ok: false, detail: "SES credentials not set — skipping live check" };
-  }
-  try {
-    const client = new SESv2Client({
-      region: process.env.AWS_SES_REGION ?? "us-west-2",
-      credentials: { accessKeyId: keyId, secretAccessKey: secret },
-    });
-    const account = await client.send(new GetAccountCommand({}));
-    const latencyMs = Date.now() - start;
-    return {
-      ok: true,
-      latencyMs,
-      sending_enabled: account.SendingEnabled ?? false,
-      max_send_rate: account.SendQuota?.MaxSendRate,
-      sent_last_24h: account.SendQuota?.SentLast24Hours,
-      max_24h: account.SendQuota?.Max24HourSend,
     };
   } catch (err) {
     return {
