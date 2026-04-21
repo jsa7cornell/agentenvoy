@@ -16,6 +16,7 @@ import {
   hasExclusiveOverride,
   hasMaterialNarrowingChange,
   hasNarrowingField,
+  isSingleSlotExclusive,
   normalizeSteering,
   readStoredSteering,
   validateIntent,
@@ -99,6 +100,64 @@ describe("hasExclusiveOverride", () => {
     expect(hasExclusiveOverride({ slotOverrides: [{ start: "a", end: "b", score: -2 }] })).toBe(true);
     expect(hasExclusiveOverride({ slotOverrides: [] })).toBe(false);
     expect(hasExclusiveOverride({})).toBe(false);
+  });
+});
+
+describe("isSingleSlotExclusive", () => {
+  it("is true for exactly one slotOverrides[-2] entry", () => {
+    expect(
+      isSingleSlotExclusive({
+        slotOverrides: [
+          { start: "2026-04-21T17:15:00-07:00", end: "2026-04-21T19:00:00-07:00", score: -2 },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("is true when the single -2 is bracketed by a narrow dateRange / preferredTimeWindows", () => {
+    // The Katie case: one -2 slot + bracketing fields. Not multiple offers.
+    expect(
+      isSingleSlotExclusive({
+        dateRange: { start: "2026-04-21", end: "2026-04-21" },
+        preferredTimeWindows: [{ start: "17:15", end: "19:00" }],
+        slotOverrides: [
+          { start: "2026-04-21T17:15:00-07:00", end: "2026-04-21T19:00:00-07:00", score: -2 },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("is false for two or more -2 slots (multiple prescriptive offers)", () => {
+    expect(
+      isSingleSlotExclusive({
+        slotOverrides: [
+          { start: "a1", end: "a2", score: -2 },
+          { start: "b1", end: "b2", score: -2 },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("is false with no -2 slots (not exclusive-shaped)", () => {
+    expect(
+      isSingleSlotExclusive({
+        slotOverrides: [{ start: "a", end: "b", score: -1 }],
+      }),
+    ).toBe(false);
+    expect(isSingleSlotExclusive({})).toBe(false);
+    expect(isSingleSlotExclusive(null)).toBe(false);
+  });
+
+  it("ignores -1 preferred slots alongside a single -2", () => {
+    // -1 is a nudge, not an additional offer. Still collapses to single-slot.
+    expect(
+      isSingleSlotExclusive({
+        slotOverrides: [
+          { start: "a1", end: "a2", score: -2 },
+          { start: "b1", end: "b2", score: -1 },
+        ],
+      }),
+    ).toBe(true);
   });
 });
 

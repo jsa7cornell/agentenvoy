@@ -106,6 +106,28 @@ export function hasExclusiveOverride(rules: MaybeRules): boolean {
 }
 
 /**
+ * Is this an `exclusive`-tier link that collapses to a single prescriptive
+ * offer — one `slotOverrides[score=-2]` entry, no other -2 alternatives?
+ * The greeting renderer uses this to skip the bulleted schedule body and
+ * render a one-liner ("We're proposing X. Confirmation below."); the
+ * calendar widget already highlights the single -2 slot as the offer.
+ *
+ * Deliberately permissive on non-slotOverride fields: dateRange /
+ * preferredTimeWindows narrowing is EXPECTED for exclusive (they bracket
+ * the one slot), not evidence of multiple alternatives.
+ */
+export function isSingleSlotExclusive(rules: MaybeRules): boolean {
+  if (!rules) return false;
+  const overrides = rules.slotOverrides;
+  if (!Array.isArray(overrides)) return false;
+  const exclusiveSlots = overrides.filter((o) => {
+    if (!o || typeof o !== "object") return false;
+    return (o as { score?: unknown }).score === -2;
+  });
+  return exclusiveSlots.length === 1;
+}
+
+/**
  * §4.6 asymmetric validator. Called inside `handleCreateLink` (and whenever
  * an update triggers reclassification per §4.7). Steps DOWN when the LLM's
  * intent over-narrows the actual fields; never steps UP. This is the whole
