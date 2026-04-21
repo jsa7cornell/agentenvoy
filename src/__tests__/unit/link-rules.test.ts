@@ -170,11 +170,12 @@ function slot(iso: string, score = 0): ScoredSlot {
   };
 }
 
-describe("applyEventOverrides — preferredDays", () => {
+describe("applyEventOverrides — preferredDays (soft boost, not filter)", () => {
   // 2026-04-20 is a Monday (Apr 14 2026 was a Tuesday).
   const monday9pdt = "2026-04-20T16:00:00.000Z"; // 9 AM PDT
   const tuesday9pdt = "2026-04-21T16:00:00.000Z";
   const wednesday9pdt = "2026-04-22T16:00:00.000Z";
+  const thursday9pdt = "2026-04-23T16:00:00.000Z";
   const saturday9pdt = "2026-04-18T16:00:00.000Z";
 
   const base = [
@@ -184,10 +185,20 @@ describe("applyEventOverrides — preferredDays", () => {
     slot(saturday9pdt),
   ];
 
-  it("keeps weekdays and drops weekends with short day names", () => {
+  // Post-2026-04-21: preferredDays is a soft boost, not a filter.
+  // All slots in `base` remain present; listed days are promoted to ★-tier
+  // (score ≤ -1), others keep their original score. Weekend filtering is
+  // handled by `allowWeekends`, not preferredDays.
+
+  it("boosts listed short-name days to ★ tier and leaves others alone", () => {
     const rules: LinkRules = { preferredDays: ["Mon", "Tue", "Wed", "Thu", "Fri"] };
     const out = applyEventOverrides(base, rules, "America/Los_Angeles");
-    expect(out.map((s) => s.start)).toEqual([monday9pdt, tuesday9pdt, wednesday9pdt]);
+    expect(out).toHaveLength(4); // all kept — including saturday
+    const byIso = new Map(out.map((s) => [s.start, s]));
+    expect(byIso.get(monday9pdt)!.score).toBeLessThanOrEqual(-1);
+    expect(byIso.get(tuesday9pdt)!.score).toBeLessThanOrEqual(-1);
+    expect(byIso.get(wednesday9pdt)!.score).toBeLessThanOrEqual(-1);
+    expect(byIso.get(saturday9pdt)!.score).toBe(0); // untouched
   });
 
   it("tolerates long day names at read time (back-compat)", () => {
@@ -195,13 +206,46 @@ describe("applyEventOverrides — preferredDays", () => {
       preferredDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
     };
     const out = applyEventOverrides(base, rules, "America/Los_Angeles");
-    expect(out.map((s) => s.start)).toEqual([monday9pdt, tuesday9pdt, wednesday9pdt]);
+    const byIso = new Map(out.map((s) => [s.start, s]));
+    expect(byIso.get(monday9pdt)!.score).toBeLessThanOrEqual(-1);
+    expect(byIso.get(saturday9pdt)!.score).toBe(0);
   });
 
   it("tolerates mixed day name shapes", () => {
     const rules: LinkRules = { preferredDays: ["Mon", "tuesday", "WED"] };
     const out = applyEventOverrides(base, rules, "America/Los_Angeles");
-    expect(out.map((s) => s.start)).toEqual([monday9pdt, tuesday9pdt, wednesday9pdt]);
+    const byIso = new Map(out.map((s) => [s.start, s]));
+    expect(byIso.get(monday9pdt)!.score).toBeLessThanOrEqual(-1);
+    expect(byIso.get(tuesday9pdt)!.score).toBeLessThanOrEqual(-1);
+    expect(byIso.get(wednesday9pdt)!.score).toBeLessThanOrEqual(-1);
+    expect(byIso.get(saturday9pdt)!.score).toBe(0);
+  });
+
+  it("does not promote slots with real conflicts (score ≥ 2)", () => {
+    // A Wed slot with a score-3 conflict (e.g., stretch/VIP-only) should stay
+    // at its conflict score even though Wed is preferred — day preference
+    // can't paper over an actual calendar issue.
+    const conflictedWed = slot(wednesday9pdt, 3);
+    const rules: LinkRules = { preferredDays: ["Wed"] };
+    const out = applyEventOverrides([conflictedWed], rules, "America/Los_Angeles");
+    expect(out[0].score).toBe(3);
+  });
+
+  it("Katie regression (feedback cmo8d9eqs): dateRange Wed–Sat + preferredDays:[Wed] keeps Thu/Fri offerable", () => {
+    // Host said "tomorrow preferred, else later in the week" — LLM wrote
+    // dateRange: Wed–Sat + preferredDays:[Wed]. Before the fix, Thu/Fri/Sat
+    // were filtered out entirely and the guest could only book Wed.
+    const wed = slot(wednesday9pdt);
+    const thu = slot(thursday9pdt);
+    const rules: LinkRules = {
+      preferredDays: ["Wed"],
+      dateRange: { start: "2026-04-22", end: "2026-04-25" },
+    };
+    const out = applyEventOverrides([wed, thu], rules, "America/Los_Angeles");
+    expect(out).toHaveLength(2); // both kept — Thu must remain offerable
+    const byIso = new Map(out.map((s) => [s.start, s]));
+    expect(byIso.get(wednesday9pdt)!.score).toBeLessThanOrEqual(-1); // ★
+    expect(byIso.get(thursday9pdt)!.score).toBe(0); // still offerable, no ★
   });
 });
 

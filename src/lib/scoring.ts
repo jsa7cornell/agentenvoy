@@ -1812,9 +1812,17 @@ export function applyEventOverrides(
     });
   }
 
-  // Apply preferredDays filter. Tolerate any day-name shape on read via
-  // normalizeDayName — persisted values are short form, but old rows or
-  // hand-written rules might not be.
+  // Apply preferredDays as a SOFT boost — promote slots on preferred days
+  // into the ★ tier (score ≤ -1), leave other days alone so they remain
+  // offerable at lower priority. Prior behavior was a hard filter that
+  // dropped non-preferred days entirely, which broke the intended pattern
+  // of "Wed preferred, Thu–Fri as fallback" (bug reported 2026-04-21 via
+  // feedback cmo8d9eqs — Katie link `aeetnc` had dateRange Wed–Sat +
+  // preferredDays:[Wed], but guest could only book Wed). Weekend filtering
+  // is handled separately via `allowWeekends`; `preferredDays` should never
+  // double-duty as a day exclusion.
+  //
+  // Tolerate any day-name shape on read via normalizeDayName.
   if (rules.preferredDays && rules.preferredDays.length > 0) {
     const allowed = new Set(
       rules.preferredDays
@@ -1823,7 +1831,17 @@ export function applyEventOverrides(
     );
     if (allowed.size > 0) {
       const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
-      slots = slots.filter((s) => allowed.has(dayFmt.format(new Date(s.start))));
+      slots = slots.map((s) => {
+        // Only promote otherwise-offerable slots (score ≤ 1). Don't override
+        // a real conflict (score ≥ 2) — a stretch/conflict slot on a preferred
+        // day stays a stretch/conflict; the host's day preference can't paper
+        // over an actual calendar issue.
+        if (s.score > 1) return s;
+        const dayStr = dayFmt.format(new Date(s.start));
+        if (!allowed.has(dayStr)) return s;
+        // Push to ★ tier (score ≤ -1). Keep already-lower scores lower.
+        return { ...s, score: Math.min(s.score, -1) };
+      });
     }
   }
 
