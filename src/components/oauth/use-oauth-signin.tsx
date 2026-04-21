@@ -71,7 +71,17 @@ export function useOAuthSignIn({
         ? HOST_REQUIRED_FROM_DEAL_ROOM
         : HOST_REQUIRED_FRONT_DOOR
     ).join(" ");
-    signIn("google", { callbackUrl, ...signInParams, scope });
+    // NextAuth v4: 2nd arg is signIn options (callbackUrl, redirect…); the
+    // 3rd arg is `authorizationParams`, which is what gets forwarded to
+    // Google's authorize URL. Putting `scope` in the 2nd arg silently
+    // does nothing — Google falls back to the provider's static scope.
+    // Re-assert prompt/access_type here too so per-call overrides don't
+    // drop the offline-refresh-token + force-consent behavior.
+    signIn(
+      "google",
+      { callbackUrl },
+      { scope, prompt: "consent", access_type: "offline", ...signInParams },
+    );
   };
   const modal = (
     <PreConsentExplainer open={open} mode={mode} onConfirm={onConfirm} onCancel={onCancel} />
