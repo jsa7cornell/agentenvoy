@@ -87,11 +87,6 @@ export function formatAvailabilityWindows(
   slots: ScoredSlot[],
   timezone: string,
   now: Date = new Date(),
-  /**
-   * @deprecated 2026-04-21 (decision #10). Ignored — greeting is always
-   * host-canonical. Kept for caller compat; will be removed in cleanup.
-   */
-  _guestTimezone?: string,
   durationMin?: number,
   minDurationMin?: number
 ): FormattedWindows {
@@ -387,14 +382,6 @@ export function formatAvailabilitySlotList(
   slots: ScoredSlot[],
   hostTimezone: string,
   now: Date = new Date(),
-  /**
-   * @deprecated 2026-04-21 (decision #10 of the guest-tz-ux-three-primitives
-   * proposal). This parameter is ignored — the greeting prose is always
-   * host-canonical. Dual-tz rendering moved to Envoy's follow-up chat; the
-   * initial greeting stays single-tz host-voice. Kept in the signature for
-   * caller compat; will be removed in a follow-up cleanup.
-   */
-  _guestTimezone?: string,
   durationMin?: number,
   minDurationMin?: number,
   opts?: { maxSlotsPerDay?: number; maxDays?: number; collapseIdenticalWindows?: boolean },
@@ -601,8 +588,6 @@ export function formatStretchDays(
   slots: ScoredSlot[],
   hostTimezone: string,
   now: Date = new Date(),
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _guestTimezone?: string, // @deprecated 2026-04-21 (decision #10) — host-canonical only.
 ): string {
   const groupTz = hostTimezone;
 
@@ -717,13 +702,13 @@ export function formatAvailabilityProse(
   slots: ScoredSlot[],
   hostTimezone: string,
   now: Date = new Date(),
-  guestTimezone?: string,
   durationMin?: number,
   minDurationMin?: number,
   opts?: { preferredAnchor?: "this-week" | "next-week" | null; maxPreferredDays?: number },
 ): FormattedProse | null {
-  // Gate 1: dual-tz → bullets.
-  if (guestTimezone && guestTimezone !== hostTimezone) return null;
+  // Dual-tz prose gate removed 2026-04-21 (decision #10 sweep). The greeting
+  // is host-canonical regardless of viewer tz; there's no reason to force
+  // bullets when the guest tz differs — both paths now render host-tz only.
 
   // Filter to offerable, duration-ok, future.
   const offerable = slots.filter((s) => new Date(s.start) > now && s.score <= 1);
@@ -880,8 +865,6 @@ interface BuildOpenWindowOpts {
   formatEmoji?: string;
   /** Host's timezone IANA for window label rendering. */
   hostTimezone: string;
-  /** Guest's timezone if distinct from host; triggers dual-tz window label. */
-  guestTimezone?: string;
   /** The window the host specified (e.g., afternoon = 12–17). Optional — if
    *  not set, the greeting just says "any time" (within offerable hours). */
   window?: { startHour: number; endHour: number };
