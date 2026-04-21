@@ -87,6 +87,35 @@ function longLabel(tz: string, now: Date): string {
   }
 }
 
+/** Offset from UTC in minutes for a given IANA tz at the given instant. */
+function tzOffsetMinutes(tz: string, date: Date): number {
+  try {
+    const dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    const map: Record<string, string> = {};
+    for (const p of dtf.formatToParts(date)) map[p.type] = p.value;
+    const asUTC = Date.UTC(
+      Number(map.year),
+      Number(map.month) - 1,
+      Number(map.day),
+      Number(map.hour),
+      Number(map.minute),
+      Number(map.second),
+    );
+    return (asUTC - date.getTime()) / 60000;
+  } catch {
+    return 0;
+  }
+}
+
 function detectBrowserTimezone(): string | null {
   if (typeof Intl === "undefined") return null;
   try {
@@ -150,13 +179,18 @@ export function TimezonePicker({
 
   const sameAsHost = selected === hostTimezone;
 
-  // Suggestion: prefer browser tz if different from current; else host tz.
-  const suggestedTz = useMemo(() => {
-    if (browserTz && browserTz !== selected) return browserTz;
-    if (hostTimezone !== selected) return hostTimezone;
-    return null;
-  }, [browserTz, hostTimezone, selected]);
-  const suggestedLong = suggestedTz ? longLabel(suggestedTz, now) : null;
+  const hostOffsetLabel = useMemo(() => {
+    if (sameAsHost) return null;
+    const diffHours =
+      (tzOffsetMinutes(hostTimezone, now) - tzOffsetMinutes(selected, now)) /
+      60;
+    if (diffHours === 0) return null;
+    const abs = Math.abs(diffHours);
+    const hrs = Number.isInteger(abs) ? String(abs) : abs.toFixed(1);
+    const unit = abs === 1 ? "hr" : "hrs";
+    const dir = diffHours > 0 ? "ahead" : "behind";
+    return `${hrs} ${unit} ${dir}`;
+  }, [sameAsHost, hostTimezone, selected, now]);
 
   const handlePick = useCallback(
     (tz: string) => {
@@ -168,15 +202,9 @@ export function TimezonePicker({
     [selected, onTimezoneChange, sessionId],
   );
 
-  // Build option list with the suggested zone pinned to the top (if any),
-  // followed by the curated IANA list. Drop duplicates.
   const options = useMemo(() => {
     const out: Array<{ tz: string; label: string }> = [];
     const seen = new Set<string>();
-    if (suggestedTz && suggestedLong) {
-      out.push({ tz: suggestedTz, label: suggestedLong });
-      seen.add(suggestedTz);
-    }
     for (const z of OTHER_ZONES) {
       if (seen.has(z.tz)) continue;
       out.push(z);
@@ -186,7 +214,7 @@ export function TimezonePicker({
       out.unshift({ tz: selected, label: viewerLong });
     }
     return out;
-  }, [suggestedTz, suggestedLong, selected, viewerLong]);
+  }, [selected, viewerLong]);
 
   return (
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] leading-snug text-muted">
@@ -202,6 +230,7 @@ export function TimezonePicker({
             <span className="text-muted">
               {" · "}
               {hostFirstName}&rsquo;s in {hostShort}
+              {hostOffsetLabel ? `, ${hostOffsetLabel}` : ""}
             </span>
           </>
         )}
@@ -210,14 +239,7 @@ export function TimezonePicker({
       <label className="relative inline-flex items-center gap-1.5 self-start sm:self-auto px-2.5 py-1 rounded-md border border-DEFAULT bg-surface-elevated hover:bg-surface-hover hover:border-purple-400/60 text-purple-400 hover:text-purple-300 transition cursor-pointer whitespace-nowrap">
         <span className="sr-only">Change timezone</span>
         <span aria-hidden="true">
-          {suggestedLong ? (
-            <>
-              <span className="text-muted">Switch to </span>
-              <span className="font-medium">{suggestedLong}</span>
-            </>
-          ) : (
-            <span className="font-medium">Change timezone</span>
-          )}
+          <span className="font-medium">Change timezone</span>
         </span>
         <svg
           aria-hidden="true"
