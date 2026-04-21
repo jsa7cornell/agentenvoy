@@ -129,46 +129,33 @@ describe("formatAvailabilityWindows", () => {
   });
 });
 
-// ─── formatAvailabilityWindows — host-canonical always ──────────────────────
-// Dual-tz rendering removed 2026-04-21 (decision #10). The greeting stays
-// host-canonical; viewer-tz presentation lives on the card picker + Envoy
-// follow-up chat. Tests below assert the host-only output when a guest tz
-// is passed (legacy callers): the param is now a no-op.
+// ─── formatAvailabilityWindows — host-canonical (decision #10 sweep) ────────
+// Dual-tz rendering removed 2026-04-21; guestTimezone param dropped from the
+// signature entirely in the follow-up cleanup. Tests below assert the
+// host-canonical output and host-local day grouping that replaced the old
+// dual-tz path.
 
-describe("formatAvailabilityWindows — host-canonical always", () => {
-  // Slots on 4/15 17:00Z → 10 AM PT → 7 PM CEST
+describe("formatAvailabilityWindows — host-canonical", () => {
+  // Slots on 4/15 17:00Z → 10 AM PT
   const slots = run([2026, 4, 15], 17, 0, 4, 1);
 
-  it("renders in host tz only even when a guest tz is passed", () => {
-    const out = formatAvailabilityWindows(slots, TZ, NOW, "Europe/Paris");
+  it("renders in host tz with no CEST/parenthetical dual label", () => {
+    const out = formatAvailabilityWindows(slots, TZ, NOW);
     expect(out.lines).toHaveLength(1);
     const line = out.lines[0];
-    // Host (PT) range only — no CEST segment, no parenthetical dual label.
     expect(line).toMatch(/10 AM–12 PM/);
     expect(line).not.toMatch(/CEST|CET/);
     expect(line).not.toContain("(");
   });
 
-  it("groups by host-local day even when a guest tz is passed", () => {
+  it("groups by host-local day (not guest-local)", () => {
     // Slot at 2026-04-15 06:30 UTC is 2026-04-14 23:30 PT — host-local day
-    // is Apr 14. Post-decision-#10 we always group host-local.
+    // is Apr 14. The old guest-tz grouping branch would have put it on
+    // Apr 15; post-decision-#10 we always group host-local.
     const earlyAm = slot([2026, 4, 15], 6, 30, 1);
-    const out = formatAvailabilityWindows([earlyAm], TZ, NOW, "Europe/Paris");
+    const out = formatAvailabilityWindows([earlyAm], TZ, NOW);
     expect(out.lines).toHaveLength(1);
     expect(out.lines[0]).toContain("Apr 14");
-  });
-
-  it("is a no-op when guest tz equals host tz (unchanged contract)", () => {
-    const out = formatAvailabilityWindows(slots, TZ, NOW, "America/Los_Angeles");
-    expect(out.lines[0]).not.toContain("(");
-    expect(out.lines[0]).not.toContain("CEST");
-  });
-
-  it("passing undefined guestTz matches the 3-arg legacy call", () => {
-    const a = formatAvailabilityWindows(slots, TZ, NOW);
-    const b = formatAvailabilityWindows(slots, TZ, NOW, undefined);
-    expect(a.lines).toEqual(b.lines);
-    expect(a.hasPreferred).toBe(b.hasPreferred);
   });
 });
 
@@ -261,7 +248,7 @@ describe("filterByDuration", () => {
     // Only the first 2 of 3 consecutive slots are valid 60-min starts.
     // The greeting should show the block range, not individual slots.
     const slots = run([2026, 4, 15], 17, 0, 3, 1); // 10:00, 10:30, 11:00 PT
-    const out = formatAvailabilityWindows(slots, TZ, NOW, undefined, 60);
+    const out = formatAvailabilityWindows(slots, TZ, NOW, 60);
     // 10:00 and 10:30 are kept → merges into "10–11 AM" (2 slots = 1h)
     expect(out.lines).toHaveLength(1);
     expect(out.lines[0]).toContain("10–11 AM");
@@ -298,15 +285,14 @@ describe("formatAvailabilitySlotList — block range labels", () => {
     expect(bullets[0]).toContain("7:00 AM");
   });
 
-  // Dual-tz rendering removed 2026-04-21 (decision #10 of the guest-tz-ux
-  // rework). The greeting is always host-canonical; viewer-tz presentation
-  // happens on the card picker and in Envoy's follow-up chat instead.
-  it("stays host-canonical even when guest tz differs", () => {
+  // Dual-tz rendering removed 2026-04-21 (decision #10). The greeting is
+  // always host-canonical; the guestTimezone param was dropped from the
+  // signature in the follow-up cleanup.
+  it("renders host-tz only — no EDT / slash-delimited dual label", () => {
     const slots = run([2026, 4, 28], 14, 0, 6, 0); // 7–10 AM PT (3h)
-    const out = formatAvailabilitySlotList(slots, TZ, NOW, "America/New_York");
+    const out = formatAvailabilitySlotList(slots, TZ, NOW);
     const bullets = out.lines.filter((l) => l.startsWith("•"));
     expect(bullets).toHaveLength(1);
-    // Host (PT) range only — no EDT segment, no slash-delimited dual label.
     expect(bullets[0]).toMatch(/7:00 AM\s*–\s*10:00 AM.*P(?:D|S)?T/);
     expect(bullets[0]).not.toMatch(/EDT|EST/);
     expect(bullets[0]).not.toContain(" / ");
@@ -321,12 +307,13 @@ describe("formatAvailabilityProse", () => {
   // This week Mon–Sun (host tz): Apr 13–Apr 19.
   // Next week Mon–Sun:            Apr 20–Apr 26.
 
-  it("returns null when dual-timezone", () => {
+  // Prose dual-tz gate removed 2026-04-21 (decision #10 sweep). Prose now
+  // renders regardless of viewer tz — greeting is host-canonical. Viewer-tz
+  // presentation lives on the card picker + Envoy follow-up chat instead.
+  it("still renders prose even when viewer tz would differ (host-canonical)", () => {
     const slots = run([2026, 4, 15], 17, 0, 2, 0); // Tue 10 AM PT
-    const out = formatAvailabilityProse(
-      slots, TZ, NOW, "America/New_York",
-    );
-    expect(out).toBeNull();
+    const out = formatAvailabilityProse(slots, TZ, NOW);
+    expect(out).not.toBeNull();
   });
 
   it("returns null when slots fall beyond next week", () => {
@@ -368,7 +355,7 @@ describe("formatAvailabilityProse", () => {
       ...run([2026, 4, 21], 17, 0, 2, 1), // next Tue
       ...run([2026, 4, 22], 17, 0, 2, 1), // next Wed
     ];
-    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, undefined, {
+    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, {
       preferredAnchor: "this-week",
     });
     expect(out).not.toBeNull();
@@ -380,7 +367,7 @@ describe("formatAvailabilityProse", () => {
       ...run([2026, 4, 14], 17, 0, 2, 1), // tomorrow (this week) — fallback
       ...run([2026, 4, 24], 17, 0, 2, 0), // next Fri — preferred (★-free but anchored)
     ];
-    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, undefined, {
+    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, {
       preferredAnchor: "next-week",
     });
     expect(out).not.toBeNull();
@@ -393,7 +380,7 @@ describe("formatAvailabilityProse", () => {
       ...run([2026, 4, 21], 17, 0, 2, 0), // Tue next week
       ...run([2026, 4, 14], 17, 0, 2, 1), // tomorrow (this week fallback)
     ];
-    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, undefined, {
+    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, {
       preferredAnchor: "next-week",
     });
     expect(out).not.toBeNull();
