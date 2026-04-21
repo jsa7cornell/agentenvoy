@@ -1137,14 +1137,13 @@ export async function POST(req: NextRequest) {
       // below already highlights the -2 slot as the sole offer, so the
       // greeting's job is to frame it as a proposal, not a menu.
       //
-      // 2026-04-21 v2 (reported cmo90x8y on /meet/dannysingh/epaywu):
-      //   - dropped "I've pasted a confirmation button below" because the
-      //     widget is still the calendar picker until the `offer`-mode
-      //     card ships (see proposal
-      //     2026-04-21_deal-room-widget-state-machine). Lying about a
-      //     UI affordance is worse than the thin copy it replaces.
-      //   - now includes the slot's start day + time in host tz so the
-      //     proposal isn't "30 min" with no anchor.
+      // 2026-04-21 Stage 2 (deal-room-widget-state-machine): the offer-mode
+      // card now exists with an explicit "Confirm this time" CTA and its own
+      // "Envoy found a mutual time that works" header. The greeting's job
+      // shrinks to a narrative lead-in that hands off to the card — it
+      // names the guest, anchors the time, and points at the card. No
+      // "confirmation button below" claim (that's the card's copy now); no
+      // duplicate "found a mutual time" framing (that's the card's header).
       if (
         !isGeneric &&
         effectiveSteering === "exclusive" &&
@@ -1186,8 +1185,12 @@ export async function POST(req: NextRequest) {
           }).format(d);
           return ` on ${day} at ${time}`;
         })();
-        const proposal = `We're proposing ${durPart}${activityPart}${locPart}${whenPart}.`;
-        const exclusiveHello = `👋 ${greeteeName}! ${proposal} Confirm below or let me know if anything needs to shift.`;
+        // Greeting hands off to the offer card. Card header says "Envoy
+        // found a mutual time that works" — greeting names the guest,
+        // anchors the time, and points at the card's Confirm CTA. Don't
+        // duplicate the "found a mutual time" framing here.
+        const proposal = `${durPart}${activityPart}${locPart}${whenPart}`;
+        const exclusiveHello = `👋 ${greeteeName}! Envoy lined up a time — ${proposal}. Confirm below, or let me know if anything needs to shift.`;
         greeting = exclusiveHello;
       } else if (proseCandidate && !isGeneric) {
         const durCasual = durationForOpener
@@ -1304,6 +1307,12 @@ export async function POST(req: NextRequest) {
       activity: (link.rules as Record<string, unknown>)?.activity ?? null,
       activityIcon: (link.rules as Record<string, unknown>)?.activityIcon ?? null,
       timingLabel: (link.rules as Record<string, unknown>)?.timingLabel ?? null,
+      // Intent.steering is the host-classified steering tier (open / soft /
+      // narrow / exclusive) from PR #58. Stage 2 `deriveMode()` reads this to
+      // decide offer-mode eligibility for single-slot exclusive links. Pre-
+      // PR-58 links have no intent blob — client falls through to slot-count
+      // / same-day rules (N7 fold of deal-room-widget-state-machine).
+      intent: ((link.rules as Record<string, unknown>)?.intent as Record<string, unknown> | null) ?? null,
     },
     isHost,
     isGuest,

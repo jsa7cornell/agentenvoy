@@ -29,10 +29,11 @@
 import { waitUntil } from "@vercel/functions";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { createCalendarEvent, deleteCalendarEvent, invalidateSchedule } from "@/lib/calendar";
+import { createCalendarEvent, deleteCalendarEvent, getOrComputeSchedule, invalidateSchedule } from "@/lib/calendar";
 import { HOST_WRITE_SCOPE } from "@/lib/oauth/required-scopes";
 import { extractLearnings } from "@/agent/administrator";
 import { getUserTimezone } from "@/lib/timezone";
+import { applyEventOverrides, filterByDuration, type LinkRules } from "@/lib/scoring";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { logRouteError } from "@/lib/route-error";
 import { buildGuestConfirmationEmail } from "@/lib/emails/guest-confirmation";
@@ -115,7 +116,8 @@ export type ConfirmResult =
         | "session_not_found"
         | "host_email_missing"
         | "in_person_disallowed"
-        | "slot_mismatch";
+        | "slot_mismatch"
+        | "slot_no_longer_offered";
       message: string;
       attempt: ConfirmAttemptRecord;
     };
@@ -295,6 +297,77 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
           attempt: buildAttempt(),
         };
       }
+    }
+  }
+
+  // === N2 fold — slot-still-offered enforcement ===
+  // Proposal 2026-04-21_deal-room-widget-state-machine §9 Stage 2.
+  // Re-derive the offered set using the same pipeline the widget reads
+  // (`applyEventOverrides(...)` + score filter + past filter + duration
+  // filter). If the requested slot isn't in the derived set anymore, the
+  // guest is trying to confirm a slot the host has since pulled — either
+  // via a link edit, a calendar change, or a racing confirm that consumed
+  // the slot (for office_hours + generic). Return 409 so the client can
+  // narrate "that time isn't available anymore" and transition the widget
+  // from `offer` to `negotiate`.
+  //
+  // Skipped on group links (participant coordination is a separate path)
+  // and when the session is already agreed (idempotency check handles
+  // that below). Any error in the derivation path falls through to the
+  // CAS layer — don't fail-closed on a schedule lookup hiccup.
+  if (session.status !== "agreed" && session.link?.mode !== "group") {
+    try {
+      const linkRules = (session.link?.rules as LinkRules | null) ?? {};
+      const schedule = await getOrComputeSchedule(session.hostId);
+      if (schedule.connected) {
+        let offered = applyEventOverrides(schedule.slots, linkRules, hostTimezone);
+        const hasExclusive = offered.some((s) => s.score === -2);
+        const isVip = !!(linkRules as Record<string, unknown>).isVip;
+        if (hasExclusive) {
+          offered = offered.filter((s) => s.score <= -1);
+        } else if (isVip) {
+          offered = offered.filter((s) => s.score <= 3);
+        } else {
+          offered = offered.filter((s) => s.score <= 1);
+        }
+        // Past filter — same invariant as slots/route.ts (Rule 14).
+        const now = new Date();
+        offered = offered.filter((s) => new Date(s.start) > now);
+        // Duration chain — mirror slots/route.ts so the chain-check rejects
+        // starts that can't actually accommodate the meeting length.
+        const linkDuration = (linkRules as Record<string, unknown>).duration as number | undefined;
+        const linkMinDuration = (linkRules as Record<string, unknown>).minDuration as number | undefined;
+        if (linkDuration && linkDuration > 30) {
+          offered = filterByDuration(offered, linkDuration, linkMinDuration);
+        }
+
+        // Match by exact ISO start (within 60s tolerance for minor
+        // offset/rounding differences). Slot starts are 30-min aligned in
+        // scoring.ts — this tolerance is defense, not policy.
+        const startMs = startTime.getTime();
+        const stillOffered = offered.some(
+          (s) => Math.abs(new Date(s.start).getTime() - startMs) < 60_000,
+        );
+        if (!stillOffered) {
+          attemptOutcome = "validation_failed";
+          attemptError = `Slot ${startTime.toISOString()} not in current offered set`;
+          return {
+            ok: false,
+            reason: "slot_no_longer_offered",
+            message: "That time isn't offered anymore.",
+            attempt: buildAttempt(),
+          };
+        }
+      }
+    } catch (e) {
+      // Fail-open: if the schedule lookup crashes, don't block confirm on
+      // our own internal check. The CAS + idempotency still guard the
+      // booking. Log for triage.
+      console.warn(
+        `[confirm] slot-still-offered derivation failed (non-blocking): ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
     }
   }
 

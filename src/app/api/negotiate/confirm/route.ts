@@ -22,6 +22,11 @@ const REASON_TO_STATUS: Record<Extract<ConfirmResult, { ok: false }>["reason"], 
   host_email_missing: 400,
   in_person_disallowed: 409,
   slot_mismatch: 409,
+  // N2 fold (proposal 2026-04-21_deal-room-widget-state-machine §9 Stage 2):
+  // guest tried to confirm a slot that's no longer in the current offered
+  // set (host edited the link, calendar changed, sibling booking consumed
+  // it). Client maps this to a one-line narration + transition to negotiate.
+  slot_no_longer_offered: 409,
 };
 
 export async function POST(req: NextRequest) {
@@ -72,7 +77,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: result.message },
+      { error: result.message, reason: result.reason },
       { status: REASON_TO_STATUS[result.reason] }
     );
   } catch (e) {
