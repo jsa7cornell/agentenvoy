@@ -1293,17 +1293,60 @@ async function handleExpandLink(
     : null;
   const sessionId = code ? null : (resolvedSessionId ?? null);
 
+  // Narrow defensive fallback (2026-04-21): when the LLM omits BOTH code and
+  // sessionId but the host has exactly ONE draft link created in the last
+  // 5 minutes, use that link. This is the Suzie case from feedback
+  // cmo85p0yq00071 — "oops - please change that to be just an hour" emitted
+  // 12 min after create, with no identifier at all. The defense against
+  // "silently misroute to an unrelated link" (which motivated the original
+  // strict reject) still holds in the general case; we only soften when
+  // there's exactly ONE unambiguous recent draft.
+  let inferredLinkId: string | null = null;
   if (!code && !sessionId) {
-    return {
-      success: false,
-      message: "expand_link requires either a `code` (link code) or `sessionId`",
-    };
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const recentDrafts = await prisma.negotiationLink.findMany({
+      where: {
+        userId,
+        createdAt: { gte: fiveMinAgo },
+        sessions: { every: { status: { in: ["active"] }, agreedTime: null } },
+      },
+      select: { id: true, code: true },
+      orderBy: { createdAt: "desc" },
+      take: 2, // we only need to know "is it exactly one?"
+    });
+    if (recentDrafts.length === 1) {
+      inferredLinkId = recentDrafts[0].id;
+      console.log(
+        `[expand_link] no code or sessionId — exactly-one-recent-draft fallback resolved linkId=${inferredLinkId} (code=${recentDrafts[0].code}) for user ${userId}`,
+      );
+    } else {
+      return {
+        success: false,
+        message: "expand_link requires either a `code` (link code) or `sessionId`",
+      };
+    }
   }
 
   // Resolve link by code (preferred) or via session.linkId.
   let link: { id: string; userId: string; rules: unknown; inviteeName: string | null; code: string | null } | null = null;
   let resolvedSessionIdForLink: string | null = sessionId || null;
-  if (code) {
+
+  // Exactly-one-recent-draft fallback — short-circuit resolution when the
+  // caller supplied no identifier. Safe because we verified uniqueness above.
+  if (inferredLinkId) {
+    link = await prisma.negotiationLink.findUnique({
+      where: { id: inferredLinkId },
+      select: { id: true, userId: true, rules: true, inviteeName: true, code: true },
+    });
+    if (link) {
+      const latest = await prisma.negotiationSession.findFirst({
+        where: { linkId: link.id, archived: false },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (latest) resolvedSessionIdForLink = latest.id;
+    }
+  } else if (code) {
     link = await prisma.negotiationLink.findFirst({
       where: { code, userId },
       select: { id: true, userId: true, rules: true, inviteeName: true, code: true },
