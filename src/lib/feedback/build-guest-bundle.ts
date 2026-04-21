@@ -151,9 +151,11 @@ export async function buildGuestFeedbackBundle(
       : undefined,
     clientState: submission.clientState,
     replay: replay ?? undefined,
+    consoleLines: submission.consoleLines
+      ? submission.consoleLines.slice(-20)
+      : undefined,
     // Explicitly NOT set: messages (host-path), recentLinks (host-only),
-    // calendar (cross-trust-boundary), routeErrors (host-scoped),
-    // consoleLines (not captured on guest path).
+    // calendar (cross-trust-boundary), routeErrors (host-scoped).
   };
 
   const firstParse = FeedbackBundleSchema.safeParse(bundle);

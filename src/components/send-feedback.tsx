@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { captureClientState } from "@/lib/feedback/capture-client-state";
+import { installConsoleRing, getConsoleRing } from "@/lib/feedback/console-ring";
 // Area picker hidden for now; keeping imports so re-enabling is a one-line flip.
 // import { FEEDBACK_AREAS, type FeedbackArea } from "@/lib/feedback/schema";
 import type { FeedbackArea } from "@/lib/feedback/schema";
@@ -54,6 +55,9 @@ export function SendFeedbackLink({
   sessionId,
 }: SendFeedbackLinkProps) {
   const [open, setOpen] = useState(false);
+  // Install the console ring as soon as the feedback entrypoint mounts so
+  // the ring has lines to capture by the time the user opens the modal.
+  useEffect(() => { installConsoleRing(); }, []);
   return (
     <>
       <button
@@ -230,6 +234,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
       const textToSend = (userText.trim() || prefillDraft || "").trim();
       const clientState = captureClientState();
       const areaField = area || undefined;
+      const consoleLines = getConsoleRing();
 
       let res: Response;
       if (mode === "guest-deal-room") {
@@ -246,6 +251,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
             url,
             userAgent,
             clientState,
+            consoleLines,
           }),
         });
       } else {
@@ -254,7 +260,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
           sessions: includeContext,
           calendar: false,
           errors: includeContext,
-          console: false,
+          console: true,
         };
         res = await fetch("/api/feedback/submit", {
           method: "POST",
@@ -267,6 +273,7 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
             url,
             userAgent,
             clientState,
+            consoleLines,
           }),
         });
       }

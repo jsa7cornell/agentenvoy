@@ -93,6 +93,7 @@ export const FeedbackSubmitAsGuestSchema = z
     url: z.string().max(500).optional(),
     userAgent: z.string().max(500).optional(),
     clientState: ClientStateSchema.optional(),
+    consoleLines: z.array(z.string().max(2000)).max(100).optional(),
   })
   .strict();
 export type FeedbackSubmitAsGuestInput = z.infer<typeof FeedbackSubmitAsGuestSchema>;
