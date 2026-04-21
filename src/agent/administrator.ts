@@ -15,6 +15,12 @@ export interface AgentContext {
   guestName?: string;
   guestEmail?: string;
   guestTimezone?: string; // IANA timezone from browser, e.g., "America/New_York"
+  /** Viewer-authoritative tz on NegotiationSession. Set → dual-tz mode for
+   *  this session (decision #8, 2026-04-21 guest-tz-ux-three-primitives). */
+  viewerTimezone?: string | null;
+  /** Current guest message text (for deterministic time-reference parsing —
+   *  decision #9). Only consulted in dual-tz mode. */
+  guestMessage?: string;
   topic?: string;
   rules?: Record<string, unknown>;
   /** @deprecated Use calendarContext instead */
@@ -48,6 +54,8 @@ function buildComposeOptions(context: AgentContext) {
     guestName: context.guestName,
     guestEmail: context.guestEmail,
     guestTimezone: context.guestTimezone,
+    viewerTimezone: context.viewerTimezone,
+    guestMessage: context.guestMessage,
     topic: context.topic,
     rules: context.rules,
     availableSlots: context.availableSlots,

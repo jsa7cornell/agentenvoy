@@ -240,3 +240,109 @@ function getOffsetMinutes(iana: string, date: Date): number {
   const zone = new Date(zoneString);
   return (zone.getTime() - utc.getTime()) / 60000;
 }
+
+// ─── Viewer-tz picker helpers (2026-04-21 guest-tz-ux-three-primitives) ─────
+
+export type Region = "americas" | "europe" | "asia-pacific" | "other";
+
+/**
+ * Classify an IANA timezone into a broad region bucket. Pinned to the IANA
+ * prefix (never geo-IP) — pure client-side per decision #6 of the
+ * guest-tz-ux proposal.
+ *
+ *   America/*                      → americas
+ *   Europe/*                       → europe
+ *   Asia/*, Australia/*, Pacific/* → asia-pacific
+ *   anything else                  → other
+ */
+export function detectRegion(iana: string | null | undefined): Region {
+  if (!iana || typeof iana !== "string") return "other";
+  if (iana.startsWith("America/")) return "americas";
+  if (iana.startsWith("Europe/")) return "europe";
+  if (
+    iana.startsWith("Asia/") ||
+    iana.startsWith("Australia/") ||
+    iana.startsWith("Pacific/")
+  )
+    return "asia-pacific";
+  return "other";
+}
+
+/** Popularity-ranked region fallback chips. Canonical IANA ids. */
+const REGION_FALLBACK: Record<Region, string[]> = {
+  americas: [
+    "America/Los_Angeles", // PT
+    "America/New_York",    // ET
+    "America/Chicago",     // CT
+    "America/Denver",      // MT
+  ],
+  europe: [
+    "Europe/Paris",        // CET
+    "Europe/London",       // GMT/BST
+    "America/New_York",    // ET (common cross-Atlantic partner)
+    "America/Los_Angeles", // PT
+  ],
+  "asia-pacific": [
+    "Asia/Tokyo",          // JST
+    "Asia/Singapore",      // SGT
+    "Australia/Sydney",    // AEST
+    "Asia/Shanghai",       // CST (China)
+  ],
+  other: [
+    "America/Los_Angeles",
+    "America/New_York",
+    "Europe/Paris",
+    "Asia/Tokyo",
+  ],
+};
+
+/**
+ * Compute the 4-chip quick-pick list for the calendar card tz picker.
+ *
+ *   1. Host tz always present.
+ *   2. Detected guest tz when different from host.
+ *   3. Remaining slots filled from the guest's region fallback.
+ *   4. No duplicates.
+ *
+ * Caller renders user-facing short labels via `shortTimezoneLabel`. An
+ * "Other…" affordance in the UI opens a full IANA dropdown for cases this
+ * algorithm can't cover (e.g. Mumbai guest, LA host).
+ */
+export function smartQuickPicks(
+  hostTz: string,
+  guestDetectedTz: string | null | undefined,
+): string[] {
+  const MAX_CHIPS = 4;
+  const chips: string[] = [];
+  const seen = new Set<string>();
+
+  const add = (tz: string | null | undefined) => {
+    if (!tz) return;
+    if (seen.has(tz)) return;
+    if (chips.length >= MAX_CHIPS) return;
+    chips.push(tz);
+    seen.add(tz);
+  };
+
+  add(hostTz);
+  if (guestDetectedTz && guestDetectedTz !== hostTz) add(guestDetectedTz);
+
+  // Region bucket comes from the guest's tz when available; else host's.
+  // When guest region is "other," fall back to the host's region bucket.
+  const baseRegion = detectRegion(guestDetectedTz ?? hostTz);
+  const region = baseRegion === "other" ? detectRegion(hostTz) : baseRegion;
+  for (const tz of REGION_FALLBACK[region]) {
+    if (chips.length >= MAX_CHIPS) break;
+    add(tz);
+  }
+
+  // Pad from "other" bucket if still under-filled.
+  if (chips.length < MAX_CHIPS) {
+    for (const tz of REGION_FALLBACK.other) {
+      if (chips.length >= MAX_CHIPS) break;
+      add(tz);
+    }
+  }
+
+  return chips;
+}

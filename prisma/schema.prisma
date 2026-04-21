@@ -250,6 +250,14 @@ model NegotiationSession {
   /// not overwritten on subsequent visits. Null when the guest visited
   /// before we started capturing, or when detection failed.
   guestTimezone   String?
+  /// IANA timezone the viewer is currently operating in for the deal-room card
+  /// and Envoy's follow-up chat. Written on first card render (using
+  /// detected-guest-tz if ≠ host, else host tz) AND on every picker tap —
+  /// picker is authoritative, overrides browser on re-reads. When
+  /// viewerTimezone !== hostTimezone, composer.ts enters dual-tz mode and
+  /// dual-renders times in all follow-up responses (host-first format).
+  /// Greeting prose is exempt — stays single-tz host-canonical regardless.
+  viewerTimezone  String?
   /// Whether to send the guest a 24h-ahead reminder email. Default true (opt-in).
   /// Set on the confirm card via the reminder checkbox. The daily cron scans
   /// sessions where this is true + status=agreed + agreedTime falls in the

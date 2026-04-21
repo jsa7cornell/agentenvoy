@@ -13,6 +13,7 @@ import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
 import { formatDuration, formatDurationCasual } from "@/lib/format-duration";
+import { getUserTimezone } from "@/lib/timezone";
 import {
   resolveSeedGuestTimezoneForCreate,
   resolveEffectiveGuestTimezone,
@@ -21,7 +22,6 @@ import {
   formatAvailabilitySlotList,
   formatAvailabilityProse,
   formatStretchDays,
-  humanTimezoneLabel,
   formatLabel,
   buildOpenWindowGreeting,
   computeCanonicalWeekLabel,
@@ -90,6 +90,15 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
+
+  // Host timezone — resolved from preferences here so every response shape
+  // (resume paths + fresh-greeting path) can surface it to the client. The
+  // calendar card picker needs it to render the secondary "{host} is in
+  // {host-tz}" label without a separate fetch. Defaults consistent with the
+  // later fallback used for schedule compute.
+  const hostTimezoneEarly = getUserTimezone(
+    (user.preferences as Record<string, unknown>) || {},
+  );
 
   // Office-hours detection: if a code is provided and matches an active
   // office_hours rule on this user, spawn a fresh child link + session for
@@ -260,6 +269,8 @@ export async function POST(req: NextRequest) {
             isGuest,
             guestUser: guestUserPayload,
             sessionTimezone: existingSession.guestTimezone ?? null,
+            hostTimezone: hostTimezoneEarly,
+            viewerTimezone: existingSession.viewerTimezone ?? null,
             isGroupEvent: true,
             participants: participantSummary,
             hostName: user.name,
@@ -282,6 +293,8 @@ export async function POST(req: NextRequest) {
             isGuest,
             guestUser: guestUserPayload,
             sessionTimezone: existingSession.guestTimezone ?? null,
+            hostTimezone: hostTimezoneEarly,
+            viewerTimezone: existingSession.viewerTimezone ?? null,
             isGroupEvent: true,
             participants: participantSummary,
             hostName: user.name,
@@ -337,6 +350,8 @@ export async function POST(req: NextRequest) {
             isGuest,
             guestUser: guestUserPayload,
             sessionTimezone: existingSession.guestTimezone ?? null,
+            hostTimezone: hostTimezoneEarly,
+            viewerTimezone: existingSession.viewerTimezone ?? null,
             hostName: user.name,
           });
         }
@@ -357,6 +372,8 @@ export async function POST(req: NextRequest) {
             isGuest,
             guestUser: guestUserPayload,
             sessionTimezone: existingSession.guestTimezone ?? null,
+            hostTimezone: hostTimezoneEarly,
+            viewerTimezone: existingSession.viewerTimezone ?? null,
             hostName: user.name,
           });
         }
@@ -572,9 +589,13 @@ export async function POST(req: NextRequest) {
   };
 
   // Human-readable timezone label for the greeting ("Pacific time", not "GMT-7").
-  const hostTimezoneLabel = humanTimezoneLabel(hostTimezone);
-  const guestTzDiffers = !!effectiveGuestTz && effectiveGuestTz !== hostTimezone;
-  const guestTimezoneLabel = guestTzDiffers ? humanTimezoneLabel(effectiveGuestTz!) : null;
+  // hostTimezoneLabel was used in the tz line (removed 2026-04-21). Kept
+  // importable via humanTimezoneLabel in case downstream callers surface it.
+  // `guestTzDiffers` and `guestTimezoneLabel` were removed 2026-04-21 when
+  // dual-tz greeting rendering was dropped (decision #10). The calendar card
+  // picker + Envoy follow-up chat now handle viewer-tz presentation;
+  // effectiveGuestTz is still used as the seed for session.guestTimezone
+  // (first-visit capture) so we keep it in scope.
 
   // Resolve effective format/duration — link rules override user preferences.
   const linkRules = (link.rules as Record<string, unknown>) || {};
@@ -660,14 +681,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Format availability as the V2 Danny-spec bullet list. Dual-timezone is
-  // inline ("6:00 AM PT / 9:00 AM ET"), same-timezone collapses to one label,
-  // days are bold markdown headers, cap 5 bullets per day.
+  // Format availability as the V2 Danny-spec bullet list. Greeting is
+  // always host-canonical post-2026-04-21 (decision #10) — the guest-tz
+  // parameter is ignored by the formatter; the calendar card picker + Envoy
+  // follow-up chat handle viewer-tz presentation.
   const slotList = formatAvailabilitySlotList(
     filteredSlots,
     hostTimezone,
     new Date(),
-    guestTzDiffers ? effectiveGuestTz : undefined,
+    undefined,
     effectiveDuration ?? undefined,
     effectiveMinDuration,
     { collapseIdenticalWindows: true },
@@ -860,7 +882,9 @@ export async function POST(req: NextRequest) {
         topic,
         formatEmoji,
         hostTimezone,
-        guestTimezone: guestTzDiffers ? effectiveGuestTz : undefined,
+        // guestTimezone intentionally omitted — greeting is host-canonical
+        // only (decision #10, 2026-04-21). Viewer-tz presentation lives on
+        // the calendar-card picker + Envoy follow-up chat.
         window: guestPicks!.window,
         anchorDate: anchorIso,
         picks: {
@@ -892,16 +916,17 @@ export async function POST(req: NextRequest) {
       // V5 prose-form gate (2026-04-20): when the offer is narrow enough to
       // say in a single sentence — "tomorrow or Thursday, or next week if
       // needed" — skip the bulleted day-list and fold availability into a
-      // casual combined opener. Gates: same timezone, not VIP, not generic,
-      // ≤ 3 days in the preferred bucket. Caller derives preferredAnchor
-      // from timingLabel: "this week" → anchor=this-week, "next week" or
-      // "next <weekday>" → next-week.
+      // casual combined opener. Post-2026-04-21 the prose gate no longer
+      // depends on guest-tz difference: greeting is always host-canonical,
+      // so dual-tz is no longer a reason to force the bulleted path. Prose
+      // still requires !VIP (stretch-days tail) and !generic (no single
+      // invitee for the opener), and ≤ 3 preferred days (enforced inside).
       const isGenericLink = link.type === "generic";
       // Shared helper — kept in sync with MCP `rules.timingPreference.anchor`
       // projection by construction (both call `deriveTimingAnchor`).
       const proseAnchor = deriveTimingAnchor(rawTimingLabel);
       const proseCandidate =
-        !guestTzDiffers && !isVip && !isGenericLink
+        !isVip && !isGenericLink
           ? formatAvailabilityProse(
               filteredSlots,
               hostTimezone,
@@ -913,13 +938,10 @@ export async function POST(req: NextRequest) {
             )
           : null;
 
-      // Timezone line. Only render when guest's tz differs — when they match,
-      // the slot times themselves already include the tz abbreviation, so the
-      // line is redundant noise.
-      const tzLine: string | null =
-        guestTzDiffers && guestTimezoneLabel
-          ? `🕒 Times shown in your timezone: ${guestTimezoneLabel} · ${hostFirstName} is on ${hostTimezoneLabel}`
-          : null;
+      // TZ line removed 2026-04-21 (decision #10). The calendar card picker
+      // now tells the guest which tz they're looking at; the greeting stays
+      // silent on tz so it reads cleanly as host-voice regardless of viewer.
+      const tzLine: string | null = null;
 
       // Schedule body — the bulleted V2 list. If empty, fall back to an
       // open-ended ask.
@@ -934,7 +956,6 @@ export async function POST(req: NextRequest) {
             filteredSlots,
             hostTimezone,
             new Date(),
-            guestTzDiffers ? effectiveGuestTz : undefined,
           );
           if (stretchDays) {
             scheduleBody += `\n\nIf none of those work, I can also make ${stretchDays} available — just ask.`;
@@ -1098,6 +1119,15 @@ export async function POST(req: NextRequest) {
     // the browser's detected TZ to decide whether to show the TZ recovery
     // banner. Null when no visitor has posted a TZ yet.
     sessionTimezone: session.guestTimezone ?? null,
+    // Host's timezone, surfaced so the calendar card picker can render the
+    // "{host} is in {host-tz}" secondary label without a separate fetch.
+    // Fresh-greeting path resolves hostTimezone from the schedule compute
+    // (same value as hostTimezoneEarly in practice), so either is fine here.
+    hostTimezone,
+    // Viewer-authoritative tz on the session (null on the fresh-greeting
+    // path because the session was just created). Widget writes it on first
+    // card render via POST /api/negotiate/session/viewer-timezone.
+    viewerTimezone: session.viewerTimezone ?? null,
     isGroupEvent: isGroupEvent || undefined,
     participants: participantSummary,
     hostName: user.name,

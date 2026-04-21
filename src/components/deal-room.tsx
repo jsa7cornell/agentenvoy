@@ -7,6 +7,7 @@ import { MatchPulse } from "./match-pulse";
 import { DashboardHeader } from "./dashboard-header";
 import { PublicHeader } from "./public-header";
 import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
+import { TimezonePicker } from "./timezone-picker";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
 import { formatDuration } from "@/lib/format-duration";
@@ -127,6 +128,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // Slots state for availability calendar sidebar
   const [slotsByDay, setSlotsByDay] = useState<Record<string, Array<{ start: string; end: string; score?: number; isShortSlot?: boolean; isStretch?: boolean }>> | null>(null);
   const [slotTimezone, setSlotTimezone] = useState("America/New_York");
+  // Host's timezone for the picker's "{host} is in {host-tz}" label and the
+  // dual-tz parity with the Envoy follow-up chat in composer.ts. Populated
+  // from the session POST response. Null until that resolves.
+  const [hostTimezone, setHostTimezoneState] = useState<string | null>(null);
+  // Viewer-authoritative tz on the session (from DB). Drives the picker's
+  // selected chip and the dual-tz trigger in composer.ts. Null before first
+  // card render seeds it — the TimezonePicker owns the first-render POST.
+  const [viewerTimezone, setViewerTimezoneState] = useState<string | null>(null);
   const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
   const [slotDuration, setSlotDuration] = useState<number | undefined>(undefined);
   const [slotMinDuration, setSlotMinDuration] = useState<number | undefined>(undefined);
@@ -228,33 +237,45 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     }
   }, [messages]);
 
-  // Fetch slots for availability calendar
+  // Fetch slots for availability calendar. Re-runs when viewerTimezone
+  // changes so the picker can trigger a regroup without a page reload.
+  //
+  // The `tz` param is display-only: it only affects day-key grouping and the
+  // returned `timezone` label. Scoring/filtering stays host-tz server-side.
   useEffect(() => {
     if (!sessionId) return;
-    fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
+    const url = new URL("/api/negotiate/slots", window.location.origin);
+    url.searchParams.set("sessionId", sessionId);
+    const tzParam =
+      viewerTimezone ??
+      (() => {
+        try {
+          return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+        } catch {
+          return "";
+        }
+      })();
+    if (tzParam) url.searchParams.set("tz", tzParam);
+    fetch(url.toString())
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data) {
           setSlotsByDay(data.slotsByDay);
-          // Show widget in the guest's local timezone when it differs from the
-          // host's — the guest shouldn't have to mentally convert. The slot
-          // start/end values are ISO strings (absolute instants) so they render
-          // correctly in any timezone via toLocaleTimeString.
-          const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          setSlotTimezone(browserTz && browserTz !== data.timezone ? browserTz : data.timezone);
+          // Widget rendering tz — server echoes the tz it grouped by. When
+          // viewerTimezone is set this will match it; pre-seed we fall back
+          // to the browser's local tz to avoid a flash of host-tz content.
+          setSlotTimezone(data.timezone);
           if (data.currentLocation) setSlotLocation(data.currentLocation);
           if (data.duration) setSlotDuration(data.duration);
           if (data.minDuration) setSlotMinDuration(data.minDuration);
           if (data.isVip) setIsVip(true);
-          // Bilateral chips are optional — server omits the key when the
-          // guest isn't logged-in or hasn't connected a calendar.
           if (data.bilateralByDay && typeof data.bilateralByDay === "object") {
             setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
           }
         }
       })
       .catch(() => {});
-  }, [sessionId]);
+  }, [sessionId, viewerTimezone]);
 
   // Hydrate TZ-banner dismissal from localStorage once we know the sessionId.
   // Keyed per session so dismissing on one deal room doesn't silence others.
@@ -298,7 +319,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       return;
     }
     if (cc !== "true") return;
-    fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
+    fetch(`/api/negotiate/slots?sessionId=${sessionId}${viewerTimezone ? `&tz=${encodeURIComponent(viewerTimezone)}` : ""}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);
@@ -311,6 +332,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         url.searchParams.delete("calendarConnected");
         window.history.replaceState({}, "", url.pathname + url.search);
       });
+    // viewerTimezone is intentionally excluded — this effect fires once on
+    // OAuth return, not on tz changes. The slot-fetch re-runs via its own
+    // effect when viewerTimezone changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   // T4: detect bilateralByDay empty → non-empty transition and fire the
@@ -538,7 +563,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       url.searchParams.delete("calendarConnected");
       window.history.replaceState({}, "", url.pathname);
       // Refetch slots so bilateralByDay + green/orange chips appear.
-      fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
+      fetch(`/api/negotiate/slots?sessionId=${sessionId}${viewerTimezone ? `&tz=${encodeURIComponent(viewerTimezone)}` : ""}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);
@@ -546,6 +571,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         })
         .catch(() => {});
     }
+    // viewerTimezone is intentionally excluded from deps — the main slots
+    // effect handles tz-change refetches; this one is a calendarConnected
+    // one-shot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, calendarConnected]);
 
   // Initialize session on mount
@@ -585,6 +614,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         // visitor has posted a TZ yet.
         if (typeof data.sessionTimezone === "string" || data.sessionTimezone === null) {
           setSessionTimezone(data.sessionTimezone);
+        }
+        // Host + viewer tz — feed the calendar-card picker.
+        if (typeof data.hostTimezone === "string") {
+          setHostTimezoneState(data.hostTimezone);
+        }
+        if (typeof data.viewerTimezone === "string" || data.viewerTimezone === null) {
+          setViewerTimezoneState(data.viewerTimezone);
         }
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
@@ -1342,7 +1378,23 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // guest clicks "Propose changes" on a confirmed meeting.
   const renderPickerBubble = (keyPrefix: string) => {
     if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
-    const headerSlot = (() => {
+    // Timezone picker (shipped 2026-04-21 per guest-tz-ux-three-primitives).
+    // Sits above any other header content. Rendered whenever the guest is a
+    // human viewer and we know the host's tz (not for host-viewing-own-room).
+    const tzPicker =
+      sessionId && hostTimezone && !isHost ? (
+        <div className="mb-2 px-3 py-2 rounded-md bg-surface-elevated border border-DEFAULT">
+          <TimezonePicker
+            sessionId={sessionId}
+            hostTimezone={hostTimezone}
+            hostFirstName={(hostName || "").split(/\s+/)[0] || "the host"}
+            viewerTimezone={viewerTimezone}
+            onTimezoneChange={(tz) => setViewerTimezoneState(tz)}
+          />
+        </div>
+      ) : null;
+
+    const connectCta = (() => {
       if (isHost || isGuest || confirmed || anonCalCtaDismissed || !sessionId) return null;
       if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
       if (calendarDenied) {
@@ -1370,6 +1422,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         />
       );
     })();
+
+    const headerSlot = tzPicker || connectCta ? (
+      <>
+        {tzPicker}
+        {connectCta}
+      </>
+    ) : null;
     return (
       <div key={keyPrefix} className="flex justify-start">
         <div className="max-w-[85%] w-full min-w-0 rounded-2xl px-3 py-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
@@ -2025,7 +2084,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   }
                   // Re-fetch slots so bilateral chips render with the new TZ
                   // (ISO datetimes are TZ-agnostic; labels flip on re-render).
-                  fetch(`/api/negotiate/slots?sessionId=${sessionId}`)
+                  fetch(`/api/negotiate/slots?sessionId=${sessionId}${viewerTimezone ? `&tz=${encodeURIComponent(viewerTimezone)}` : ""}`)
                     .then((r) => (r.ok ? r.json() : null))
                     .then((data) => {
                       if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);

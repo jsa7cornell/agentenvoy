@@ -87,7 +87,11 @@ export function formatAvailabilityWindows(
   slots: ScoredSlot[],
   timezone: string,
   now: Date = new Date(),
-  guestTimezone?: string,
+  /**
+   * @deprecated 2026-04-21 (decision #10). Ignored — greeting is always
+   * host-canonical. Kept for caller compat; will be removed in cleanup.
+   */
+  _guestTimezone?: string,
   durationMin?: number,
   minDurationMin?: number
 ): FormattedWindows {
@@ -109,12 +113,9 @@ export function formatAvailabilityWindows(
 
   let wasTruncated = false;
 
-  // When the guest has a distinct timezone, group by the GUEST's local calendar
-  // so "Wednesday 8 PM CEST" doesn't visually split across two days in PT.
-  // Time ranges are rendered primary in the guest TZ and secondary in the
-  // host TZ via fmtDualTimeRange below.
-  const hasGuestTz = !!guestTimezone && guestTimezone !== timezone;
-  const groupTz = hasGuestTz ? guestTimezone! : timezone;
+  // Dual-tz rendering intentionally removed (decision #10, 2026-04-21).
+  // Greeting is always host-canonical.
+  const groupTz = timezone;
 
   const dayFmt = (d: Date) =>
     d.toLocaleDateString("en-US", {
@@ -194,39 +195,15 @@ export function formatAvailabilityWindows(
 
   // Step 3: score each day and keep the best MAX_DAYS.
   // When the guest is in a different timezone, rank by guest-convenience
-  // first: how much of the offered time lands inside the guest-local
-  // working window (08:00–19:00 local). That way a Paris guest sees
-  // afternoon CET slots (morning PT) first, not the host's "preferred"
-  // 10 AM PT slots that fall at 7 PM CET for them.
-  const GUEST_WORK_START = 8;
-  const GUEST_WORK_END = 19;
-
-  /** Minutes of a block that land inside [workStart, workEnd) in a given tz. */
-  function minutesInWorkingWindow(block: Block, rankTz: string): number {
-    const startMs = block.start.getTime();
-    const endMs = block.end.getTime();
-    let total = 0;
-    for (let t = startMs; t < endMs; t += SLOT_MS) {
-      const slotHour = Number(
-        new Intl.DateTimeFormat("en-US", {
-          hour: "numeric",
-          hour12: false,
-          timeZone: rankTz,
-        }).format(new Date(t))
-      );
-      if (slotHour >= GUEST_WORK_START && slotHour < GUEST_WORK_END) {
-        total += 30;
-      }
-    }
-    return total;
-  }
+  // Guest-tz-convenience reranking removed 2026-04-21 (decision #10). The
+  // greeting is host-canonical; the calendar card + picker handle viewer-tz
+  // presentation. Ranking is now simply preferred-first, then chronological.
 
   interface DayEntry {
     day: string;
     firstStart: Date;
     preferredCount: number;
     totalSlots: number;
-    guestWorkingMinutes: number;
     blocks: Block[];
   }
   const days: DayEntry[] = [];
@@ -237,34 +214,21 @@ export function formatAvailabilityWindows(
       (n: number, b: Block) => n + Math.round((b.end.getTime() - b.start.getTime()) / SLOT_MS),
       0
     );
-    const guestWorkingMinutes = hasGuestTz
-      ? blocks.reduce((n: number, b: Block) => n + minutesInWorkingWindow(b, guestTimezone!), 0)
-      : 0;
     days.push({
       day,
       firstStart: blocks[0].start,
       preferredCount,
       totalSlots,
-      guestWorkingMinutes,
       blocks,
     });
   }
 
-  // Ranking: host-preferred slots always come first (they represent explicit
-  // host choices — link rules, scored -1 or lower). Within the same preference
-  // tier, guest-TZ working hours break ties so the most convenient EDT/CEST/etc.
-  // windows surface ahead of chronological order. Final tiebreak: chronological.
+  // Ranking: host-preferred slots always come first. Final tiebreak:
+  // chronological. Guest-tz-convenience reranking removed 2026-04-21
+  // (decision #10 — greeting is always host-canonical).
   days.sort((a, b) => {
     if (a.preferredCount !== b.preferredCount) {
       return b.preferredCount - a.preferredCount;
-    }
-    if (hasGuestTz) {
-      if (a.guestWorkingMinutes !== b.guestWorkingMinutes) {
-        return b.guestWorkingMinutes - a.guestWorkingMinutes;
-      }
-      if (a.totalSlots !== b.totalSlots) {
-        return b.totalSlots - a.totalSlots;
-      }
     }
     return a.firstStart.getTime() - b.firstStart.getTime();
   });
@@ -274,9 +238,7 @@ export function formatAvailabilityWindows(
   // Re-sort chronologically for display.
   picked.sort((a, b) => a.firstStart.getTime() - b.firstStart.getTime());
 
-  // Short TZ labels are resolved at render time against "now" so DST is
-  // handled correctly for both sides.
-  const guestShort = hasGuestTz ? shortTimezoneLabel(guestTimezone!, now) : null;
+  // Short TZ label resolved against "now" so DST is handled correctly.
   const hostShort = shortTimezoneLabel(timezone, now);
 
   // Week grouping: insert "This week:", "Next week:", "Week of May 5:" headers
@@ -328,23 +290,14 @@ export function formatAvailabilityWindows(
     }
 
     const parts = entry.blocks.map((b) => {
-      if (!hasGuestTz) {
-        const range = fmtTimeRange(b.start, b.end, timezone);
-        if (b.hasPreferred) {
-          hasPreferred = true;
-          return `${range} ★`;
-        }
-        return range;
-      }
-      const guestRange = fmtTimeRange(b.start, b.end, guestTimezone!);
-      const hostRange = fmtTimeRange(b.start, b.end, timezone);
-      const dual = `${guestRange} ${guestShort} (${hostRange} ${hostShort})`;
+      const range = fmtTimeRange(b.start, b.end, timezone);
       if (b.hasPreferred) {
         hasPreferred = true;
-        return `${dual} ★`;
+        return `${range} ★`;
       }
-      return dual;
+      return range;
     });
+    void hostShort; // reserved — rendering may surface it in a future pass
     lines.push(`  • ${entry.day} — ${parts.join(", ")}`);
   }
 
@@ -434,7 +387,14 @@ export function formatAvailabilitySlotList(
   slots: ScoredSlot[],
   hostTimezone: string,
   now: Date = new Date(),
-  guestTimezone?: string,
+  /**
+   * @deprecated 2026-04-21 (decision #10 of the guest-tz-ux-three-primitives
+   * proposal). This parameter is ignored — the greeting prose is always
+   * host-canonical. Dual-tz rendering moved to Envoy's follow-up chat; the
+   * initial greeting stays single-tz host-voice. Kept in the signature for
+   * caller compat; will be removed in a follow-up cleanup.
+   */
+  _guestTimezone?: string,
   durationMin?: number,
   minDurationMin?: number,
   opts?: { maxSlotsPerDay?: number; maxDays?: number; collapseIdenticalWindows?: boolean },
@@ -457,8 +417,10 @@ export function formatAvailabilitySlotList(
     return { lines: [], hasPreferred: false, hasMore: false, isDualTimezone: false };
   }
 
-  const hasGuestTz = !!guestTimezone && guestTimezone !== hostTimezone;
-  const groupTz = hasGuestTz ? guestTimezone! : hostTimezone;
+  // Dual-tz rendering intentionally removed (decision #10, 2026-04-21).
+  // Greeting is always host-canonical; viewer-tz presentation happens in the
+  // calendar card picker + Envoy's follow-up chat, not here.
+  const groupTz = hostTimezone;
 
   const dayFmt = (d: Date) =>
     d.toLocaleDateString("en-US", {
@@ -523,7 +485,6 @@ export function formatAvailabilitySlotList(
   const pickedDays = dayEntries.slice(0, MAX_DAYS_LOCAL);
 
   const hostShort = shortTimezoneLabel(hostTimezone, now);
-  const guestShort = hasGuestTz ? shortTimezoneLabel(guestTimezone!, now) : null;
 
   const lines: string[] = [];
   let hasPreferred = false;
@@ -550,16 +511,9 @@ export function formatAvailabilitySlotList(
     const bullets: string[] = [];
     for (const block of chosen) {
       const hostLabel = fmtBlockLabel(block.start, block.end, hostTimezone, hostShort);
-      if (hasGuestTz) {
-        const guestLabel = fmtBlockLabel(block.start, block.end, guestTimezone!, guestShort!);
-        const star = block.hasPreferred ? " ★" : "";
-        if (block.hasPreferred) hasPreferred = true;
-        bullets.push(`• ${guestLabel} / ${hostLabel}${star}`);
-      } else {
-        const star = block.hasPreferred ? " ★" : "";
-        if (block.hasPreferred) hasPreferred = true;
-        bullets.push(`• ${hostLabel}${star}`);
-      }
+      const star = block.hasPreferred ? " ★" : "";
+      if (block.hasPreferred) hasPreferred = true;
+      bullets.push(`• ${hostLabel}${star}`);
     }
 
     // Split `entry.day` ("Mon, Apr 20") into weekday + month-day parts so we
@@ -627,7 +581,9 @@ export function formatAvailabilitySlotList(
     for (const b of g.bullets) lines.push(b);
   }
 
-  return { lines, hasPreferred, hasMore, isDualTimezone: hasGuestTz };
+  // isDualTimezone always false post-2026-04-21 (decision #10). Kept on the
+  // return shape for caller compat; callers should ignore it.
+  return { lines, hasPreferred, hasMore, isDualTimezone: false };
 }
 
 // ─── Stretch-day formatter ───────────────────────────────────────────────────
@@ -645,10 +601,10 @@ export function formatStretchDays(
   slots: ScoredSlot[],
   hostTimezone: string,
   now: Date = new Date(),
-  guestTimezone?: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _guestTimezone?: string, // @deprecated 2026-04-21 (decision #10) — host-canonical only.
 ): string {
-  const hasGuestTz = !!guestTimezone && guestTimezone !== hostTimezone;
-  const groupTz = hasGuestTz ? guestTimezone! : hostTimezone;
+  const groupTz = hostTimezone;
 
   const dayFmt = (d: Date) =>
     d.toLocaleDateString("en-US", {
@@ -973,17 +929,18 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
     topic,
     formatEmoji,
     hostTimezone,
-    guestTimezone,
     window,
     anchorDate,
     picks,
     guidance,
     hostNote,
   } = opts;
+  // `guestTimezone` from opts is ignored post-2026-04-21 (decision #10).
+  // Greeting is host-canonical; viewer-tz presentation lives on the card +
+  // Envoy follow-up chat, not the static greeting. Field retained on the
+  // BuildOpenWindowOpts type for caller compat; will be dropped in cleanup.
 
   const hostShort = shortTimezoneLabel(hostTimezone, new Date());
-  const hasDistinctGuestTz = guestTimezone && guestTimezone !== hostTimezone;
-  const guestShort = hasDistinctGuestTz ? shortTimezoneLabel(guestTimezone!, new Date()) : null;
 
   // Render an hour given in HOST-LOCAL 24h form as a 12h label in the target
   // timezone. Critical: the previous version used setUTCHours(h) which
@@ -1012,14 +969,7 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
   }
 
   const windowLabel = window
-    ? (() => {
-        const hostLabel = `${hostHourIn(hostTimezone, window.startHour)}–${hostHourIn(hostTimezone, window.endHour)} ${hostShort}`;
-        if (hasDistinctGuestTz) {
-          const guestLabel = `${hostHourIn(guestTimezone!, window.startHour)}–${hostHourIn(guestTimezone!, window.endHour)} ${guestShort}`;
-          return `${guestLabel} (${hostLabel})`;
-        }
-        return hostLabel;
-      })()
+    ? `${hostHourIn(hostTimezone, window.startHour)}–${hostHourIn(hostTimezone, window.endHour)} ${hostShort}`
     : null;
 
   const dateProse = anchorDate

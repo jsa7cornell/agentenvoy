@@ -12,12 +12,21 @@ import {
   type BilateralSlot,
 } from "@/lib/bilateral-availability";
 
-// GET /api/negotiate/slots?sessionId=xxx  (guest view — by session)
-// GET /api/negotiate/slots?self=true      (host view — authenticated user's own availability)
-// Returns scored slots grouped by day for the calendar widget
+// GET /api/negotiate/slots?sessionId=xxx            (guest view — by session)
+// GET /api/negotiate/slots?sessionId=xxx&tz=...     (guest view, viewer-tz display)
+// GET /api/negotiate/slots?self=true                (host view — authenticated user's own availability)
+//
+// Returns scored slots grouped by day for the calendar widget.
+//
+// The `tz` query param is display-only: it changes the day-key grouping (so a
+// 9pm PT slot groups under the viewer's calendar day, not the host's) and the
+// returned `timezone` field. All scoring/filtering internals stay in HOST tz —
+// "afternoon means what the host meant" invariants are preserved. Invalid tz
+// strings silently fall back to host tz.
 export async function GET(req: NextRequest) {
   const selfMode = req.nextUrl.searchParams.get("self") === "true";
   const sessionId = req.nextUrl.searchParams.get("sessionId");
+  const viewerTzParam = req.nextUrl.searchParams.get("tz");
 
   let hostId: string;
   let prefs: Record<string, unknown>;
@@ -68,7 +77,23 @@ export async function GET(req: NextRequest) {
   }
 
   const explicit = prefs.explicit as Record<string, unknown> | undefined;
-  const timezone = getUserTimezone(prefs);
+  const hostTimezone = getUserTimezone(prefs);
+
+  // Validate viewer tz param — fall back to host tz on any error. Using tz
+  // only for display grouping and the returned `timezone` field; all scoring
+  // math stays host-tz regardless (see file header).
+  let displayTimezone = hostTimezone;
+  if (viewerTzParam && !selfMode) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: viewerTzParam }).format(new Date());
+      displayTimezone = viewerTzParam;
+    } catch {
+      // invalid IANA — keep host tz
+    }
+  }
+  // `timezone` alias retained for downstream logic that passes it to scoring
+  // and rule-clamp helpers. All such use sites expect HOST tz semantics.
+  const timezone = hostTimezone;
 
   const slotsByDay: Record<
     string,
@@ -106,7 +131,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (!schedule.connected) {
-      return NextResponse.json({ slotsByDay: {}, timezone });
+      return NextResponse.json({ slotsByDay: {}, timezone: displayTimezone });
     }
 
     // Apply event-level overrides from link rules
@@ -208,9 +233,10 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Group by day
+    // Group by day. Uses displayTimezone so a 9pm PT slot groups under the
+    // viewer's calendar day when the viewer is in ET, not under the host's.
     const dateFmt = new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
+      timeZone: displayTimezone,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -313,7 +339,10 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     slotsByDay,
-    timezone,
+    // `timezone` is the viewer's display tz (viewerTz when set + valid, else
+    // host tz). Widget labels slots using this; internal scoring stays host-tz.
+    timezone: displayTimezone,
+    hostTimezone,
     currentLocation,
     duration,
     minDuration,

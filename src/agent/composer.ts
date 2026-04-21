@@ -5,6 +5,7 @@ import { getUserTimezone } from "@/lib/timezone";
 import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
 import { computeWeekAnchors, computeWeekAnchorsHostSide, formatWeekAnchorsForPrompt } from "@/lib/week-anchors";
 import { formatDuration } from "@/lib/format-duration";
+import { parseGuestTimeReferences, renderParsedTime } from "@/lib/time-parse";
 
 // --- Playbook cache (read once per cold start) ---
 
@@ -51,6 +52,22 @@ export interface ComposeOptions {
   guestName?: string;
   guestEmail?: string;
   guestTimezone?: string;
+  /**
+   * Viewer-authoritative IANA tz on the NegotiationSession (picker-driven).
+   * When set and differs from host tz, Envoy enters dual-tz mode for this
+   * session: follow-up replies dual-render times as `{host-tz} / {viewer-tz}`
+   * and bare time references in guest messages are interpreted in viewer tz.
+   * Decision #8 + #9 of the 2026-04-21 guest-tz-ux-three-primitives proposal.
+   */
+  viewerTimezone?: string | null;
+  /**
+   * Raw guest message text for the current turn (optional). When provided
+   * alongside `viewerTimezone` in dual-tz mode, the composer parses bare
+   * time references deterministically via `src/lib/time-parse.ts` and
+   * attaches the structured result to the [GROUND TRUTH] block so the LLM
+   * composes prose around pre-interpreted data (no more LLM-tz drift).
+   */
+  guestMessage?: string;
   topic?: string;
   rules?: Record<string, unknown>;
   /** @deprecated Use calendarContext instead */
@@ -328,6 +345,55 @@ function buildSessionContext(options: ComposeOptions): string {
   if (options.guestName) parts.push(`Guest: ${options.guestName}`);
   if (options.guestEmail) parts.push(`Guest email: ${options.guestEmail}`);
   if (options.guestTimezone) parts.push(`[GROUND TRUTH] Guest timezone (from browser): ${options.guestTimezone} — confirm with guest if different from host timezone`);
+
+  // Dual-tz mode — guest-tz-ux-three-primitives decision #8 (2026-04-21).
+  // When the viewer has picked a tz different from host, Envoy dual-renders
+  // every time reference in follow-up replies. Trigger is the session flag,
+  // not a heuristic — viewerTimezone is always populated after first card
+  // render (decision #11 / B1 fix).
+  const viewerTz = options.viewerTimezone;
+  const dualTzActive = !!viewerTz && viewerTz !== tz;
+  if (dualTzActive) {
+    parts.push(
+      `[GROUND TRUTH] Dual-tz mode active. Host is in ${tz}, viewer (guest) is operating in ${viewerTz}.`,
+    );
+    parts.push(
+      `[GROUND TRUTH] When you reference a time in your reply, dual-render it as "{host-tz} / {viewer-tz}" — host-tz first. Example: "Thursday 3pm PT / 6pm ET works — want me to grab it?". This applies to every time reference in follow-up replies, not just confirmations.`,
+    );
+    parts.push(
+      `[GROUND TRUTH] When the guest mentions a bare time (e.g. "3pm", "Thursday 10am"), interpret it in the viewer's tz (${viewerTz}), NOT host tz. Echo both tzs in your confirmation ("I read that as 3pm ET / 12pm PT — want me to grab it?"). If the time is ambiguous (no am/pm, no day anchor), ask for clarification — the affirmative default you propose back should still be viewer tz.`,
+    );
+  }
+
+  // Decision #9 — deterministic time parsing. When we have the current
+  // guest message + a known viewer tz, parse bare time references (via
+  // regex, not the LLM) and attach the structured result as ground truth.
+  // The LLM composes prose around already-interpreted data instead of
+  // interpreting the time itself. Prevents LLM-tz drift in composition.
+  if (dualTzActive && options.guestMessage && viewerTz) {
+    const refs = parseGuestTimeReferences(options.guestMessage, viewerTz);
+    if (refs.length > 0) {
+      const lines: string[] = [];
+      lines.push(
+        `[GROUND TRUTH] Parsed time references from the guest's current message (deterministic regex, NOT LLM):`,
+      );
+      for (const ref of refs) {
+        const rendered = renderParsedTime(ref);
+        const dayPart = ref.dayAnchor ? `day=${ref.dayAnchor} ` : "";
+        if (ref.ambiguous || !rendered) {
+          lines.push(
+            `  - "${ref.raw}" — AMBIGUOUS (no am/pm or unclear). ${dayPart}Ask the guest to clarify; treat their re-answer as viewer tz (${viewerTz}) by default.`,
+          );
+        } else {
+          lines.push(
+            `  - "${ref.raw}" → ${rendered} ${dayPart}in viewer tz (${viewerTz}). Echo both viewer and host tz in your confirmation.`,
+          );
+        }
+      }
+      parts.push(lines.join("\n"));
+    }
+  }
+
   if (options.topic) parts.push(`Topic: ${options.topic}`);
 
   if (options.rules && Object.keys(options.rules).length > 0) {
