@@ -1135,9 +1135,16 @@ export async function POST(req: NextRequest) {
       // exactly one slot (`exclusive` tier + one slotOverrides[-2]), skip
       // the bulleted body and render a prescriptive one-liner. The widget
       // below already highlights the -2 slot as the sole offer, so the
-      // greeting's job is to frame it as a proposal, not a menu. Copy
-      // matches John's feedback on the Katie case (report cmo8w7er…):
-      // "We're proposing X. Confirmation below. Let me know if questions."
+      // greeting's job is to frame it as a proposal, not a menu.
+      //
+      // 2026-04-21 v2 (reported cmo90x8y on /meet/dannysingh/epaywu):
+      //   - dropped "I've pasted a confirmation button below" because the
+      //     widget is still the calendar picker until the `offer`-mode
+      //     card ships (see proposal
+      //     2026-04-21_deal-room-widget-state-machine). Lying about a
+      //     UI affordance is worse than the thin copy it replaces.
+      //   - now includes the slot's start day + time in host tz so the
+      //     proposal isn't "30 min" with no anchor.
       if (
         !isGeneric &&
         effectiveSteering === "exclusive" &&
@@ -1151,8 +1158,36 @@ export async function POST(req: NextRequest) {
           ? ` at ${linkLocationForOpener}`
           : "";
         const durPart = durStr ? `${durStr}` : "some time";
-        const proposal = `We're proposing ${durPart}${activityPart}${locPart}.`;
-        const exclusiveHello = `👋 ${greeteeName}! ${proposal} I've pasted a confirmation button below — let me know if you have any questions.`;
+        const slotStartIso = ((): string | null => {
+          const overrides = (linkRules?.slotOverrides ?? []) as Array<{
+            start?: unknown;
+            score?: unknown;
+          }>;
+          const hit = overrides.find(
+            (o) => typeof o.start === "string" && o.score === -2,
+          );
+          return hit && typeof hit.start === "string" ? hit.start : null;
+        })();
+        const whenPart = ((): string => {
+          if (!slotStartIso) return "";
+          const d = new Date(slotStartIso);
+          if (Number.isNaN(d.getTime())) return "";
+          const day = new Intl.DateTimeFormat("en-US", {
+            timeZone: hostTimezone,
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          }).format(d);
+          const time = new Intl.DateTimeFormat("en-US", {
+            timeZone: hostTimezone,
+            hour: "numeric",
+            minute: "2-digit",
+            timeZoneName: "short",
+          }).format(d);
+          return ` on ${day} at ${time}`;
+        })();
+        const proposal = `We're proposing ${durPart}${activityPart}${locPart}${whenPart}.`;
+        const exclusiveHello = `👋 ${greeteeName}! ${proposal} Confirm below or let me know if anything needs to shift.`;
         greeting = exclusiveHello;
       } else if (proseCandidate && !isGeneric) {
         const durCasual = durationForOpener
