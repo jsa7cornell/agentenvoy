@@ -315,23 +315,52 @@ export default function Feed() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input]);
 
-  // Scroll feed container to bottom
+  // Scroll feed container to bottom. On new messages we pin to the bottom
+  // (stickToBottomRef), then a ResizeObserver on the inner content keeps us
+  // there as async card content finishes rendering (calendar cards, images,
+  // etc.) — without the observer the initial scrollTo fires before the final
+  // scrollHeight is known, leaving the newest card clipped under the composer.
   const prevMessageCount = useRef(0);
+  const stickToBottomRef = useRef(true);
   useEffect(() => {
     if (messages.length === 0) return;
     const container = scrollContainerRef.current;
     if (!container) return;
     if (prevMessageCount.current === 0) {
+      stickToBottomRef.current = true;
       requestAnimationFrame(() => {
         container.scrollTop = container.scrollHeight;
       });
     } else if (messages.length > prevMessageCount.current) {
+      stickToBottomRef.current = true;
       requestAnimationFrame(() => {
         container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
       });
     }
     prevMessageCount.current = messages.length;
   }, [messages]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    const end = messagesEndRef.current;
+    if (!container || !end) return;
+    const onScroll = () => {
+      const nearBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight < 24;
+      stickToBottomRef.current = nearBottom;
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    const observer = new ResizeObserver(() => {
+      if (!stickToBottomRef.current) return;
+      container.scrollTop = container.scrollHeight;
+    });
+    const inner = end.parentElement;
+    if (inner) observer.observe(inner);
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      observer.disconnect();
+    };
+  }, []);
 
   // Auto-resize textarea
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -616,7 +645,7 @@ export default function Feed() {
       {/* Messages — scroll container spans full column width so the scrollbar
           lands at the sidebar divider; inner wrapper re-centers the content. */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
-        <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 py-5 flex flex-col gap-1.5">
+        <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 pt-5 pb-8 flex flex-col gap-1.5">
         {/* Empty state — only for calibrated users with no messages */}
         {messages.length === 0 && !loading && isCalibrated && (
           <div className="flex-1 flex items-center justify-center">
