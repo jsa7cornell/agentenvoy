@@ -77,6 +77,33 @@ model User {
   calendarCaches   CalendarCache[]
   computedSchedule ComputedSchedule?
   adminAccessLogs  AdminAccessLog[]     @relation("AdminAccessLogs")
+  feedbackReports  FeedbackReport[]
+}
+
+/// User-submitted feedback bundle (F3 of the feedback-loops proposal).
+/// Per-incident consent model: `checklistState` records what the user
+/// agreed to attach, `bundle` is the server-generated redacted payload.
+/// Calendar events in `bundle` are redacted at the sink
+/// (src/lib/feedback/redact-calendar.ts).
+model FeedbackReport {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId      String?
+  userText       String    @db.Text
+  triedToDoText  String?   @db.Text
+  userAgent      String?
+  url            String?
+  checklistState Json
+  bundle         Json
+  resolved       Boolean   @default(false)
+  resolvedAt     DateTime?
+  resolvedBy     String?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([resolved, createdAt])
 }
 
 /// Break-glass audit of every admin read of user-specific data (F5 of the
