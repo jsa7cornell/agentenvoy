@@ -512,7 +512,9 @@ export function WeeklyCalendar({
                   if (endMin <= startMin) return null;
 
                   const top = ((startMin - gridStartMin) / 30) * ROW_HEIGHT;
-                  const height = Math.max(((endMin - startMin) / 30) * ROW_HEIGHT, ROW_HEIGHT * 0.8);
+                  // -2px so back-to-back events show a visible separator
+                  // instead of merging into one block.
+                  const height = Math.max(((endMin - startMin) / 30) * ROW_HEIGHT - 2, ROW_HEIGHT * 0.8);
                   const width = ev.totalCols > 1 ? `${Math.floor(90 / ev.totalCols)}%` : "90%";
                   const left = ev.totalCols > 1 ? `${5 + (ev.col / ev.totalCols) * 90}%` : "5%";
 
