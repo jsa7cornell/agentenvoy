@@ -2,6 +2,11 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
+import {
+  binSlotsIntoWindows,
+  assertBinningTz,
+  type WindowCard,
+} from "@/lib/window-binning";
 
 interface Slot {
   start: string;
@@ -9,6 +14,12 @@ interface Slot {
   score?: number;
   isShortSlot?: boolean; // fits minDuration but not full duration
   isStretch?: boolean;   // VIP stretch slot (score 2-3) — shown orange
+}
+
+interface BilateralChip {
+  start: string;
+  end: string;
+  color: "both" | "one";
 }
 
 interface AvailabilityCalendarProps {
@@ -23,6 +34,18 @@ interface AvailabilityCalendarProps {
   minDuration?: number;
   headerSlot?: React.ReactNode;
   footerSlot?: React.ReactNode;
+  /** Bilateral chips per day — drives "Both" badge + loose-mutual reveal count. */
+  bilateralByDay?: Record<string, BilateralChip[]> | null;
+  /** First name of the host — reveal link reads "+ N more windows {name} prefers but you're busy". */
+  hostFirstName?: string;
+  /** Host profile image URL for the "Both" badge (Google photo → <img>; null → initials circle). */
+  hostImage?: string | null;
+  /** Guest profile image URL for the "Both" badge. */
+  guestImage?: string | null;
+  /** First name of the host — drives initials fallback when hostImage is missing. */
+  hostInitialSource?: string;
+  /** First name of the guest — drives initials fallback when guestImage is missing. */
+  guestInitialSource?: string;
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
@@ -148,6 +171,192 @@ function SlotPills({
   );
 }
 
+// ─── "Both" badge — two tiny avatars w/ initials fallback (§12.5, §12.8.1) ───
+
+function initialsCircleColor(source: string): string {
+  // Deterministic hash → tailwind color class.
+  const palette = [
+    "bg-emerald-600", "bg-sky-600", "bg-violet-600", "bg-rose-600",
+    "bg-amber-600", "bg-cyan-600", "bg-fuchsia-600", "bg-indigo-600",
+  ];
+  let h = 0;
+  for (let i = 0; i < source.length; i++) h = (h * 31 + source.charCodeAt(i)) >>> 0;
+  return palette[h % palette.length];
+}
+
+function AvatarCircle({ image, source }: { image?: string | null; source: string }) {
+  const initial = (source || "?").trim().charAt(0).toUpperCase() || "?";
+  if (image) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={image}
+        alt=""
+        className="w-3.5 h-3.5 rounded-full border border-surface-primary object-cover"
+      />
+    );
+  }
+  return (
+    <span
+      className={`inline-flex w-3.5 h-3.5 rounded-full items-center justify-center text-[7px] font-semibold text-white border border-surface-primary ${initialsCircleColor(source)}`}
+      aria-hidden="true"
+    >
+      {initial}
+    </span>
+  );
+}
+
+function BothBadge({
+  hostImage, guestImage, hostSource, guestSource,
+}: {
+  hostImage?: string | null;
+  guestImage?: string | null;
+  hostSource: string;
+  guestSource: string;
+}) {
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded-full bg-emerald-950/50 border border-emerald-800/60 text-[9px] font-medium text-emerald-300"
+      title="Both calendars confirm this window"
+    >
+      <span className="inline-flex -space-x-1">
+        <AvatarCircle image={hostImage} source={hostSource} />
+        <AvatarCircle image={guestImage} source={guestSource} />
+      </span>
+      <span className="ml-0.5">Both</span>
+    </span>
+  );
+}
+
+// ─── WindowCards — new default render replacing SlotPills (§12, §13) ────
+
+const MAX_CARDS_PER_DAY = 3;
+
+function windowIsMatched(window: WindowCard, chips: BilateralChip[] | undefined): boolean {
+  if (!chips || chips.length === 0) return false;
+  const ws = new Date(window.start).getTime();
+  const we = new Date(window.end).getTime();
+  return chips.some((c) => {
+    if (c.color !== "both") return false;
+    const cs = new Date(c.start).getTime();
+    return cs >= ws && cs < we;
+  });
+}
+
+function formatWindowMessage(card: WindowCard, dateStr: string, tz: string) {
+  const date = new Date(dateStr + "T12:00:00");
+  const dayStr = date.toLocaleDateString("en-US", {
+    weekday: "long", month: "short", day: "numeric",
+  });
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleTimeString("en-US", {
+      hour: "numeric", minute: "2-digit", timeZone: tz,
+    });
+  const tzAbbr = new Intl.DateTimeFormat("en-US", {
+    timeZoneName: "short", timeZone: tz,
+  }).formatToParts(new Date(card.defaultStart))
+    .find((p) => p.type === "timeZoneName")?.value ?? "";
+  return `How about ${dayStr}, ${fmt(card.defaultStart)}–${fmt(card.defaultEnd)} ${tzAbbr}?`;
+}
+
+function WindowCards({
+  windows,
+  chipsForDay,
+  dateStr,
+  timezone,
+  onSelectSlot,
+  looseMutualCount,
+  hostFirstName,
+  hostImage, guestImage, hostSource, guestSource,
+}: {
+  windows: WindowCard[];
+  chipsForDay: BilateralChip[] | undefined;
+  dateStr: string;
+  timezone: string;
+  onSelectSlot?: (msg: string, slot: { start: string; end: string }) => void;
+  looseMutualCount: number;
+  hostFirstName?: string;
+  hostImage?: string | null;
+  guestImage?: string | null;
+  hostSource: string;
+  guestSource: string;
+}) {
+  const [revealMore, setRevealMore] = useState(false);
+  if (windows.length === 0) {
+    return <p className="text-xs text-muted">No available windows</p>;
+  }
+  const visible = revealMore ? windows : windows.slice(0, MAX_CARDS_PER_DAY);
+  const hiddenCount = windows.length - visible.length;
+
+  return (
+    <div className="space-y-1.5">
+      {visible.map((w, i) => {
+        const matched = windowIsMatched(w, chipsForDay);
+        const fmt = (iso: string) =>
+          new Date(iso).toLocaleTimeString("en-US", {
+            hour: "numeric", minute: "2-digit", timeZone: timezone,
+          });
+        const ariaLabel = `${w.name}, ${fmt(w.start)} to ${fmt(w.end)}${matched ? ", both calendars confirm" : ""}${w.isPick ? ", best pick" : ""}`;
+        return (
+          <button
+            key={i}
+            onClick={() =>
+              onSelectSlot?.(
+                formatWindowMessage(w, dateStr, timezone),
+                { start: w.defaultStart, end: w.defaultEnd },
+              )
+            }
+            disabled={!onSelectSlot}
+            aria-label={ariaLabel}
+            className={`
+              w-full text-left px-3 py-2 rounded-lg border transition-all
+              ${w.isPick
+                ? "border-emerald-400/60 bg-emerald-950/30 hover:border-emerald-300"
+                : "border-DEFAULT bg-surface-secondary hover:border-secondary"}
+              ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
+            `}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {w.isPick && (
+                  <span className="text-emerald-400 text-[11px] leading-none" aria-hidden="true">★</span>
+                )}
+                <span className="text-xs font-medium text-primary truncate">{w.name}</span>
+              </div>
+              {matched && (
+                <BothBadge
+                  hostImage={hostImage}
+                  guestImage={guestImage}
+                  hostSource={hostSource}
+                  guestSource={guestSource}
+                />
+              )}
+            </div>
+            <div className="mt-0.5 text-[11px] text-secondary">
+              {fmt(w.start)} – {fmt(w.end)}
+            </div>
+          </button>
+        );
+      })}
+      {hiddenCount > 0 && !revealMore && (
+        <button
+          type="button"
+          onClick={() => setRevealMore(true)}
+          className="text-[11px] text-secondary hover:text-primary underline transition"
+        >
+          + {hiddenCount} more window{hiddenCount !== 1 ? "s" : ""}
+        </button>
+      )}
+      {looseMutualCount > 0 && (
+        <div className="text-[11px] text-muted italic pt-0.5">
+          + {looseMutualCount} more window{looseMutualCount !== 1 ? "s" : ""}{" "}
+          {hostFirstName || "they"} prefer{hostFirstName ? "s" : ""} but you&rsquo;re busy
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LocationNotice({
   currentLocation,
   onClearLocation,
@@ -207,10 +416,27 @@ function WeekView({
   onClearLocation,
   onTimezoneClick,
   duration,
-  minDuration,
   headerSlot,
   footerSlot,
+  bilateralByDay,
+  hostFirstName,
+  hostImage,
+  guestImage,
+  hostInitialSource,
+  guestInitialSource,
 }: Omit<AvailabilityCalendarProps, "view">) {
+  // F1: bin in the same tz we render in.
+  assertBinningTz(timezone, timezone);
+
+  // Compute windows per day up-front — drives both day-strip count and selected-day cards.
+  const durationMinutes = duration ?? 30;
+  const windowsByDay = useMemo(() => {
+    const out: Record<string, WindowCard[]> = {};
+    for (const [date, slots] of Object.entries(slotsByDay)) {
+      out[date] = binSlotsIntoWindows(slots, { tz: timezone, durationMinutes });
+    }
+    return out;
+  }, [slotsByDay, timezone, durationMinutes]);
   const now = new Date();
   const todayStr = toDateStr(now);
   const thisWeekStartTime = getWeekStart(now).getTime();
@@ -297,8 +523,6 @@ function WeekView({
     return `${first.monthLabel} ${first.day} – ${last.monthLabel} ${last.day}`;
   })();
 
-  const selectedSlots = selectedDay ? slotsByDay[selectedDay] || [] : [];
-
   return (
     <div>
       {/* Header slot — e.g., inline CTA chip for calendar connect */}
@@ -331,31 +555,31 @@ function WeekView({
       <div className="grid grid-cols-7 gap-1">
         {weekDays.map((wd) => {
           const daySlots = slotsByDay[wd.dateStr] || [];
-          const visibleSlots = daySlots.filter((s) => (s.score ?? 0) <= 1);
+          const dayWindows = windowsByDay[wd.dateStr] || [];
           const isPast = wd.dateStr < todayStr;
           const isToday = wd.dateStr === todayStr;
           const isSelected = wd.dateStr === selectedDay;
           const colorClass = getSlotColor(daySlots, isPast);
-          const hasSlots = !isPast && visibleSlots.length > 0;
+          const hasWindows = !isPast && dayWindows.length > 0;
 
           return (
             <button
               key={wd.dateStr}
-              onClick={() => hasSlots && setSelectedDay(isSelected ? null : wd.dateStr)}
-              disabled={!hasSlots}
+              onClick={() => hasWindows && setSelectedDay(isSelected ? null : wd.dateStr)}
+              disabled={!hasWindows}
               className={`
                 flex flex-col items-center rounded-lg py-1.5 px-0.5 transition-all
                 ${colorClass}
                 ${isToday ? "ring-1 ring-indigo-500" : ""}
                 ${isSelected ? "ring-2 ring-foreground" : ""}
-                ${hasSlots ? "hover:ring-1 hover:ring-secondary cursor-pointer" : "cursor-default"}
+                ${hasWindows ? "hover:ring-1 hover:ring-secondary cursor-pointer" : "cursor-default"}
               `}
             >
               <span className="text-[9px] font-medium uppercase leading-none">{wd.dayLabel}</span>
               <span className="text-sm font-semibold leading-tight">{wd.day}</span>
-              {hasSlots && (
+              {hasWindows && (
                 <span className="text-[8px] leading-none mt-0.5 opacity-70">
-                  {visibleSlots.length} slot{visibleSlots.length !== 1 ? "s" : ""}
+                  {dayWindows.length} window{dayWindows.length !== 1 ? "s" : ""}
                 </span>
               )}
             </button>
@@ -363,28 +587,37 @@ function WeekView({
         })}
       </div>
 
-      {/* Selected day time slots */}
-      {selectedDay && (
-        <div className="mt-2.5 space-y-1.5">
-          <div className="text-[10px] font-medium text-muted">
-            Start times on{" "}
-            {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
-              weekday: "long",
-              month: "short",
-              day: "numeric",
-            })}
-            , {formatDurationCompact(duration)} meeting
+      {/* Selected day — window cards */}
+      {selectedDay && (() => {
+        const selectedWindows = windowsByDay[selectedDay] || [];
+        const chipsForDay = bilateralByDay?.[selectedDay];
+        const looseMutualCount = chipsForDay ? chipsForDay.filter((c) => c.color === "one").length : 0;
+        return (
+          <div className="mt-2.5 space-y-1.5">
+            <div className="text-[10px] font-medium text-muted">
+              {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", {
+                weekday: "long",
+                month: "short",
+                day: "numeric",
+              })}
+              , {formatDurationCompact(duration)} meeting
+            </div>
+            <WindowCards
+              windows={selectedWindows}
+              chipsForDay={chipsForDay}
+              dateStr={selectedDay}
+              timezone={timezone}
+              onSelectSlot={onSelectSlot}
+              looseMutualCount={looseMutualCount}
+              hostFirstName={hostFirstName}
+              hostImage={hostImage}
+              guestImage={guestImage}
+              hostSource={hostInitialSource || hostFirstName || "Host"}
+              guestSource={guestInitialSource || "Guest"}
+            />
           </div>
-          <SlotPills
-            slots={selectedSlots}
-            dateStr={selectedDay}
-            timezone={timezone}
-            onSelectSlot={onSelectSlot}
-            duration={duration}
-            minDuration={minDuration}
-          />
-        </div>
-      )}
+        );
+      })()}
 
       {/* Location notice */}
       {currentLocation && (
