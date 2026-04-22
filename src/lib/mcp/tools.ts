@@ -185,6 +185,9 @@ export async function handleGetMeetingParameters(
       return {
         ...(rules.activity ? { activity: rules.activity } : {}),
         ...(rules.activityIcon ? { activityIcon: rules.activityIcon } : {}),
+        ...(Array.isArray(rules.activityOptions) && (rules.activityOptions as string[]).length > 1
+          ? { activityOptions: rules.activityOptions }
+          : {}),
         ...(rules.timingLabel ? { timingLabel: rules.timingLabel } : {}),
         ...(isVip !== undefined ? { isVip } : {}),
         ...(timingPreference ? { timingPreference } : {}),

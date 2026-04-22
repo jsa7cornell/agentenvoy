@@ -1512,6 +1512,13 @@ export interface LinkRules {
   activity?: string;
   activityIcon?: string;
   /**
+   * Ordered list of host-offered activity options the guest can pick from.
+   * First entry mirrors `activity` (backward compat). When present, Envoy
+   * presents these as a menu and accepts any pick without a ladder check.
+   * Stored in link.rules JSON — no Prisma migration needed.
+   */
+  activityOptions?: string[];
+  /**
    * Free-form human phrase describing WHEN the meeting should happen
    * ("next week", "mid-May", "this weekend"). Captured verbatim from the
    * host; displayed by the greeting's natural-prose opener. Does NOT drive

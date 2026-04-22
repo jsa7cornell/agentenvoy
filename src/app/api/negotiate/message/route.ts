@@ -235,6 +235,15 @@ export async function POST(req: NextRequest) {
     isGroupEvent: isGroupEvent || undefined,
     eventParticipants,
     conversationHistory: history,
+    // Guest-negotiated values — inject as [LOCKED] GROUND TRUTH so Envoy
+    // doesn't re-open already-agreed activity/location.
+    negotiatedActivity: (session as Record<string, unknown>).negotiatedActivity as string | null ?? null,
+    negotiatedLocation: (session as Record<string, unknown>).negotiatedLocation as string | null ?? null,
+    negotiatedFormat: (session as Record<string, unknown>).negotiatedFormat as string | null ?? null,
+    // Host-offered activity menu from link rules.
+    activityOptions: Array.isArray((session.link.rules as Record<string, unknown>)?.activityOptions)
+      ? (session.link.rules as Record<string, unknown>).activityOptions as string[]
+      : null,
   };
 
   console.log(`[negotiate/message] start | session=${sessionId} | role=${messageRole} | slots=${scoredSlots.length} | history=${history.length}`);

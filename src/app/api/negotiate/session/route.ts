@@ -789,6 +789,13 @@ export async function POST(req: NextRequest) {
       typeof linkRules.activity === "string" && linkRules.activity.trim()
         ? linkRules.activity.trim()
         : null;
+    // activityOptions — ordered menu of host-offered activities. When present,
+    // Envoy presents these to the guest so they can pick. Passed through to
+    // composer context ([MENU] block) and surfaced in session payload.
+    const activityOptions =
+      Array.isArray(linkRules.activityOptions) && (linkRules.activityOptions as string[]).length > 1
+        ? (linkRules.activityOptions as string[])
+        : null;
     const activityEmoji =
       typeof linkRules.activityIcon === "string" && linkRules.activityIcon.trim()
         ? linkRules.activityIcon.trim()
@@ -1313,6 +1320,7 @@ export async function POST(req: NextRequest) {
       location: (link.rules as Record<string, unknown>)?.location ?? null,
       activity: (link.rules as Record<string, unknown>)?.activity ?? null,
       activityIcon: (link.rules as Record<string, unknown>)?.activityIcon ?? null,
+      activityOptions: (link.rules as Record<string, unknown>)?.activityOptions ?? null,
       timingLabel: (link.rules as Record<string, unknown>)?.timingLabel ?? null,
       // Intent.steering is the host-classified steering tier (open / soft /
       // narrow / exclusive) from PR #58. Stage 2 `deriveMode()` reads this to
@@ -1340,6 +1348,12 @@ export async function POST(req: NextRequest) {
     isGroupEvent: isGroupEvent || undefined,
     participants: participantSummary,
     hostName: user.name,
+    // Guest-negotiated values (set by lock_activity_location in the deal room).
+    // Client uses these to display the locked state in the event card thread.
+    negotiatedActivity: session.negotiatedActivity ?? null,
+    negotiatedLocation: session.negotiatedLocation ?? null,
+    negotiatedFormat: session.negotiatedFormat ?? null,
+    negotiatedLockedBy: session.negotiatedLockedBy ?? null,
   });
 }
 

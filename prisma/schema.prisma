@@ -372,6 +372,17 @@ model NegotiationSession {
   /// sessions where this is true + status=agreed + agreedTime falls in the
   /// now+23h..now+25h window. Idempotency via SideEffectLog.
   wantsReminder        Boolean   @default(true)
+  /// Guest-agreed activity override (e.g. "coffee"). Overrides link.rules.activity at confirm time.
+  /// Set by lock_activity_location agent action; cleared if host subsequently edits link.rules.activity.
+  negotiatedActivity   String?
+  /// Guest-agreed location (e.g. "Blue Bottle on Valencia"). Overrides link.rules.location at confirm time.
+  /// Session-only — no dual-write to link.rules. Cleared if host edits link.rules.location.
+  negotiatedLocation   String?
+  /// Format derived from guest-negotiated activity (e.g. "in-person" for coffee, "phone" for phone call).
+  /// Overrides the body format param at confirm time when set.
+  negotiatedFormat     String?
+  /// Who last wrote the negotiated values. Always "guest" in v1; "host" reserved for future multi-round use.
+  negotiatedLockedBy   String?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 

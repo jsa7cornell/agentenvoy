@@ -88,6 +88,15 @@ export interface ComposeOptions {
     statedAvailability?: string;
   }>;
   role?: string;
+  /** Guest-negotiated values already locked in this session. Injected as
+   *  [LOCKED] GROUND TRUTH blocks so Envoy doesn't re-negotiate them. */
+  negotiatedActivity?: string | null;
+  negotiatedLocation?: string | null;
+  negotiatedFormat?: string | null;
+  /** Host-offered activity menu. When present, Envoy presents these options
+   *  to the guest and accepts any pick without a ladder check. Injected as
+   *  a [MENU] block in the session context. */
+  activityOptions?: string[] | null;
 }
 
 export function composeSystemPrompt(options: ComposeOptions): string {
@@ -406,6 +415,32 @@ function buildSessionContext(options: ComposeOptions): string {
 
   if (options.rules && Object.keys(options.rules).length > 0) {
     parts.push(formatRules(options.rules));
+  }
+
+  // [LOCKED] blocks — guest-negotiated values already committed this session.
+  // These are GROUND TRUTH: Envoy must not re-negotiate them unless the guest
+  // explicitly says to. (P3 from proposal 2026-04-22_guest-activity-location-negotiation)
+  const lockedLines: string[] = [];
+  if (options.negotiatedActivity) {
+    const override = options.rules?.activity ? ` (overrides host's ${options.rules.activity})` : "";
+    lockedLines.push(`[LOCKED] Activity: ${options.negotiatedActivity}${override} — guest confirmed, do not re-negotiate.`);
+  }
+  if (options.negotiatedLocation) {
+    lockedLines.push(`[LOCKED] Location: ${options.negotiatedLocation} — guest confirmed, do not re-negotiate.`);
+  }
+  if (options.negotiatedFormat) {
+    lockedLines.push(`[LOCKED] Format: ${options.negotiatedFormat} — derived from guest-confirmed activity.`);
+  }
+  if (lockedLines.length > 0) {
+    parts.push(lockedLines.join("\n"));
+  }
+
+  // [MENU] block — host-offered activity options the guest can pick from.
+  // Any pick from this list is valid (host pre-approved all options; no
+  // downgrade-ladder check needed). Envoy should present these naturally.
+  if (options.activityOptions && options.activityOptions.length > 1) {
+    const menuList = options.activityOptions.join(" | ");
+    parts.push(`[MENU] Host offered these activity options: ${menuList}. Present naturally and lock_activity_location when the guest picks one.`);
   }
 
   // Scored slots → pre-formatted offerable blocks (preferred: prevents hallucination)
