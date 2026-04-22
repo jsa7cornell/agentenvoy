@@ -1,4 +1,4 @@
-import { shortTimezoneLabel, longTimezoneLabel, getTimezoneEntry } from "./timezone";
+import { shortTimezoneLabel, longTimezoneLabel } from "./timezone";
 
 /**
  * Onboarding state machine — drives the chat-led calibration conversation.
@@ -55,101 +55,32 @@ export interface OnboardingContext {
   userName?: string;
   detectedTimezone?: string;
   meetSlug?: string;
-  /**
-   * Optional LLM-generated riff on the user's calendar, shown as the
-   * very first message of onboarding. Generated in the route handler
-   * (NOT the state machine — the machine stays pure) and passed in.
-   * Undefined when the calendar is empty or LLM generation failed;
-   * onboarding proceeds normally without the paragraph.
-   */
-  calendarReadParagraph?: string;
 }
 
 // ── Phase handlers ─────────────────────────────────────────────────────
 
-// Phase 1: Welcome + Timezone
+// Phase 1: Welcome
+// Tz is browser-seeded (or Google-Calendar-seeded) before onboarding runs;
+// we mention it conversationally here ("I'm assuming you're in Pacific...")
+// so a wrong guess is cheap to correct in normal chat later, but never blocks
+// the first turn. No quick-replies, no phase gate — intro auto-advances to
+// the next phase after a brief dwell so the user sees the welcome and then
+// lands in the real calibration questions (format, hours, etc.).
 export function getIntroMessages(ctx: OnboardingContext): PhaseResult {
   const name = ctx.userName ? ctx.userName.split(" ")[0] : "there";
   const tz = ctx.detectedTimezone || "America/Los_Angeles";
-  // Prefer the curated long label from the table; fall back to Intl-derived text.
   const tzLabel = `${longTimezoneLabel(tz)} (${shortTimezoneLabel(tz)})`;
-
-  // The "for instance" wow snippet: a single calendar-grounded sentence
-  // generated in the route handler and passed in via ctx. Embedded inline
-  // in the greeting so it reads naturally, not as a standalone message.
-  const forInstance = ctx.calendarReadParagraph
-    ? ` For instance, ${ctx.calendarReadParagraph.replace(/^\s*for instance,?\s*/i, "").replace(/^[A-Z]/, (c) => c.toLowerCase())}`
-    : "";
 
   const content =
     `Hey ${name}! I'm Envoy — I negotiate your schedule so you don't have to. ` +
-    `When you need to meet with someone, I handle the back-and-forth. ` +
-    `I thrive in the context of your calendar and use that to find the best time for the most important people — ` +
-    `I'm personalized and context-aware.${forInstance}` +
-    `\n\nLet's get you set up. Takes about a minute — mostly quick choices.` +
-    `\n\nI detected your timezone as **${tzLabel}**. Correct?`;
+    `When you need to meet with someone, I handle the back-and-forth.` +
+    `\n\nI'm assuming you're in **${tzLabel}** — just say the word if I've got that wrong.` +
+    `\n\nLet's get you set up — takes about a minute.`;
 
   return {
     phase: "intro",
-    messages: [
-      {
-        content,
-        options: [
-          { number: 1, label: `Yes, ${tzLabel}`, value: tz },
-          { number: 2, label: "No, let me change it", value: "change_tz" },
-        ],
-      },
-    ],
-  };
-}
-
-// Phase 1b: Timezone picker (shown only if user wants to change).
-// Options are driven by TIMEZONE_TABLE — single source of truth.
-// A compact picker of ~9 zones from different regions keeps the quick-reply
-// list short; anything not here uses "Other" → freetext.
-const ONBOARDING_TIMEZONE_PICKS: string[] = [
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "Europe/London",
-  "Europe/Paris",
-  "Asia/Kolkata",
-  "Asia/Tokyo",
-  "Australia/Sydney",
-];
-
-export function getTimezonePickerMessages(): PhaseResult {
-  const options = ONBOARDING_TIMEZONE_PICKS.map((iana, i) => {
-    const entry = getTimezoneEntry(iana);
-    const label = entry
-      ? `${entry.long} · ${shortTimezoneLabel(iana)}`
-      : iana;
-    return { number: i + 1, label, value: iana };
-  });
-  options.push({ number: options.length + 1, label: "Other", value: "other_tz" });
-
-  return {
-    phase: "intro",
-    messages: [
-      {
-        content: `What timezone are you in?`,
-        options,
-      },
-    ],
-  };
-}
-
-// Phase 1c: Timezone free-text input (shown only if user picks "Other")
-export function getTimezoneInputMessages(): PhaseResult {
-  return {
-    phase: "intro",
-    messages: [
-      {
-        content: `Type your IANA timezone (e.g. "America/New_York", "Europe/Berlin", "Asia/Singapore").`,
-      },
-    ],
-    placeholder: "America/New_York",
+    messages: [{ content }],
+    autoAdvance: true,
   };
 }
 

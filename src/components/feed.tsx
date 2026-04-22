@@ -160,7 +160,17 @@ export default function Feed() {
 
     async function initOnboarding() {
       try {
-        const res = await fetch("/api/onboarding/chat");
+        // Seed the user's tz from the browser on first onboarding GET. The
+        // server ignores this if a tz is already stored (createUser seeds
+        // from Google Calendar settings when possible). Prevents the race
+        // where a user who didn't grant calendar scope has no tz seeded and
+        // the very first chat turn falls back to a default.
+        let browserTz = "";
+        try {
+          browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+        } catch {}
+        const qs = browserTz ? `?browserTz=${encodeURIComponent(browserTz)}` : "";
+        const res = await fetch(`/api/onboarding/chat${qs}`);
         if (!res.ok) return;
         const data = await res.json();
 
@@ -450,7 +460,13 @@ export default function Feed() {
     setClarifierState(null);
 
     // ── Onboarding freeform input (about_you, protection_blocks, etc.) ──
-    if (isOnboarding && onboardingPhase) {
+    //
+    // Intro is a welcome-only auto-advancing phase — freetext during intro
+    // (e.g. a user who reads the welcome and immediately types "Book time
+    // w/ Danny…") should route to the normal channel chat handler, NOT to
+    // the onboarding POST. Tz is already seeded; no blocking question to
+    // answer. We fall through to /api/channel/chat below.
+    if (isOnboarding && onboardingPhase && onboardingPhase !== "intro") {
       setInput("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
       addUserMessage(text);

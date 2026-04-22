@@ -9,8 +9,6 @@ import {
   OnboardingPhase,
   OnboardingContext,
   getIntroMessages,
-  getTimezonePickerMessages,
-  getTimezoneInputMessages,
   getDefaultsFormatMessages,
   getPhoneNumberMessages,
   getZoomLinkMessages,
@@ -25,7 +23,6 @@ import {
 } from "@/lib/onboarding-machine";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { safeTimezone, getUserTimezone } from "@/lib/timezone";
-import { generateOnboardingCalendarRead } from "@/lib/calendar-read";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
 import { parseCustomBusinessHours } from "./_parse-business-hours";
 
@@ -48,9 +45,14 @@ interface UserPreferences {
 }
 
 /**
- * GET /api/onboarding/chat — returns current onboarding state + initial messages
+ * GET /api/onboarding/chat — returns current onboarding state + initial messages.
+ *
+ * Accepts optional `?browserTz=...` query param. If the user has no stored
+ * tz yet, we seed it from the browser (validated with `safeTimezone`) and
+ * stamp `timezoneSource: "browser-detected"`. A subsequent host correction
+ * in normal chat will flip the source to "host-confirmed". Never blocks.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -77,7 +79,23 @@ export async function GET() {
     return NextResponse.json({ phase: "complete", messages: [], redirect: "/dashboard" });
   }
 
-  const prefs = (user.preferences as UserPreferences) || {};
+  let prefs = (user.preferences as UserPreferences) || {};
+  const explicit = prefs.explicit || {};
+
+  // Seed tz from browser if we don't have one yet (e.g. createUser couldn't
+  // reach Google Calendar settings). One-shot write; never overwrites.
+  const browserTzRaw = req.nextUrl.searchParams.get("browserTz");
+  if (browserTzRaw && !explicit.timezone) {
+    const seeded = safeTimezone(browserTzRaw);
+    if (seeded === browserTzRaw) {
+      await updatePrefs(user.id, prefs, explicit, {
+        timezone: seeded,
+        timezoneSource: "browser-detected",
+      });
+      prefs = { ...prefs, explicit: { ...explicit, timezone: seeded, timezoneSource: "browser-detected" } };
+    }
+  }
+
   const tz = getUserTimezone(prefs as unknown as Record<string, unknown>);
 
   const ctx: OnboardingContext = {
@@ -88,18 +106,6 @@ export async function GET() {
 
   // Resume at saved phase or start fresh
   const phase = (user.onboardingPhase as OnboardingPhase) || "intro";
-
-  // Wow-factor calendar read — best-effort, only on the intro phase.
-  // Generated fresh on each GET so a user who refreshes gets a new riff;
-  // if it's slow or fails, onboarding still renders without it.
-  if (phase === "intro") {
-    const paragraph = await generateOnboardingCalendarRead(
-      user.id,
-      tz,
-      user.name || undefined
-    );
-    if (paragraph) ctx.calendarReadParagraph = paragraph;
-  }
 
   const result = getMessagesForPhase(phase, ctx);
   // Persist the intro message only once per onboarding run so repeated GETs
@@ -190,32 +196,10 @@ export async function POST(req: NextRequest) {
 
   switch (currentPhase) {
     case "intro": {
-      if (response === "change_tz") {
-        advancing = false;
-        result = getTimezonePickerMessages();
-        return await respondWithPersist(user.id, result);
-      }
-      if (response === "other_tz") {
-        // Show free-text timezone input
-        advancing = false;
-        result = getTimezoneInputMessages();
-        return await respondWithPersist(user.id, result);
-      }
-      // Validate timezone — if invalid, ask again
-      const selectedTz = response || tz;
-      const validatedTz = safeTimezone(selectedTz);
-      if (validatedTz !== selectedTz && response) {
-        // User typed an invalid timezone — show error and re-prompt
-        advancing = false;
-        result = {
-          phase: "intro",
-          messages: [{ content: `"${response}" isn't a recognized timezone. Try the format **Continent/City** (e.g. America/New_York, Europe/Berlin).` }],
-          placeholder: "America/New_York",
-        };
-        return await respondWithPersist(user.id, result);
-      }
-      await updatePrefs(user.id, prefs, explicit, { timezone: validatedTz });
-      ctx.detectedTimezone = validatedTz;
+      // No tz parsing here. Tz is seeded server-side from Google Calendar
+      // (createUser) and/or client-browser (`?browserTz=` on GET). The
+      // intro phase is a welcome-only auto-advance: any response (including
+      // the "auto" ping from the client) just advances to defaults_format.
       break;
     }
 
