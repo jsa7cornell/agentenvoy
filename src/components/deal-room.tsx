@@ -15,7 +15,7 @@ import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
 import { TimezonePicker } from "./timezone-picker";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { onboardingCallbackUrl } from "@/lib/onboarding/return-to";
-import { TimeChipList, type TimeChipData } from "./time-chip-list";
+import type { TimeChipData } from "./time-chip-list";
 import { OfferCard } from "./deal-room/offer-card";
 import { ExternalAgentPrimer } from "./deal-room/external-agent-primer";
 import { SendFeedbackLink } from "./send-feedback";
@@ -1824,7 +1824,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           )}
           <MatchPulse
             justMatched={justMatched}
-            matchCount={bilateralByDay ? Object.values(bilateralByDay).reduce((n, v) => n + v.length, 0) : 0}
+            matchCount={bilateralByDay ? Object.values(bilateralByDay).filter((v) => v.some((c) => c.color === "both")).length : 0}
             enabled={!isHost && !confirmed}
             defaultLabel="Envoy"
           >
@@ -1844,10 +1844,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             }}
             headerSlot={headerSlot}
             footerSlot={tzPicker}
-            bilateralByDay={bilateralByDay}
-            hostFirstName={hostName ? hostName.split(" ")[0] : undefined}
-            hostInitialSource={hostName || "Host"}
-            guestInitialSource={guestUser?.name || inviteeName || "Guest"}
           />
           </MatchPulse>
         </div>
@@ -2052,19 +2048,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             // labelColor comes from MESSAGE_ROLE_DISPATCH via roleStyle.
             const labelColor = roleStyle.labelColor;
 
-            // Bilateral time chips render inline below the guest_envoy's
-            // message — the greeting names a top pick and the chips let the
-            // guest (or host watching) tap an alternative. Only surfaces when
-            // server returned bilateralByDay data (guest is logged in + has
-            // calendar connected). Show on the guest_envoy message that
-            // immediately follows the host's greeting — i.e. the one with no
-            // earlier guest_envoy message in the thread.
-            const isFirstGuestEnvoy =
-              msg.role === "guest_envoy" &&
-              !messages.slice(0, idx).some((m) => m.role === "guest_envoy");
-            const showChipsHere =
-              isFirstGuestEnvoy && bilateralByDay && Object.keys(bilateralByDay).length > 0;
-
             // Slice 9 — proxy attribution badge. Server writes
             // metadata.delegateSpeaker when Envoy detects a proxy
             // (ai_agent, human_assistant, or unknown). Render a small
@@ -2192,39 +2175,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                         )}
                     <div className="whitespace-pre-wrap break-words">{text}</div>
                     {delegateBadge}
-                    {showChipsHere && bilateralByDay && (
-                      <TimeChipList
-                        bilateralByDay={bilateralByDay}
-                        primaryTimezone={slotTimezone}
-                        counterpartyTimezone={slotTimezone === "America/Los_Angeles" ? undefined : "America/Los_Angeles"}
-                        onSelectSlot={({ start, end, color }) => {
-                          // "both" chips are available on both calendars →
-                          // skip the Envoy round-trip and pop the confirm card.
-                          // Other colors (guest-only, near-miss) still route
-                          // through chat so Envoy can negotiate the gap.
-                          if (color === "both" && !confirmed) {
-                            proposeFromSlot({ start, end });
-                            return;
-                          }
-                          const d = new Date(start);
-                          const day = d.toLocaleDateString("en-US", {
-                            weekday: "long",
-                            month: "short",
-                            day: "numeric",
-                            timeZone: slotTimezone,
-                          });
-                          const time = d.toLocaleTimeString("en-US", {
-                            hour: "numeric",
-                            minute: "2-digit",
-                            timeZone: slotTimezone,
-                          });
-                          const hostFirst = hostName ? hostName.split(" ")[0] : "you";
-                          const template = `Any chance ${day} at ${time} could work for ${hostFirst}? It's close — let me know if we can make it happen.`;
-                          setInput(template);
-                          document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-                        }}
-                      />
-                    )}
                   </div>
                 </div>
 
@@ -2256,53 +2206,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         ))}
 
         <div data-messages-end />
-
-        {/* Standalone bilateral chips (2026-04-17). Rendered outside the
-            message stream so anonymous guests — who have no guest_envoy
-            message to attach chips to — can see mutual-availability overlap
-            after connecting their calendar. Skipped for logged-in guests
-            whose guest_envoy greeting already embeds the TimeChipList. */}
-        {!confirmed && !isHost && !isGuest && !latestProposal && bilateralByDay &&
-          Object.keys(bilateralByDay).length > 0 && (
-            <div className="flex justify-start">
-              <div className="max-w-[85%] rounded-2xl border border-emerald-700/40 bg-emerald-900/10 px-4 py-3">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-2">
-                  Calendar connected ✓
-                </div>
-                <p className="text-xs text-secondary mb-2 leading-snug">
-                  Here are the times that work for both of you. Tap a green chip to lock one in.
-                </p>
-                <TimeChipList
-                  bilateralByDay={bilateralByDay}
-                  primaryTimezone={slotTimezone}
-                  counterpartyTimezone={slotTimezone === "America/Los_Angeles" ? undefined : "America/Los_Angeles"}
-                  onSelectSlot={({ start, end, color }) => {
-                    if (color === "both" && !confirmed) {
-                      proposeFromSlot({ start, end });
-                      return;
-                    }
-                    const d = new Date(start);
-                    const day = d.toLocaleDateString("en-US", {
-                      weekday: "long",
-                      month: "short",
-                      day: "numeric",
-                      timeZone: slotTimezone,
-                    });
-                    const time = d.toLocaleTimeString("en-US", {
-                      hour: "numeric",
-                      minute: "2-digit",
-                      timeZone: slotTimezone,
-                    });
-                    const hostFirst = hostName ? hostName.split(" ")[0] : "you";
-                    setInput(
-                      `Any chance ${day} at ${time} could work for ${hostFirst}? It's close — let me know if we can make it happen.`
-                    );
-                    document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-                  }}
-                />
-              </div>
-            </div>
-          )}
 
         {/* Stage 2 offer-mode card (proposal 2026-04-21_deal-room-widget-
             state-machine §4). Shown when `deriveMode(...)` resolves to
