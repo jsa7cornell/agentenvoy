@@ -71,7 +71,7 @@ export function MatchPulse({
   // of <AvailabilityCalendar> inside the same bubble; we own it here so the
   // crossfade and the ring share lifecycle.
   const label = enabled && badgeVisible
-    ? `Matched · ${matchCount} mutual ${matchCount === 1 ? "time" : "times"}`
+    ? `Matched · ${matchCount} ${matchCount === 1 ? "day" : "days"} both free`
     : defaultLabel;
 
   return (
@@ -87,7 +87,7 @@ export function MatchPulse({
       {children}
       {enabled && justMatched && (
         <span className="sr-only" aria-live="polite">
-          Calendars matched. {matchCount} {matchCount === 1 ? "time works" : "times work"} for both of you.
+          Calendars matched. {matchCount} {matchCount === 1 ? "day" : "days"} both free.
         </span>
       )}
     </div>
