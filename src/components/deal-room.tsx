@@ -2,6 +2,11 @@
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
+import {
+  resolveTimeOfDayTheme,
+  hasNoStoredThemePreference,
+} from "@/lib/time-of-day-theme";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { MatchPulse } from "./match-pulse";
 import { DashboardHeader } from "./dashboard-header";
@@ -93,6 +98,16 @@ interface DealRoomProps {
 
 export function DealRoom({ slug, code }: DealRoomProps) {
   const router = useRouter();
+  const { setTheme } = useTheme();
+  // Time-of-day theme default (2026-04-21 deal-room reshape, thread G).
+  // If the guest has no stored theme preference, pick light/dark based
+  // on their local wall-clock. Any explicit toggle still wins — this only
+  // fires on first visit when localStorage has no "theme" entry.
+  useEffect(() => {
+    if (hasNoStoredThemePreference()) {
+      setTheme(resolveTimeOfDayTheme());
+    }
+  }, [setTheme]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
