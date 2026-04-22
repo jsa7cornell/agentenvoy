@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { DealRoom } from "@/components/deal-room";
+import { formatDuration } from "@/lib/format-duration";
 
 interface Props {
   params: Promise<{ slug: string; code: string }>;
@@ -35,7 +36,21 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const topic = link?.topic;
   const rules = (link?.rules as Record<string, unknown>) || {};
   const format = rules.format as string | undefined;
-  const duration = rules.duration as string | undefined;
+  // rules.duration is stored as raw minutes (number or numeric string).
+  // Previously coerced straight into the description, which leaked raw
+  // "180" into the iMessage unfurl for a 3h link. Run through formatDuration
+  // so the preview reads "3h" / "30 min" etc.
+  const durationRaw = rules.duration;
+  const durationMinutes =
+    typeof durationRaw === "number"
+      ? durationRaw
+      : typeof durationRaw === "string"
+      ? Number.parseInt(durationRaw, 10)
+      : null;
+  const duration =
+    durationMinutes != null && Number.isFinite(durationMinutes)
+      ? formatDuration(durationMinutes)
+      : undefined;
   const isGroup = link?.mode === "group";
   const baseUrl = process.env.NEXTAUTH_URL ?? "https://agentenvoy.ai";
 
