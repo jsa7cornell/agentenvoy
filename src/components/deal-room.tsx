@@ -906,11 +906,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             }))
           );
         } else {
+          // Use a temp id (numeric ms-since-epoch) so the first poll's
+          // content-match pass in mergePollResult swaps this local row in
+          // place with the server-persisted greeting. A non-numeric id
+          // like "greeting" fails isTempId, falls through to id-dedup,
+          // and the server's CUID row appends — rendering the greeting
+          // twice (one DB row, two bubbles).
           setMessages([
             {
-              id: "greeting",
+              id: Date.now().toString(),
               role: "administrator",
               content: data.greeting,
+              createdAt: new Date().toISOString(),
             },
           ]);
         }
