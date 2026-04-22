@@ -87,16 +87,16 @@ export interface OnboardingContext {
 
 // ── Phase handlers ─────────────────────────────────────────────────────
 
-// Phase 1: Welcome + Timezone
+// Phase 1: Welcome
+// Tz is seeded from the browser (or Google Calendar settings) before onboarding
+// runs; we mention it conversationally so a wrong guess is cheap to correct in
+// normal chat later, but never blocks the first turn. No quick-replies, no
+// phase gate — intro auto-advances to the next active phase after a brief dwell.
 export function getIntroMessages(ctx: OnboardingContext): PhaseResult {
   const name = ctx.userName ? ctx.userName.split(" ")[0] : "there";
   const tz = ctx.detectedTimezone || "America/Los_Angeles";
-  // Prefer the curated long label from the table; fall back to Intl-derived text.
   const tzLabel = `${longTimezoneLabel(tz)} (${shortTimezoneLabel(tz)})`;
 
-  // The "for instance" wow snippet: a single calendar-grounded sentence
-  // generated in the route handler and passed in via ctx. Embedded inline
-  // in the greeting so it reads naturally, not as a standalone message.
   const forInstance = ctx.calendarReadParagraph
     ? ` For instance, ${ctx.calendarReadParagraph.replace(/^\s*for instance,?\s*/i, "").replace(/^[A-Z]/, (c) => c.toLowerCase())}`
     : "";
@@ -106,20 +106,13 @@ export function getIntroMessages(ctx: OnboardingContext): PhaseResult {
     `When you need to meet with someone, I handle the back-and-forth. ` +
     `I thrive in the context of your calendar and use that to find the best time for the most important people — ` +
     `I'm personalized and context-aware.${forInstance}` +
-    `\n\nLet's get you set up. Takes about a minute — mostly quick choices.` +
-    `\n\nI detected your timezone as **${tzLabel}**. Correct?`;
+    `\n\nI'm assuming you're in **${tzLabel}** — just say the word if I've got that wrong.` +
+    `\n\nLet's get you set up. Takes about a minute — mostly quick choices.`;
 
   return {
     phase: "intro",
-    messages: [
-      {
-        content,
-        options: [
-          { number: 1, label: `Yes, ${tzLabel}`, value: tz },
-          { number: 2, label: "No, let me change it", value: "change_tz" },
-        ],
-      },
-    ],
+    messages: [{ content }],
+    autoAdvance: true,
   };
 }
 
