@@ -25,6 +25,7 @@ import { runWithStageRotation } from "@/agent/progress-rotation";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { classifyChatIntent } from "@/agent/intent-classifier";
+import { isEchoOfRecentEnvoy } from "@/lib/echo-detect";
 import { normalizeChatIntent, type ChatIntent, type ChatIntentBlock } from "@/lib/intent";
 import { runDispatchHandler } from "@/agent/dispatch-handler";
 import { computeProfileGaps } from "@/lib/profile-gaps";
@@ -233,6 +234,8 @@ export async function POST(req: NextRequest) {
           let classifierLatencyMs = 0;
           let classifierRetried = false;
           let rawClassifierKind: string | null = null;
+          let fabricationDetected = false;
+          let echoFlag = false;
           if (hintedIntent) {
             intentBlock = { kind: hintedIntent };
           } else {
@@ -258,29 +261,29 @@ export async function POST(req: NextRequest) {
               })
               .join("\n");
 
-            // Pass the most recent envoy message so the classifier can
-            // resolve short-reply affirmatives ("new", "yes", "go ahead")
-            // as follow-ups to an envoy-asked question. Without this,
-            // a bare "new" after an envoy clarifier like "did you mean
-            // to send a new request?" classifies as `unclear` — see
-            // proposal 2026-04-22_chat-intent-router-context-carryover
-            // §2.2 (Failure B). ClassifyContext accepted priorEnvoyTurn
-            // since the router shipped; only the route caller was
-            // missing the plumbing.
-            const priorEnvoy = await prisma.channelMessage.findFirst({
+            // Fetch last 3 envoy messages to feed the deterministic echo
+            // detector (proposal §4.4) AND to plumb `priorEnvoyTurn` into
+            // the classifier context (proposal §4.1 / PR-α). Most-recent-first.
+            const recentEnvoy = await prisma.channelMessage.findMany({
               where: { channelId: safeChannel.id, role: "envoy" },
               orderBy: { createdAt: "desc" },
+              take: 3,
               select: { content: true },
             });
+            const recentEnvoyContents = recentEnvoy.map((m) => m.content);
+            const echoResult = isEchoOfRecentEnvoy(message, recentEnvoyContents);
+            echoFlag = echoResult.isEcho;
 
             const classified = await classifyChatIntent(message, {
               activeSessionsSummary: activeSessionsSummary || undefined,
-              priorEnvoyTurn: priorEnvoy?.content ?? undefined,
+              priorEnvoyTurn: recentEnvoyContents[0] ?? undefined,
+              echoFlag,
             });
             intentBlock = classified.intent;
             classifierLatencyMs = classified.latencyMs;
             classifierRetried = classified.retried;
             rawClassifierKind = classified.rawKind;
+            fabricationDetected = classified.fabricationDetected;
           }
           const intent = intentBlock.kind;
 
@@ -297,6 +300,8 @@ export async function POST(req: NextRequest) {
               userIntentHintUsed: !!hintedIntent,
               classifierRetried,
               classifierLatencyMs,
+              echoFlag,
+              fabricationDetected,
             }),
           );
 

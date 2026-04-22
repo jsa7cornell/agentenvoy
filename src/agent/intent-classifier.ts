@@ -58,6 +58,11 @@ export interface ClassifyContext {
   activeSessionsSummary?: string;
   /** Host's recent prior turn, if any, for trailing-revision cases. */
   priorEnvoyTurn?: string;
+  /** Deterministic echo detector (src/lib/echo-detect.ts) has flagged the
+   *  current host message as a near-verbatim copy of a recent envoy reply.
+   *  Playbook rule: when set, classifier picks `schedule`. Proposal §4.2
+   *  rule 3 / §4.4. */
+  echoFlag?: boolean;
 }
 
 export interface ClassifyResult {
@@ -67,6 +72,57 @@ export interface ClassifyResult {
   /** What the raw tool-use response contained before validation. Useful
    *  when the validator coerced a malformed response. */
   rawKind: string | null;
+  /** Server detected that Haiku's `clarifier` looked fabricated (Failure C
+   *  patterns from §2.3) or was missing — substituted a closed-set fallback.
+   *  Surfaced so telemetry can observe the rate. */
+  fabricationDetected: boolean;
+}
+
+/**
+ * Detect obvious-fabrication patterns from Failure C (§2.3). Conservative —
+ * we only flag the specific shapes we've seen Haiku produce when forced to
+ * fill the `clarifier` slot with nothing useful to say. False positives here
+ * just swap one clarifier for a closed-set fallback, which is strictly
+ * better copy, but we still keep the patterns narrow so genuine clarifiers
+ * survive.
+ */
+export function looksFabricated(clarifier: string): boolean {
+  const s = clarifier.toLowerCase();
+  // "Did you want to schedule X as a meeting, or are you letting me know
+  // you're unavailable…" — the exact Failure-C shape.
+  if (s.includes("as a meeting") && s.includes("unavailable")) return true;
+  // "Do you want to schedule or add an availability rule…" — the other
+  // observed dead-end binary (schedule-vs-rule) that v1 can't even route to.
+  if (s.includes("schedule or") && s.includes("rule")) return true;
+  if (s.includes("schedule or") && s.includes("availability")) return true;
+  return false;
+}
+
+const FALLBACK_NO_CONTEXT =
+  "I need more info — could you say more about what you'd like to do?";
+const FALLBACK_WITH_SESSIONS =
+  "Tell me who you'd like to meet with and when.";
+const FALLBACK_PROFILE_OR_RULE =
+  "Want me to schedule something, update a rule, or change a default?";
+
+/**
+ * Server-side closed-set clarifier fallback (proposal §9.3.2). Called when
+ * Haiku returns `kind: "unclear"` with no clarifier OR with a clarifier that
+ * matches the Failure-C fabrication patterns. Substitutes one of three
+ * short, honest clarifiers chosen from context.
+ */
+export function pickClosedSetClarifier(ctx: ClassifyContext): string {
+  const priorMentionsProfileOrRule =
+    typeof ctx.priorEnvoyTurn === "string" &&
+    /(default|profile|rule|availability|working hours|phone|zoom)/i.test(
+      ctx.priorEnvoyTurn,
+    );
+  if (priorMentionsProfileOrRule) return FALLBACK_PROFILE_OR_RULE;
+  const hasActive =
+    typeof ctx.activeSessionsSummary === "string" &&
+    ctx.activeSessionsSummary.trim().length > 0;
+  if (hasActive) return FALLBACK_WITH_SESSIONS;
+  return FALLBACK_NO_CONTEXT;
 }
 
 function buildUserPrompt(message: string, ctx: ClassifyContext): string {
@@ -77,14 +133,15 @@ function buildUserPrompt(message: string, ctx: ClassifyContext): string {
   if (ctx.priorEnvoyTurn) {
     parts.push(`Your prior turn:\n${ctx.priorEnvoyTurn.slice(0, 300)}`);
   }
-  parts.push(`Host's message:\n${message}`);
+  const echoMarker = ctx.echoFlag ? " [ECHO_OF_PRIOR_ENVOY]" : "";
+  parts.push(`Host's message:${echoMarker}\n${message}`);
   return parts.join("\n\n");
 }
 
 async function callClassifier(
   message: string,
   ctx: ClassifyContext,
-): Promise<{ block: ChatIntentBlock; rawKind: string | null }> {
+): Promise<{ block: ChatIntentBlock; rawKind: string | null; rawClarifier: string | null }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CLASSIFIER_TIMEOUT_MS);
   try {
@@ -97,8 +154,27 @@ async function callClassifier(
       abortSignal: controller.signal,
     });
     const rawKind = typeof object?.kind === "string" ? object.kind : null;
-    const validated = validateChatIntent(object);
-    return { block: validated, rawKind };
+    const rawClarifier =
+      typeof object?.clarifier === "string" ? object.clarifier : null;
+    // Schema-amendment (proposal §9.3.2): if Haiku returned `unclear` with
+    // either no clarifier or a fabricated-looking one, substitute a
+    // closed-set clarifier BEFORE validation — otherwise the validator's
+    // "unclear without clarifier → schedule" fallback triggers and we lose
+    // the unclear intent entirely.
+    let input: unknown = object;
+    if (
+      rawKind === "unclear" &&
+      (!rawClarifier ||
+        !rawClarifier.trim() ||
+        looksFabricated(rawClarifier))
+    ) {
+      input = {
+        ...(object as Record<string, unknown>),
+        clarifier: pickClosedSetClarifier(ctx),
+      };
+    }
+    const validated = validateChatIntent(input);
+    return { block: validated, rawKind, rawClarifier };
   } finally {
     clearTimeout(timeout);
   }
@@ -118,15 +194,32 @@ export async function classifyChatIntent(
   ctx: ClassifyContext = {},
 ): Promise<ClassifyResult> {
   const start = Date.now();
+  const fabricatedFrom = (rawClarifier: string | null, rawKind: string | null) =>
+    rawKind === "unclear" &&
+    ((typeof rawClarifier === "string" && rawClarifier.trim().length > 0 && looksFabricated(rawClarifier)) ||
+      !rawClarifier ||
+      !rawClarifier.trim());
   try {
-    const { block, rawKind } = await callClassifier(message, ctx);
-    return { intent: block, latencyMs: Date.now() - start, retried: false, rawKind };
+    const { block, rawKind, rawClarifier } = await callClassifier(message, ctx);
+    return {
+      intent: block,
+      latencyMs: Date.now() - start,
+      retried: false,
+      rawKind,
+      fabricationDetected: fabricatedFrom(rawClarifier, rawKind),
+    };
   } catch (firstErr) {
     console.warn("[intent-classifier] first call failed, retrying once:", firstErr);
     await new Promise((r) => setTimeout(r, CLASSIFIER_RETRY_BACKOFF_MS));
     try {
-      const { block, rawKind } = await callClassifier(message, ctx);
-      return { intent: block, latencyMs: Date.now() - start, retried: true, rawKind };
+      const { block, rawKind, rawClarifier } = await callClassifier(message, ctx);
+      return {
+        intent: block,
+        latencyMs: Date.now() - start,
+        retried: true,
+        rawKind,
+        fabricationDetected: fabricatedFrom(rawClarifier, rawKind),
+      };
     } catch (secondErr) {
       console.error(
         "[intent-classifier] second call failed, falling back to schedule:",
@@ -137,6 +230,7 @@ export async function classifyChatIntent(
         latencyMs: Date.now() - start,
         retried: true,
         rawKind: null,
+        fabricationDetected: false,
       };
     }
   }
