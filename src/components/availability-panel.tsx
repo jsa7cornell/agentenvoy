@@ -256,14 +256,20 @@ export function AvailabilityPanel({
     loadCalendars();
   }, [loadCalendars]);
 
-  async function toggleCalendarActive(id: string) {
+  // Sentinel used to represent "none selected" — no real Google calendar
+  // id matches this, so isCalendarActive returns false for every row.
+  // Backend stores as-is (empty array already means "all", so we can't
+  // reuse that to mean "none").
+  const NONE_SENTINEL = "__none__";
+
+  async function persistActiveCalendars(next: string[]) {
+    // Normalize "all selected" → empty array.
     const sorted = [...googleCalendars].map((c) => c.id).sort();
-    const currentActive =
-      activeCalendarIds.length === 0 ? sorted : [...activeCalendarIds].sort();
-    const isActive = currentActive.includes(id);
-    const next = isActive ? currentActive.filter((x) => x !== id) : [...currentActive, id];
-    // Normalize: all selected → empty array (meaning "all").
-    const normalized = next.length === sorted.length ? [] : next;
+    const onlyRealIds = next.filter((id) => id !== NONE_SENTINEL);
+    const normalized =
+      onlyRealIds.length === sorted.length && next.every((id) => id !== NONE_SENTINEL)
+        ? []
+        : next;
     setSavingCalendarFilter(true);
     try {
       await fetch("/api/connections/calendar-filter", {
@@ -279,7 +285,29 @@ export function AvailabilityPanel({
     }
   }
 
+  async function toggleCalendarActive(id: string) {
+    const sorted = [...googleCalendars].map((c) => c.id).sort();
+    const isNoneState = activeCalendarIds.includes(NONE_SENTINEL);
+    const currentActive = isNoneState
+      ? []
+      : activeCalendarIds.length === 0
+        ? sorted
+        : [...activeCalendarIds].sort();
+    const isActive = currentActive.includes(id);
+    const next = isActive ? currentActive.filter((x) => x !== id) : [...currentActive, id];
+    await persistActiveCalendars(next);
+  }
+
+  async function selectAllCalendars() {
+    await persistActiveCalendars([]);
+  }
+
+  async function selectNoneCalendars() {
+    await persistActiveCalendars([NONE_SENTINEL]);
+  }
+
   function isCalendarActive(id: string): boolean {
+    if (activeCalendarIds.includes(NONE_SENTINEL)) return false;
     if (activeCalendarIds.length === 0) return true; // all active
     return activeCalendarIds.includes(id);
   }
@@ -635,9 +663,28 @@ export function AvailabilityPanel({
                     variant below already does this — 55519ca missed desktop. */}
                 <div className="fixed inset-0 z-[60]" onClick={() => setCalPickerOpen(false)} />
                 <div className="absolute right-0 top-full mt-1 z-[70] w-64 bg-surface-inset border border-DEFAULT rounded-lg shadow-xl p-2">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted px-1 pb-1.5">
-                    Calendars
-                  </p>
+                  <div className="flex items-center justify-between px-1 pb-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                      Calendars
+                    </p>
+                    <div className="flex items-center gap-2 text-[10px]">
+                      <button
+                        onClick={selectAllCalendars}
+                        disabled={savingCalendarFilter}
+                        className="text-purple-400 hover:text-purple-300 transition disabled:opacity-50"
+                      >
+                        All
+                      </button>
+                      <span className="text-muted">·</span>
+                      <button
+                        onClick={selectNoneCalendars}
+                        disabled={savingCalendarFilter}
+                        className="text-purple-400 hover:text-purple-300 transition disabled:opacity-50"
+                      >
+                        None
+                      </button>
+                    </div>
+                  </div>
                   {calendarsLoading ? (
                     <p className="text-xs text-muted px-1 py-2">Loading…</p>
                   ) : calendarsError?.kind === "reconnect" ? (
@@ -766,9 +813,28 @@ export function AvailabilityPanel({
                 so the top rows of the calendar list aren't clipped. */}
             <div className="fixed inset-0 z-[60]" onClick={() => setCalPickerOpen(false)} />
             <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-[70] w-64 max-w-[calc(100vw-1rem)] bg-surface-inset border border-DEFAULT rounded-lg shadow-xl p-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted px-1 pb-1.5">
-                Calendars
-              </p>
+              <div className="flex items-center justify-between px-1 pb-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                  Calendars
+                </p>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <button
+                    onClick={selectAllCalendars}
+                    disabled={savingCalendarFilter}
+                    className="text-purple-400 hover:text-purple-300 transition disabled:opacity-50"
+                  >
+                    All
+                  </button>
+                  <span className="text-muted">·</span>
+                  <button
+                    onClick={selectNoneCalendars}
+                    disabled={savingCalendarFilter}
+                    className="text-purple-400 hover:text-purple-300 transition disabled:opacity-50"
+                  >
+                    None
+                  </button>
+                </div>
+              </div>
               {calendarsLoading ? (
                 <p className="text-xs text-muted px-1 py-2">Loading…</p>
               ) : calendarsError?.kind === "reconnect" ? (
