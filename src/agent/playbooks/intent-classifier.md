@@ -30,9 +30,21 @@ Emit a `clarifier` field — ONE concise question phrased for the host. Offer 2�
 
 **When the alternate tier the user might have meant is `profile` or `rule`** (stubs in v1): name the limitation in the clarifier text itself — *"I can't edit profile/rules from chat yet — but I can schedule something or answer a question about your defaults."* Quick-replies then offer a live CTA (schedule this utterance, or open the inquire handler on the topic), never a dead-end stub.
 
+## Short-reply, bare-noun, and echo rules
+
+Three rules that override the ambiguity-first default for specific, detectable shapes:
+
+1. **Short-reply / affirmative follow-up.** When the host's message is a one-word or bare-phrase affirmative (`yes`, `yeah`, `new`, `new one`, `go ahead`, `do it`, `sure`, `yep`) AND the prior envoy turn ends with a question offering a scheduling action (e.g. *"did you mean to send a new request?"*, *"want me to set that up?"*, *"should I book it?"*), pick `schedule`. Let the Sonnet scheduling pass pick up the thread context rather than producing another clarifier.
+
+2. **Bare-noun continuation.** When the host's message is a noun phrase (`bike ride`, `1:1`, `call`, `coffee`, `lunch`) that matches a topic or activity already mentioned in the prior envoy turn OR in recent session titles, pick `schedule`. These are NOT availability rules — availability rules use different language entirely (`no`, `block`, `out`, `busy`, `off`). A bare `bike ride` after the envoy asked what to schedule is a scheduling continuation; only `block bike rides` or `no bike rides this week` is a `rule`.
+
+3. **Echo-safety.** If the user prompt section contains the marker `[ECHO_OF_PRIOR_ENVOY]`, the server has deterministically flagged this message as a near-verbatim copy of a recent envoy reply. Pick `schedule` — the scheduling pass has its own rule for handling this case. Do NOT route to `unclear`.
+
 ## Examples
 
 - "Book me with Bob tomorrow at 2pm" → `{kind: "schedule"}`
+- priorEnvoyTurn: "…did you mean to send a new request?"; message: "new" → `{kind: "schedule"}`
+- priorEnvoyTurn: "What would you like to schedule?"; message: "bike ride" → `{kind: "schedule"}`
 - "Make my default time 12 to 5" → `{kind: "profile"}`
 - "No meetings on Fridays" → `{kind: "rule"}`
 - "What's on my calendar tomorrow?" → `{kind: "inquire"}`
