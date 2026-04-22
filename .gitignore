@@ -35,3 +35,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env
+
+# bench harness output (not CI-blocking, not versioned)
+/scripts/bench-intent/out/
