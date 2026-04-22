@@ -37,6 +37,10 @@
       {
         "selector": "CallExpression[callee.property.name='patch'][callee.object.property.name='events']",
         "message": "Direct calendar event writes (`calendar.events.patch`) are forbidden outside `src/lib/side-effects/handlers/`. Use a dispatch({ kind: 'calendar.*', ... }) effect (add a new kind if none fits). See RISK-MANAGEMENT.md."
+      },
+      {
+        "selector": "AssignmentExpression[left.type='MemberExpression'][left.object.name=/^(preferences|prefs|newPrefs|nextPrefs|updatedPrefs)$/][left.property.name=/^(phone|videoProvider|zoomLink|defaultDuration)$/]",
+        "message": "Profile fields (phone/videoProvider/zoomLink/defaultDuration) must be written via `writeProfileField` from `@/lib/profile-fields` (Proposal 3, decided 2026-04-21 §2.5). Top-level writes are legacy; the canonical home is `preferences.explicit.*`."
       }
     ]
   },
@@ -52,6 +56,12 @@
       "files": ["src/__tests__/**/*.ts"],
       "rules": {
         "no-restricted-imports": "off",
+        "no-restricted-syntax": "off"
+      }
+    },
+    {
+      "files": ["src/lib/profile-fields.ts"],
+      "rules": {
         "no-restricted-syntax": "off"
       }
     }

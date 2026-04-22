@@ -8,6 +8,7 @@ import { invalidateSchedule } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
 import type { UserPreferences } from "@/lib/scoring";
 import { getUserTimezone } from "@/lib/timezone";
+import { readProfileField } from "@/lib/profile-fields";
 
 // GET /api/agent/knowledge
 // Returns the host's knowledge base + a rendered preview
@@ -47,10 +48,10 @@ export async function GET() {
     preview,
     ambiguities: compiled?.ambiguities ?? [],
     activeCalendarIds: prefs.explicit?.activeCalendarIds ?? [],
-    phone: prefs.explicit?.phone || prefs.phone || "",
-    videoProvider: prefs.explicit?.videoProvider || prefs.videoProvider || "google-meet",
-    zoomLink: prefs.explicit?.zoomLink || prefs.zoomLink || "",
-    defaultDuration: prefs.explicit?.defaultDuration || prefs.defaultDuration || 30,
+    phone: readProfileField(prefs, "phone") || "",
+    videoProvider: readProfileField(prefs, "videoProvider") || "google-meet",
+    zoomLink: readProfileField(prefs, "zoomLink") || "",
+    defaultDuration: readProfileField(prefs, "defaultDuration") || 30,
   });
 }
 

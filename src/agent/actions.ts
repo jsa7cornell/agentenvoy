@@ -18,6 +18,9 @@ import { parseTimeOfDay, TIME_OF_DAY_WINDOWS } from "@/lib/time-of-day";
 import { sanitizeHostFlavor, sanitizeSuggestionList } from "@/lib/host-flavor-sanitizer";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
 import { formatDuration } from "@/lib/format-duration";
+import { writeProfileField } from "@/lib/profile-fields";
+import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
+import type { UserPreferences } from "@/lib/scoring";
 
 // --- Helpers ---
 
@@ -167,6 +170,10 @@ async function executeAction(
       return handleUpdateKnowledge(action.params, userId);
     case "update_meeting_settings":
       return handleUpdateMeetingSettings(action.params, userId);
+    case "update_business_hours":
+      return handleUpdateBusinessHours(action.params, userId);
+    case "update_availability_rule":
+      return handleUpdateAvailabilityRule(action.params, userId);
     case "save_guest_info":
       return handleSaveGuestInfo(action.params, userId, context?.sessionId);
     default:
@@ -1170,21 +1177,23 @@ async function handleUpdateKnowledge(
 }
 
 /**
- * Save host meeting settings (phone, video provider, zoom link, default duration)
- * to user.preferences. Used when the host supplies one of these mid-negotiation
- * (e.g., drops a phone number into chat for a phone call).
+ * Save host meeting settings (phone, video provider, zoom link, default
+ * duration) to user.preferences. Used when the host supplies one of these
+ * mid-negotiation (e.g., drops a phone number into chat for a phone call)
+ * or via the dedicated profile tier dispatch.
  *
- * Writes at the top level of preferences (not inside `explicit`), matching the
- * /api/agent/knowledge PUT contract so the account page + confirm route + composer
- * all read the same values. The confirm route reads hostPrefs.phone fresh at
- * confirm-time, so saving here auto-applies to any pending (unconfirmed) invites.
+ * Writes land under `preferences.explicit.*` — the canonical home per
+ * Proposal 3 (decided 2026-04-21 §2.5). `writeProfileField` also strips
+ * any legacy top-level copy of the same key so readers never see drift.
+ * Legacy rows still work because `readProfileField` falls back to the
+ * top level when `explicit.*` is absent.
  */
 async function handleUpdateMeetingSettings(
   params: Record<string, unknown>,
   userId: string
 ): Promise<ActionResult> {
   const phone = params.phone as string | undefined;
-  const videoProvider = params.videoProvider as string | undefined;
+  const videoProvider = params.videoProvider as "google-meet" | "zoom" | undefined;
   const zoomLink = params.zoomLink as string | undefined;
   const defaultDuration = params.defaultDuration as number | undefined;
 
@@ -1201,33 +1210,34 @@ async function handleUpdateMeetingSettings(
     where: { id: userId },
     select: { preferences: true },
   });
-  const currentPrefs = (user?.preferences as Record<string, unknown>) || {};
+  let prefs: UserPreferences = (user?.preferences as UserPreferences | null) ?? {};
 
-  const updates: Record<string, unknown> = { ...currentPrefs };
   const changed: string[] = [];
   if (phone !== undefined) {
-    updates.phone = phone || null;
+    prefs = writeProfileField(prefs, "phone", phone || undefined);
     changed.push(phone ? `phone: ${phone}` : "cleared phone");
   }
   if (videoProvider !== undefined) {
-    updates.videoProvider = videoProvider || "google-meet";
+    prefs = writeProfileField(prefs, "videoProvider", videoProvider || "google-meet");
     changed.push(`video provider: ${videoProvider}`);
   }
   if (zoomLink !== undefined) {
-    updates.zoomLink = zoomLink || null;
+    prefs = writeProfileField(prefs, "zoomLink", zoomLink || undefined);
     changed.push(zoomLink ? `zoom link saved` : "cleared zoom link");
   }
   if (defaultDuration !== undefined) {
-    updates.defaultDuration = defaultDuration || 30;
+    prefs = writeProfileField(prefs, "defaultDuration", defaultDuration || 30);
     changed.push(`default duration: ${defaultDuration} min`);
   }
 
   await prisma.user.update({
     where: { id: userId },
     data: {
-      preferences: updates as unknown as Parameters<typeof prisma.user.update>[0]["data"]["preferences"],
+      preferences: prefs as unknown as Prisma.InputJsonValue,
     },
   });
+
+  invalidateBehaviorSnapshot(userId);
 
   return {
     success: true,
@@ -1899,5 +1909,189 @@ async function handleReleaseHold(
     success: true,
     message: `Released ${result.count} hold${result.count === 1 ? "" : "s"} for ${name}.`,
     data: { sessionId, releasedCount: result.count },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Profile / rule handlers — Proposal 3 (Progressive Profiling), decided
+// 2026-04-21. Called from the narrower profile + rule dispatch tiers.
+// Both land writes under `preferences.explicit.*` (canonical per §2.5).
+// ---------------------------------------------------------------------------
+
+const ALLOWED_BUFFERS = new Set([0, 5, 10, 15, 30]);
+
+/**
+ * Update business hours window + between-meeting buffer. Writes to
+ * `preferences.explicit.businessHoursStart`, `businessHoursEnd`, and
+ * `bufferMinutes`. Any field can be omitted. Triggers `invalidateSchedule`
+ * on any change — recomputed with fresh inputs on the next query.
+ */
+async function handleUpdateBusinessHours(
+  params: Record<string, unknown>,
+  userId: string,
+): Promise<ActionResult> {
+  const startRaw = params.start;
+  const endRaw = params.end;
+  const bufferRaw = params.buffer;
+
+  const start = typeof startRaw === "number" ? startRaw : undefined;
+  const end = typeof endRaw === "number" ? endRaw : undefined;
+  const buffer = typeof bufferRaw === "number" ? bufferRaw : undefined;
+
+  if (start === undefined && end === undefined && buffer === undefined) {
+    return { success: false, message: "No business-hours fields to update" };
+  }
+
+  if (start !== undefined && (start < 0 || start > 23 || !Number.isInteger(start))) {
+    return { success: false, message: `Invalid start hour: ${start} (must be integer 0-23)` };
+  }
+  if (end !== undefined && (end < 1 || end > 24 || !Number.isInteger(end))) {
+    return { success: false, message: `Invalid end hour: ${end} (must be integer 1-24)` };
+  }
+  if (buffer !== undefined && !ALLOWED_BUFFERS.has(buffer)) {
+    return { success: false, message: `Invalid buffer: ${buffer} (must be one of 0, 5, 10, 15, 30)` };
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferences: true },
+  });
+  const prefs: UserPreferences = (user?.preferences as UserPreferences | null) ?? {};
+  const explicit = { ...(prefs.explicit ?? {}) };
+
+  const effectiveStart = start ?? explicit.businessHoursStart ?? 9;
+  const effectiveEnd = end ?? explicit.businessHoursEnd ?? 18;
+  if (effectiveStart >= effectiveEnd) {
+    return {
+      success: false,
+      message: `Business hours end (${effectiveEnd}) must be after start (${effectiveStart})`,
+    };
+  }
+
+  const changed: string[] = [];
+  if (start !== undefined) {
+    explicit.businessHoursStart = start;
+    changed.push(`start ${start}`);
+  }
+  if (end !== undefined) {
+    explicit.businessHoursEnd = end;
+    changed.push(`end ${end}`);
+  }
+  if (buffer !== undefined) {
+    explicit.bufferMinutes = buffer;
+    changed.push(`buffer ${buffer}m`);
+  }
+
+  const nextPrefs: UserPreferences = { ...prefs, explicit };
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { preferences: nextPrefs as unknown as Prisma.InputJsonValue },
+  });
+
+  const { invalidateSchedule } = await import("@/lib/calendar");
+  await invalidateSchedule(userId);
+  invalidateBehaviorSnapshot(userId);
+
+  return {
+    success: true,
+    message: `Business hours updated (${changed.join(", ")})`,
+  };
+}
+
+/**
+ * Add, update, or remove a structured availability rule. Rules live at
+ * `preferences.explicit.structuredRules` — see src/lib/availability-rules.ts
+ * for the AvailabilityRule shape and compileStructuredRules pathway.
+ *
+ * This handler does not recompile rules itself — that happens on the next
+ * availability query via the normal scoring path. It does call
+ * `invalidateSchedule` so stale compiled output is discarded.
+ */
+async function handleUpdateAvailabilityRule(
+  params: Record<string, unknown>,
+  userId: string,
+): Promise<ActionResult> {
+  const operation = params.operation as "add" | "update" | "remove" | undefined;
+  const id = typeof params.id === "string" ? params.id : undefined;
+  const ruleInput = params.rule as Partial<AvailabilityRule> | undefined;
+
+  if (operation !== "add" && operation !== "update" && operation !== "remove") {
+    return { success: false, message: `Invalid operation: ${String(operation)}` };
+  }
+  if ((operation === "update" || operation === "remove") && !id) {
+    return { success: false, message: `Operation "${operation}" requires an id` };
+  }
+  if ((operation === "add" || operation === "update") && !ruleInput) {
+    return { success: false, message: `Operation "${operation}" requires a rule body` };
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferences: true },
+  });
+  const prefs: UserPreferences = (user?.preferences as UserPreferences | null) ?? {};
+  const explicit = { ...(prefs.explicit ?? {}) };
+  const existing =
+    ((explicit as Record<string, unknown>).structuredRules as AvailabilityRule[] | undefined) ?? [];
+
+  let nextRules: AvailabilityRule[];
+  let summary: string;
+
+  if (operation === "add") {
+    const newId = `rule_${generateCode(8)}`;
+    const nowIso = new Date().toISOString();
+    const rule: AvailabilityRule = {
+      id: newId,
+      originalText: String(ruleInput!.originalText ?? "").trim() || "(no description)",
+      type: (ruleInput!.type as AvailabilityRule["type"]) ?? "recurring",
+      action: (ruleInput!.action as AvailabilityRule["action"]) ?? "block",
+      timeStart: ruleInput!.timeStart,
+      timeEnd: ruleInput!.timeEnd,
+      allDay: ruleInput!.allDay,
+      daysOfWeek: ruleInput!.daysOfWeek,
+      effectiveDate: ruleInput!.effectiveDate,
+      expiryDate: ruleInput!.expiryDate,
+      bufferMinutesBefore: ruleInput!.bufferMinutesBefore,
+      bufferMinutesAfter: ruleInput!.bufferMinutesAfter,
+      bufferAppliesTo: ruleInput!.bufferAppliesTo,
+      locationLabel: ruleInput!.locationLabel,
+      status: "active",
+      priority: typeof ruleInput!.priority === "number" ? ruleInput!.priority : 3,
+      createdAt: nowIso,
+    };
+    nextRules = [...existing, rule];
+    summary = `Added rule ${newId}`;
+  } else if (operation === "update") {
+    const idx = existing.findIndex((r) => r.id === id);
+    if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
+    const merged: AvailabilityRule = { ...existing[idx], ...ruleInput, id: existing[idx].id };
+    nextRules = [...existing];
+    nextRules[idx] = merged;
+    summary = `Updated rule ${id}`;
+  } else {
+    const idx = existing.findIndex((r) => r.id === id);
+    if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
+    nextRules = existing.filter((r) => r.id !== id);
+    summary = `Removed rule ${id}`;
+  }
+
+  (explicit as Record<string, unknown>).structuredRules = nextRules;
+  const nextPrefs: UserPreferences = { ...prefs, explicit };
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { preferences: nextPrefs as unknown as Prisma.InputJsonValue },
+  });
+
+  const { invalidateSchedule } = await import("@/lib/calendar");
+  await invalidateSchedule(userId);
+  invalidateBehaviorSnapshot(userId);
+
+  const addedRuleId = operation === "add" ? nextRules[nextRules.length - 1]?.id : undefined;
+  return {
+    success: true,
+    message: summary,
+    data: addedRuleId ? { id: addedRuleId } : { id },
   };
 }

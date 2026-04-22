@@ -388,14 +388,23 @@ export function getCompleteMessages(ctx: OnboardingContext): PhaseResult {
 // appear here — new users never enter them. Mid-flow users whose stored
 // `User.onboardingPhase` holds a removed value are auto-promoted past the
 // trim via nextPhase() — see proposal §2.1.1.
-const PHASE_ORDER: OnboardingPhase[] = [
+export const PHASE_ORDER = [
   "intro",
   "defaults_confirm",
   "complete",
-];
+] as const satisfies readonly OnboardingPhase[];
+
+/**
+ * The subset of `OnboardingPhase` values still in the live phase sequence.
+ * Proposal 3 (decided 2026-04-21 §2.1) uses this type where the caller
+ * needs to exclude the legacy phases retained in `OnboardingPhase` for
+ * in-flight users — e.g., activity/progress narration keyed on the live
+ * phase set.
+ */
+export type ActivePhase = typeof PHASE_ORDER[number];
 
 export function nextPhase(current: OnboardingPhase): OnboardingPhase {
-  const idx = PHASE_ORDER.indexOf(current);
+  const idx = (PHASE_ORDER as readonly OnboardingPhase[]).indexOf(current);
   // Legacy phase not in the active list → jump to defaults_confirm (the
   // first active phase after intro). Preserves any data already written;
   // the confirm card reads whatever values exist plus seed fallbacks.
@@ -405,7 +414,7 @@ export function nextPhase(current: OnboardingPhase): OnboardingPhase {
 }
 
 export function phaseIndex(phase: OnboardingPhase): number {
-  return PHASE_ORDER.indexOf(phase);
+  return (PHASE_ORDER as readonly OnboardingPhase[]).indexOf(phase);
 }
 
 export const TOTAL_PHASES = PHASE_ORDER.length;

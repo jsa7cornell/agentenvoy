@@ -9,6 +9,8 @@ import type { AvailabilityRule } from "@/lib/availability-rules";
 import { generateOfficeHoursLinkCode } from "@/lib/office-hours";
 import { getUserTimezone } from "@/lib/timezone";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
+import { readProfileField } from "@/lib/profile-fields";
+import type { UserPreferences } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
 
 // GET /api/tuner/preferences — fetch current user preferences for the tuner panel
@@ -91,7 +93,7 @@ export async function GET() {
     upcomingSchedulePreferences: user.upcomingSchedulePreferences ?? "",
     compiledRules: compiledFromStructured ?? compiled ?? null,
     structuredRules: cleanedRules,
-    videoProvider: (explicit.videoProvider as string) || (prefs.videoProvider as string) || "google-meet",
+    videoProvider: readProfileField(prefs as UserPreferences, "videoProvider") || "google-meet",
   });
 }
 
