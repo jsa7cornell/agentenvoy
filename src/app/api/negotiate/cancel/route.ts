@@ -48,10 +48,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const host = await prisma.user.findUnique({
+    where: { id: authSession.user.id },
+    select: { name: true },
+  });
+
   const result = await cancelSession({
     sessionId,
     hostId: authSession.user.id,
     initiator: "host",
+    initiatorName: host?.name ?? null,
     note: typeof note === "string" ? note : null,
     notifyAttendees: true,
   });

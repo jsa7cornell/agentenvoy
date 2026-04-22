@@ -33,6 +33,8 @@ export interface CancelSessionInput {
   hostId: string;
   /** Who initiated the cancellation. Drives the statusLabel + system message. */
   initiator: CancelInitiator;
+  /** Display name of the initiator (first name). Used in the timeline indicator. */
+  initiatorName?: string | null;
   /** Optional freeform note. Appended to the system message in the deal room. */
   note?: string | null;
   /** Whether Google's cancellation email should be sent to attendees.
@@ -61,7 +63,7 @@ export interface CancelSessionResult {
 export async function cancelSession(
   input: CancelSessionInput
 ): Promise<CancelSessionResult> {
-  const { sessionId, hostId, initiator, note, notifyAttendees = true } = input;
+  const { sessionId, hostId, initiator, initiatorName, note, notifyAttendees = true } = input;
 
   const session = await prisma.negotiationSession.findUnique({
     where: { id: sessionId },
@@ -140,12 +142,13 @@ export async function cancelSession(
     },
   });
 
-  // 5. Post system message in the deal room.
+  // 5. Post system timeline indicator in the deal room.
   await prisma.message.create({
     data: {
       sessionId,
       role: "system",
-      content: systemMessageFor(initiator, note),
+      content: cancelIndicatorFor(initiator, initiatorName),
+      metadata: { kind: "cancel_event" } as unknown as import("@prisma/client").Prisma.InputJsonValue,
     },
   });
 
@@ -168,24 +171,18 @@ function statusLabelFor(
   }
 }
 
-function systemMessageFor(
+function cancelIndicatorFor(
   initiator: CancelInitiator,
-  note: string | null | undefined
+  initiatorName: string | null | undefined,
 ): string {
-  const base = (() => {
-    switch (initiator) {
-      case "host":
-      case "agent":
-        return "This meeting was cancelled by the host.";
-      case "guest":
-        return "This meeting was cancelled by the guest.";
-      case "external":
-        return "This meeting was cancelled in Google Calendar.";
-    }
-  })();
-  const trimmed = note?.trim();
-  if (trimmed && trimmed.length > 0) {
-    return `${base}\n\nNote: ${trimmed}`;
+  const name = initiatorName?.split(/\s+/)[0]?.trim();
+  switch (initiator) {
+    case "host":
+    case "agent":
+      return name ? `Meeting cancelled by ${name}` : "Meeting cancelled by host";
+    case "guest":
+      return name ? `Meeting cancelled by ${name}` : "Meeting cancelled by guest";
+    case "external":
+      return "Meeting cancelled in Google Calendar";
   }
-  return base;
 }

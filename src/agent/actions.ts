@@ -415,10 +415,16 @@ async function handleCancel(
       ? (params.reason as string)
       : null;
 
+  const hostUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
+
   const result = await cancelSession({
     sessionId: session.id,
     hostId: userId,
     initiator: "agent",
+    initiatorName: hostUser?.name ?? null,
     note: reasonParam,
     notifyAttendees: true,
   });
