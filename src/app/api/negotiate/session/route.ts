@@ -1104,22 +1104,14 @@ export async function POST(req: NextRequest) {
       const useGenericBody =
         isGeneric || effectiveSteering === "open" || effectiveSteering === "soft";
 
+      // Closing V7 (2026-04-21 deal-room reshape proposal): pure calendar
+      // deferral — no prose enumeration of hours, no "typical slot" alt-format
+      // paragraph. The calendar below is the source of truth; the closing
+      // hands off to it in one short line. Duration/format flexibility moves
+      // to the card/widget affordances rather than greeting prose.
       const closing = useGenericBody
-        ? (() => {
-            const base = `Choose a slot from the calendar below or reply with what works best for you.`;
-            const durStr = effectiveDuration ? formatDuration(effectiveDuration) : "30 min";
-            const fmt = fmtLabel || "video";
-            // Alt-formats line that stays honest: mention what's NOT the
-            // declared/default so the guest sees the full menu.
-            const altFormats =
-              fmt === "video"
-                ? "phone or in person"
-                : fmt === "phone"
-                ? "video or in person"
-                : "phone or video";
-            return `${base}\n\n${hostFirstName}'s typical slot is ${durStr} ${fmt}, but if a different length or meeting type (${altFormats}) works better for you, just let me know — we can make that happen.`;
-          })()
-        : `Choose a slot from the calendar below or reply to me with your preference to get it booked.`;
+        ? `Highlighted times below are best for ${hostFirstName} — grab one, or counter-pick.`
+        : `Pick a time below, or reply with what works for you.`;
 
       // Host-supplied flavor (hostNote) is NO LONGER rendered verbatim in
       // the guest greeting (narration-hygiene-v2, 2026-04-20). Root cause:
@@ -1213,13 +1205,16 @@ export async function POST(req: NextRequest) {
         if (tzLine) headerLines.push(tzLine);
         const header = headerLines.join("\n");
 
-        // Generic links skip the bulleted schedule body and lean on the
-        // calendar widget below. Per John's 2026-04-21 feedback: "lean more
-        // on the calendar selector, don't need to put slots here." The
-        // generic closing already has "Choose a slot from the calendar
-        // below…" + the customization hint, so the greeting body is
-        // intentionally just header + closing with a blank line between.
-        greeting = isGeneric
+        // Greeting V7 (2026-04-21 deal-room reshape): when the render will
+        // lean on the calendar widget (useGenericBody — soft/open steering
+        // or generic link), skip the bulleted scheduleBody entirely. The
+        // widget IS the enumeration; repeating it in prose is the ~180-word
+        // Katie-link anti-pattern from report cmo9i7z9o.
+        //
+        // The bulleted body still renders for narrow/exclusive intents
+        // where the specific slots ARE the offer and the guest needs to see
+        // them even before scanning the calendar.
+        greeting = useGenericBody
           ? [header, closing].join("\n\n")
           : [header, scheduleBody, closing].join("\n\n");
       }
