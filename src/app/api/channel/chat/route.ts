@@ -26,6 +26,8 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { classifyChatIntent } from "@/agent/intent-classifier";
 import { normalizeChatIntent, type ChatIntent, type ChatIntentBlock } from "@/lib/intent";
+import { runDispatchHandler } from "@/agent/dispatch-handler";
+import { computeProfileGaps } from "@/lib/profile-gaps";
 
 // Load playbooks once at module scope (same pattern as composer.ts)
 let personaPlaybook = "";
@@ -55,12 +57,10 @@ try {
 const CHANNEL_SYSTEM = `${personaPlaybook ? personaPlaybook + "\n\n---\n\n" : ""}${channelPlaybook}`;
 const INQUIRE_SYSTEM = `${personaPlaybook ? personaPlaybook + "\n\n---\n\n" : ""}${inquirePlaybook}`;
 
-// Templated stub replies for tiers without live handlers in v1.
-// Proposal §2.4 — fires as a single text frame, no LLM call.
-const STUB_REPLY_PROFILE =
-  "I can't edit profile defaults from chat yet — that's coming in a future release. For now, you can update defaults in Settings.";
-const STUB_REPLY_RULE =
-  "I can't add or edit availability rules from chat yet — that's coming in a future release. For now, you can manage rules in Settings.";
+// Profile + rule tiers route through `runDispatchHandler` (Proposal 3,
+// decided 2026-04-21). Each tier loads a narrower playbook
+// (profile.md / rule.md) and emits the shorter `thinking → executing →
+// finalizing` taxonomy — no calendar scan or slot scoring.
 
 // ---------------------------------------------------------------------------
 // Progress narration protocol (proposal decided 2026-04-21)
@@ -284,16 +284,42 @@ export async function POST(req: NextRequest) {
             }),
           );
 
-          // Tier dispatch — stub + unclear short-circuit before calendar load.
+          // Tier dispatch — profile + rule short-circuit before the
+          // calendar load and run against their own narrower playbook
+          // via runDispatchHandler. Unclear also short-circuits below.
           if (intent === "profile" || intent === "rule") {
-            await userMsgPersist;
-            const stub = intent === "profile" ? STUB_REPLY_PROFILE : STUB_REPLY_RULE;
-            await prisma.channelMessage.create({
-              data: { channelId: safeChannel.id, role: "envoy", content: stub },
-            });
-            controller.enqueue(
-              encoder.encode(JSON.stringify({ type: "text", content: stub }) + "\n"),
-            );
+            const playbookRelativePath =
+              intent === "profile"
+                ? "src/agent/playbooks/profile.md"
+                : "src/agent/playbooks/rule.md";
+            let profileGapHints: string[] | undefined;
+            if (intent === "profile") {
+              try {
+                const gaps = await computeProfileGaps(safeUser.id);
+                profileGapHints = gaps.map((g) => g.hint);
+              } catch (e) {
+                console.warn(`[channel/chat] computeProfileGaps failed for ${safeUser.id}:`, e);
+              }
+            }
+            try {
+              await runDispatchHandler({
+                tier: intent,
+                playbookRelativePath,
+                userId: safeUser.id,
+                userName: user.name ?? null,
+                channelId: safeChannel.id,
+                userMessage: message,
+                userMsgPersist,
+                controller,
+                encoder,
+                profileGapHints,
+                emitStatus: (stage) => {
+                  emitStatus(stage);
+                },
+              });
+            } catch (e) {
+              console.error(`[channel/chat] dispatch-handler ${intent} failed:`, e);
+            }
             controller.close();
             return;
           }

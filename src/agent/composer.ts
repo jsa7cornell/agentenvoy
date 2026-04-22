@@ -6,6 +6,8 @@ import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability
 import { computeWeekAnchors, computeWeekAnchorsHostSide, formatWeekAnchorsForPrompt } from "@/lib/week-anchors";
 import { formatDuration } from "@/lib/format-duration";
 import { parseGuestTimeReferences, renderParsedTime } from "@/lib/time-parse";
+import { readProfileField } from "@/lib/profile-fields";
+import type { UserPreferences } from "@/lib/scoring";
 
 // --- Playbook cache (read once per cold start) ---
 
@@ -221,18 +223,24 @@ function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: str
     }
   }
 
-  // Meeting settings (phone, video provider, default duration)
+  // Meeting settings (phone, video provider, default duration) — read via
+  // readProfileField so `explicit.*` takes precedence over legacy top-level
+  // values (Proposal 3, decided 2026-04-21 §2.5).
   const meetingItems: string[] = [];
-  const defaultDur = (prefs.defaultDuration as number) || (explicit?.defaultDuration as number) || 30;
+  const prefsForRead = prefs as UserPreferences;
+  const defaultDur = readProfileField(prefsForRead, "defaultDuration") ?? 30;
+  const phoneVal = readProfileField(prefsForRead, "phone");
+  const providerVal = readProfileField(prefsForRead, "videoProvider");
+  const zoomLinkVal = readProfileField(prefsForRead, "zoomLink");
   meetingItems.push(`Default meeting duration: ${defaultDur} minutes. Use this when no duration is specified in the link rules.`);
-  if (prefs.phone) {
-    meetingItems.push(`Host phone: ${prefs.phone} (default location for phone calls — "guest calls host @ number")`);
+  if (phoneVal) {
+    meetingItems.push(`Host phone: ${phoneVal} (default location for phone calls — "guest calls host @ number")`);
   } else {
     meetingItems.push(`Host phone: NOT SET. If this meeting is a phone call and the host mentions a phone number in chat, save it with update_meeting_settings so the confirmation invite auto-populates. If a phone call is being arranged and no number is on file, ask the host for it.`);
   }
-  if (prefs.videoProvider === "zoom" && prefs.zoomLink) {
-    meetingItems.push(`Video provider: Zoom (link: ${prefs.zoomLink}). Use "Zoom" not "Google Meet" when discussing video meetings.`);
-  } else if (prefs.videoProvider === "zoom") {
+  if (providerVal === "zoom" && zoomLinkVal) {
+    meetingItems.push(`Video provider: Zoom (link: ${zoomLinkVal}). Use "Zoom" not "Google Meet" when discussing video meetings.`);
+  } else if (providerVal === "zoom") {
     meetingItems.push(`Video provider: Zoom (no link set — mention Zoom, not Google Meet)`);
   } else {
     meetingItems.push(`Video provider: Google Meet (auto-generated on confirmation)`);
