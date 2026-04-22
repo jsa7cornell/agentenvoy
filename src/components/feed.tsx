@@ -213,7 +213,14 @@ export default function Feed() {
       autoAdvance?: boolean;
       onboardingComplete?: boolean;
       placeholder?: string;
-    }) => {
+    },
+    // The phase the client *believed* it was on when it made the request that
+    // produced this result. Belt-and-suspenders gate for the demo auto-draft:
+    // we only arm the Anderson draft when we arrived at complete by answering
+    // the terminal calendar_evenings phase — never on a stale phase="complete"
+    // re-POST or a GET that lands someone already-complete back on /dashboard.
+    fromPhase?: OnboardingPhase,
+    ) => {
       // Onboarding finished — switch to normal chat mode (no reload)
       if (data.onboardingComplete) {
         for (const msg of data.messages) {
@@ -224,17 +231,20 @@ export default function Feed() {
         setActiveOptions(null);
         setIsCalibrated(true);
 
-        // Auto-fire a test meeting after a short pause so the user sees the
-        // "watch what happens..." message first, then Envoy creates the demo
-        // invite in front of their eyes.
-        setTimeout(() => {
-          // Tone note: phrase this as a concrete, completed-sounding request
-          // so the LLM's reply is a short acknowledgement ("Ok, here's the
-          // invite I drafted for John — [slot/link]. Let me know any tweaks.")
-          // rather than a performative recap of what it's about to do.
-          pendingSendRef.current = "Draft a 5-minute meet & greet video call with John Anderson, founder of AgentEnvoy, at my next available time. Keep your reply short — just confirm the draft with the time + link and invite tweaks.";
-          setInput(pendingSendRef.current);
-        }, 2500);
+        // Only arm the demo draft when we just finished the terminal phase
+        // in this session. Anything else (stale re-POST, resumed session that
+        // was already complete, server bug) must not push a meeting prompt
+        // into the composer before the user has actually completed calibration.
+        if (fromPhase === "calendar_evenings") {
+          setTimeout(() => {
+            // Tone note: phrase this as a concrete, completed-sounding request
+            // so the LLM's reply is a short acknowledgement ("Ok, here's the
+            // invite I drafted for John — [slot/link]. Let me know any tweaks.")
+            // rather than a performative recap of what it's about to do.
+            pendingSendRef.current = "Draft a 5-minute meet & greet video call with John Anderson, founder of AgentEnvoy, at my next available time. Keep your reply short — just confirm the draft with the time + link and invite tweaks.";
+            setInput(pendingSendRef.current);
+          }, 2500);
+        }
         return;
       }
 
@@ -306,7 +316,7 @@ export default function Feed() {
         throw new Error((err as { error?: string }).error || "Failed to advance onboarding");
       }
       const data = await res.json();
-      processOnboardingResult(data);
+      processOnboardingResult(data, phase);
     } catch (e) {
       console.error("Onboarding advance error:", e);
       addEnvoyMessage("Something went wrong. Please try again.");
