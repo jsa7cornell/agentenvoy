@@ -857,8 +857,9 @@ export function formatAvailabilityProse(
 interface BuildOpenWindowOpts {
   /** Host's first name. Used in the greeting prose. */
   hostFirstName: string;
-  /** The guest's display name, or null if unknown. */
+  /** The guest's display name(s). Array preferred; single string for compat. */
   inviteeName: string | null;
+  inviteeNames?: string[];
   /** Session topic (post-filter for generic terms). Null = no topic. */
   topic: string | null;
   /** Meeting format emoji ("📞" / "📹" / "🤝" / "📅") chosen by the caller. */
@@ -988,7 +989,8 @@ export function buildOpenWindowGreeting(opts: BuildOpenWindowOpts): string {
   // Intro — thread the topic through when we have one so context like
   // "hike" flows to the guest. Without topic we fall back to a generic
   // "find time" since format/duration are often deferred in this branch.
-  const greetee = inviteeName ? inviteeName.split(/\s+/)[0] : "there";
+  const firstName = (opts.inviteeNames?.[0] ?? inviteeName ?? "").split(/\s+/)[0];
+  const greetee = firstName || "there";
   const hello = `👋 Hi ${greetee}!`;
   const emoji = formatEmoji ? ` ${formatEmoji}` : "";
   const intro = topic

@@ -15,9 +15,13 @@ interface AvailabilityCalendarProps {
   slotsByDay: Record<string, Slot[]>;
   timezone: string;
   onSelectSlot?: (formattedTime: string, slot: { start: string; end: string }) => void;
+  /** Date-mode: called with YYYY-MM-DD when guest taps a day. */
+  onSelectDate?: (dateStr: string) => void;
   currentLocation?: { label: string; until?: string } | null;
   onClearLocation?: () => void;
   view?: "month" | "week";
+  /** When "date", renders a date-picker grid instead of time-slot pills. */
+  schedulingMode?: "time" | "date";
   onTimezoneClick?: () => void;
   duration?: number;
   minDuration?: number;
@@ -580,10 +584,130 @@ function MonthView({
   );
 }
 
+// ─── Date-mode picker ─────────────────────────────────────────────────
+// Renders the same calendar grid as MonthView but clicking a day calls
+// onSelectDate instead of revealing time-slot pills. Used for multi-day
+// events (duration ≥ 24h) where the guest picks a start date, not a time.
+
+function DatePickerView({
+  slotsByDay,
+  timezone: _timezone,
+  onSelectDate,
+  headerSlot,
+  footerSlot,
+  onTimezoneClick,
+}: Omit<AvailabilityCalendarProps, "view" | "schedulingMode">) {
+  const [viewMonth, setViewMonth] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+
+  const now = new Date();
+  const todayStr = toDateStr(now);
+
+  // Jump to the first month that has viable dates.
+  useEffect(() => {
+    const sorted = Object.keys(slotsByDay).sort();
+    const first = sorted.find((d) => d >= todayStr);
+    if (!first) return;
+    const firstDate = new Date(first + "T12:00:00");
+    const nowMonth = now.getMonth();
+    const nowYear = now.getFullYear();
+    if (firstDate.getFullYear() !== nowYear || firstDate.getMonth() !== nowMonth) {
+      setViewMonth(new Date(firstDate.getFullYear(), firstDate.getMonth(), 1));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotsByDay]);
+
+  const year = viewMonth.getFullYear();
+  const month = viewMonth.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayOfWeek = new Date(year, month, 1).getDay();
+
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const canGoPrev = viewMonth > currentMonthStart;
+
+  const cells: Array<{ day: number; dateStr: string } | null> = [];
+  for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    cells.push({ day: d, dateStr });
+  }
+
+  return (
+    <div>
+      {headerSlot && <div className="mb-3">{headerSlot}</div>}
+
+      <div className="flex items-center justify-between mb-2">
+        <button
+          onClick={() => setViewMonth(new Date(year, month - 1, 1))}
+          className={`p-1 rounded hover:bg-surface-secondary transition ${!canGoPrev ? "opacity-30 cursor-default" : ""}`}
+          disabled={!canGoPrev}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+        <span className="text-xs font-medium text-primary">
+          {viewMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+        </span>
+        <button
+          onClick={() => setViewMonth(new Date(year, month + 1, 1))}
+          className="p-1 rounded hover:bg-surface-secondary transition"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1.5 mb-1">
+        {DAY_HEADERS.map((d) => (
+          <div key={d} className="text-[11px] text-muted text-center font-medium">{d}</div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1.5">
+        {cells.map((cell, i) => {
+          if (!cell) return <div key={`empty-${i}`} />;
+          const isPast = cell.dateStr < todayStr;
+          const hasSlots = !!slotsByDay[cell.dateStr]?.length;
+          const isToday = cell.dateStr === todayStr;
+          const available = !isPast && hasSlots;
+
+          return (
+            <button
+              key={cell.dateStr}
+              onClick={() => available && onSelectDate?.(cell.dateStr)}
+              disabled={!available}
+              className={`
+                aspect-square rounded-lg text-sm font-medium flex items-center justify-center transition-all
+                ${available
+                  ? "bg-green-500/15 text-green-300 hover:ring-1 hover:ring-green-400 cursor-pointer"
+                  : "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700 cursor-default"}
+                ${isToday ? "ring-1 ring-indigo-500" : ""}
+              `}
+            >
+              {cell.day}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-2 text-[11px] text-muted text-center">Tap a date to confirm</div>
+
+      <div className="mt-3 pt-3 border-t border-DEFAULT">
+        {footerSlot ?? <TimezoneLabel timezone={_timezone} onClick={onTimezoneClick} />}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main export ──────────────────────────────────────────────────────
 
 export function AvailabilityCalendar(props: AvailabilityCalendarProps) {
-  const { view = "month", ...rest } = props;
+  const { view = "month", schedulingMode = "time", ...rest } = props;
+  if (schedulingMode === "date") return <DatePickerView {...rest} />;
   if (view === "week") return <WeekView {...rest} />;
   return <MonthView {...rest} />;
 }

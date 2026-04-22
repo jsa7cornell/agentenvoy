@@ -12,6 +12,7 @@ import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availabili
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
+import { getInviteeDisplay, getWaitingLabel } from "@/lib/invitee-display";
 import { formatDuration, formatDurationCasual } from "@/lib/format-duration";
 import { getUserTimezone } from "@/lib/timezone";
 import {
@@ -36,6 +37,8 @@ import {
   isSingleSlotExclusive,
   readStoredSteering,
 } from "@/lib/intent";
+import { computeDensityHorizon } from "@/lib/availability-density";
+import { getSchedulingMode } from "@/lib/scheduling-mode";
 
 const GENERIC_TOPICS = new Set([
   "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
@@ -64,13 +67,14 @@ function pickGreeting(messages: Array<{ role: string; content: string }>): strin
 
 function buildSessionTitle(
   topic: string | null,
-  inviteeName: string | null,
+  link: { inviteeName?: string | null; inviteeNames?: string[] },
   hostFirstName: string,
 ): string {
+  const display = getInviteeDisplay(link);
   if (topic && !isGenericTopic(topic)) {
-    return `${topic}${inviteeName ? ` — ${inviteeName}` : ""}`;
+    return `${topic}${display ? ` — ${display}` : ""}`;
   }
-  if (inviteeName) return `${hostFirstName} + ${inviteeName}`;
+  if (display) return `${hostFirstName} + ${display}`;
   return `Meeting — ${hostFirstName}`;
 }
 
@@ -200,12 +204,14 @@ export async function POST(req: NextRequest) {
       type: link.type,
       topic: link.topic,
       inviteeName: link.inviteeName,
+      inviteeNames: link.inviteeNames,
       format: (link.rules as Record<string, unknown>)?.format ?? null,
       duration: (link.rules as Record<string, unknown>)?.duration ?? null,
       location: (link.rules as Record<string, unknown>)?.location ?? null,
       activity: (link.rules as Record<string, unknown>)?.activity ?? null,
       activityIcon: (link.rules as Record<string, unknown>)?.activityIcon ?? null,
       timingLabel: (link.rules as Record<string, unknown>)?.timingLabel ?? null,
+      startTime: (link.rules as Record<string, unknown>)?.startTime ?? null,
     };
 
     // --- GROUP MODE: each visitor gets their own session ---
@@ -519,8 +525,8 @@ export async function POST(req: NextRequest) {
           guestId: guestIdForCreate,
           type: "calendar",
           status: "active",
-          title: buildSessionTitle(link.topic, link.inviteeName, hostFirstName),
-          statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
+          title: buildSessionTitle(link.topic, link, hostFirstName),
+          statusLabel: getWaitingLabel(link) || "Waiting for invitee",
           guestTimezone: resolveSeedGuestTimezoneForCreate({
           linkInviteeTimezone: link.inviteeTimezone,
           observedBrowserTimezone: guestTimezone,
@@ -541,8 +547,8 @@ export async function POST(req: NextRequest) {
         guestId: guestIdForCreate,
         type: "calendar",
         status: "active",
-        title: buildSessionTitle(link.topic, link.inviteeName, hostFirstName),
-        statusLabel: `Waiting for ${link.inviteeName || 'invitee'}`,
+        title: buildSessionTitle(link.topic, link, hostFirstName),
+        statusLabel: getWaitingLabel(link) || "Waiting for invitee",
         guestTimezone: resolveSeedGuestTimezoneForCreate({
           linkInviteeTimezone: link.inviteeTimezone,
           observedBrowserTimezone: guestTimezone,
@@ -732,6 +738,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Density-aware horizon: expand lookout window if the host is very busy.
+  // Multi-day (date-mode) links skip this — they use the full 8-week pool.
+  const schedulingMode = getSchedulingMode(linkRules as { duration?: number | null });
+  if (schedulingMode === "time") {
+    const horizonDays = computeDensityHorizon(filteredSlots);
+    const cutoff = new Date(Date.now() + horizonDays * 86_400_000);
+    filteredSlots = filteredSlots.filter((s) => new Date(s.start) < cutoff);
+    console.log(`[session] density horizon=${horizonDays}d filteredSlots=${filteredSlots.length}`);
+  }
+
   // Format availability as the V2 Danny-spec bullet list. Greeting is
   // always host-canonical post-2026-04-21 (decision #10) — the guest-tz
   // parameter is ignored by the formatter; the calendar card picker + Envoy
@@ -762,17 +778,9 @@ export async function POST(req: NextRequest) {
     const rawTopic = link.topic || null;
     const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
 
-    // Greeting V2 (Danny spec, 2026-04-18). Structure:
-    //   👋 Hi {name}! I'm scheduling time with you and {host}.
-    //   {emoji} {duration}-min {format}
-    //   🕒 Times in your timezone: {viewerTz} · {host} is on {hostTz}
-    //
-    //   **Mon, Apr 27**
-    //   • 6:00 AM PT / 9:00 AM ET
-    //   ...
-    //
-    //   👉 Reply with a time that works for you, and I'll get it booked.
-    const greeteeName = inviteeName ? inviteeName.split(/\s+/)[0] : "there";
+    // Greeting V2 (Danny spec, 2026-04-18).
+    const firstName = ((link.inviteeNames?.[0] ?? inviteeName ?? "").split(/\s+/)[0]);
+    const greeteeName = firstName || "there";
 
     // Format emoji: phone → 📞, video → 📹, in-person → 👤 (person; per UX
     // 2026-04-20 we switched from 🤝 to 👤 to convey "together/in person"
@@ -924,6 +932,7 @@ export async function POST(req: NextRequest) {
       greeting = buildOpenWindowGreeting({
         hostFirstName,
         inviteeName,
+        inviteeNames: link.inviteeNames,
         // For physical activities where the guest picks location/details,
         // activityText carries the event name ("hike", "bike ride") even
         // when no formal topic was set. Without this the greeting just says
@@ -1308,6 +1317,7 @@ export async function POST(req: NextRequest) {
       type: link.type,
       topic: link.topic,
       inviteeName: link.inviteeName,
+      inviteeNames: link.inviteeNames,
       format: (link.rules as Record<string, unknown>)?.format ?? null,
       duration: (link.rules as Record<string, unknown>)?.duration ?? null,
       location: (link.rules as Record<string, unknown>)?.location ?? null,
@@ -1316,6 +1326,7 @@ export async function POST(req: NextRequest) {
       activityOptions: (link.rules as Record<string, unknown>)?.activityOptions ?? null,
       guestPicks: (link.rules as Record<string, unknown>)?.guestPicks ?? null,
       timingLabel: (link.rules as Record<string, unknown>)?.timingLabel ?? null,
+      startTime: (link.rules as Record<string, unknown>)?.startTime ?? null,
       // Intent.steering is the host-classified steering tier (open / soft /
       // narrow / exclusive) from PR #58. Stage 2 `deriveMode()` reads this to
       // decide offer-mode eligibility for single-slot exclusive links. Pre-
