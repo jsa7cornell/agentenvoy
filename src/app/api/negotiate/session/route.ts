@@ -924,7 +924,12 @@ export async function POST(req: NextRequest) {
       greeting = buildOpenWindowGreeting({
         hostFirstName,
         inviteeName,
-        topic,
+        // For physical activities where the guest picks location/details,
+        // activityText carries the event name ("hike", "bike ride") even
+        // when no formal topic was set. Without this the greeting just says
+        // "I'm helping John find time with you" — the guest has no idea what
+        // the event is before picking a spot.
+        topic: topic || activityText,
         formatEmoji,
         hostTimezone,
         // guestTimezone intentionally omitted — greeting is host-canonical
