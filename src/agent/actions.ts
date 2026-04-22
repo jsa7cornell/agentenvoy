@@ -791,7 +791,6 @@ async function handleCreateLink(
       console.warn(`[create_link] hostNote dropped — contains newline or control char`);
     }
   }
-  const format = (params.format as string) || null;
   const urgency = (params.urgency as string) || null;
   // Meeting location for in-person (or phone/video where host wants to pin
   // a specific address/URL). Flows into link.rules.location so the deal-
@@ -822,6 +821,41 @@ async function handleCreateLink(
     ? rawTimingLabel.trim().slice(0, 80)
     : null;
   const rules = (params.rules as Record<string, unknown>) || {};
+
+  // Physical-activity guard (2026-04-22, feedback cmoa81lmy + cmoacqq5r).
+  // When the LLM omits `format` or `location` for a physical activity (bike
+  // ride, hike, etc.), the host's video default silently applies — sending
+  // the guest a Google Meet invite for a bike ride. This is a code-level
+  // safety net on top of the channel.md playbook rule; LLM compliance alone
+  // is not reliable enough for these two fields.
+  //
+  // Rules:
+  //   format: null + physical activity → force "in-person"
+  //   location: null + guestPicks.location unset + physical activity
+  //             → set guestPicks.location: true  (guest picks, not silently null)
+  //
+  // "Physical activity" = any activity whose primary mode is in-person and
+  // non-remote. We match on a substring allowlist rather than exact strings
+  // so "trail run", "morning hike", "short bike ride", etc. all hit.
+  const PHYSICAL_ACTIVITY_TOKENS = [
+    "bike", "hike", "run", "walk", "coffee", "lunch", "dinner",
+    "breakfast", "drinks", "swim", "workout", "yoga", "trail",
+  ];
+  const activityLower = activity?.toLowerCase() ?? "";
+  const isPhysicalActivity =
+    !!activity &&
+    PHYSICAL_ACTIVITY_TOKENS.some((t) => activityLower.includes(t));
+
+  let effectiveFormat = (params.format as string) || null;
+  if (isPhysicalActivity && !effectiveFormat) {
+    effectiveFormat = "in-person";
+    console.warn(
+      `[create_link] physical activity "${activity}" had no format — defaulting to in-person`,
+    );
+  }
+  // Rebind so the rest of the handler uses the corrected value.
+  // (The `format` const above is already read; we introduce effectiveFormat
+  // and use it in linkRulesPreIntent below.)
 
   // Drift detector (2026-04-20): the channel playbook asks the LLM to populate
   // hostNote whenever the host's phrasing carries context — including
@@ -963,9 +997,23 @@ async function handleCreateLink(
   const rawSteering = normalizeSteering(intentParam ?? params.steering);
   const declaredSteering: Steering = rawSteering ?? "open";
 
+  // Physical-activity location guard: if no location was set and guestPicks
+  // doesn't already declare location, mark it as guest-picks so it's
+  // intentional rather than silently null.
+  if (isPhysicalActivity && !location) {
+    const existingGuestPicks = params.guestPicks as Record<string, unknown> | undefined;
+    if (!existingGuestPicks?.location) {
+      // Inject into the guestPicksOut that will be written to the link rules.
+      guestPicksOut = { ...(guestPicksOut ?? {}), location: true };
+      console.warn(
+        `[create_link] physical activity "${activity}" had no location — setting guestPicks.location=true`,
+      );
+    }
+  }
+
   const linkRulesPreIntent = normalizeLinkRules({
     ...rules,
-    ...(format ? { format } : {}),
+    ...(effectiveFormat ? { format: effectiveFormat } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(urgency ? { urgency } : {}),
     ...(isVip ? { isVip: true } : {}),
@@ -1028,7 +1076,7 @@ async function handleCreateLink(
       status: "active",
       title,
       statusLabel: `Waiting for ${inviteeName || "invitee"}`,
-      format,
+      format: effectiveFormat,
       duration: (params.duration as number) || 30,
     },
   });
