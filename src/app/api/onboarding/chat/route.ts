@@ -10,8 +10,6 @@ import {
   OnboardingPhase,
   OnboardingContext,
   getIntroMessages,
-  getTimezonePickerMessages,
-  getTimezoneInputMessages,
   getDefaultsFormatMessages,
   getDefaultsConfirmMessages,
   getPhoneNumberMessages,
@@ -88,7 +86,40 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ phase: "complete", messages: [], redirect: "/dashboard" });
   }
 
-  const prefs = (user.preferences as UserPreferences) || {};
+  let prefs = (user.preferences as UserPreferences) || {};
+
+  // Resume at saved phase or start fresh
+  const isFreshRun = !user.onboardingPhase;
+  const phase = (user.onboardingPhase as OnboardingPhase) || "intro";
+
+  // Browser-tz seeding — only on fresh run and only when the user's
+  // current stored tz came from a weak source (no Google Calendar tz
+  // seeded at createUser yet). Validated via `safeTimezone`; invalid
+  // input is ignored. Stamped `explicit.timezoneSource = "browser-detected"`
+  // so a later calendar-read can overwrite if it finds something better.
+  if (isFreshRun) {
+    const browserTz = req.nextUrl.searchParams.get("browserTz");
+    const hasExplicitTz = typeof prefs.explicit?.timezone === "string";
+    if (browserTz && !hasExplicitTz) {
+      const safe = safeTimezone(browserTz);
+      if (safe === browserTz) {
+        const merged: UserPreferences = {
+          ...prefs,
+          explicit: {
+            ...(prefs.explicit || {}),
+            timezone: safe,
+            timezoneSource: "browser-detected",
+          },
+        };
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { preferences: merged as unknown as Prisma.InputJsonValue },
+        });
+        prefs = merged;
+      }
+    }
+  }
+
   const tz = getUserTimezone(prefs as unknown as Record<string, unknown>);
 
   const ctx: OnboardingContext = {
@@ -97,10 +128,6 @@ export async function GET(req: NextRequest) {
     meetSlug: user.meetSlug || undefined,
     seededDefaults: mergeSeededDefaults(prefs.explicit),
   };
-
-  // Resume at saved phase or start fresh
-  const isFreshRun = !user.onboardingPhase;
-  const phase = (user.onboardingPhase as OnboardingPhase) || "intro";
 
   // Fire onboarding.entered once per fresh run. The events helper dedupes
   // within 24h via the OnboardingEvent table, so double-GETs (StrictMode,
@@ -113,7 +140,9 @@ export async function GET(req: NextRequest) {
 
   // Wow-factor calendar read — best-effort, only on the intro phase.
   // Generated fresh on each GET so a user who refreshes gets a new riff;
-  // if it's slow or fails, onboarding still renders without it.
+  // if it's slow or fails, onboarding still renders without it. Kept in
+  // place (intro has no blocking quick-replies post-tz-ask-removal, so
+  // GET latency no longer races against the user's first freetext turn).
   if (phase === "intro") {
     const paragraph = await generateOnboardingCalendarRead(
       user.id,
@@ -213,32 +242,14 @@ export async function POST(req: NextRequest) {
 
   switch (currentPhase) {
     case "intro": {
-      if (response === "change_tz") {
-        advancing = false;
-        result = getTimezonePickerMessages();
-        return await respondWithPersist(user.id, result);
-      }
-      if (response === "other_tz") {
-        // Show free-text timezone input
-        advancing = false;
-        result = getTimezoneInputMessages();
-        return await respondWithPersist(user.id, result);
-      }
-      // Validate timezone — if invalid, ask again
-      const selectedTz = response || tz;
-      const validatedTz = safeTimezone(selectedTz);
-      if (validatedTz !== selectedTz && response) {
-        // User typed an invalid timezone — show error and re-prompt
-        advancing = false;
-        result = {
-          phase: "intro",
-          messages: [{ content: `"${response}" isn't a recognized timezone. Try the format **Continent/City** (e.g. America/New_York, Europe/Berlin).` }],
-          placeholder: "America/New_York",
-        };
-        return await respondWithPersist(user.id, result);
-      }
-      await updatePrefs(user.id, prefs, explicit, { timezone: validatedTz });
-      ctx.detectedTimezone = validatedTz;
+      // Intro auto-advances — no blocking tz ask. Tz is seeded from the
+      // browser (GET `?browserTz=`) or Google Calendar at createUser and is
+      // correctable in normal chat later. Any response reaching this case
+      // is the client's auto-advance ping; just persist the seeded tz so
+      // `explicit.timezone` is set before the next phase.
+      const seededTz = safeTimezone(tz);
+      await updatePrefs(user.id, prefs, explicit, { timezone: seededTz });
+      ctx.detectedTimezone = seededTz;
       break;
     }
 

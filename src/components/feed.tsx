@@ -169,9 +169,22 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
 
     async function initOnboarding() {
       try {
-        const url = onboardReturnTo
-          ? "/api/onboarding/chat?hasReturnTo=1"
-          : "/api/onboarding/chat";
+        // Seed the server with the browser-detected tz so the welcome can
+        // assume a reasonable zone before Google Calendar settings are
+        // consulted. Server validates + stamps `timezoneSource:"browser-detected"`;
+        // invalid values are ignored.
+        const browserTz = (() => {
+          try {
+            return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+          } catch {
+            return "";
+          }
+        })();
+        const params = new URLSearchParams();
+        if (onboardReturnTo) params.set("hasReturnTo", "1");
+        if (browserTz) params.set("browserTz", browserTz);
+        const qs = params.toString();
+        const url = qs ? `/api/onboarding/chat?${qs}` : "/api/onboarding/chat";
         const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
@@ -215,7 +228,15 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
       autoAdvance?: boolean;
       onboardingComplete?: boolean;
       placeholder?: string;
-    }) => {
+    },
+    // Belt-and-suspenders gate for the demo auto-draft: only arm the
+    // Anderson draft when we arrived at `complete` by advancing from the
+    // terminal phase in THIS session — never on a stale re-POST or a GET
+    // that lands an already-complete user back on /dashboard. The server
+    // already gates `onboardingComplete: true` to the terminal phase
+    // advance, so this is defense-in-depth.
+    fromPhase?: OnboardingPhase,
+    ) => {
       // Onboarding finished — switch to normal chat mode (no reload)
       if (data.onboardingComplete) {
         for (const msg of data.messages) {
@@ -233,6 +254,14 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           setTimeout(() => {
             router.replace(onboardReturnTo);
           }, 1200);
+          return;
+        }
+
+        // Only arm the demo auto-draft if this complete came from advancing
+        // the terminal phase (`defaults_confirm`) in this session. initOnboarding
+        // calls this fn with no fromPhase, so a resumed already-complete
+        // user never arms the draft.
+        if (fromPhase !== "defaults_confirm") {
           return;
         }
 
@@ -318,7 +347,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
         throw new Error((err as { error?: string }).error || "Failed to advance onboarding");
       }
       const data = await res.json();
-      processOnboardingResult(data);
+      processOnboardingResult(data, phase);
     } catch (e) {
       console.error("Onboarding advance error:", e);
       addEnvoyMessage("Something went wrong. Please try again.");
@@ -472,7 +501,12 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     setClarifierState(null);
 
     // ── Onboarding freeform input (about_you, protection_blocks, etc.) ──
-    if (isOnboarding && onboardingPhase) {
+    // Intro phase is an exception: freetext during the welcome dwell falls
+    // through to normal channel chat so a fresh user can type
+    // "Book time w/ Danny..." the moment the welcome renders, using the
+    // seeded tz, without being blocked by a phase that no longer asks for
+    // anything.
+    if (isOnboarding && onboardingPhase && onboardingPhase !== "intro") {
       setInput("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
       addUserMessage(text);
