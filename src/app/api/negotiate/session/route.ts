@@ -1314,6 +1314,7 @@ export async function POST(req: NextRequest) {
       activity: (link.rules as Record<string, unknown>)?.activity ?? null,
       activityIcon: (link.rules as Record<string, unknown>)?.activityIcon ?? null,
       activityOptions: (link.rules as Record<string, unknown>)?.activityOptions ?? null,
+      guestPicks: (link.rules as Record<string, unknown>)?.guestPicks ?? null,
       timingLabel: (link.rules as Record<string, unknown>)?.timingLabel ?? null,
       // Intent.steering is the host-classified steering tier (open / soft /
       // narrow / exclusive) from PR #58. Stage 2 `deriveMode()` reads this to
