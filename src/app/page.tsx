@@ -73,6 +73,12 @@ export default function Home() {
             <a href="/agents" className="hidden md:inline text-sm text-secondary hover:text-primary transition">For Agents</a>
             <button
               onClick={handleSignIn}
+              className="hidden md:inline text-sm text-secondary hover:text-primary transition"
+            >
+              Log in
+            </button>
+            <button
+              onClick={handleSignIn}
               className="inline-flex items-center gap-2 bg-accent hover:bg-accent-hover text-white px-4 py-2 rounded-lg text-sm font-semibold transition shadow-accent-glow group"
             >
               Get Started
