@@ -1844,6 +1844,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             }}
             headerSlot={headerSlot}
             footerSlot={tzPicker}
+            bilateralByDay={bilateralByDay}
+            hostFirstName={hostName ? hostName.split(" ")[0] : undefined}
+            hostInitialSource={hostName || "Host"}
+            guestInitialSource={guestUser?.name || inviteeName || "Guest"}
           />
           </MatchPulse>
         </div>
