@@ -751,7 +751,15 @@ async function handleCreateLink(
   }
 
   const code = generateCode();
-  const inviteeName = (params.inviteeName as string) || null;
+  // Accept inviteeNames[] (multi-guest) or legacy inviteeName (single string).
+  // LLM should emit inviteeNames for new links; inviteeName is a shim for old prompts.
+  const rawInviteeNames = params.inviteeNames;
+  const inviteeNames: string[] = Array.isArray(rawInviteeNames)
+    ? (rawInviteeNames as string[]).filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+    : typeof params.inviteeName === "string" && (params.inviteeName as string).trim()
+    ? [(params.inviteeName as string).trim()]
+    : [];
+  const inviteeName = inviteeNames[0] ?? null; // deprecated bridge — remove after inviteeName column drops
   const inviteeEmail = (params.inviteeEmail as string) || null;
   // Host-declared guest TZ (e.g. "Sarah is on EST"). Validated via Intl —
   // invalid zones silently drop to null rather than throw, so a bad LLM
@@ -1075,14 +1083,13 @@ async function handleCreateLink(
     },
   });
 
-  // Session display title. When no topic was specified, use "HostFirst + GuestName"
-  // so the dashboard shows something meaningful instead of a generic "Catch up".
-  // hostName was fetched above in the combined slug+name lookup.
   const hostFirstName = hostName?.split(/\s+/)[0] || "Host";
+  const { getInviteeDisplay, getWaitingLabel } = await import("@/lib/invitee-display");
+  const inviteeDisplay = getInviteeDisplay({ inviteeNames, inviteeName });
   const title = topic
-    ? `${topic} — ${inviteeName || "Invitee"}`
-    : inviteeName
-    ? `${hostFirstName} + ${inviteeName}`
+    ? `${topic}${inviteeDisplay ? ` — ${inviteeDisplay}` : ""}`
+    : inviteeDisplay
+    ? `${hostFirstName} + ${inviteeDisplay}`
     : `Meeting — ${hostFirstName}`;
 
   const session = await prisma.negotiationSession.create({
@@ -1092,7 +1099,7 @@ async function handleCreateLink(
       type: "calendar",
       status: "active",
       title,
-      statusLabel: `Waiting for ${inviteeName || "invitee"}`,
+      statusLabel: getWaitingLabel({ inviteeNames, inviteeName }),
       format: effectiveFormat,
       duration: (params.duration as number) || 30,
     },
@@ -1103,7 +1110,7 @@ async function handleCreateLink(
 
   return {
     success: true,
-    message: `Created link for ${inviteeName || "invitee"}${topic ? ` (${topic})` : ""}`,
+    message: `Created link for ${inviteeDisplay || "invitee"}${topic ? ` (${topic})` : ""}`,
     data: {
       sessionId: session.id,
       linkId: link.id,
