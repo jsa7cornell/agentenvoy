@@ -1197,7 +1197,8 @@ export async function POST(req: NextRequest) {
         const locPart = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
         const durPart = durCasual ? `${durCasual} ` : "";
         const proposal = `He's proposing ${durPart}${proseCandidate.phrase}${activityPart}${locPart}.`;
-        const proseHello = `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}. ${proposal}`;
+        const toneLine = guestGuidance?.tone ? `\n\n${guestGuidance.tone}` : "";
+        const proseHello = `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}. ${proposal}${toneLine}`;
         const proseClosing = `Pick a time below, or reply with what works for you.`;
         greeting = [proseHello, proseClosing].join("\n\n");
       } else {
@@ -1206,9 +1207,15 @@ export async function POST(req: NextRequest) {
         // Generic links have no single invitee, so the opener "scheduling time
         // with you and John" reads wrong. Use an agent-framed self-intro.
         const genericHello = `👋 I'm ${hostFirstName}'s scheduling agent.`;
+        // guestGuidance.tone — soft flavor line ("He's thinking a hike but
+        // open to coffee if that's easier"). Rendered after the opener so
+        // the guest gets the personal context before scanning the schedule.
+        // Skipped for generic links (no single invitee to personalize for).
+        const toneBlock = !isGeneric && guestGuidance?.tone ? guestGuidance.tone : null;
         const headerLines = [isGeneric ? genericHello : hello];
+        if (toneBlock) headerLines.push(toneBlock);
         if (tzLine) headerLines.push(tzLine);
-        const header = headerLines.join("\n");
+        const header = headerLines.join("\n\n");
 
         // Greeting V7 (2026-04-21 deal-room reshape): when the render will
         // lean on the calendar widget (useGenericBody — soft/open steering
