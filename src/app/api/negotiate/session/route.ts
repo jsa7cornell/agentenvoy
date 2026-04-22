@@ -789,13 +789,6 @@ export async function POST(req: NextRequest) {
       typeof linkRules.activity === "string" && linkRules.activity.trim()
         ? linkRules.activity.trim()
         : null;
-    // activityOptions — ordered menu of host-offered activities. When present,
-    // Envoy presents these to the guest so they can pick. Passed through to
-    // composer context ([MENU] block) and surfaced in session payload.
-    const activityOptions =
-      Array.isArray(linkRules.activityOptions) && (linkRules.activityOptions as string[]).length > 1
-        ? (linkRules.activityOptions as string[])
-        : null;
     const activityEmoji =
       typeof linkRules.activityIcon === "string" && linkRules.activityIcon.trim()
         ? linkRules.activityIcon.trim()
