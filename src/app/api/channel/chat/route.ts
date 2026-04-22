@@ -258,8 +258,24 @@ export async function POST(req: NextRequest) {
               })
               .join("\n");
 
+            // Pass the most recent envoy message so the classifier can
+            // resolve short-reply affirmatives ("new", "yes", "go ahead")
+            // as follow-ups to an envoy-asked question. Without this,
+            // a bare "new" after an envoy clarifier like "did you mean
+            // to send a new request?" classifies as `unclear` — see
+            // proposal 2026-04-22_chat-intent-router-context-carryover
+            // §2.2 (Failure B). ClassifyContext accepted priorEnvoyTurn
+            // since the router shipped; only the route caller was
+            // missing the plumbing.
+            const priorEnvoy = await prisma.channelMessage.findFirst({
+              where: { channelId: safeChannel.id, role: "envoy" },
+              orderBy: { createdAt: "desc" },
+              select: { content: true },
+            });
+
             const classified = await classifyChatIntent(message, {
               activeSessionsSummary: activeSessionsSummary || undefined,
+              priorEnvoyTurn: priorEnvoy?.content ?? undefined,
             });
             intentBlock = classified.intent;
             classifierLatencyMs = classified.latencyMs;
