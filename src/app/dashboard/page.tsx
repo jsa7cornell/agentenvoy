@@ -1,18 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Feed from "@/components/feed";
 import { AvailabilityPanel } from "@/components/availability-panel";
+import { validateReturnTo } from "@/lib/onboarding/return-to";
 
 const CHAT_MIN = 400;
 const CHAT_MAX = 860;
 const CHAT_DEFAULT = 610;
 
-export default function DashboardPage() {
+function DashboardPageInner() {
   const [chatWidth, setChatWidth] = useState(CHAT_DEFAULT);
   const dragging = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
+
+  // onboardReturnTo transport. See proposal
+  // `2026-04-21_lean-first-run-onboarding-and-returnto_*.md` §2.2 / §2.3.
+  // Validated here (same-origin path, no protocol-relative, no backslash)
+  // and passed to Feed so that on onboarding completion we route back to
+  // the original destination. Bad input is silently dropped.
+  const searchParams = useSearchParams();
+  const onboardReturnTo = validateReturnTo(searchParams.get("onboardReturnTo"));
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     dragging.current = true;
@@ -51,14 +61,14 @@ export default function DashboardPage() {
         style={{ width: chatWidth }}
       >
         <div className="flex-1 min-h-0 overflow-hidden">
-          <Feed />
+          <Feed onboardReturnTo={onboardReturnTo} />
         </div>
       </div>
 
       {/* Mobile-only chat */}
       <div className="flex md:hidden flex-1 flex-col overflow-hidden min-w-0">
         <div className="flex-1 min-h-0 overflow-hidden">
-          <Feed />
+          <Feed onboardReturnTo={onboardReturnTo} />
         </div>
       </div>
 
@@ -81,5 +91,16 @@ export default function DashboardPage() {
         <AvailabilityPanel />
       </div>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  // Next.js 14 requires useSearchParams to be wrapped in Suspense so that
+  // the static-export build doesn't fail with "useSearchParams should be
+  // wrapped in a suspense boundary".
+  return (
+    <Suspense fallback={<div className="flex-1" />}>
+      <DashboardPageInner />
+    </Suspense>
   );
 }

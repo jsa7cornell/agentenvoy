@@ -38,6 +38,19 @@ export const HOST_REQUIRED_FROM_DEAL_ROOM = [
 ] as const;
 
 /**
+ * Post-booking signup upsell: a guest who just confirmed a meeting in the
+ * deal room is being asked to create their own host account. They already
+ * demonstrated willingness to share read-only access during the read-side
+ * of the deal-room flow; asking for write on the upsell would be aggressive.
+ * Scope set mirrors deal-room; the `upgrade-scope` modal surfaces write
+ * later if/when they host their first meeting.
+ */
+export const HOST_REQUIRED_FROM_UPSELL = [
+  ...OPENID_BASE,
+  HOST_READ_SCOPE,
+] as const;
+
+/**
  * Back-compat alias. Most callers want the full host scope set; only the
  * NextAuth `signIn` audit needs to vary by entry point. Prefer the explicit
  * names in new code.
@@ -53,15 +66,15 @@ export const HOST_OPTIONAL: readonly string[] = [];
 
 export const GUEST_REQUIRED = [...OPENID_BASE, HOST_READ_SCOPE] as const;
 
-export type HostEntryPoint = "front-door" | "deal-room";
+export type HostEntryPoint = "front-door" | "deal-room" | "deal-room-upsell";
 
 /** Returns the scope set we *expect* a host to have granted, given how they
  *  entered the app. Used by the signIn audit so the dashboard interstitial
  *  doesn't fire for deal-room users (we never asked them for write). */
 export function hostRequiredFor(entryPoint: HostEntryPoint): readonly string[] {
-  return entryPoint === "deal-room"
-    ? HOST_REQUIRED_FROM_DEAL_ROOM
-    : HOST_REQUIRED_FRONT_DOOR;
+  if (entryPoint === "deal-room") return HOST_REQUIRED_FROM_DEAL_ROOM;
+  if (entryPoint === "deal-room-upsell") return HOST_REQUIRED_FROM_UPSELL;
+  return HOST_REQUIRED_FRONT_DOOR;
 }
 
 export type ScopeAudit = {

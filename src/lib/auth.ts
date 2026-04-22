@@ -14,6 +14,7 @@ import {
   hostRequiredFor,
   type HostEntryPoint,
 } from "@/lib/oauth/required-scopes";
+import { buildSeededExplicit } from "@/lib/onboarding/seed-defaults";
 
 // Dev-only credentials provider — NEVER available in production
 const devProvider =
@@ -57,7 +58,15 @@ export const authOptions: NextAuthOptions = {
           scope:
             "openid email profile https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly",
           access_type: "offline",
-          prompt: "consent",
+          // `prompt` is NOT hardcoded here. Per-call overrides from
+          // `useOAuthSignIn` (`promptForMode`) pick the right value:
+          // "consent" for first-connect / upgrade-scope / reconnect,
+          // "select_account" for `mode: "login"` (returning users). Setting
+          // it at the provider level would force consent for every sign-in
+          // and re-issue a refresh_token every time — the 1i bug. See
+          // proposals/2026-04-21_lean-first-run-onboarding-and-returnto.
+          // The refresh-token preservation guard below (`account.refresh_token
+          // ?? undefined` in the account update) makes this removal safe.
         },
       },
     }),
@@ -246,10 +255,15 @@ export const authOptions: NextAuthOptions = {
         console.error("Failed to fetch timezone from Google Calendar:", e);
       }
 
-      const preferences: Record<string, unknown> = {};
-      if (timezone) {
-        preferences.explicit = { timezone };
-      }
+      // Seed-and-show defaults (proposal §2.7) — fresh users land with
+      // sensible defaults (9am–5pm, Google Meet, 30min, no buffer) that
+      // the single `defaults_confirm` onboarding beat surfaces for review.
+      // Replaces the old 4-phase ask-each-field flow. `buildSeededExplicit`
+      // omits timezone when not present; scoring falls back to UTC until
+      // the intro phase captures it.
+      const preferences: Record<string, unknown> = {
+        explicit: buildSeededExplicit({ timezone }),
+      };
 
       await prisma.user.update({
         where: { id: user.id },

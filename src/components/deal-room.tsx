@@ -9,6 +9,7 @@ import { PublicHeader } from "./public-header";
 import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
 import { TimezonePicker } from "./timezone-picker";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
+import { onboardingCallbackUrl } from "@/lib/onboarding/return-to";
 import { TimeChipList, type TimeChipData } from "./time-chip-list";
 import { OfferCard } from "./deal-room/offer-card";
 import { ExternalAgentPrimer } from "./deal-room/external-agent-primer";
@@ -185,20 +186,25 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // storage). Dismissal persists per-session in localStorage.
   // Post-confirm signup upsell dismissal (client-only state)
   const [signupUpsellDismissed, setSignupUpsellDismissed] = useState(false);
-  // Signup-upsell modal "Connect with Google" pre-consent step. Uses
-  // reconnect mode because the upsell modal already shows the value-prop;
-  // here we just need a thin "Continue to Google" affirmation.
+  // Signup-upsell modal: guest just booked a meeting and we're asking them
+  // to create a host account. This is a true first-connect signup (not a
+  // reconnect), so it gets the full trust-building first-connect modal.
+  // `entryPoint: "deal-room-upsell"` audits against read-only scope only
+  // (HOST_REQUIRED_FROM_UPSELL), since we're converting a guest who already
+  // went through the deal-room read-only flow.
+  // onboardReturnTo round-trips them back to this meet page after onboarding.
   const signupUpsellSignIn = useOAuthSignIn({
-    mode: "reconnect",
-    callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
+    mode: "first-connect",
+    entryPoint: "deal-room-upsell",
+    callbackUrl: onboardingCallbackUrl(`/meet/${slug}${code ? `/${code}` : ""}`),
   });
   // T3c: re-prompt host for calendar.events write scope when the confirm
-  // pipeline degraded to .ics-only (gcal_skipped_scope). prompt=consent so
-  // Google re-shows the unchecked write scope checkbox.
+  // pipeline degraded to .ics-only (gcal_skipped_scope). `upgrade-scope`
+  // mode in useOAuthSignIn already forces prompt=consent, so the redundant
+  // signInParams override is gone.
   const writeScopeReconnect = useOAuthSignIn({
     mode: "upgrade-scope",
     callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
-    signInParams: { prompt: "consent" },
   });
   // T3c: tracks whether the host's Google account currently lacks
   // calendar.events. Sourced from confirmData.calendarWriteUnavailable

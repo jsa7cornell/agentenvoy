@@ -87,6 +87,26 @@ model User {
   feedbackReports   FeedbackReport[]
   agentTokensMinted AgentAccessToken[]   @relation("AgentTokensMinted")
   productEvents     ProductEvent[]
+  onboardingEvents  OnboardingEvent[]
+}
+
+/// Lean onboarding instrumentation. See proposal
+/// `2026-04-21_lean-first-run-onboarding-and-returnto_*.md` §2.5.
+/// Two event kinds for v1: `entered` and `completed`. PII-free: no freetext,
+/// no metadata blob, so the stream is safe to query without redaction.
+/// Dedup of `entered` is enforced in application code (24h window) rather
+/// than via a DB constraint so we can extend with goal-level events later.
+model OnboardingEvent {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        String   // "entered" | "completed"
+  entryPoint  String?  // "front-door" | "deal-room" | "deal-room-upsell" (null on completed)
+  hasReturnTo Boolean  @default(false)
+  at          DateTime @default(now())
+
+  @@index([userId, at])
+  @@index([kind, at])
 }
 
 /// User-submitted feedback bundle (F3 of the feedback-loops proposal).

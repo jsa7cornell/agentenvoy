@@ -86,8 +86,8 @@ function MeetLinkCard({ url }: { url: string }) {
 
 // ── Feed component ──────────────────────────────────────────────────────
 
-export default function Feed() {
-  const router = useRouter(); // eslint-disable-line @typescript-eslint/no-unused-vars
+export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | null } = {}) {
+  const router = useRouter();
   const [messages, setMessages] = useState<ChannelMsg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -153,6 +153,15 @@ export default function Feed() {
     loadMessages();
   }, []);
 
+  // ── Calibrated user with onboardReturnTo → bounce immediately ──────────
+  // If the user arrived at /dashboard?onboardReturnTo=... but is already
+  // calibrated (returning host, no onboarding to run), honor the returnTo
+  // instead of showing the dashboard. Proposal §2.3.
+  useEffect(() => {
+    if (initialLoading || !isCalibrated || !onboardReturnTo) return;
+    router.replace(onboardReturnTo);
+  }, [initialLoading, isCalibrated, onboardReturnTo, router]);
+
   // ── Initialize onboarding when uncalibrated ───────────────────────────
   useEffect(() => {
     if (initialLoading || isCalibrated || onboardingInitRef.current) return;
@@ -160,7 +169,10 @@ export default function Feed() {
 
     async function initOnboarding() {
       try {
-        const res = await fetch("/api/onboarding/chat");
+        const url = onboardReturnTo
+          ? "/api/onboarding/chat?hasReturnTo=1"
+          : "/api/onboarding/chat";
+        const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
 
@@ -213,6 +225,16 @@ export default function Feed() {
         setInputPlaceholder(null);
         setActiveOptions(null);
         setIsCalibrated(true);
+
+        // onboardReturnTo path: user came in mid-flow (e.g. booking a deal
+        // room). Bounce them to the original destination instead of the
+        // demo-meeting auto-fire, so they resume the interrupted task.
+        if (onboardReturnTo) {
+          setTimeout(() => {
+            router.replace(onboardReturnTo);
+          }, 1200);
+          return;
+        }
 
         // Auto-fire a test meeting after a short pause so the user sees the
         // "watch what happens..." message first, then Envoy creates the demo
