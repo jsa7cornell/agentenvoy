@@ -1005,16 +1005,25 @@ export function AvailabilityPanel({
             className="bg-surface-inset border border-DEFAULT rounded-2xl p-5 w-full max-w-sm mx-4 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-semibold text-primary mb-1 truncate flex items-center gap-1.5">
-              {clickedEvent.attendeeRollup && (
-                <AttendeeStatusIcon
-                  rollup={clickedEvent.attendeeRollup}
-                  size={12}
-                  className="flex-shrink-0"
-                />
-              )}
-              <span className="truncate">{clickedEvent.summary}</span>
-            </h3>
+            <div className="flex items-start gap-2 mb-1">
+              <h3 className="text-sm font-semibold text-primary truncate flex items-center gap-1.5 flex-1 min-w-0">
+                {clickedEvent.attendeeRollup && (
+                  <AttendeeStatusIcon
+                    rollup={clickedEvent.attendeeRollup}
+                    size={12}
+                    className="flex-shrink-0"
+                  />
+                )}
+                <span className="truncate">{clickedEvent.summary}</span>
+              </h3>
+              <button
+                onClick={() => { setClickedEvent(null); setClickedSession(undefined); setConfirmingCancel(false); setCancelNote(""); }}
+                className="text-muted hover:text-primary text-lg leading-none transition flex-shrink-0 -mt-0.5"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
             <p className="text-xs text-muted mb-3">
               {new Date(clickedEvent.start).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
               {" · "}
@@ -1049,9 +1058,8 @@ export function AvailabilityPanel({
             )}
 
             {clickedSession !== undefined && clickedSession !== null && (
-              <div className="border-t border-secondary pt-3 mb-3 space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400">AgentEnvoy</span>
+              <div className="border-t border-secondary pt-3 mb-3">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
                     clickedSession.status === "agreed" ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" :
                     clickedSession.status === "cancelled" ? "text-red-400 border-red-500/30" :
@@ -1059,17 +1067,13 @@ export function AvailabilityPanel({
                   }`}>
                     {clickedSession.status === "agreed" ? "Confirmed" : clickedSession.status}
                   </span>
+                  {clickedSession.guestName && (
+                    <span className="text-xs text-secondary">
+                      With {clickedSession.guestName}
+                      {clickedSession.guestEmail ? ` (${clickedSession.guestEmail})` : ""}
+                    </span>
+                  )}
                 </div>
-                {clickedSession.guestName && (
-                  <p className="text-xs text-secondary">With {clickedSession.guestName}{clickedSession.guestEmail ? ` (${clickedSession.guestEmail})` : ""}</p>
-                )}
-                <Link
-                  href={clickedSession.dealRoomUrl}
-                  className="inline-block text-xs text-indigo-400 hover:text-indigo-300 transition"
-                  onClick={() => setClickedEvent(null)}
-                >
-                  View this event on AgentEnvoy →
-                </Link>
               </div>
             )}
 
@@ -1285,22 +1289,6 @@ export function AvailabilityPanel({
                       >
                         {sessionActionBusy ? "Working…" : "Find a new time with Envoy"}
                       </button>
-                      {(() => {
-                        const gcalUrl =
-                          clickedEvent?.htmlLink ||
-                          googleCalendarEventUrl(clickedEvent?.id);
-                        if (!gcalUrl) return null;
-                        return (
-                          <a
-                            href={gcalUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="w-full px-3 py-2 text-xs text-center text-secondary border border-secondary rounded-lg hover:border-DEFAULT hover:text-primary transition"
-                          >
-                            Reschedule in Google Calendar →
-                          </a>
-                        );
-                      })()}
                       <button
                         onClick={() => setConfirmingCancel(true)}
                         disabled={sessionActionBusy}
@@ -1311,6 +1299,12 @@ export function AvailabilityPanel({
                     </div>
                   )}
 
+                {/* Hide the bottom Close/Submit row for confirmed Envoy
+                    meetings — the X in the top-right handles close and
+                    there's no protection flow to submit. Still rendered for
+                    pending sessions (holds the Cancel button) and for
+                    non-Envoy events (holds Submit for the protection flow). */}
+                {!(clickedSession && clickedSession.status === "agreed" && !clickedSession.archived) && (
                 <div className="flex gap-2">
                   {(() => {
                     const hasUnsaved =
@@ -1368,6 +1362,7 @@ export function AvailabilityPanel({
                       </button>
                     )}
                 </div>
+                )}
               </div>
             )}
           </div>
