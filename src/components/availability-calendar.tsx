@@ -302,8 +302,6 @@ function formatWindowMessage(card: WindowCard, dateStr: string, tz: string) {
   return `How about ${dayStr}, ${fmt(card.defaultStart)}–${fmt(card.defaultEnd)} ${tzAbbr}?`;
 }
 
-const MAX_CHIPS_PER_GROUP = 4;
-
 function SlotChipRows({
   windows,
   slotsForDay,
@@ -323,8 +321,6 @@ function SlotChipRows({
   looseMutualCount: number;
   hostFirstName?: string;
 }) {
-  const [revealByGroup, setRevealByGroup] = useState<Record<number, boolean>>({});
-
   const fmt = (iso: string) =>
     new Date(iso).toLocaleTimeString("en-US", {
       hour: "numeric", minute: "2-digit", timeZone: timezone,
@@ -348,54 +344,40 @@ function SlotChipRows({
 
   return (
     <div className="space-y-2.5">
-      {groups.map((g, gi) => {
-        const revealed = revealByGroup[gi];
-        const visible = revealed ? g.slots : g.slots.slice(0, MAX_CHIPS_PER_GROUP);
-        const hidden = g.slots.length - visible.length;
-        return (
-          <div key={gi}>
-            <div className="text-[10px] text-muted font-medium mb-1">{g.name}</div>
-            <div className="flex flex-wrap gap-1.5">
-              {visible.map((slot, si) => {
-                const isBoth = chipsForDay?.some(
-                  (c) => c.color === "both" && c.start === slot.start,
-                );
-                return (
-                  <button
-                    key={si}
-                    onClick={() =>
-                      onSelectSlot?.(
-                        formatSlotMessage(slot, dateStr, timezone),
-                        { start: slot.start, end: slot.end },
-                      )
-                    }
-                    disabled={!onSelectSlot}
-                    className={`
-                      flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] border transition-all
-                      ${isBoth
-                        ? "border-emerald-400/60 bg-emerald-950/30 text-emerald-300 hover:border-emerald-300"
-                        : "border-DEFAULT bg-surface-secondary text-primary hover:border-secondary"}
-                      ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
-                    `}
-                  >
-                    {isBoth && <span className="text-emerald-400 text-[10px]" aria-hidden="true">★</span>}
-                    {fmt(slot.start)}
-                  </button>
-                );
-              })}
-              {hidden > 0 && !revealed && (
+      {groups.map((g, gi) => (
+        <div key={gi}>
+          <div className="text-[10px] text-muted font-medium mb-1">{g.name}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {g.slots.map((slot, si) => {
+              const isBoth = chipsForDay?.some(
+                (c) => c.color === "both" && c.start === slot.start,
+              );
+              return (
                 <button
-                  type="button"
-                  onClick={() => setRevealByGroup((p) => ({ ...p, [gi]: true }))}
-                  className="text-[11px] text-secondary hover:text-primary underline transition px-1 py-1"
+                  key={si}
+                  onClick={() =>
+                    onSelectSlot?.(
+                      formatSlotMessage(slot, dateStr, timezone),
+                      { start: slot.start, end: slot.end },
+                    )
+                  }
+                  disabled={!onSelectSlot}
+                  className={`
+                    flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] border transition-all
+                    ${isBoth
+                      ? "border-emerald-400/60 bg-emerald-950/30 text-emerald-300 hover:border-emerald-300"
+                      : "border-DEFAULT bg-surface-secondary text-primary hover:border-secondary"}
+                    ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
+                  `}
                 >
-                  +{hidden} more
+                  {isBoth && <span className="text-emerald-400 text-[10px]" aria-hidden="true">★</span>}
+                  {fmt(slot.start)}
                 </button>
-              )}
-            </div>
+              );
+            })}
           </div>
-        );
-      })}
+        </div>
+      ))}
       {looseMutualCount > 0 && (
         <div className="text-[11px] text-muted italic pt-0.5">
           + {looseMutualCount} more {hostFirstName || "they"} prefer{hostFirstName ? "s" : ""} but you&rsquo;re busy
@@ -705,20 +687,20 @@ function WeekView({
       <div className="flex items-center justify-between mb-2">
         <button
           onClick={() => { setWeekOffset((o) => o - 1); setSelectedDay(null); }}
-          className={`p-1 rounded hover:bg-surface-secondary transition ${!canGoPrev ? "opacity-30 cursor-default" : ""}`}
+          className={`p-2 rounded-lg hover:bg-surface-secondary transition ${!canGoPrev ? "opacity-25 cursor-default" : "hover:opacity-80"}`}
           disabled={!canGoPrev}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
         <span className="text-xs font-medium text-primary">{weekLabel}</span>
         <button
           onClick={() => { setWeekOffset((o) => o + 1); setSelectedDay(null); }}
-          className={`p-1 rounded hover:bg-surface-secondary transition ${!canGoNext ? "opacity-30 cursor-default" : ""}`}
+          className={`p-2 rounded-lg hover:bg-surface-secondary transition ${!canGoNext ? "opacity-25 cursor-default" : "hover:opacity-80"}`}
           disabled={!canGoNext}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="9 18 15 12 9 6" />
           </svg>
         </button>

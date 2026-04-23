@@ -38,7 +38,7 @@ export function DealRoomConnectCtas({
   const wrapperClass =
     variant === "mobile-banner"
       ? "md:hidden border-b border-secondary flex-shrink-0 px-4 py-2"
-      : "mb-1";
+      : "hidden md:block mb-1";
 
   return (
     <>
@@ -46,9 +46,13 @@ export function DealRoomConnectCtas({
         <button
           type="button"
           onClick={signUpFlow.trigger}
-          className="w-full px-3 py-2 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition leading-snug"
+          className={
+            variant === "mobile-banner"
+              ? "w-full px-3 py-2 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition leading-snug"
+              : "w-full px-4 py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-violet-600 via-blue-600 to-cyan-500 hover:from-violet-500 hover:via-blue-500 hover:to-cyan-400 text-white transition-all shadow-lg shadow-blue-900/30 leading-snug"
+          }
         >
-          ✨ Sync your calendar to instantly find the best mutual availability
+          ✦ Connect your calendar — see where you both have time
         </button>
       </div>
       {signUpFlow.modal}

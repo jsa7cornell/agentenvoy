@@ -7,7 +7,6 @@ interface MatchPulseProps {
   justMatched: boolean;
   matchCount: number;
   enabled: boolean;
-  defaultLabel: string;
 }
 
 export function MatchPulse({
@@ -15,7 +14,6 @@ export function MatchPulse({
   justMatched,
   matchCount,
   enabled,
-  defaultLabel,
 }: MatchPulseProps) {
   const [hasMatched, setHasMatched] = useState(false);
   const [pulseActive, setPulseActive] = useState(false);
@@ -38,9 +36,6 @@ export function MatchPulse({
 
   return (
     <div className={`relative rounded-2xl ${ringClass}`}>
-      <div className="text-[10px] font-bold uppercase tracking-wider mb-2 text-emerald-400">
-        {defaultLabel}
-      </div>
       {children}
       {enabled && justMatched && (
         <span className="sr-only" aria-live="polite">
