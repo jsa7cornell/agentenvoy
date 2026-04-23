@@ -209,8 +209,9 @@ export function DragSlotPicker({
   const endMins = currentMins + durationMinutes;
   const displayTime = `${fmtTimeFromMins(currentMins, dateStr, timezone)} – ${fmtTimeFromMins(endMins, dateStr, timezone)}`;
 
+  // Hour ticks every hour; label every other hour to avoid crowding.
   const hourTicks: number[] = [];
-  for (let h = workingHourStart; h <= workingHourEnd; h += 2) hourTicks.push(h);
+  for (let h = workingHourStart; h <= workingHourEnd; h += 1) hourTicks.push(h);
 
   return (
     <div className="select-none">
@@ -272,9 +273,9 @@ export function DragSlotPicker({
           </div>
         </div>
 
-        {/* Hour labels */}
+        {/* Hour labels — label every other hour to keep density readable */}
         <div className="absolute left-0 right-0 bottom-0 pointer-events-none h-4">
-          {hourTicks.map(h => {
+          {hourTicks.filter(h => (h - workingHourStart) % 2 === 0).map(h => {
             const pct = (h - workingHourStart) / (workingHourEnd - workingHourStart) * 100;
             const label = h === 12 ? "12p" : h > 12 ? `${h - 12}p` : `${h}a`;
             return (
@@ -294,9 +295,9 @@ export function DragSlotPicker({
         </div>
       </div>
 
-      {/* Time readout + confirm row */}
-      <div className="flex items-center justify-between gap-3 mt-2">
-        <p className="text-sm font-semibold text-primary">{displayTime}</p>
+      {/* Time readout + confirm row — readout centered, button anchored right */}
+      <div className="relative flex items-center mt-2 min-h-[28px]">
+        <p className="w-full text-center text-xs font-medium text-primary">{displayTime}</p>
         {onSelectSlot && (
           <button
             onClick={() => {
@@ -311,7 +312,7 @@ export function DragSlotPicker({
               );
             }}
             disabled={confirmed}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition disabled:opacity-100
+            className={`absolute right-0 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition disabled:opacity-100
               ${confirmed
                 ? "bg-emerald-600"
                 : "bg-accent hover:bg-accent-hover"}`}
