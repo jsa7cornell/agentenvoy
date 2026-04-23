@@ -104,24 +104,42 @@ export function DragSlotPicker({
 
   const drag = useRef<{ startX: number; startMins: number; rulerWidth: number } | null>(null);
 
-  // Booked gaps between consecutive available slot ranges
-  const bookedBlocks: Array<{ startPct: number; widthPct: number }> = [];
-  for (let i = 0; i < slotMins.length - 1; i++) {
-    const gapStart = slotMins[i] + durationMinutes;
-    const gapEnd = slotMins[i + 1];
-    if (gapEnd - gapStart > 30) {
-      const left = (gapStart - workingHourStart * 60) / SPAN * 100;
-      const width = (gapEnd - gapStart) / SPAN * 100;
-      bookedBlocks.push({ startPct: left, widthPct: width });
+  // Build available "runs" — contiguous spans of free time within working hours.
+  // A run starts at slotMins[i] and extends through consecutive 30-min slots
+  // (gap === 30) plus durationMinutes for the final fit.
+  const availRuns: Array<{ startMins: number; endMins: number }> = [];
+  if (slotMins.length > 0) {
+    let runStart = slotMins[0];
+    for (let i = 0; i < slotMins.length; i++) {
+      const isLast = i === slotMins.length - 1;
+      const gapBreaks = !isLast && slotMins[i + 1] - slotMins[i] !== 30;
+      if (isLast || gapBreaks) {
+        availRuns.push({ startMins: runStart, endMins: slotMins[i] + durationMinutes });
+        if (!isLast) runStart = slotMins[i + 1];
+      }
     }
   }
 
-  const availStart = slotMins.length > 0
-    ? (slotMins[0] - workingHourStart * 60) / SPAN * 100
-    : 0;
-  const availEnd = slotMins.length > 0
-    ? (slotMins[slotMins.length - 1] + durationMinutes - workingHourStart * 60) / SPAN * 100
-    : 0;
+  const minsToPct = (m: number) => (m - workingHourStart * 60) / SPAN * 100;
+
+  // Busy = working hours minus the union of available runs.
+  const busyBlocks: Array<{ startPct: number; widthPct: number }> = [];
+  let cursor = workingHourStart * 60;
+  for (const run of availRuns) {
+    if (run.startMins > cursor) {
+      busyBlocks.push({
+        startPct: minsToPct(cursor),
+        widthPct: minsToPct(run.startMins) - minsToPct(cursor),
+      });
+    }
+    cursor = Math.max(cursor, run.endMins);
+  }
+  if (cursor < workingHourEnd * 60) {
+    busyBlocks.push({
+      startPct: minsToPct(cursor),
+      widthPct: minsToPct(workingHourEnd * 60) - minsToPct(cursor),
+    });
+  }
 
   const pillLeft = (currentMins - workingHourStart * 60) / SPAN * 100;
   const pillWidth = durationMinutes / SPAN * 100;
@@ -187,29 +205,18 @@ export function DragSlotPicker({
       <div className="relative pb-6">
         <div
           ref={rulerRef}
-          className="relative h-12 rounded-lg overflow-visible bg-surface-secondary"
+          className="relative h-12 rounded-lg overflow-hidden"
+          style={{ background: "rgba(52,199,89,0.10)" }}
         >
-          {/* Available band */}
-          <div
-            className="absolute inset-y-0 rounded-lg pointer-events-none"
-            style={{
-              left: `${availStart}%`,
-              width: `${availEnd - availStart}%`,
-              background: "rgba(52,199,89,0.10)",
-            }}
-          />
-
-          {/* Booked blocks */}
-          {bookedBlocks.map((b, i) => (
+          {/* Busy blocks (everything outside available runs) */}
+          {busyBlocks.map((b, i) => (
             <div
               key={i}
               className="absolute inset-y-0 pointer-events-none z-[1]"
               style={{
                 left: `${b.startPct}%`,
                 width: `${b.widthPct}%`,
-                background: "repeating-linear-gradient(45deg, rgba(255,255,255,0.04), rgba(255,255,255,0.04) 3px, transparent 3px, transparent 8px)",
-                borderLeft: "1px solid rgba(255,255,255,0.07)",
-                borderRight: "1px solid rgba(255,255,255,0.07)",
+                background: "repeating-linear-gradient(45deg, hsl(var(--surface-secondary)), hsl(var(--surface-secondary)) 5px, hsl(var(--surface-tertiary)) 5px, hsl(var(--surface-tertiary)) 10px)",
               }}
             />
           ))}
