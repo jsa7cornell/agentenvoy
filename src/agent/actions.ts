@@ -1101,11 +1101,35 @@ async function handleCreateLink(
   const hostFirstName = hostName?.split(/\s+/)[0] || "Host";
   const { getInviteeDisplay, getWaitingLabel } = await import("@/lib/invitee-display");
   const inviteeDisplay = getInviteeDisplay({ inviteeNames, inviteeName });
-  const title = topic
-    ? `${topic}${inviteeDisplay ? ` — ${inviteeDisplay}` : ""}`
-    : inviteeDisplay
-    ? `${hostFirstName} + ${inviteeDisplay}`
-    : `Meeting — ${hostFirstName}`;
+  // Generic topics — stripped and replaced by format/name signal.
+  // Exact lowercase match only: "intro call" is specific and kept.
+  const GENERIC_TOPICS = new Set([
+    "meeting", "chat", "sync", "catch-up", "catchup",
+    "check-in", "checkin", "discussion", "talk",
+    "call", "zoom", "video call",
+  ]);
+  const normalizedTopic = topic?.trim().toLowerCase() ?? null;
+  const isGenericTopic = normalizedTopic ? GENERIC_TOPICS.has(normalizedTopic) : true;
+  const meaningfulActivity = !isGenericTopic && topic
+    ? topic.charAt(0).toUpperCase() + topic.slice(1)
+    : null;
+
+  // Format-derived prefix when no meaningful activity.
+  const effectiveFormatStr = typeof effectiveFormat === "string" ? effectiveFormat : null;
+  const formatPrefix =
+    effectiveFormatStr === "phone" ? "Call"
+    : effectiveFormatStr === "video" ? "VC"
+    : null;
+
+  const prefix = meaningfulActivity ?? formatPrefix;
+  const isGroup = Array.isArray(inviteeNames) && inviteeNames.length > 1;
+
+  const title =
+    isGroup || !inviteeDisplay
+      ? (prefix ?? "Meeting")
+      : prefix
+      ? `${prefix}: ${inviteeDisplay} + ${hostFirstName}`
+      : `${inviteeDisplay} + ${hostFirstName}`;
 
   const session = await prisma.negotiationSession.create({
     data: {

@@ -20,16 +20,10 @@ export function computeThreadStatus(input: StatusInput): StatusResult {
 
   if (input.status === "agreed") return { label: "Confirmed", color: "green" };
   if (input.status === "expired") return { label: "Expired", color: "gray" };
-  if (input.status === "escalated") return { label: "Needs your input", color: "red" };
   if (input.status === "cancelled") return { label: "Cancelled", color: "red" };
-  if (input.status === "proposed") return { label: waitingLabel, color: "amber" };
 
-  // Active status — depends on last message
-  if (!input.lastMessageRole) return { label: waitingLabel, color: "amber" };
-  if (input.lastMessageRole === "administrator") return { label: waitingLabel, color: "amber" };
-  if (input.lastMessageRole === "guest") return { label: `${displayName} responded`, color: "purple" };
-
-  return { label: "In progress", color: "purple" };
+  // All in-progress states (active, proposed, escalated) → "Active"
+  return { label: "Active", color: "amber" };
 }
 
 // Group event status — aggregates across participants
