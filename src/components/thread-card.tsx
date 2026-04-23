@@ -28,6 +28,9 @@ interface ThreadCardProps {
   /** True when the link has been flagged as a VIP meeting. Renders a single
    *  purple VIP badge in the title row. No tier ladder — VIP is binary. */
   isVip?: boolean;
+  /** Activity icon emoji (e.g. "🚴", "🏄") from link.rules.activityIcon. When
+   *  provided, replaces the generic calendar icon in the card header. */
+  activityIcon?: string;
   /** Short TZ label (e.g. "CEST", "JST") detected from the guest's browser on
    *  first visit. When set, shows as a small "guest in X" chip so the host can
    *  see the timezone context at a glance. */
@@ -68,6 +71,7 @@ export default function ThreadCard({
   isGroupEvent,
   participants,
   isVip = false,
+  activityIcon,
   guestTimezoneLabel,
 }: ThreadCardProps) {
   const style = STATUS_STYLES[statusColor] || STATUS_STYLES.gray;
@@ -115,7 +119,10 @@ export default function ThreadCard({
       {/* Header */}
       <div className="flex items-start gap-3 px-4 pt-3.5 pb-2">
         <div className="w-8 h-8 rounded-lg bg-purple-500/12 flex items-center justify-center text-sm flex-shrink-0">
-          <span role="img" aria-label="calendar">&#128197;</span>
+          {activityIcon
+            ? <span role="img">{activityIcon}</span>
+            : <span role="img" aria-label="calendar">&#128197;</span>
+          }
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">

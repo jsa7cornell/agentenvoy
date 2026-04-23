@@ -1160,10 +1160,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       // Zoom / Meet / Teams URLs land here when location is the meet link
       if (/\b(zoom\.us|meet\.google|teams\.microsoft|webex)\b/.test(loc)) return "📹";
     }
+    // Location provided but no keyword matched — use pin as the generic location icon
+    if (loc) return "📍";
     if (format === "phone") return "📞";
     if (format === "video") return "📹";
-    if (format === "in-person") return "🤝";
-    return "📅";
+    if (format === "in-person") return "👤";
+    return "";
   }
 
   // ─── Stage 2 mode derivation ──────────────────────────────────────────
@@ -1446,7 +1448,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           {eventFormat && (() => {
             const formatEmoji = getMeetingEmoji(eventFormat, null);
             const formatText = eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat;
-            return <span>{formatEmoji} {formatText} &middot; {eventDuration} min</span>;
+            return <span>{formatEmoji}{formatEmoji ? " " : ""}{formatText} &middot; {eventDuration} min</span>;
           })()}
           {eventDateTime && (() => {
             const dt = new Date(eventDateTime);
@@ -1474,8 +1476,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             return <span>{parts.join(" · ")}</span>;
           })()}
           {confirmed && (formGuestName || formGuestEmail) && (
-            <span className="text-muted" title="Guest">
-              👤 {[formGuestName, formGuestEmail].filter(Boolean).join(" · ")}
+            <span className="text-muted">
+              {[formGuestName, formGuestEmail].filter(Boolean).join(" · ")}
             </span>
           )}
           {eventMeetLink && (

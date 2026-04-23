@@ -43,6 +43,7 @@ interface ChannelMsg {
       code?: string;
       slug: string;
       mode?: string;
+      activityIcon?: string | null;
     };
     _count: { messages: number };
   } | null;
@@ -835,6 +836,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                   title={msg.thread.title || "Thread"}
                   statusLabel={status.label}
                   statusColor={status.color}
+                  activityIcon={msg.thread.link.activityIcon || undefined}
                   subtitle={[
                     msg.thread.format === "phone" ? "Phone call" : msg.thread.format === "video" ? "Video" : msg.thread.format,
                     msg.thread.duration ? formatDuration(msg.thread.duration) : null,
