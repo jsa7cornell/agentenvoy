@@ -29,6 +29,33 @@ import { isEchoOfRecentEnvoy } from "@/lib/echo-detect";
 import { normalizeChatIntent, type ChatIntent, type ChatIntentBlock } from "@/lib/intent";
 import { runDispatchHandler } from "@/agent/dispatch-handler";
 import { computeProfileGaps } from "@/lib/profile-gaps";
+import type { CalendarEvent } from "@/lib/calendar";
+
+function formatUpcomingEvents(events: CalendarEvent[], tz: string): string | null {
+  const now = Date.now();
+  const cutoff = now + 14 * 24 * 60 * 60 * 1000;
+  const dateFmt = new Intl.DateTimeFormat("en-US", {
+    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    timeZone: tz, hour12: true,
+  });
+  const relevant = events
+    .filter((e) => {
+      if (!e.summary || e.summary === "(no title)") return false;
+      const start = new Date(e.start).getTime();
+      return start >= now && start <= cutoff;
+    })
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+    .slice(0, 15);
+  if (relevant.length === 0) return null;
+  const lines = relevant.map((e) => {
+    const startLabel = dateFmt.format(new Date(e.start));
+    const attendeePart = (e.attendeeCount ?? 0) > 1
+      ? ` (${e.attendeeCount} guests)`
+      : "";
+    return `- "${e.summary}" — ${startLabel}${attendeePart}`;
+  });
+  return `Upcoming calendar events (next 14 days — use these to resolve cancel/reschedule requests by name):\n${lines.join("\n")}`;
+}
 
 // Load playbooks once at module scope (same pattern as composer.ts)
 let personaPlaybook = "";
@@ -517,6 +544,12 @@ export async function POST(req: NextRequest) {
               }),
             );
             contextParts.push(formatOfferableSlots(scheduleResult.slots, tz, scheduleResult.canWrite));
+
+            // Upcoming named events — lets Envoy resolve "cancel my meeting with
+            // Katie" even when the NegotiationSession is old or below the take:20
+            // limit. Only real events (with a summary) in the next 14 days.
+            const upcomingLines = formatUpcomingEvents(scheduleResult.events, tz);
+            if (upcomingLines) contextParts.push(upcomingLines);
           }
           if (!calendarConnected) {
             contextParts.push("Calendar: Not connected");
@@ -583,7 +616,7 @@ export async function POST(req: NextRequest) {
               return `- "${s.title || 'Untitled'}" (${ids}) — status: ${s.status}, guest: ${guest}${note}`;
             }).join('\n');
             contextParts.push(
-              `Active sessions:\n${sessionList}\n\n` +
+              `Sessions (active and confirmed — "agreed" sessions have a confirmed calendar event and can be cancelled or rescheduled):\n${sessionList}\n\n` +
               `You can execute actions on these sessions using [ACTION] blocks. ` +
               `For session-scoped actions (update_format / update_time / update_location / cancel / hold_slot / archive) pass sessionId. ` +
               `For link-scoped actions (update_link / expand_link) pass linkCode — it's the 6-char string after /meet/{slug}/ in the url above.`
