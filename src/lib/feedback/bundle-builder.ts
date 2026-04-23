@@ -83,12 +83,20 @@ export async function buildFeedbackBundle(
     }
   }
 
-  const [rawMessages, sessions, calendar, routeErrors] = await Promise.all([
-    checklistState.messages ? loadRecentMessagesWithMeta(userId) : Promise.resolve([]),
-    checklistState.sessions ? loadRecentSessions(userId) : Promise.resolve(undefined),
-    checklistState.calendar ? loadRedactedCalendar(userId) : Promise.resolve(undefined),
-    checklistState.errors ? loadRecentRouteErrors(userId) : Promise.resolve(undefined),
-  ]);
+  const isDealRoom = submission.area === "deal_room_chat";
+  const dealRoomSessionId = isDealRoom ? (submission.sessionId ?? null) : null;
+
+  const [rawMessages, sessions, calendar, routeErrors, dealRoomTurns, scheduleComputedAt] =
+    await Promise.all([
+      checklistState.messages ? loadRecentMessagesWithMeta(userId) : Promise.resolve([]),
+      checklistState.sessions ? loadRecentSessions(userId) : Promise.resolve(undefined),
+      checklistState.calendar || isDealRoom
+        ? loadRedactedCalendar(userId)
+        : Promise.resolve(undefined),
+      checklistState.errors ? loadRecentRouteErrors(userId) : Promise.resolve(undefined),
+      dealRoomSessionId ? loadDealRoomTurns(dealRoomSessionId) : Promise.resolve(undefined),
+      loadScheduleComputedAt(userId),
+    ]);
 
   // Segment messages + build filingContext from the same ordered list.
   const ordered = rawMessages;
@@ -132,7 +140,10 @@ export async function buildFeedbackBundle(
       ? (consoleLines ?? []).slice(0, MAX_CONSOLE_LINES)
       : undefined,
     clientState,
-    replay: replay ?? undefined,
+    dealRoomTurns,
+    replay: replay
+      ? { ...replay, scheduleComputedAt: scheduleComputedAt ?? undefined }
+      : undefined,
   };
 
   const firstParse = FeedbackBundleSchema.safeParse(bundle);
@@ -330,6 +341,28 @@ async function loadRecentRouteErrors(userId: string) {
     errorClass: r.errorClass ?? null,
     message: r.message,
   }));
+}
+
+async function loadDealRoomTurns(sessionId: string) {
+  const rows = await prisma.message.findMany({
+    where: { sessionId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, role: true, content: true, createdAt: true },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    role: r.role,
+    content: r.content,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+async function loadScheduleComputedAt(userId: string): Promise<string | null> {
+  const row = await prisma.computedSchedule.findUnique({
+    where: { userId },
+    select: { computedAt: true },
+  });
+  return row ? row.computedAt.toISOString() : null;
 }
 
 /** Re-export for the submit route — keeps the callsite narrow. */

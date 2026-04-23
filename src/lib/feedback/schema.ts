@@ -354,11 +354,27 @@ export const FeedbackBundleV2Schema = z.object({
       email: z.string().nullable(),
     })
     .optional(),
+  /** Deal room Envoy↔guest conversation. Auto-included for deal_room_chat
+   *  area reports regardless of checklist state. */
+  dealRoomTurns: z
+    .array(
+      z.object({
+        id: z.string(),
+        role: z.string(),
+        createdAt: z.string(),
+        content: z.string(),
+      }),
+    )
+    .optional(),
   /** Widget-display replay: computed availability at submit time. Populated
    *  only when area === "deal_room_chat" and sessionId is in scope. */
   replay: z
     .object({
       computedAt: z.string(),
+      /** ISO timestamp of when the underlying schedule cache was last built
+       *  (computedSchedule.computedAt). Distinct from computedAt (report
+       *  filing time) — the gap indicates potential cache staleness. */
+      scheduleComputedAt: z.string().optional(),
       sessionId: z.string(),
       slotsByDay: z.record(
         z.string(),
