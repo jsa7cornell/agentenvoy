@@ -20,6 +20,7 @@ import { logCalibrationWrite } from "@/lib/calibration-audit";
 import { formatDuration } from "@/lib/format-duration";
 import { writeProfileField } from "@/lib/profile-fields";
 import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
+import { parseRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { UserPreferences } from "@/lib/scoring";
 
 // --- Helpers ---
@@ -1106,6 +1107,23 @@ async function handleCreateLink(
   // Silence unused-import warnings for constants referenced only in playbooks.
   void TIME_OF_DAY_WINDOWS;
 
+  // Recurrence (2026-04-23): when the host frames the link as a series
+  // ("weekly for 6 weeks with Sarah"), the LLM emits a `recurrence` object
+  // shaped like LinkRecurrence. We validate here — malformed configs drop
+  // to null (one-off link) rather than blocking creation; the drift is
+  // surfaced via warn-log. See src/lib/recurrence.ts for the shape.
+  let recurrenceForLink: LinkRecurrence | null = null;
+  const rawRecurrence = params.recurrence;
+  if (rawRecurrence != null) {
+    try {
+      recurrenceForLink = parseRecurrence(rawRecurrence);
+    } catch (e) {
+      console.warn(
+        `[create_link] recurrence rejected (${(e as Error).message}) — raw: ${JSON.stringify(rawRecurrence).slice(0, 200)}`,
+      );
+    }
+  }
+
   const link = await prisma.negotiationLink.create({
     data: {
       userId,
@@ -1119,6 +1137,9 @@ async function handleCreateLink(
       topic,
       hostNote,
       rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
+      ...(recurrenceForLink
+        ? { recurrence: recurrenceForLink as unknown as Prisma.InputJsonValue }
+        : {}),
     },
   });
 
