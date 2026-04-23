@@ -137,10 +137,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [linkActivityIcon, setLinkActivityIcon] = useState<string | null>(null);
   const [linkActivityOptions, setLinkActivityOptions] = useState<string[] | null>(null);
   const [linkGuestPicksLocation, setLinkGuestPicksLocation] = useState(false);
-  // Whether the guest Envoy chat is visible. True by default when the link has
-  // something to negotiate (activity menu, location TBD, activity without venue).
-  // Guest can also open it manually via the "Chat with Envoy" toggle.
-  const [guestChatOpen, setGuestChatOpen] = useState(false);
+  const [guestChatOpen, setGuestChatOpen] = useState(true);
   const [linkTimingLabel, setLinkTimingLabel] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [inviteeNames, setInviteeNames] = useState<string[]>([]); // full list — used in PR-C group display
