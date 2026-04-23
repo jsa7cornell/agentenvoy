@@ -8,7 +8,7 @@ import { validateReturnTo } from "@/lib/onboarding/return-to";
 
 const CHAT_MIN = 400;
 const CHAT_MAX = 860;
-const CHAT_DEFAULT = 610;
+const CHAT_DEFAULT = 732; // 20% wider than original 610
 
 function DashboardPageInner() {
   const [chatWidth, setChatWidth] = useState(CHAT_DEFAULT);

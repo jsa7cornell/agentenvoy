@@ -795,6 +795,7 @@ export default function AccountPage() {
                       setDeleting(false);
                       return;
                     }
+                    document.cookie = "ae_returning=; Path=/; Max-Age=0; SameSite=Lax";
                     await signOut({ callbackUrl: "/" });
                   } catch {
                     setDeleteError("Network error. Please try again.");
