@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { DragSlotPicker } from "./drag-slot-picker";
 import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
 import {
   binSlotsIntoWindows,
@@ -429,6 +430,19 @@ function WindowCards({
       />
     );
   }
+  // For longer meetings, use the drag-to-pick timeline instead of window cards
+  if (durationMinutes > 30) {
+    return (
+      <DragSlotPicker
+        slotsForDay={slotsForDay}
+        durationMinutes={durationMinutes}
+        timezone={timezone}
+        onSelectSlot={onSelectSlot}
+        dateStr={dateStr}
+      />
+    );
+  }
+
   if (windows.length === 0) {
     return <p className="text-xs text-muted">No available windows</p>;
   }
