@@ -610,7 +610,20 @@ export default function AvailabilityPage() {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Event title + time */}
-            <h3 className="text-sm font-semibold text-primary mb-1 truncate">{clickedEvent.summary}</h3>
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <h3 className="text-sm font-semibold text-primary truncate">{clickedEvent.summary}</h3>
+              {clickedEvent.htmlLink && (
+                <a
+                  href={clickedEvent.htmlLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-shrink-0 text-[11px] text-indigo-400 hover:text-indigo-300 transition"
+                  title="Open in Google Calendar"
+                >
+                  GCal ↗
+                </a>
+              )}
+            </div>
             <p className="text-xs text-muted mb-3">
               {new Date(clickedEvent.start).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
               {" · "}
