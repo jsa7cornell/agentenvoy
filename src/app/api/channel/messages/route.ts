@@ -140,6 +140,10 @@ export async function GET() {
       linkType: msg.thread.link?.type ?? null,
     });
 
+    const activityIcon = typeof rules?.activityIcon === "string" && rules.activityIcon.trim()
+      ? rules.activityIcon.trim()
+      : null;
+
     const base = {
       ...msg,
       thread: {
@@ -147,6 +151,10 @@ export async function GET() {
         statusLabel,
         isVip,
         guestTimezoneLabel,
+        link: {
+          ...msg.thread.link,
+          activityIcon,
+        },
       },
     };
 
