@@ -107,7 +107,7 @@ export function MyLinksPopover() {
     if (pathname !== "/dashboard" && pathname !== "/dashboard/") {
       router.push("/dashboard");
     }
-    setTimeout(() => prefillComposer("Create an office hours link for "), 60);
+    setTimeout(() => prefillComposer("Create an office hours link"), 60);
   }
 
   const general = rows.find((r) => r.kind === "general");
