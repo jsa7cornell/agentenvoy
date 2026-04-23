@@ -29,6 +29,7 @@ const GENERIC_TOPICS = new Set([
   "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
   "check in", "check-in", "checkin", "connect", "touch base",
   "quick chat", "quick meeting", "quick sync", "discussion",
+  "call", "video call", "zoom", "zoom call", "video", "talk",
 ]);
 
 function isGenericTopic(topic: string): boolean {
@@ -1101,16 +1102,9 @@ async function handleCreateLink(
   const hostFirstName = hostName?.split(/\s+/)[0] || "Host";
   const { getInviteeDisplay, getWaitingLabel } = await import("@/lib/invitee-display");
   const inviteeDisplay = getInviteeDisplay({ inviteeNames, inviteeName });
-  // Generic topics — stripped and replaced by format/name signal.
-  // Exact lowercase match only: "intro call" is specific and kept.
-  const GENERIC_TOPICS = new Set([
-    "meeting", "chat", "sync", "catch-up", "catchup",
-    "check-in", "checkin", "discussion", "talk",
-    "call", "zoom", "video call",
-  ]);
-  const normalizedTopic = topic?.trim().toLowerCase() ?? null;
-  const isGenericTopic = normalizedTopic ? GENERIC_TOPICS.has(normalizedTopic) : true;
-  const meaningfulActivity = !isGenericTopic && topic
+  // topic is already null if it was generic (stripped at line 786 above).
+  // Capitalize the meaningful activity phrase if present.
+  const activityLabel = topic
     ? topic.charAt(0).toUpperCase() + topic.slice(1)
     : null;
 
@@ -1121,7 +1115,7 @@ async function handleCreateLink(
     : effectiveFormatStr === "video" ? "VC"
     : null;
 
-  const prefix = meaningfulActivity ?? formatPrefix;
+  const prefix = activityLabel ?? formatPrefix;
   const isGroup = Array.isArray(inviteeNames) && inviteeNames.length > 1;
 
   const title =
