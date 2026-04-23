@@ -7,30 +7,33 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";
 import type { ScoredSlot, LinkRules } from "@/lib/scoring";
-import { applyEventOverrides, deriveTimingAnchor } from "@/lib/scoring";
+import { applyEventOverrides } from "@/lib/scoring";
 import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
 import { getInviteeDisplay, getWaitingLabel } from "@/lib/invitee-display";
-import { formatDuration, formatDurationCasual } from "@/lib/format-duration";
+import { formatDuration } from "@/lib/format-duration";
 import { getUserTimezone } from "@/lib/timezone";
 import {
   resolveSeedGuestTimezoneForCreate,
   resolveEffectiveGuestTimezone,
 } from "@/lib/guest-timezone-seed";
 import {
-  formatAvailabilitySlotList,
-  formatAvailabilityProse,
-  formatStretchDays,
   formatLabel,
-  buildOpenWindowGreeting,
   computeCanonicalWeekLabel,
 } from "@/lib/greeting-template";
-import {
-  buildGuestGreeting,
-  extractGuestPreferencesSummary,
-} from "@/lib/guest-greeting-template";
+// formatAvailabilitySlotList / formatAvailabilityProse / formatStretchDays /
+// buildOpenWindowGreeting removed 2026-04-23 when the bulleted schedule body
+// and guestPicks open-window template were folded into the unified greeting
+// framework. Exports retained in greeting-template.ts for unit tests; no
+// production caller remains.
+// Guest-Envoy greeting imports — intentionally retained as comment so the
+// re-enable path is one-line. See disabled block below (2026-04-23).
+// import {
+//   buildGuestGreeting,
+//   extractGuestPreferencesSummary,
+// } from "@/lib/guest-greeting-template";
 import {
   deriveLegacy,
   hasExclusiveOverride,
@@ -755,18 +758,11 @@ export async function POST(req: NextRequest) {
     console.log(`[session] density horizon=${horizonDays}d filteredSlots=${filteredSlots.length}`);
   }
 
-  // Format availability as the V2 Danny-spec bullet list. Greeting is
-  // always host-canonical post-2026-04-21 (decision #10) — the guest-tz
-  // parameter is ignored by the formatter; the calendar card picker + Envoy
-  // follow-up chat handle viewer-tz presentation.
-  const slotList = formatAvailabilitySlotList(
-    filteredSlots,
-    hostTimezone,
-    new Date(),
-    effectiveDuration ?? undefined,
-    effectiveMinDuration,
-    { collapseIdenticalWindows: true },
-  );
+  // V2 bullet-list pre-computation removed 2026-04-23 — the bulleted body
+  // branch was deleted when the greeting framework unified around calendar-
+  // widget deferral. `effectiveDuration` + `effectiveMinDuration` still
+  // flow into the widget via scoring; nothing in the greeting renderer
+  // needs a flat slot list anymore.
 
   let greeting: string;
 
@@ -783,30 +779,19 @@ export async function POST(req: NextRequest) {
     const hostFirstName = hostName.split(/\s+/)[0] || hostName;
     const inviteeName = link.inviteeName || null;
     const rawTopic = link.topic || null;
-    const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
 
     // Greeting V2 (Danny spec, 2026-04-18).
     const firstName = ((link.inviteeNames?.[0] ?? inviteeName ?? "").split(/\s+/)[0]);
     const greeteeName = firstName || "there";
 
-    // Format emoji: phone → 📞, video → 📹, in-person → 👤 (person; per UX
-    // 2026-04-20 we switched from 🤝 to 👤 to convey "together/in person"
-    // without the handshake formality), fallback → 📅
-    const formatEmoji = effectiveFormat === "phone" ? "📞"
-      : effectiveFormat === "video" ? "📹"
-      : effectiveFormat === "in-person" ? "👤"
-      : "📅";
-
-    // Activity (free-form) + its icon (free-form emoji) — set by the host's
-    // LLM at create_link time. Keeps the meeting-type taxonomy expansive
-    // rather than discrete.
+    // Activity (free-form) — set by the host's LLM at create_link time.
+    // Keeps the meeting-type taxonomy expansive rather than discrete.
+    // Format emoji + activityIcon are no longer rendered in the greeting
+    // (activityIcon lives on the thread card; format emoji was dropped with
+    // the 2026-04-23 voice refactor).
     const activityText =
       typeof linkRules.activity === "string" && linkRules.activity.trim()
         ? linkRules.activity.trim()
-        : null;
-    const activityEmoji =
-      typeof linkRules.activityIcon === "string" && linkRules.activityIcon.trim()
-        ? linkRules.activityIcon.trim()
         : null;
 
     // V4 prose-first opener (2026-04-20) — replaces V3's Proposal bar.
@@ -847,42 +832,6 @@ export async function POST(req: NextRequest) {
         ? canonicalWeekLabel
         : rawTimingLabel;
 
-    const openerTimingClause = timingLabel ? ` for ${timingLabel}` : "";
-
-    const buildProposalSentence = (): string | null => {
-      // Fragments assemble into: "He's proposing [dur min] [for activity] [in loc]."
-      //
-      // timingLabel is intentionally NOT included here — it's already rendered
-      // in the opener via `openerTimingClause` ("scheduling time with you and
-      // John *for tomorrow*"). Including it again produced awkward duplication
-      // like: "…for tonight if possible, else tomorrow or next week. He's
-      // proposing tonight if possible, else tomorrow or next week and 30 min."
-      // (bug reported 2026-04-21, link q6vcyv). The proposal sentence focuses
-      // purely on substance (duration / activity / location); timing lives
-      // exclusively in the opener.
-      const durStr = durationForOpener ? formatDuration(durationForOpener) : null;
-      if (activityText) {
-        const tail = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
-        if (durStr) return `He's proposing ${durStr} for ${activityText}${tail}.`;
-        return `He's proposing a${/^[aeiou]/i.test(activityText) ? "n" : ""} ${activityText}${tail}.`;
-      }
-      // No activity — fall back to duration/location framing.
-      if (durStr || linkLocationForOpener) {
-        const locTail = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
-        if (durStr) return `He's proposing ${durStr}${locTail}.`;
-        if (linkLocationForOpener) return `He's proposing to meet in ${linkLocationForOpener}.`;
-      }
-      return null;
-    };
-
-    const proposalSentence = buildProposalSentence();
-    // Note: hostNote is no longer rendered verbatim (narration-hygiene-v2,
-    // 2026-04-20), so the proposal sentence is now always safe to include
-    // when we have structured fields — no dupe risk with a pass-through line.
-    const hello = `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}${openerTimingClause}.${
-      proposalSentence ? ` ${proposalSentence}` : ""
-    }`;
-
     const fmtLabel = formatLabel(effectiveFormat);
     const durationLabel = (effectiveMinDuration && effectiveMinDuration < (effectiveDuration ?? 30))
       ? `${effectiveMinDuration}–${effectiveDuration}`
@@ -897,358 +846,214 @@ export async function POST(req: NextRequest) {
       ? `${durationLabel}-min meeting`
       : "meeting";
 
-    // Optional venue/address. Shown as a fourth line when set.
-    const linkLocation = typeof linkRules.location === "string" && linkRules.location.trim()
-      ? linkRules.location.trim()
-      : null;
-
-    const isVip = !!(linkRules.isVip);
-
-    // guestPicks branch (2026-04-17): when the host deferred details to the
-    // guest, skip the day-bullet windows list entirely and render the
-    // open-window variant. Preserves the host's ambiguity instead of
-    // artificially pinning a narrow offer.
     const guestPicks = (linkRules as Record<string, unknown>).guestPicks as
       | { window?: { startHour: number; endHour: number }; date?: boolean; duration?: boolean | number[]; location?: boolean }
       | undefined;
     const guestGuidance = (linkRules as Record<string, unknown>).guestGuidance as
       | { suggestions?: { locations?: string[]; durations?: number[] }; tone?: string }
       | undefined;
-    // Open-window template only fires when the guest actually has to pick
-    // something structural (date / duration / location). A pure `window`
-    // constraint from the host is just a time-of-day clamp on availability —
-    // already applied to filteredSlots above — so the standard prose/bulleted
-    // path handles it. This keeps the opener consistent with other 1:1 links
-    // and ensures the duration renders (buildOpenWindowGreeting drops it when
-    // the guest isn't picking duration). Changed 2026-04-20 per Katie/vf9dwx
-    // feedback: "duration missing from greeting."
-    const hasGuestPicks =
-      !!guestPicks &&
-      !!(guestPicks.date || guestPicks.duration || guestPicks.location);
+    // ────────────────────────────────────────────────────────────────────
+    // Greeting render (2026-04-23 unified-branch refactor)
+    //
+    //   Branch A — named invitee + steering=exclusive + single-slot override
+    //              → "Envoy lined up a time" handoff to the offer card.
+    //   Branch B-proposal — named invitee + any structural field set (format,
+    //              duration, activity, or location) → "He's proposing {xxx}"
+    //              voice. Timing is folded into {xxx}.
+    //   Branch B-find-time — named invitee with no structural fields set
+    //              → "{Host} asked me to find time{ timingLabel}" voice.
+    //   Branch C — anonymous link (type=generic OR sourceRuleId!=null, i.e.
+    //              office-hours child) → agent-voice self-intro. Office-hours
+    //              surface `topic` inline; bare generics use "default is".
+    //
+    // Rules baked in:
+    //   • `link.type === "generic" || link.sourceRuleId != null` is the ONLY
+    //     gate for anonymous voice. Steering does NOT select the branch.
+    //   • Bulleted schedule body (old Branch D) deleted. Calendar widget IS
+    //     the enumeration.
+    //   • guestPicks open-window template (`buildOpenWindowGreeting`) folded
+    //     inline as a "Let me know where/how long works" hint on B-templates.
+    //   • Dimension-aware suggest-alt clause — mentions only the dimensions
+    //     the host actually set; skipped for directive steering (narrow/
+    //     exclusive) and skipped entirely for office-hours links (topic
+    //     defines the offer).
+    //   • Calendar-connect pitch — shown only when there's >1 bookable slot
+    //     AND the viewer is anonymous (logged-in guests already have app-
+    //     level calendar access).
+    // ────────────────────────────────────────────────────────────────────
 
-    if (hasGuestPicks) {
-      // Anchor date: use the earliest filteredSlot's host-tz date as the "when"
-      // when the host specified one (e.g., "this afternoon" → today). Null
-      // when guestPicks.date is true so the greeting reads "any day that works".
-      const anchorIso = !guestPicks!.date && filteredSlots.length > 0
-        ? new Intl.DateTimeFormat("en-CA", { timeZone: hostTimezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(filteredSlots[0].start))
-        : null;
-      // The open-window path emits its own intro so topic ("hike", "welcome-back
-      // lunch") can flow through naturally. Email is NOT asked for up front —
-      // it's collected by the confirm card flow when the guest locks a time.
-      greeting = buildOpenWindowGreeting({
-        hostFirstName,
-        inviteeName,
-        inviteeNames: link.inviteeNames,
-        // For physical activities where the guest picks location/details,
-        // activityText carries the event name ("hike", "bike ride") even
-        // when no formal topic was set. Without this the greeting just says
-        // "I'm helping John find time with you" — the guest has no idea what
-        // the event is before picking a spot.
-        topic: topic || activityText,
-        formatEmoji,
-        hostTimezone,
-        // guestTimezone intentionally omitted — greeting is host-canonical
-        // only (decision #10, 2026-04-21). Viewer-tz presentation lives on
-        // the calendar-card picker + Envoy follow-up chat.
-        window: guestPicks!.window,
-        anchorDate: anchorIso,
-        picks: {
-          date: guestPicks!.date,
-          duration: guestPicks!.duration,
-          location: guestPicks!.location,
-        },
-        guidance: guestGuidance,
-        hostNote: link.hostNote,
-      });
-    } else {
-      // V4 assembly (2026-04-20 — prose-first, Proposal bar removed):
-      //   hello (opener + proposal sentence, both prose; empty lines preserved)
-      //   [tzLine — only when timezones differ]
-      //   [hostNoteLine — verbatim host flavor]
-      //
-      //   **Mon, Apr 27**
-      //   • 6:00 AM PT / 9:00 AM ET
-      //   ...
-      //
-      //   closing (points at both chat + calendar)
-      //
-      // Structured at-a-glance facts (activity · duration · timing · location)
-      // now live in the deal-room event card instead of a greeting-bar.
-      // `fmtLabel`, `durationLabel`, `linkLocation`, `activityEmoji` are still
-      // used below by tzLine / hostNoteLine / event-card reader via linkRules.
-      void fmtLabel; void durationLabel; void linkLocation; void activityEmoji;
+    const isAnonymousLink = link.type === "generic" || !!link.sourceRuleId;
+    const isOfficeHoursLink = !!link.sourceRuleId;
 
-      // V5 prose-form gate (2026-04-20): when the offer is narrow enough to
-      // say in a single sentence — "tomorrow or Thursday, or next week if
-      // needed" — skip the bulleted day-list and fold availability into a
-      // casual combined opener. Post-2026-04-21 the prose gate no longer
-      // depends on guest-tz difference: greeting is always host-canonical,
-      // so dual-tz is no longer a reason to force the bulleted path. Prose
-      // still requires !VIP (stretch-days tail) and !generic (no single
-      // invitee for the opener), and ≤ 3 preferred days (enforced inside).
-      const isGenericLink = link.type === "generic";
-      // Shared helper — kept in sync with MCP `rules.timingPreference.anchor`
-      // projection by construction (both call `deriveTimingAnchor`).
-      const proseAnchor = deriveTimingAnchor(rawTimingLabel);
-      const proseCandidate =
-        !isVip && !isGenericLink
-          ? formatAvailabilityProse(
-              filteredSlots,
-              hostTimezone,
-              new Date(),
-              effectiveDuration ?? undefined,
-              effectiveMinDuration,
-              { preferredAnchor: proseAnchor },
-            )
-          : null;
+    const storedSteering = readStoredSteering(linkRules);
+    const effectiveSteering = storedSteering ?? deriveLegacy(linkRules);
+    if (effectiveSteering === "exclusive" && !hasExclusiveOverride(linkRules)) {
+      console.error(
+        `[greeting] intent=exclusive with no slotOverrides[-2] (sessionId=${session.id}, linkCode=${link.code ?? "?"})`,
+      );
+    }
+    const isDirective =
+      effectiveSteering === "narrow" || effectiveSteering === "exclusive";
 
-      // TZ line removed 2026-04-21 (decision #10). The calendar card picker
-      // now tells the guest which tz they're looking at; the greeting stays
-      // silent on tz so it reads cleanly as host-voice regardless of viewer.
-      const tzLine: string | null = null;
+    // Multi-slot signal drives the calendar-connect pitch. "Bookable" = future
+    // slot with score ≤ 1 (matches the widget's offerable predicate).
+    const nowMs = Date.now();
+    const bookableSlotCount = filteredSlots.filter(
+      (s) =>
+        new Date(s.start).getTime() > nowMs &&
+        typeof s.score === "number" &&
+        s.score <= 1,
+    ).length;
+    const isMultiSlot = bookableSlotCount > 1;
+    const calendarPitch = isMultiSlot && !isGuest
+      ? "If you connect your calendar I can automagically find the best fit for you!"
+      : null;
 
-      // Schedule body — the bulleted V2 list. If empty, fall back to an
-      // open-ended ask.
-      let scheduleBody: string;
-      if (slotList.lines.length > 0) {
-        scheduleBody = slotList.lines.join("\n");
-        if (slotList.hasPreferred) {
-          scheduleBody += `\n\n★ = best fit with ${hostFirstName}'s schedule`;
-        }
-        if (isVip) {
-          const stretchDays = formatStretchDays(
-            filteredSlots,
-            hostTimezone,
-            new Date(),
-          );
-          if (stretchDays) {
-            scheduleBody += `\n\nIf none of those work, I can also make ${stretchDays} available — just ask.`;
-          }
-        }
-      } else {
-        scheduleBody = `I don't have open times to show right now — tell me what generally works and I'll find a match.`;
-      }
+    // Dimension-aware suggest-alt clause. Skipped for directive steering,
+    // office-hours links, and when neither format nor duration is set.
+    const suggestAltClause = ((): string | null => {
+      if (isDirective || isOfficeHoursLink) return null;
+      const fmtSet = !!effectiveFormat;
+      const durSet = durationForOpener != null;
+      if (!fmtSet && !durSet) return null;
+      if (fmtSet && durSet)
+        return "and also free to suggest a different format or meeting length if that's better for you";
+      if (fmtSet)
+        return "and also free to suggest a different format if that's better for you";
+      return "and also free to suggest a different meeting length if that's better for you";
+    })();
 
-      // Closing — V3 keeps it to one line and NEVER asks for email up front
-      // (the confirmation card collects it when the guest locks a time). If
-      // we're missing name/topic, fold just those into the sentence.
-      //
-      // Generic links: third-person voice ("{host}'s typical slot is…") +
-      // always include both duration and format in the hint so the guest
-      // knows they can adjust either axis. When format isn't declared at link
-      // creation (typical for bare-slug generic visits), default the "typical"
-      // framing to video — most common host default. Per John's 2026-04-21
-      // feedback: "John's typical slot is 30 mins and VC, but if a different
-      // length and meeting method (call, f2f) is appropriate, just let me
-      // know and we can make that happen."
-      const isGeneric = link.type === "generic";
-
-      // "Essentially-unsteered" contextual link: the host named a guest but
-      // didn't narrow the offer in any meaningful way. The bulleted schedule
-      // body would just dump "here's my whole calendar" — noisy, redundant
-      // with the calendar widget below. Treat body + closing as generic
-      // even though the link is contextual; keep the personalized hello
-      // since we still have an invitee.
-      //
-      // First reported 2026-04-21 (Suzie link 6dngnf — "get time w/ suzie
-      // again" → no rules at all). Refined same day (Bob link 8hryrv —
-      // "create new event for bob - anytime next week" → dateRange set to
-      // Mon–Fri of next week, nothing else). A wide-ish dateRange alone is
-      // NOT meaningful steering; it's labeling a week, not narrowing the
-      // offer. Threshold: dateRange spans < 5 calendar days → counts as
-      // steering. ≥ 5 days (work week or wider) → doesn't count.
-      const unsteeredRules = linkRules as Record<string, unknown>;
-      const ptw = Array.isArray(unsteeredRules.preferredTimeWindows)
-        ? unsteeredRules.preferredTimeWindows
-        : [];
-
-      // Compute dateRange span in calendar days (inclusive). Narrow spans
-      // (specific day, "Tue-Thu") still count as steering because they're
-      // genuinely narrowing what's on offer.
-      const isNarrowDateRange = (() => {
-        const dr = unsteeredRules.dateRange as { start?: unknown; end?: unknown } | undefined;
-        if (!dr || typeof dr.start !== "string" || typeof dr.end !== "string") return false;
-        const startMs = Date.parse(`${dr.start}T00:00:00Z`);
-        const endMs = Date.parse(`${dr.end}T00:00:00Z`);
-        if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
-        const days = Math.floor((endMs - startMs) / 86_400_000) + 1;
-        return days < 5;
-      })();
-
-      // Legacy syntactic predicate — retained in this PR as
-      // defense-in-depth and as the telemetry signal that gates its own
-      // deletion. Per §4.10 the delete trigger is
-      // `legacyFallbackRate < 1%` over 7 consecutive days (follow-up PR).
-      // This PR no longer consults `hasMeaningfulSteering` for the
-      // render decision; the single `effectiveSteering` enum below is
-      // authoritative. Kept as `void`'d so the predicate is still
-      // inspectable during diagnosis without tripping lint.
-      const hasMeaningfulSteering =
-        !!unsteeredRules.preferredDays ||
-        !!unsteeredRules.preferredTimeStart ||
-        !!unsteeredRules.preferredTimeEnd ||
-        ptw.length > 0 ||
-        isNarrowDateRange ||
-        !!unsteeredRules.activity ||
-        !!unsteeredRules.lastResort ||
-        !!unsteeredRules.allowWeekends ||
-        !!unsteeredRules.isVip ||
-        !!unsteeredRules.guestPicks;
-      void hasMeaningfulSteering;
-
-      // Host-intent steering (proposal 2026-04-21). Read the LLM-classified
-      // `intent.steering` directly — replacing the predicate chain above
-      // with a single enum read. `hasMeaningfulSteering` stays in place as
-      // defense-in-depth and as the backing predicate for `deriveLegacy`;
-      // the predicate chain's deletion is telemetry-gated (§4.10) and ships
-      // in a follow-up PR.
-      //
-      // - `open` / `soft`       → generic body (skip bulleted list; lean on
-      //                           the calendar widget below)
-      // - `narrow` / `exclusive` → bulleted body (those specifics ARE the
-      //                             offer)
-      // Missing intent → fall back to `deriveLegacy`, which applies the
-      // syntactic predicate above and returns a best-guess tier.
-      //
-      // Belt-and-suspenders: even with intent present, a stored tier of
-      // `exclusive` that somehow has no score-(-2) override gets a render-
-      // time console.error — see §4.8. The display still falls through to
-      // the bulleted body so the guest isn't stranded.
-      const storedSteering = readStoredSteering(linkRules);
-      const effectiveSteering = storedSteering ?? deriveLegacy(linkRules);
-      if (effectiveSteering === "exclusive" && !hasExclusiveOverride(linkRules)) {
-        console.error(
-          `[greeting] intent=exclusive with no slotOverrides[-2] (sessionId=${session.id}, linkCode=${link.code ?? "?"})`,
-        );
-      }
-      const useGenericBody =
-        isGeneric || effectiveSteering === "open" || effectiveSteering === "soft";
-
-      // Closing V7 (2026-04-21 deal-room reshape proposal): pure calendar
-      // deferral — no prose enumeration of hours, no "typical slot" alt-format
-      // paragraph. The calendar below is the source of truth; the closing
-      // hands off to it in one short line. Duration/format flexibility moves
-      // to the card/widget affordances rather than greeting prose.
-      const closing = `Pick a time below, or reply with what works for you.`;
-
-      // Host-supplied flavor (hostNote) is NO LONGER rendered verbatim in
-      // the guest greeting (narration-hygiene-v2, 2026-04-20). Root cause:
-      // hosts write hostNote as *context to Envoy* ("next week — he's back
-      // from London"), but the 2026-04-18 pass-through ship rendered it as
-      // a literal guest-facing line ("💬 John: next week — he's back from
-      // London"). That leaked host-to-Envoy context into the guest view.
-      // hostNote now stays in the DB as context for the create_link LLM to
-      // inform structured fields (timingLabel, activity, etc.) but is never
-      // displayed verbatim to guests.
-
-      // V6 exclusive-single-slot (2026-04-21): when the host narrowed to
-      // exactly one slot (`exclusive` tier + one slotOverrides[-2]), skip
-      // the bulleted body and render a prescriptive one-liner. The widget
-      // below already highlights the -2 slot as the sole offer, so the
-      // greeting's job is to frame it as a proposal, not a menu.
-      //
-      // 2026-04-21 Stage 2 (deal-room-widget-state-machine): the offer-mode
-      // card now exists with an explicit "Confirm this time" CTA and its own
-      // "Envoy found a mutual time that works" header. The greeting's job
-      // shrinks to a narrative lead-in that hands off to the card — it
-      // names the guest, anchors the time, and points at the card. No
-      // "confirmation button below" claim (that's the card's copy now); no
-      // duplicate "found a mutual time" framing (that's the card's header).
-      if (
-        !isGeneric &&
-        effectiveSteering === "exclusive" &&
-        isSingleSlotExclusive(linkRules)
-      ) {
-        const durStr = effectiveDuration
-          ? formatDuration(effectiveDuration)
-          : null;
-        const activityPart = activityText ? ` for ${activityText}` : "";
-        const locPart = linkLocationForOpener
-          ? ` at ${linkLocationForOpener}`
-          : "";
-        const durPart = durStr ? `${durStr}` : "some time";
-        const slotStartIso = ((): string | null => {
-          const overrides = (linkRules?.slotOverrides ?? []) as Array<{
-            start?: unknown;
-            score?: unknown;
-          }>;
-          const hit = overrides.find(
-            (o) => typeof o.start === "string" && o.score === -2,
-          );
-          return hit && typeof hit.start === "string" ? hit.start : null;
-        })();
-        const whenPart = ((): string => {
-          if (!slotStartIso) return "";
-          const d = new Date(slotStartIso);
-          if (Number.isNaN(d.getTime())) return "";
-          const day = new Intl.DateTimeFormat("en-US", {
-            timeZone: hostTimezone,
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-          }).format(d);
-          const time = new Intl.DateTimeFormat("en-US", {
-            timeZone: hostTimezone,
-            hour: "numeric",
-            minute: "2-digit",
-            timeZoneName: "short",
-          }).format(d);
-          return ` on ${day} at ${time}`;
-        })();
-        // Greeting hands off to the offer card. Card header says "Envoy
-        // found a mutual time that works" — greeting names the guest,
-        // anchors the time, and points at the card's Confirm CTA. Don't
-        // duplicate the "found a mutual time" framing here.
-        const proposal = `${durPart}${activityPart}${locPart}${whenPart}`;
-        const exclusiveHello = `👋 ${greeteeName}! Envoy lined up a time — ${proposal}. Confirm below, or let me know if anything needs to shift.`;
-        greeting = exclusiveHello;
-      } else if (proseCandidate && !isGeneric && !useGenericBody) {
-        const durCasual = durationForOpener
-          ? formatDurationCasual(durationForOpener)
-          : null;
-        const activityPart = activityText ? ` for ${activityText}` : "";
-        const locPart = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
-        const durPart = durCasual ? `${durCasual} ` : "";
-        const proposal = `He's proposing ${durPart}${proseCandidate.phrase}${activityPart}${locPart}.`;
-        const toneLine = guestGuidance?.tone ? `\n\n${guestGuidance.tone}` : "";
-        const proseHello = `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}. ${proposal}${toneLine}`;
-        const proseClosing = `Pick a time below, or reply with what works for you.`;
-        greeting = [proseHello, proseClosing].join("\n\n");
-      } else {
-        // V4 bulleted fallback: proposal sentence already rendered in `hello`,
-        // followed by the bulleted schedule body.
-        // Generic links have no single invitee, so the opener "scheduling time
-        // with you and John" reads wrong. Use an agent-framed self-intro.
-        const genericHello = `👋 I'm ${hostFirstName}'s scheduling agent.`;
-        // guestGuidance.tone — soft flavor line ("He's thinking a hike but
-        // open to coffee if that's easier"). Rendered after the opener so
-        // the guest gets the personal context before scanning the schedule.
-        // Skipped for generic links (no single invitee to personalize for).
-        const toneBlock = !isGeneric && guestGuidance?.tone ? guestGuidance.tone : null;
-        const headerLines = [isGeneric ? genericHello : hello];
-        if (toneBlock) headerLines.push(toneBlock);
-        if (tzLine) headerLines.push(tzLine);
-        const header = headerLines.join("\n\n");
-
-        // Greeting V7 (2026-04-21 deal-room reshape): when the render will
-        // lean on the calendar widget (useGenericBody — soft/open steering
-        // or generic link), skip the bulleted scheduleBody entirely. The
-        // widget IS the enumeration; repeating it in prose is the ~180-word
-        // Katie-link anti-pattern from report cmo9i7z9o.
-        //
-        // The bulleted body still renders for narrow/exclusive intents
-        // where the specific slots ARE the offer and the guest needs to see
-        // them even before scanning the calendar.
-        if (useGenericBody) {
-          greeting = [
-            `👋 I'm ${hostFirstName}'s scheduling agent.`,
-            `Highlighted times below are best for ${hostFirstName}. Our default is ${meetingDescShort} — you can grab a time and/or suggest other durations and formats such as coffee, phone, etc. If you connect your calendar I can automagically find the best fit for you!`,
-          ].join("\n\n");
+    // Guest-pick hint — folds the old `hasGuestPicks` / buildOpenWindowGreeting
+    // special case inline. Date-pick is intentionally suppressed (the calendar
+    // widget IS the day picker).
+    const guestPickHint = ((): string | null => {
+      if (!guestPicks) return null;
+      const locPick = !!guestPicks.location;
+      const durPick = guestPicks.duration === true || (Array.isArray(guestPicks.duration) && guestPicks.duration.length > 0);
+      let lead: string | null = null;
+      if (locPick && durPick) lead = "where and how long works for you";
+      else if (locPick) lead = "where works for you";
+      else if (durPick) lead = "how long works for you";
+      if (!lead) return null;
+      let hint = `Let me know ${lead}`;
+      const locSugs = guestGuidance?.suggestions?.locations || [];
+      if (locPick && locSugs.length > 0) {
+        if (locSugs.length === 1) {
+          hint += ` — ${hostFirstName} suggested ${locSugs[0]}`;
+        } else if (locSugs.length === 2) {
+          hint += ` — ${hostFirstName} suggested ${locSugs[0]} or ${locSugs[1]}`;
         } else {
-          greeting = [header, scheduleBody, closing].join("\n\n");
+          hint += ` — ${hostFirstName} suggested ${locSugs.slice(0, -1).join(", ")}, or ${locSugs[locSugs.length - 1]}`;
         }
       }
+      return `${hint}.`;
+    })();
+
+    // Build the proposal phrase ({xxx} in "He's proposing {xxx}.") composing
+    // duration / format / activity / location / timingLabel. Activity leads
+    // when set; otherwise duration+format; otherwise bare format or duration.
+    const buildProposalPhrase = (): string => {
+      const durStr = durationForOpener ? formatDuration(durationForOpener) : null;
+      const fmtWord = formatLabel(effectiveFormat);
+      let head: string;
+      if (activityText) {
+        const article = /^[aeiou]/i.test(activityText) ? "an" : "a";
+        head = durStr ? `${durStr} for ${activityText}` : `${article} ${activityText}`;
+      } else if (durStr && fmtWord) {
+        head = `a ${durStr} ${fmtWord}`;
+      } else if (durStr) {
+        head = durStr;
+      } else if (fmtWord) {
+        const article = /^[aeiou]/i.test(fmtWord) ? "an" : "a";
+        head = `${article} ${fmtWord}`;
+      } else {
+        head = "time";
+      }
+      const locPart = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
+      const timingPart = timingLabel ? ` ${timingLabel}` : "";
+      return `${head}${locPart}${timingPart}`;
+    };
+
+    // ─── Branch A: single-slot exclusive ─────────────────────────────────
+    if (
+      !isAnonymousLink &&
+      effectiveSteering === "exclusive" &&
+      isSingleSlotExclusive(linkRules)
+    ) {
+      const durStr = effectiveDuration ? formatDuration(effectiveDuration) : null;
+      const activityPart = activityText ? ` for ${activityText}` : "";
+      const locPart = linkLocationForOpener ? ` at ${linkLocationForOpener}` : "";
+      const durPart = durStr ? `${durStr}` : "some time";
+      const slotStartIso = ((): string | null => {
+        const overrides = (linkRules?.slotOverrides ?? []) as Array<{
+          start?: unknown;
+          score?: unknown;
+        }>;
+        const hit = overrides.find(
+          (o) => typeof o.start === "string" && o.score === -2,
+        );
+        return hit && typeof hit.start === "string" ? hit.start : null;
+      })();
+      const whenPart = ((): string => {
+        if (!slotStartIso) return "";
+        const d = new Date(slotStartIso);
+        if (Number.isNaN(d.getTime())) return "";
+        const day = new Intl.DateTimeFormat("en-US", {
+          timeZone: hostTimezone,
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        }).format(d);
+        const time = new Intl.DateTimeFormat("en-US", {
+          timeZone: hostTimezone,
+          hour: "numeric",
+          minute: "2-digit",
+          timeZoneName: "short",
+        }).format(d);
+        return ` on ${day} at ${time}`;
+      })();
+      const proposal = `${durPart}${activityPart}${locPart}${whenPart}`;
+      greeting = `👋 ${greeteeName}! Envoy lined up a time — ${proposal}. Confirm below, or let me know if anything needs to shift.`;
+
+      // ─── Branch C: anonymous-visitor voice ─────────────────────────────
+    } else if (isAnonymousLink) {
+      // Office-hours children carry a `topic` (e.g. "Coaching hours"). Bare
+      // generic links don't — render the default offer instead.
+      const hostTopic =
+        isOfficeHoursLink && rawTopic && !isGenericTopic(rawTopic) ? rawTopic : null;
+      const pitch = calendarPitch ? ` ${calendarPitch}` : "";
+      const body = hostTopic
+        ? `These are ${hostFirstName}'s ${hostTopic} — ${meetingDescShort}s within the available windows below.${pitch}`
+        : `${hostFirstName}'s default is ${meetingDescShort} sometime within the available windows below.${pitch}`;
+      greeting = [`👋 I'm ${hostFirstName}'s scheduling agent.`, body].join("\n");
+
+      // ─── Branch B: named invitee (proposal or find-time) ───────────────
+    } else {
+      const hasProposalSubstance =
+        !!effectiveFormat ||
+        durationForOpener != null ||
+        !!activityText ||
+        !!linkLocationForOpener;
+
+      const openerLine = hasProposalSubstance
+        ? `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}. He's proposing ${buildProposalPhrase()}.`
+        : `👋 ${greeteeName}! ${hostFirstName} asked me to find time${timingLabel ? ` ${timingLabel}` : ""}.`;
+
+      const toneLine = guestGuidance?.tone ? guestGuidance.tone : null;
+
+      // Closing: "Pick a time below[, <suggest-alt>]. [<calendar pitch>]"
+      const closingBase = suggestAltClause
+        ? `Pick a time below, ${suggestAltClause}.`
+        : "Pick a time below.";
+      const closingParts = [closingBase];
+      if (calendarPitch) closingParts.push(calendarPitch);
+      const closing = closingParts.join(" ");
+
+      const blocks: string[] = [openerLine];
+      if (toneLine) blocks.push(toneLine);
+      if (guestPickHint) blocks.push(guestPickHint);
+      blocks.push(closing);
+      greeting = blocks.join("\n\n");
     }
   }
 
@@ -1261,47 +1066,45 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Bilateral: if the visitor is a logged-in guest, fire a deterministic
-  // greeting from *their* Envoy right after the host's. Template-driven, no
-  // LLM — matches the host-side pattern per SPEC. Skipped for anonymous
-  // guests (isGuest false) and for group events (the group flow handles its
-  // own greeting shape).
-  if (isGuest && !isGroupEvent && authSession?.user?.id) {
-    try {
-      const guestUser = await prisma.user.findUnique({
-        where: { id: authSession.user.id },
-        select: { name: true, preferences: true },
-      });
-      if (guestUser) {
-        const guestPrefsSummary = extractGuestPreferencesSummary(guestUser.preferences);
-        const guestFirstName = guestUser.name ? guestUser.name.split(/\s+/)[0] : null;
-        const hostFirst = (user.name || "the organizer").split(/\s+/)[0];
-        const guestGreeting = buildGuestGreeting({
-          guestFirstName,
-          hostFirstName: hostFirst,
-          offerableSlots: filteredSlots,
-          guestPreferences: guestPrefsSummary,
-          guestTimezone: effectiveGuestTz ?? null,
-          hostTimezone,
-        });
-        if (guestGreeting) {
-          await prisma.message.create({
-            data: {
-              sessionId: session.id,
-              // Distinct role so the client can render this in the guest-team
-              // color (blue for the guest viewer, violet for the host viewer).
-              role: "guest_envoy",
-              content: guestGreeting,
-            },
-          });
-        }
-      }
-    } catch (e) {
-      // Never block the host greeting — bilateral intelligence is strictly
-      // additive. Log and move on.
-      console.error("[negotiate/session] guest-envoy greeting failed", e);
-    }
-  }
+  // Bilateral guest-Envoy initial greeting — DISABLED 2026-04-23 per John.
+  // Didn't add enough at the initial-greeting stage to justify the extra
+  // bubble; template, helpers, and tests are retained for potential re-
+  // enable once the voice is redesigned to match the find-time/proposal
+  // model. To re-enable: restore the block below + the two imports
+  // (buildGuestGreeting, extractGuestPreferencesSummary).
+  //
+  // if (isGuest && !isGroupEvent && authSession?.user?.id) {
+  //   try {
+  //     const guestUser = await prisma.user.findUnique({
+  //       where: { id: authSession.user.id },
+  //       select: { name: true, preferences: true },
+  //     });
+  //     if (guestUser) {
+  //       const guestPrefsSummary = extractGuestPreferencesSummary(guestUser.preferences);
+  //       const guestFirstName = guestUser.name ? guestUser.name.split(/\s+/)[0] : null;
+  //       const hostFirst = (user.name || "the organizer").split(/\s+/)[0];
+  //       const guestGreeting = buildGuestGreeting({
+  //         guestFirstName,
+  //         hostFirstName: hostFirst,
+  //         offerableSlots: filteredSlots,
+  //         guestPreferences: guestPrefsSummary,
+  //         guestTimezone: effectiveGuestTz ?? null,
+  //         hostTimezone,
+  //       });
+  //       if (guestGreeting) {
+  //         await prisma.message.create({
+  //           data: {
+  //             sessionId: session.id,
+  //             role: "guest_envoy",
+  //             content: guestGreeting,
+  //           },
+  //         });
+  //       }
+  //     }
+  //   } catch (e) {
+  //     console.error("[negotiate/session] guest-envoy greeting failed", e);
+  //   }
+  // }
 
   const participantSummary = eventParticipants?.map((p) => ({
     name: p.name,
