@@ -977,7 +977,7 @@ export async function POST(req: NextRequest) {
       // now live in the deal-room event card instead of a greeting-bar.
       // `fmtLabel`, `durationLabel`, `linkLocation`, `activityEmoji` are still
       // used below by tzLine / hostNoteLine / event-card reader via linkRules.
-      void fmtLabel; void durationLabel; void linkLocation; void activityEmoji; void meetingDescShort;
+      void fmtLabel; void durationLabel; void linkLocation; void activityEmoji;
 
       // V5 prose-form gate (2026-04-20): when the offer is narrow enough to
       // say in a single sentence — "tomorrow or Thursday, or next week if
@@ -1130,9 +1130,7 @@ export async function POST(req: NextRequest) {
       // paragraph. The calendar below is the source of truth; the closing
       // hands off to it in one short line. Duration/format flexibility moves
       // to the card/widget affordances rather than greeting prose.
-      const closing = useGenericBody
-        ? `Highlighted times below are best for ${hostFirstName} — grab one, or counter-pick.`
-        : `Pick a time below, or reply with what works for you.`;
+      const closing = `Pick a time below, or reply with what works for you.`;
 
       // Host-supplied flavor (hostNote) is NO LONGER rendered verbatim in
       // the guest greeting (narration-hygiene-v2, 2026-04-20). Root cause:
@@ -1242,9 +1240,14 @@ export async function POST(req: NextRequest) {
         // The bulleted body still renders for narrow/exclusive intents
         // where the specific slots ARE the offer and the guest needs to see
         // them even before scanning the calendar.
-        greeting = useGenericBody
-          ? [header, closing].join("\n\n")
-          : [header, scheduleBody, closing].join("\n\n");
+        if (useGenericBody) {
+          greeting = [
+            `👋 I'm ${hostFirstName}'s scheduling agent.`,
+            `Highlighted times below are best for ${hostFirstName}. Our default is ${meetingDescShort} — you can grab a time and/or suggest other durations and formats such as coffee, phone, etc. If you connect your calendar I can automagically find the best fit for you!`,
+          ].join("\n\n");
+        } else {
+          greeting = [header, scheduleBody, closing].join("\n\n");
+        }
       }
     }
   }
