@@ -147,17 +147,20 @@ async function probeMigrations(): Promise<ProbeResult> {
     `;
     const dbCount = Number(dbResult[0].count);
 
-    // Allow up to 1 discrepancy (a migration dir added but not yet tracked).
-    const diff = Math.abs(fsCount - dbCount);
-    const ok = diff <= 1;
+    // FS having more dirs than DB rows = unapplied migrations = bad.
+    // DB having more rows than FS dirs = normal after a migration flatten
+    // (old rows stay in _prisma_migrations; filesystem was collapsed to a
+    // baseline). Allow up to 1 extra FS dir (migration added mid-deploy).
+    const fsAhead = Math.max(0, fsCount - dbCount);
+    const ok = fsAhead <= 1;
     return {
       ok,
       fsCount,
       dbCount,
-      diff,
+      diff: fsCount - dbCount,
       detail: ok
         ? undefined
-        : `${diff} migration(s) in filesystem not tracked in _prisma_migrations`,
+        : `${fsAhead} migration(s) in filesystem not tracked in _prisma_migrations`,
     };
   } catch (err) {
     return {
@@ -259,7 +262,7 @@ function probeEnv(): Promise<ProbeResult> {
     "NEXTAUTH_URL",
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
-    "ADMIN_EMAIL",
+    // ADMIN_EMAIL intentionally omitted — has a hardcoded fallback in all call sites
   ];
   const missing = required.filter((k) => !process.env[k]);
 
