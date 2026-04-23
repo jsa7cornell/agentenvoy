@@ -18,8 +18,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wait for Vercel deploy to propagate
-        # Vercel Hobby builds typically finish in 60–90s. We wait 2min to be safe.
-        run: sleep 120
+        # Poll until the smoke endpoint returns non-5xx, up to 8 minutes.
+        # merge commits and large diffs take 3-5 min to build on Vercel Pro.
+        env:
+          ADMIN_SMOKE_TOKEN: ${{ secrets.ADMIN_SMOKE_TOKEN }}
+          SMOKE_URL: ${{ secrets.SMOKE_URL || 'https://agentenvoy.ai/api/admin/smoke' }}
+        run: |
+          echo "Waiting for deploy (polling every 20s, up to 8 min)..."
+          for i in $(seq 1 24); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer $ADMIN_SMOKE_TOKEN" \
+              "$SMOKE_URL")
+            echo "Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" != "502" ] && [ "$STATUS" != "503" ] && [ "$STATUS" != "504" ] && [ "$STATUS" != "000" ]; then
+              echo "Deploy is live (got $STATUS)."
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Deploy did not come up within 8 minutes."
+          exit 1
 
       - name: Run smoke probe
         env:
