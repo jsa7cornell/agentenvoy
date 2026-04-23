@@ -1861,7 +1861,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             justMatched={justMatched}
             matchCount={bilateralByDay ? Object.values(bilateralByDay).filter((v) => v.some((c) => c.color === "both")).length : 0}
             enabled={!isHost && !confirmed}
-            defaultLabel="Envoy"
           >
           <AvailabilityCalendar
             view="week"
