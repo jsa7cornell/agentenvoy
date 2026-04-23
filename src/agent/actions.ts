@@ -2135,15 +2135,68 @@ async function handleUpdateBusinessHours(
  * availability query via the normal scoring path. It does call
  * `invalidateSchedule` so stale compiled output is discarded.
  */
+/**
+ * Build the public shareable URL for an office-hours link.
+ * Format: https://agentenvoy.ai/meet/{slug}/{code} — matches the deal-room link pattern.
+ * Host kept consistent with elsewhere; caller can swap origin for staging.
+ */
+function buildOfficeHoursUrl(slug: string, code: string): string {
+  const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
+  return `${origin}/meet/${slug}/${code}`;
+}
+
+/**
+ * Collect normalized reusable-link names for a host — all active office-hours
+ * rules plus the generalLinkName (defaulting to "General"). Used for the
+ * per-host uniqueness guard. Optional `exceptRuleId` excludes one rule from
+ * the check (so renaming a rule doesn't collide with its own prior name).
+ */
+function normalizeNameForGuard(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function collectNormalizedLinkNames(
+  existing: AvailabilityRule[],
+  generalLinkName: string | undefined,
+  opts: { exceptRuleId?: string; includeGeneral?: boolean } = {},
+): Set<string> {
+  const { exceptRuleId, includeGeneral = true } = opts;
+  const out = new Set<string>();
+  for (const r of existing) {
+    if (r.action !== "office_hours" || !r.officeHours) continue;
+    if (exceptRuleId && r.id === exceptRuleId) continue;
+    const name = (r.officeHours.name ?? r.officeHours.title ?? "").trim();
+    if (name) out.add(normalizeNameForGuard(name));
+  }
+  if (includeGeneral) {
+    out.add(
+      normalizeNameForGuard(
+        generalLinkName && generalLinkName.trim() ? generalLinkName : "General",
+      ),
+    );
+  }
+  return out;
+}
+
 async function handleUpdateAvailabilityRule(
   params: Record<string, unknown>,
   userId: string,
 ): Promise<ActionResult> {
-  const operation = params.operation as "add" | "update" | "remove" | undefined;
+  const operation = params.operation as
+    | "add"
+    | "update"
+    | "remove"
+    | "rename_general"
+    | undefined;
   const id = typeof params.id === "string" ? params.id : undefined;
   const ruleInput = params.rule as Partial<AvailabilityRule> | undefined;
 
-  if (operation !== "add" && operation !== "update" && operation !== "remove") {
+  if (
+    operation !== "add" &&
+    operation !== "update" &&
+    operation !== "remove" &&
+    operation !== "rename_general"
+  ) {
     return { success: false, message: `Invalid operation: ${String(operation)}` };
   }
   if ((operation === "update" || operation === "remove") && !id) {
@@ -2155,24 +2208,92 @@ async function handleUpdateAvailabilityRule(
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { preferences: true },
+    select: { preferences: true, meetSlug: true },
   });
   const prefs: UserPreferences = (user?.preferences as UserPreferences | null) ?? {};
   const explicit = { ...(prefs.explicit ?? {}) };
   const existing =
     ((explicit as Record<string, unknown>).structuredRules as AvailabilityRule[] | undefined) ?? [];
+  const currentGeneralName =
+    typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined;
 
-  let nextRules: AvailabilityRule[];
+  let nextRules: AvailabilityRule[] = existing;
   let summary: string;
+  let linkUrl: string | undefined;
+  let addedRuleId: string | undefined;
 
-  if (operation === "add") {
+  if (operation === "rename_general") {
+    const newName =
+      typeof (params as Record<string, unknown>).name === "string"
+        ? ((params as Record<string, unknown>).name as string).trim()
+        : "";
+    if (!newName) {
+      return { success: false, message: `rename_general requires a "name" param` };
+    }
+    // Uniqueness: new name must not collide with any office-hours rule name.
+    const taken = collectNormalizedLinkNames(existing, undefined, { includeGeneral: false });
+    if (taken.has(normalizeNameForGuard(newName))) {
+      return {
+        success: false,
+        message: `You already have a link named "${newName}". Pick a different name.`,
+      };
+    }
+    explicit.generalLinkName = newName;
+    summary = `Renamed general link to "${newName}"`;
+    // Return the generic /meet/{slug} URL so the channel reply can display it.
+    if (user?.meetSlug) {
+      const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
+      linkUrl = `${origin}/meet/${user.meetSlug}`;
+    }
+  } else if (operation === "add") {
     const newId = `rule_${generateCode(8)}`;
     const nowIso = new Date().toISOString();
+    const action = (ruleInput!.action as AvailabilityRule["action"]) ?? "block";
+
+    // Office-hours-specific validation + population (R1, R4 folds).
+    let officeHours: AvailabilityRule["officeHours"] | undefined;
+    if (action === "office_hours") {
+      const ohInput =
+        (ruleInput!.officeHours as Partial<NonNullable<AvailabilityRule["officeHours"]>> | undefined) ??
+        {};
+      const nameRaw = typeof ohInput.name === "string" ? ohInput.name.trim() : "";
+      if (!nameRaw) {
+        return {
+          success: false,
+          message: `Office hours rules require a name (e.g. "Sales pitch"). Ask the host what to call it.`,
+        };
+      }
+      const taken = collectNormalizedLinkNames(existing, currentGeneralName);
+      if (taken.has(normalizeNameForGuard(nameRaw))) {
+        return {
+          success: false,
+          message: `You already have a link named "${nameRaw}". Want to call this one something else?`,
+        };
+      }
+      if (!user?.meetSlug) {
+        return {
+          success: false,
+          message: `Can't create an office-hours link — your meeting slug isn't set up yet.`,
+        };
+      }
+      const linkCode = generateCode(8);
+      const title = typeof ohInput.title === "string" && ohInput.title.trim() ? ohInput.title.trim() : nameRaw;
+      officeHours = {
+        name: nameRaw,
+        title,
+        format: (ohInput.format as "video" | "phone" | "in-person" | undefined) ?? "video",
+        durationMinutes: typeof ohInput.durationMinutes === "number" ? ohInput.durationMinutes : 30,
+        linkSlug: user.meetSlug,
+        linkCode,
+      };
+      linkUrl = buildOfficeHoursUrl(user.meetSlug, linkCode);
+    }
+
     const rule: AvailabilityRule = {
       id: newId,
       originalText: String(ruleInput!.originalText ?? "").trim() || "(no description)",
       type: (ruleInput!.type as AvailabilityRule["type"]) ?? "recurring",
-      action: (ruleInput!.action as AvailabilityRule["action"]) ?? "block",
+      action,
       timeStart: ruleInput!.timeStart,
       timeEnd: ruleInput!.timeEnd,
       allDay: ruleInput!.allDay,
@@ -2183,24 +2304,67 @@ async function handleUpdateAvailabilityRule(
       bufferMinutesAfter: ruleInput!.bufferMinutesAfter,
       bufferAppliesTo: ruleInput!.bufferAppliesTo,
       locationLabel: ruleInput!.locationLabel,
+      officeHours,
       status: "active",
       priority: typeof ruleInput!.priority === "number" ? ruleInput!.priority : 3,
       createdAt: nowIso,
     };
     nextRules = [...existing, rule];
-    summary = `Added rule ${newId}`;
+    addedRuleId = newId;
+    summary =
+      action === "office_hours" && officeHours
+        ? `Your "${officeHours.name}" link is ready: ${linkUrl}`
+        : `Added rule ${newId}`;
   } else if (operation === "update") {
     const idx = existing.findIndex((r) => r.id === id);
     if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
-    const merged: AvailabilityRule = { ...existing[idx], ...ruleInput, id: existing[idx].id };
+    const prior = existing[idx];
+    // Office-hours rename: enforce uniqueness on name change.
+    if (
+      prior.action === "office_hours" &&
+      ruleInput!.officeHours &&
+      typeof (ruleInput!.officeHours as { name?: string }).name === "string"
+    ) {
+      const newName = ((ruleInput!.officeHours as { name?: string }).name ?? "").trim();
+      if (newName) {
+        const taken = collectNormalizedLinkNames(existing, currentGeneralName, {
+          exceptRuleId: prior.id,
+        });
+        if (taken.has(normalizeNameForGuard(newName))) {
+          return {
+            success: false,
+            message: `You already have a link named "${newName}". Pick a different name.`,
+          };
+        }
+      }
+    }
+    // Merge: shallow-merge top-level, deep-merge officeHours so partial edits
+    // (e.g. { officeHours: { name: "X" } }) don't drop linkSlug/linkCode.
+    const mergedOH = ruleInput!.officeHours
+      ? { ...(prior.officeHours ?? {}), ...(ruleInput!.officeHours as object) }
+      : prior.officeHours;
+    const merged: AvailabilityRule = {
+      ...prior,
+      ...ruleInput,
+      id: prior.id,
+      officeHours: mergedOH as AvailabilityRule["officeHours"],
+    };
     nextRules = [...existing];
     nextRules[idx] = merged;
     summary = `Updated rule ${id}`;
+    if (merged.action === "office_hours" && merged.officeHours) {
+      linkUrl = buildOfficeHoursUrl(merged.officeHours.linkSlug, merged.officeHours.linkCode);
+    }
   } else {
+    // remove
     const idx = existing.findIndex((r) => r.id === id);
     if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
+    const removed = existing[idx];
     nextRules = existing.filter((r) => r.id !== id);
-    summary = `Removed rule ${id}`;
+    summary =
+      removed.action === "office_hours" && removed.officeHours
+        ? `Removed "${removed.officeHours.name ?? removed.officeHours.title}".`
+        : `Removed rule ${id}`;
   }
 
   (explicit as Record<string, unknown>).structuredRules = nextRules;
@@ -2215,11 +2379,13 @@ async function handleUpdateAvailabilityRule(
   await invalidateSchedule(userId);
   invalidateBehaviorSnapshot(userId);
 
-  const addedRuleId = operation === "add" ? nextRules[nextRules.length - 1]?.id : undefined;
   return {
     success: true,
     message: summary,
-    data: addedRuleId ? { id: addedRuleId } : { id },
+    data: {
+      ...(addedRuleId ? { id: addedRuleId } : id ? { id } : {}),
+      ...(linkUrl ? { linkUrl } : {}),
+    },
   };
 }
 

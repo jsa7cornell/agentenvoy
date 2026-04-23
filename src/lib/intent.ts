@@ -270,6 +270,7 @@ export const CHAT_INTENT_VALUES = [
   "rule",
   "inquire",
   "unclear",
+  "chitchat",
 ] as const;
 
 export type ChatIntent = (typeof CHAT_INTENT_VALUES)[number];
@@ -293,6 +294,9 @@ export type ChatIntentBlock = {
    *  for other kinds. */
   clarifier?: string;
   quickReplies?: ChatIntentQuickReply[];
+  /** Single emoji for kind = "chitchat". Placed as a reaction on the host's
+   *  message bubble (WhatsApp-style). */
+  emoji?: string;
 };
 
 /**
@@ -325,10 +329,19 @@ export function validateChatIntent(raw: unknown): ChatIntentBlock {
     kind?: unknown;
     clarifier?: unknown;
     quickReplies?: unknown;
+    emoji?: unknown;
   };
   const kind = normalizeChatIntent(block.kind);
   if (!kind) {
     return { kind: "unclear", clarifier: GENERIC_CLARIFIER };
+  }
+
+  if (kind === "chitchat") {
+    const emoji =
+      typeof block.emoji === "string" && block.emoji.trim()
+        ? block.emoji.trim()
+        : "👍";
+    return { kind, emoji };
   }
 
   if (kind === "unclear") {

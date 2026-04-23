@@ -92,6 +92,21 @@ function fixtureHasTopicHints(fixture: Fixture): boolean {
   return /topic:/i.test(fixture.activeSessionsSummary);
 }
 
+// Returns true when the utterance contains an explicit scheduling signal —
+// a guest name from the fixture or a clear scheduling verb. Used to
+// distinguish "schedule Jon" (should not be unclear) from "move it"
+// (legitimately unclear even with context).
+function hasExplicitSchedulingSignal(utterance: string, fixture: Fixture): boolean {
+  const lower = utterance.toLowerCase();
+  // Extract guest names from activeSessionsSummary lines like "- John + Bob — guest: Bob"
+  const guestMatches = Array.from(fixture.activeSessionsSummary.matchAll(/guest:\s*(\w+)/gi));
+  for (const m of guestMatches) {
+    if (lower.includes(m[1].toLowerCase())) return true;
+  }
+  // Clear scheduling verbs that don't need pronoun resolution
+  return /\b(schedule|book|set up|arrange|add)\b/i.test(utterance);
+}
+
 function computeFlagReasons(
   row: Omit<BenchResultRow, "flagReasons" | "passed">,
   fixture: Fixture,
@@ -107,9 +122,10 @@ function computeFlagReasons(
   if (
     predicted === "unclear" &&
     hasNamedGuest(fixture) &&
-    fixtureHasTopicHints(fixture)
+    fixtureHasTopicHints(fixture) &&
+    hasExplicitSchedulingSignal(row.utterance, fixture)
   ) {
-    reasons.push("predicted unclear despite named guest + topic in fixture");
+    reasons.push("predicted unclear despite explicit scheduling signal in utterance");
   }
 
   if (row.clarifier) {

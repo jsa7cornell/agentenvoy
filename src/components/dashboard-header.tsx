@@ -5,7 +5,8 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoFull } from "./logo";
-import { useOAuthSignIn } from "./oauth/use-oauth-signin";
+import { MyLinksPopover } from "./my-links-popover";
+import { useOAuthSignIn, hasReturningCookie } from "./oauth/use-oauth-signin";
 import { onboardingCallbackUrl } from "@/lib/onboarding/return-to";
 
 interface ConnectionStatus {
@@ -27,7 +28,6 @@ interface ConnectionStatus {
 export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: string } = {}) {
   const { data: session, status: sessionStatus } = useSession();
   const pathname = usePathname();
-  const [copied, setCopied] = useState(false);
   const [connStatus, setConnStatus] = useState<ConnectionStatus | null>(null);
 
   const meetSlug = session?.user?.meetSlug;
@@ -44,13 +44,8 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
       .catch(() => {});
   }, []);
 
-  function copyLink() {
-    if (meetUrl) {
-      navigator.clipboard.writeText(meetUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  }
+  const [isReturning, setIsReturning] = useState(false);
+  useEffect(() => { setIsReturning(hasReturningCookie()); }, []);
 
   const calendarConnected = connStatus?.google?.calendar ?? false;
   const hasPreferences =
@@ -95,7 +90,7 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
             className="text-xs text-muted hover:text-primary transition px-2 py-1"
             data-testid="header-signin"
           >
-            Sign in / Join
+            {isReturning ? "Sign in" : "Sign in / Join"}
           </button>
         </div>
         {anonSignIn.modal}
@@ -117,54 +112,9 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
           <LogoFull height={22} className="text-primary" />
         </Link>
 
-        {/* Meet link pill — desktop. Click copies; the arrow navigates to
-            the full "My Links" page for share + stats + office hours. */}
-        {meetUrl && (
-          <div className="hidden sm:flex items-center bg-surface-secondary/60 border border-surface-tertiary/50 rounded-full pl-3 pr-1 hover:border-purple-500/40 transition max-w-[280px]">
-            <button
-              onClick={copyLink}
-              className="flex items-center gap-2 group"
-              title="Copy link"
-            >
-              <code className="text-purple-400 font-mono text-xs truncate">
-                /meet/{meetSlug}
-              </code>
-              <span className="text-[10px] text-muted group-hover:text-secondary transition flex-shrink-0">
-                {copied ? (
-                  <span className="text-emerald-400">Copied!</span>
-                ) : (
-                  "Copy"
-                )}
-              </span>
-            </button>
-            <Link
-              href="/dashboard/my-links"
-              className="ml-1 w-6 h-6 rounded-full flex items-center justify-center text-muted hover:text-primary hover:bg-surface-tertiary/60 transition flex-shrink-0"
-              title="All my links"
-            >
-              →
-            </Link>
-          </div>
-        )}
-
-        {/* Mobile: copy icon */}
-        {meetUrl && (
-          <button
-            onClick={copyLink}
-            className="flex sm:hidden items-center justify-center w-7 h-7 rounded-lg bg-surface-secondary/60 border border-surface-tertiary/50 hover:border-purple-500/40 transition"
-            title="Copy invite link"
-          >
-            {copied ? (
-              <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            ) : (
-              <svg className="w-3.5 h-3.5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.776a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.25 8.016" />
-              </svg>
-            )}
-          </button>
-        )}
+        {/* My Links — popover with General + office-hours links. Full
+            management lives at /dashboard/my-links (linked from the footer). */}
+        {meetUrl && <MyLinksPopover />}
 
         {/* Spacer */}
         <div className="flex-1" />

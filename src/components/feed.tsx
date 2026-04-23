@@ -132,6 +132,25 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
 
   const isOnboarding = !isCalibrated && onboardingPhase !== null && onboardingPhase !== "complete";
 
+  // Composer prefill bus — MyLinksPopover dispatches `envoy:prefill-composer`
+  // with a seeded string when the host clicks Rename or Create office-hours.
+  useEffect(() => {
+    function onPrefill(e: Event) {
+      const ce = e as CustomEvent<string>;
+      const text = typeof ce.detail === "string" ? ce.detail : "";
+      if (!text) return;
+      setInput(text);
+      textareaRef.current?.focus();
+      const el = textareaRef.current;
+      if (el) {
+        const len = text.length;
+        try { el.setSelectionRange(len, len); } catch {}
+      }
+    }
+    window.addEventListener("envoy:prefill-composer", onPrefill);
+    return () => window.removeEventListener("envoy:prefill-composer", onPrefill);
+  }, []);
+
   // Load channel history
   useEffect(() => {
     if (hasLoadedRef.current) return;
@@ -659,6 +678,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
               continue;
             }
             // status frame — supersede any pending one; dwell-gate on render.
+            if (f.type !== "status") continue;
             pendingCopy = f.copy;
             pendingAt = Date.now();
             maybeRender();

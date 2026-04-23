@@ -65,7 +65,7 @@ function promptForMode(mode: PreConsentMode, isReturning: boolean): string {
   return "consent";
 }
 
-function hasReturningCookie(): boolean {
+export function hasReturningCookie(): boolean {
   if (typeof document === "undefined") return false;
   return document.cookie.split(";").some((c) => {
     const [name, value] = c.trim().split("=");

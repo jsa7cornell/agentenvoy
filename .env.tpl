@@ -19,8 +19,13 @@ GOOGLE_CLIENT_SECRET=op://Secrets/GOOGLE_CLIENT_SECRET/credential
 # BYOK provider keys (Anthropic/Google/OpenAI) are configured in Vercel dashboard.
 AI_GATEWAY_API_KEY=op://Secrets/AI_GATEWAY_API_KEY/credential
 
+# ─── Direct Anthropic (bench only) ────────────────────────
+# Used when BENCH_DIRECT=1 to bypass Vercel AI Gateway for bench runs.
+# Not used by the production app.
+ANTHROPIC_API_KEY=op://Secrets/ANTHROPIC_API_KEY/credential
+
 # ─── Email (AWS SES) ───────────────────────────────────────
-AWS_SES_ACCESS_KEY_ID=op://Private/AWS Access Key/plain access key ID
+AWS_SES_ACCESS_KEY_ID=op://Private/AWS Access Key/access key id
 AWS_SES_SECRET_ACCESS_KEY=op://Private/AWS Access Key/secret access key
 AWS_SES_REGION=us-west-2
 

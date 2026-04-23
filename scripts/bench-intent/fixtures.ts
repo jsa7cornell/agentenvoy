@@ -25,7 +25,9 @@ export type ScenarioSeed =
 export type PresetName =
   | "john-jon-bike-ride"
   | "john-bob-quarterly"
-  | "empty-new-host";
+  | "empty-new-host"
+  | "host-with-named-links"
+  | "host-general-only";
 
 export interface Fixture {
   host: string;
@@ -60,6 +62,24 @@ const PRESETS: Record<PresetName, Fixture> = {
     activeSessionsSummary: "",
     priorEnvoyTurn: undefined,
     recap: "Fresh host, no sessions, no prior envoy turn.",
+  },
+  // Recall-surface fixture: host has two reusable links beyond General.
+  // Use with messages like "what's my sales pitch link" (→ inquire) or
+  // "rename my coaching link to mentoring" (→ rule).
+  "host-with-named-links": {
+    host: "John Anderson",
+    activeSessionsSummary: "",
+    priorEnvoyTurn: undefined,
+    recap:
+      "Host has reusable links: General, 'Sales pitch', 'Coaching' (office-hours).",
+  },
+  // Create-surface fixture: host has only the General link. Use with
+  // messages like "set up an office hours link" (→ rule).
+  "host-general-only": {
+    host: "John Anderson",
+    activeSessionsSummary: "",
+    priorEnvoyTurn: undefined,
+    recap: "Host has only the default General link — no office-hours rules yet.",
   },
 };
 

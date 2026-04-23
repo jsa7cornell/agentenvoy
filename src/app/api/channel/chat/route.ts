@@ -345,6 +345,26 @@ export async function POST(req: NextRequest) {
             return;
           }
 
+          if (intent === "chitchat") {
+            const emoji = intentBlock.emoji ?? "👍";
+            // Patch the host's message with the reaction emoji in-place, then
+            // stream a reaction frame so the UI can render it immediately.
+            const savedMsg = await userMsgPersist;
+            await prisma.channelMessage.update({
+              where: { id: savedMsg.id },
+              data: {
+                metadata: mergeChannelMetadata(savedMsg.metadata, { reaction: emoji }) as Prisma.InputJsonValue,
+              },
+            });
+            controller.enqueue(
+              encoder.encode(
+                JSON.stringify({ type: "reaction", emoji, messageId: savedMsg.id }) + "\n",
+              ),
+            );
+            controller.close();
+            return;
+          }
+
           if (intent === "unclear") {
             await userMsgPersist;
             const clarifierText =
@@ -510,6 +530,41 @@ export async function POST(req: NextRequest) {
           }
           if (user.hostDirectives && (user.hostDirectives as string[]).length > 0) {
             contextParts.push(`Host directives (highest priority):\n${(user.hostDirectives as string[]).map(d => `- ${d}`).join("\n")}`);
+          }
+
+          // Reusable links — General + all active office-hours rules — so the
+          // inquire tier can answer recall questions ("what's my sales pitch link")
+          // and the schedule tier can reference them. Per reusable-links proposal §4.
+          {
+            const explicitPrefs = (hostPrefs?.explicit as Record<string, unknown> | undefined) ?? {};
+            const structuredRules =
+              (explicitPrefs.structuredRules as Array<{
+                action?: string;
+                status?: string;
+                officeHours?: { name?: string; title?: string; linkSlug?: string; linkCode?: string };
+              }> | undefined) ?? [];
+            const generalLinkName =
+              typeof explicitPrefs.generalLinkName === "string" && explicitPrefs.generalLinkName.trim()
+                ? explicitPrefs.generalLinkName
+                : "General";
+            const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
+            const lines: string[] = [];
+            if (safeUser.meetSlug) {
+              lines.push(`- "${generalLinkName}" (default): ${origin}/meet/${safeUser.meetSlug}`);
+            }
+            for (const r of structuredRules) {
+              if (r.action !== "office_hours" || r.status !== "active" || !r.officeHours) continue;
+              const name = r.officeHours.name ?? r.officeHours.title ?? "Office Hours";
+              const url = r.officeHours.linkSlug && r.officeHours.linkCode
+                ? `${origin}/meet/${r.officeHours.linkSlug}/${r.officeHours.linkCode}`
+                : "(url unavailable)";
+              lines.push(`- "${name}": ${url}`);
+            }
+            if (lines.length > 0) {
+              contextParts.push(
+                `Host's reusable links (answer "what's my X link" / "share my X link" from this list — match by name fuzzy, case-insensitive; if the host asks generally for "my links" reply with the full list):\n${lines.join("\n")}`
+              );
+            }
           }
 
           if (activeSessions.length > 0) {

@@ -245,7 +245,19 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
 
   await userMsgPersist;
 
-  const finalText = displayText || "Done.";
+  // Append any linkUrl returned from successful actions (e.g. office-hours
+  // rule creation / rename_general) so the host sees the shareable URL in
+  // the confirmation. Per reusable-links proposal §Gap 2.
+  const linkUrls = actionResults
+    .filter((r) => r.success && typeof r.data?.linkUrl === "string")
+    .map((r) => r.data!.linkUrl as string);
+  let textWithLinks = displayText || "Done.";
+  if (linkUrls.length > 0) {
+    const suffix = linkUrls.map((u) => `\n\n${u}`).join("");
+    textWithLinks = (displayText || "") + suffix;
+    textWithLinks = textWithLinks.trim() || linkUrls.join("\n\n");
+  }
+  const finalText = textWithLinks;
   await prisma.channelMessage.create({
     data: {
       channelId,
