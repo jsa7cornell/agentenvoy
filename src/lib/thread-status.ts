@@ -1,11 +1,11 @@
 // Thread status engine — computes dynamic status labels for thread cards
-import { getInviteeDisplay, getWaitingLabel } from "@/lib/invitee-display";
 
 interface StatusInput {
-  status: string;           // "active" | "proposed" | "agreed" | "cancelled" | "escalated" | "expired"
+  status: string; // "active" | "proposed" | "agreed" | "cancelled" | "escalated" | "expired"
+  // retained for call-site compatibility — no longer used in label computation
   inviteeNames?: string[];
-  inviteeName?: string | null; // deprecated — use inviteeNames
-  lastMessageRole?: string | null;  // "administrator" | "guest" | "system"
+  inviteeName?: string | null;
+  lastMessageRole?: string | null;
   guestEmail?: string | null;
 }
 
@@ -15,9 +15,6 @@ interface StatusResult {
 }
 
 export function computeThreadStatus(input: StatusInput): StatusResult {
-  const displayName = getInviteeDisplay(input) || input.guestEmail || "invitee";
-  const waitingLabel = getWaitingLabel(input) || `Waiting for ${input.guestEmail || "invitee"}`;
-
   if (input.status === "agreed") return { label: "Confirmed", color: "green" };
   if (input.status === "expired") return { label: "Expired", color: "gray" };
   if (input.status === "cancelled") return { label: "Cancelled", color: "red" };
