@@ -909,8 +909,16 @@ async function handleCreateLink(
   // long day names ("Monday") or short ones ("Mon"); persist the canonical form.
   const isVip = params.isVip === true;
   const allowWeekends = params.allowWeekends === true;
-  const preferredTimeStart = typeof params.preferredTimeStart === "string" ? params.preferredTimeStart : undefined;
-  const preferredTimeEnd = typeof params.preferredTimeEnd === "string" ? params.preferredTimeEnd : undefined;
+  const isDateModeLink = (params.duration as number | undefined ?? 0) >= 24 * 60;
+  // For date-mode links (duration ≥ 1440 min), preferredTimeStart/End express
+  // an event start time, not a daily slot filter. Storing them as a filter
+  // window produces start==end → zero-width → all slots dropped (bug: surf trip
+  // "noon to noon"). Promote to rules.startTime instead; drop the filter fields.
+  const rawPreferredTimeStart = typeof params.preferredTimeStart === "string" ? params.preferredTimeStart : undefined;
+  const rawPreferredTimeEnd = typeof params.preferredTimeEnd === "string" ? params.preferredTimeEnd : undefined;
+  const preferredTimeStart = isDateModeLink ? undefined : rawPreferredTimeStart;
+  const preferredTimeEnd = isDateModeLink ? undefined : rawPreferredTimeEnd;
+  const startTime = isDateModeLink ? (rawPreferredTimeStart ?? null) : undefined;
   // preferredTimeWindows — multi-window variant for "two separate spans on
   // the same day" cases (e.g. "12–2 PM OR 4:30–6 PM today"). Accepted at
   // top-level; normalizeLinkRules validates HH:MM shape and sorts.
@@ -1050,6 +1058,7 @@ async function handleCreateLink(
     ...(allowWeekends ? { allowWeekends: true } : {}),
     ...(preferredTimeStart ? { preferredTimeStart } : {}),
     ...(preferredTimeEnd ? { preferredTimeEnd } : {}),
+    ...(startTime != null ? { startTime } : {}),
     ...(preferredTimeWindows ? { preferredTimeWindows } : {}),
     ...(preferredDays ? { preferredDays } : {}),
     ...(dateRange ? { dateRange } : {}),
