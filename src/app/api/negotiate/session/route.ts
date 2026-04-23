@@ -1198,7 +1198,7 @@ export async function POST(req: NextRequest) {
         const proposal = `${durPart}${activityPart}${locPart}${whenPart}`;
         const exclusiveHello = `👋 ${greeteeName}! Envoy lined up a time — ${proposal}. Confirm below, or let me know if anything needs to shift.`;
         greeting = exclusiveHello;
-      } else if (proseCandidate && !isGeneric) {
+      } else if (proseCandidate && !isGeneric && !useGenericBody) {
         const durCasual = durationForOpener
           ? formatDurationCasual(durationForOpener)
           : null;
