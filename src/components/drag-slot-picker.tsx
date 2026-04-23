@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 
 interface Slot {
   start: string;
@@ -14,7 +14,6 @@ interface DragSlotPickerProps {
   timezone: string;
   onSelectSlot?: (msg: string, slot: { start: string; end: string }) => void;
   dateStr: string;
-  // Host working hours — fixed scale across all days
   workingHourStart?: number; // default 8
   workingHourEnd?: number;   // default 18
 }
@@ -28,20 +27,32 @@ function toLocalMins(isoStr: string, tz: string): number {
   }).formatToParts(date);
   const h = parseInt(parts.find(p => p.type === "hour")?.value ?? "0", 10);
   const m = parseInt(parts.find(p => p.type === "minute")?.value ?? "0", 10);
-  // Intl returns 24 for midnight in hour12:false mode on some platforms
   return (h === 24 ? 0 : h) * 60 + m;
 }
 
-function fmtTime(isoStr: string, tz: string): string {
-  return new Date(isoStr).toLocaleTimeString("en-US", {
+function fmtTimeFromMins(mins: number, dateStr: string, tz: string): string {
+  // Build an ISO from the dateStr at the given local minutes in tz.
+  // Easiest: compute offset by formatting a known UTC date in tz.
+  const baseUtc = new Date(dateStr + "T12:00:00Z");
+  const baseLocalMins = toLocalMins(baseUtc.toISOString(), tz);
+  const deltaMins = mins - baseLocalMins;
+  const target = new Date(baseUtc.getTime() + deltaMins * 60_000);
+  return target.toLocaleTimeString("en-US", {
     hour: "numeric", minute: "2-digit", timeZone: tz,
   });
 }
 
-function fmtMsg(start: string, end: string, dateStr: string, tz: string): string {
-  const d = new Date(dateStr + "T00:00:00");
+function isoFromMins(mins: number, dateStr: string, tz: string): string {
+  const baseUtc = new Date(dateStr + "T12:00:00Z");
+  const baseLocalMins = toLocalMins(baseUtc.toISOString(), tz);
+  const deltaMins = mins - baseLocalMins;
+  return new Date(baseUtc.getTime() + deltaMins * 60_000).toISOString();
+}
+
+function fmtMsg(startMins: number, endMins: number, dateStr: string, tz: string): string {
+  const d = new Date(dateStr + "T12:00:00");
   const day = d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  return `${day} · ${fmtTime(start, tz)} – ${fmtTime(end, tz)}`;
+  return `${day} · ${fmtTimeFromMins(startMins, dateStr, tz)} – ${fmtTimeFromMins(endMins, dateStr, tz)}`;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -55,43 +66,56 @@ export function DragSlotPicker({
   workingHourStart = 8,
   workingHourEnd = 18,
 }: DragSlotPickerProps) {
-  // Only show slots that fit the full duration (not short slots)
   const validSlots = slotsForDay.filter(s => !s.isShortSlot);
 
   const rulerRef = useRef<HTMLDivElement>(null);
-  const [currentIdx, setCurrentIdx] = useState(0);
   const [confirmed, setConfirmed] = useState(false);
 
-  // Reset when day changes
   useEffect(() => {
-    setCurrentIdx(0);
     setConfirmed(false);
   }, [dateStr]);
 
-  const drag = useRef<{
-    startX: number;
-    startIdx: number;
-    rulerWidth: number;
-  } | null>(null);
-
   const SPAN = (workingHourEnd - workingHourStart) * 60;
 
-  // Compute local-minute positions for each valid slot
-  const slotMins = validSlots.map(s => toLocalMins(s.start, timezone));
+  // Local-minute starts of valid 30-min slots
+  const slotMins = useMemo(
+    () => validSlots.map(s => toLocalMins(s.start, timezone)).sort((a, b) => a - b),
+    [validSlots, timezone],
+  );
 
-  // Find "booked" gaps between consecutive available slots (gap > 30 min)
-  const bookedBlocks: Array<{ startPct: number; widthPct: number; label?: string }> = [];
+  // 15-min snap candidates: every valid slot start, plus +15 between consecutive
+  // 30-min slots (since the meeting fits in either half, it fits anywhere between).
+  const candidates = useMemo(() => {
+    const out: number[] = [];
+    for (let i = 0; i < slotMins.length; i++) {
+      out.push(slotMins[i]);
+      if (i + 1 < slotMins.length && slotMins[i + 1] - slotMins[i] === 30) {
+        out.push(slotMins[i] + 15);
+      }
+    }
+    return out;
+  }, [slotMins]);
+
+  const [currentMins, setCurrentMins] = useState<number>(candidates[0] ?? 0);
+
+  useEffect(() => {
+    setCurrentMins(candidates[0] ?? 0);
+  }, [dateStr, candidates]);
+
+  const drag = useRef<{ startX: number; startMins: number; rulerWidth: number } | null>(null);
+
+  // Booked gaps between consecutive available slot ranges
+  const bookedBlocks: Array<{ startPct: number; widthPct: number }> = [];
   for (let i = 0; i < slotMins.length - 1; i++) {
     const gapStart = slotMins[i] + durationMinutes;
-    const gapEnd   = slotMins[i + 1];
+    const gapEnd = slotMins[i + 1];
     if (gapEnd - gapStart > 30) {
-      const left  = (gapStart - workingHourStart * 60) / SPAN * 100;
+      const left = (gapStart - workingHourStart * 60) / SPAN * 100;
       const width = (gapEnd - gapStart) / SPAN * 100;
       bookedBlocks.push({ startPct: left, widthPct: width });
     }
   }
 
-  // Available band: first slot start → last slot end
   const availStart = slotMins.length > 0
     ? (slotMins[0] - workingHourStart * 60) / SPAN * 100
     : 0;
@@ -99,38 +123,31 @@ export function DragSlotPicker({
     ? (slotMins[slotMins.length - 1] + durationMinutes - workingHourStart * 60) / SPAN * 100
     : 0;
 
-  // Pill geometry
-  const pillLeft  = slotMins.length > 0
-    ? (slotMins[currentIdx] - workingHourStart * 60) / SPAN * 100
-    : 0;
+  const pillLeft = (currentMins - workingHourStart * 60) / SPAN * 100;
   const pillWidth = durationMinutes / SPAN * 100;
 
-  // Snap raw minutes to nearest valid slot index
-  const snapToIdx = useCallback((rawMins: number) => {
-    if (slotMins.length === 0) return 0;
-    return slotMins.reduce((best, m, i) =>
-      Math.abs(m - rawMins) < Math.abs(slotMins[best] - rawMins) ? i : best, 0);
-  }, [slotMins]);
+  const snapToCandidate = useCallback((rawMins: number) => {
+    if (candidates.length === 0) return 0;
+    return candidates.reduce((best, m) =>
+      Math.abs(m - rawMins) < Math.abs(best - rawMins) ? m : best, candidates[0]);
+  }, [candidates]);
 
-  // Drag handlers (mouse + touch unified)
   const onDragStart = useCallback((clientX: number) => {
-    if (!rulerRef.current || confirmed || validSlots.length === 0) return;
+    if (!rulerRef.current || confirmed || candidates.length === 0) return;
     drag.current = {
       startX: clientX,
-      startIdx: currentIdx,
+      startMins: currentMins,
       rulerWidth: rulerRef.current.getBoundingClientRect().width,
     };
-  }, [confirmed, currentIdx, validSlots.length]);
+  }, [confirmed, currentMins, candidates.length]);
 
   const onDragMove = useCallback((clientX: number) => {
-    if (!drag.current || slotMins.length === 0) return;
-    const { startX, startIdx, rulerWidth } = drag.current;
+    if (!drag.current) return;
+    const { startX, startMins, rulerWidth } = drag.current;
     const deltaPct = (clientX - startX) / rulerWidth * 100;
     const deltaMins = deltaPct / 100 * SPAN;
-    const rawMins = slotMins[startIdx] + deltaMins;
-    const newIdx = snapToIdx(rawMins);
-    setCurrentIdx(newIdx);
-  }, [slotMins, SPAN, snapToIdx]);
+    setCurrentMins(snapToCandidate(startMins + deltaMins));
+  }, [SPAN, snapToCandidate]);
 
   const onDragEnd = useCallback(() => {
     drag.current = null;
@@ -154,35 +171,31 @@ export function DragSlotPicker({
     };
   }, [onDragMove, onDragEnd]);
 
-  if (validSlots.length === 0) {
+  if (candidates.length === 0) {
     return <p className="text-xs text-muted py-2">No available times</p>;
   }
 
-  const currentSlot = validSlots[currentIdx];
-  const displayTime = `${fmtTime(currentSlot.start, timezone)} – ${fmtTime(currentSlot.end, timezone)}`;
+  const endMins = currentMins + durationMinutes;
+  const displayTime = `${fmtTimeFromMins(currentMins, dateStr, timezone)} – ${fmtTimeFromMins(endMins, dateStr, timezone)}`;
 
-  // Hour tick labels — every 2h to avoid crowding
   const hourTicks: number[] = [];
-  for (let h = workingHourStart; h <= workingHourEnd; h += 2) {
-    hourTicks.push(h);
-  }
+  for (let h = workingHourStart; h <= workingHourEnd; h += 2) hourTicks.push(h);
 
   return (
     <div className="select-none">
       {/* Ruler */}
-      <div className="relative pb-5">
+      <div className="relative pb-6">
         <div
           ref={rulerRef}
-          className="relative h-14 rounded-xl overflow-visible"
-          style={{ background: "hsl(var(--surface-secondary))" }}
+          className="relative h-12 rounded-lg overflow-visible bg-surface-secondary"
         >
           {/* Available band */}
           <div
-            className="absolute inset-y-0 rounded-xl pointer-events-none"
+            className="absolute inset-y-0 rounded-lg pointer-events-none"
             style={{
               left: `${availStart}%`,
               width: `${availEnd - availStart}%`,
-              background: "rgba(52,199,89,0.12)",
+              background: "rgba(52,199,89,0.10)",
             }}
           />
 
@@ -201,39 +214,6 @@ export function DragSlotPicker({
             />
           ))}
 
-          {/* Draggable pill */}
-          <div
-            className={`absolute top-1.5 bottom-1.5 rounded-[10px] z-[2] flex items-center justify-center
-              ${confirmed
-                ? "cursor-default"
-                : "cursor-grab active:cursor-grabbing"
-              }`}
-            style={{
-              left: `${pillLeft}%`,
-              width: `${pillWidth}%`,
-              background: confirmed
-                ? "linear-gradient(135deg, #16a34a, #15803d)"
-                : "linear-gradient(135deg, #7c3aed, #2563eb, #06b6d4)",
-              boxShadow: confirmed
-                ? "0 2px 16px rgba(22,163,74,0.4)"
-                : "0 2px 16px rgba(99,102,241,0.35)",
-              transition: "background 0.2s, box-shadow 0.2s",
-            }}
-            onMouseDown={e => { e.preventDefault(); onDragStart(e.clientX); }}
-            onTouchStart={e => { onDragStart(e.touches[0].clientX); }}
-          >
-            {/* Grip dots */}
-            <div className="flex gap-[3px] pointer-events-none">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <span
-                  key={i}
-                  className="w-[3px] h-[3px] rounded-full block"
-                  style={{ background: "rgba(255,255,255,0.5)" }}
-                />
-              ))}
-            </div>
-          </div>
-
           {/* Hour tick lines */}
           {hourTicks.map(h => (
             <div
@@ -241,25 +221,49 @@ export function DragSlotPicker({
               className="absolute top-0 bottom-0 pointer-events-none"
               style={{
                 left: `${(h - workingHourStart) / (workingHourEnd - workingHourStart) * 100}%`,
-                borderLeft: "1px solid rgba(255,255,255,0.05)",
+                borderLeft: "1px solid rgba(255,255,255,0.06)",
               }}
             />
           ))}
+
+          {/* Draggable pill */}
+          <div
+            className={`absolute top-1 bottom-1 rounded-md z-[2] flex items-center justify-center
+              ${confirmed
+                ? "cursor-default bg-emerald-500"
+                : "cursor-grab active:cursor-grabbing bg-blue-500 hover:bg-blue-400"
+              }
+              transition-colors shadow-md`}
+            style={{
+              left: `${pillLeft}%`,
+              width: `${pillWidth}%`,
+            }}
+            onMouseDown={e => { e.preventDefault(); onDragStart(e.clientX); }}
+            onTouchStart={e => { onDragStart(e.touches[0].clientX); }}
+          >
+            <div className="flex gap-[3px] pointer-events-none">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <span
+                  key={i}
+                  className="w-[3px] h-[3px] rounded-full block bg-white/60"
+                />
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Hour labels */}
-        <div className="absolute left-0 right-0 bottom-0 pointer-events-none">
+        <div className="absolute left-0 right-0 bottom-0 pointer-events-none h-4">
           {hourTicks.map(h => {
             const pct = (h - workingHourStart) / (workingHourEnd - workingHourStart) * 100;
             const label = h === 12 ? "12p" : h > 12 ? `${h - 12}p` : `${h}a`;
             return (
               <span
                 key={h}
-                className="absolute text-[8px] font-medium"
+                className="absolute text-[10px] text-muted"
                 style={{
                   left: `${pct}%`,
                   transform: "translateX(-50%)",
-                  color: "hsl(var(--text-muted))",
                   whiteSpace: "nowrap",
                 }}
               >
@@ -270,37 +274,32 @@ export function DragSlotPicker({
         </div>
       </div>
 
-      {/* Live time readout */}
-      <p className="text-center text-[17px] font-extrabold tracking-tight mt-1 mb-4"
-         style={{ color: "hsl(var(--text-primary))" }}>
-        {displayTime}
-      </p>
-
-      {/* Confirm button */}
-      {onSelectSlot && (
-        <button
-          onClick={() => {
-            if (confirmed) return;
-            setConfirmed(true);
-            onSelectSlot(
-              fmtMsg(currentSlot.start, currentSlot.end, dateStr, timezone),
-              { start: currentSlot.start, end: currentSlot.end },
-            );
-          }}
-          disabled={confirmed}
-          className="w-full py-3 rounded-2xl text-sm font-bold text-white transition-opacity disabled:opacity-100"
-          style={{
-            background: confirmed
-              ? "linear-gradient(to right, #16a34a, #15803d)"
-              : "linear-gradient(to right, #7c3aed, #2563eb, #06b6d4)",
-            boxShadow: confirmed
-              ? "0 2px 12px rgba(22,163,74,0.35)"
-              : "0 2px 12px rgba(99,102,241,0.35)",
-          }}
-        >
-          {confirmed ? "✓ Confirmed" : "Confirm →"}
-        </button>
-      )}
+      {/* Time readout + confirm row */}
+      <div className="flex items-center justify-between gap-3 mt-2">
+        <p className="text-sm font-semibold text-primary">{displayTime}</p>
+        {onSelectSlot && (
+          <button
+            onClick={() => {
+              if (confirmed) return;
+              setConfirmed(true);
+              onSelectSlot(
+                fmtMsg(currentMins, endMins, dateStr, timezone),
+                {
+                  start: isoFromMins(currentMins, dateStr, timezone),
+                  end: isoFromMins(endMins, dateStr, timezone),
+                },
+              );
+            }}
+            disabled={confirmed}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition disabled:opacity-100
+              ${confirmed
+                ? "bg-emerald-600"
+                : "bg-accent hover:bg-accent-hover"}`}
+          >
+            {confirmed ? "✓ Confirmed" : "Confirm"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
