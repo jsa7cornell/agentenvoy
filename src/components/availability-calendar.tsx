@@ -734,7 +734,7 @@ function WeekView({
           return (
             <button
               key={wd.dateStr}
-              onClick={() => hasWindows && setSelectedDay(isSelected ? null : wd.dateStr)}
+              onClick={() => hasWindows && setSelectedDay(wd.dateStr)}
               disabled={!hasWindows}
               className={`
                 flex flex-col items-center rounded-lg py-1.5 px-0.5 transition-all
@@ -932,7 +932,7 @@ function MonthView({
           return (
             <button
               key={cell.dateStr}
-              onClick={() => !isPast && visibleSlots.length > 0 && setSelectedDay(isSelected ? null : cell.dateStr)}
+              onClick={() => !isPast && visibleSlots.length > 0 && setSelectedDay(cell.dateStr)}
               disabled={isPast || visibleSlots.length === 0}
               className={`
                 aspect-square rounded-lg text-sm font-medium flex items-center justify-center transition-all
