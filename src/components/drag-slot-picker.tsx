@@ -215,6 +215,17 @@ export function DragSlotPicker({
 
   return (
     <div className="select-none">
+      {/* Confirmed badge — surfaces the committed state above the picker */}
+      {confirmed && (
+        <div className="flex justify-end mb-1.5">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            Confirmed
+          </span>
+        </div>
+      )}
       {/* Ruler */}
       <div className="relative pb-6">
         <div
