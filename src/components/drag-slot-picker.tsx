@@ -66,21 +66,26 @@ export function DragSlotPicker({
   workingHourStart = 8,
   workingHourEnd = 18,
 }: DragSlotPickerProps) {
-  const validSlots = slotsForDay.filter(s => !s.isShortSlot);
-
   const rulerRef = useRef<HTMLDivElement>(null);
   const [confirmed, setConfirmed] = useState(false);
 
-  useEffect(() => {
-    setConfirmed(false);
-  }, [dateStr]);
-
   const SPAN = (workingHourEnd - workingHourStart) * 60;
 
-  // Local-minute starts of valid 30-min slots
+  // Stable key derived from slot start times — prevents new array refs from
+  // retriggering effects every parent render (which reset the drag position).
+  const slotsKey = slotsForDay
+    .filter(s => !s.isShortSlot)
+    .map(s => s.start)
+    .join("|");
+
   const slotMins = useMemo(
-    () => validSlots.map(s => toLocalMins(s.start, timezone)).sort((a, b) => a - b),
-    [validSlots, timezone],
+    () =>
+      slotsForDay
+        .filter(s => !s.isShortSlot)
+        .map(s => toLocalMins(s.start, timezone))
+        .sort((a, b) => a - b),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [slotsKey, timezone],
   );
 
   // 15-min snap candidates: every valid slot start, plus +15 between consecutive
@@ -96,11 +101,19 @@ export function DragSlotPicker({
     return out;
   }, [slotMins]);
 
-  const [currentMins, setCurrentMins] = useState<number>(candidates[0] ?? 0);
+  // Pick the middle candidate as the default so the pill starts centered
+  // rather than jammed to the earliest slot.
+  const defaultMins = candidates[Math.floor(candidates.length / 2)] ?? 0;
 
+  const [currentMins, setCurrentMins] = useState<number>(defaultMins);
+
+  // Reset only when the day changes — NOT on every render (which would undo
+  // every drag). dateStr is the source of truth for "new day, reset pill".
   useEffect(() => {
-    setCurrentMins(candidates[0] ?? 0);
-  }, [dateStr, candidates]);
+    setConfirmed(false);
+    setCurrentMins(defaultMins);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateStr]);
 
   const drag = useRef<{ startX: number; startMins: number; rulerWidth: number } | null>(null);
 
@@ -216,7 +229,7 @@ export function DragSlotPicker({
               style={{
                 left: `${b.startPct}%`,
                 width: `${b.widthPct}%`,
-                background: "repeating-linear-gradient(45deg, hsl(var(--surface-secondary)), hsl(var(--surface-secondary)) 5px, hsl(var(--surface-tertiary)) 5px, hsl(var(--surface-tertiary)) 10px)",
+                background: "repeating-linear-gradient(45deg, var(--surface-secondary), var(--surface-secondary) 5px, var(--surface-tertiary) 5px, var(--surface-tertiary) 10px)",
               }}
             />
           ))}
