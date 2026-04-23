@@ -1158,12 +1158,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       if (/\b(office|hq|headquarters|workspace|coworking|wework)\b/.test(loc)) return "🏢";
       if (/\b(home|house|my place|apartment|apt)\b/.test(loc)) return "🏠";
       // Zoom / Meet / Teams URLs land here when location is the meet link
-      if (/\b(zoom\.us|meet\.google|teams\.microsoft|webex)\b/.test(loc)) return "📹";
+      if (/\b(zoom\.us|meet\.google|teams\.microsoft|webex)\b/.test(loc)) return "💻";
     }
     // Location provided but no keyword matched — use pin as the generic location icon
     if (loc) return "📍";
-    if (format === "phone") return "📞";
-    if (format === "video") return "📹";
+    if (format === "phone") return "📱";
+    if (format === "video") return "💻";
     if (format === "in-person") return "👤";
     return "";
   }
