@@ -29,6 +29,7 @@ const GENERIC_TOPICS = new Set([
   "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
   "check in", "check-in", "checkin", "connect", "touch base",
   "quick chat", "quick meeting", "quick sync", "discussion",
+  "call", "video call", "zoom", "zoom call", "video", "talk",
 ]);
 
 function isGenericTopic(topic: string): boolean {
@@ -1101,11 +1102,28 @@ async function handleCreateLink(
   const hostFirstName = hostName?.split(/\s+/)[0] || "Host";
   const { getInviteeDisplay, getWaitingLabel } = await import("@/lib/invitee-display");
   const inviteeDisplay = getInviteeDisplay({ inviteeNames, inviteeName });
-  const title = topic
-    ? `${topic}${inviteeDisplay ? ` — ${inviteeDisplay}` : ""}`
-    : inviteeDisplay
-    ? `${hostFirstName} + ${inviteeDisplay}`
-    : `Meeting — ${hostFirstName}`;
+  // topic is already null if it was generic (stripped at line 786 above).
+  // Capitalize the meaningful activity phrase if present.
+  const activityLabel = topic
+    ? topic.charAt(0).toUpperCase() + topic.slice(1)
+    : null;
+
+  // Format-derived prefix when no meaningful activity.
+  const effectiveFormatStr = typeof effectiveFormat === "string" ? effectiveFormat : null;
+  const formatPrefix =
+    effectiveFormatStr === "phone" ? "Call"
+    : effectiveFormatStr === "video" ? "VC"
+    : null;
+
+  const prefix = activityLabel ?? formatPrefix;
+  const isGroup = Array.isArray(inviteeNames) && inviteeNames.length > 1;
+
+  const title =
+    isGroup || !inviteeDisplay
+      ? (prefix ?? "Meeting")
+      : prefix
+      ? `${prefix}: ${inviteeDisplay} + ${hostFirstName}`
+      : `${inviteeDisplay} + ${hostFirstName}`;
 
   const session = await prisma.negotiationSession.create({
     data: {

@@ -244,7 +244,7 @@ export async function POST(req: NextRequest) {
             // it to Tuesday" (proposal §2.2 buildUserPrompt). Short by
             // design: the classifier is cheap but not free.
             const recentSessions = await prisma.negotiationSession.findMany({
-              where: { hostId: safeUser.id, archived: false },
+              where: { hostId: safeUser.id, archived: false, status: { not: "cancelled" } },
               select: {
                 id: true,
                 title: true,
@@ -404,7 +404,7 @@ export async function POST(req: NextRequest) {
               return null;
             }),
             prisma.negotiationSession.findMany({
-              where: { hostId: safeUser.id, archived: false },
+              where: { hostId: safeUser.id, archived: false, status: { not: "cancelled" } },
               include: {
                 link: {
                   select: {

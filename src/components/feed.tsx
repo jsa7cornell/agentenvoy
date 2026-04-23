@@ -833,7 +833,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                 )}
                 <ThreadCard
                   title={msg.thread.title || "Thread"}
-                  statusLabel={msg.thread.statusLabel || status.label}
+                  statusLabel={status.label}
                   statusColor={status.color}
                   subtitle={[
                     msg.thread.format === "phone" ? "Phone call" : msg.thread.format === "video" ? "Video" : msg.thread.format,

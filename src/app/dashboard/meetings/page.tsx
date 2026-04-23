@@ -28,10 +28,10 @@ function getDealRoomUrl(s: ActiveSession) {
 
 const STATUS_DISPLAY: Record<string, { label: string; bg: string; text: string }> = {
   agreed: { label: "Confirmed", bg: "bg-green-500/10", text: "text-green-400" },
-  proposed: { label: "Proposed", bg: "bg-amber-500/10", text: "text-amber-400" },
-  active: { label: "Pending", bg: "bg-amber-500/10", text: "text-amber-400" },
+  proposed: { label: "Active", bg: "bg-amber-500/10", text: "text-amber-400" },
+  active: { label: "Active", bg: "bg-amber-500/10", text: "text-amber-400" },
   cancelled: { label: "Cancelled", bg: "bg-red-500/10", text: "text-red-400" },
-  escalated: { label: "Escalated", bg: "bg-orange-500/10", text: "text-orange-400" },
+  escalated: { label: "Active", bg: "bg-amber-500/10", text: "text-amber-400" },
 };
 
 export default function MeetingsPage() {
