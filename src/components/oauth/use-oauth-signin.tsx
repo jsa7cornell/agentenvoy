@@ -132,8 +132,16 @@ export function useOAuthSignIn({
     setOpen(false);
     doSignIn();
   };
+  // Login mode: sign-in view primary action — select_account, no forced consent.
+  const onSignIn = mode === "login" ? () => {
+    setOpen(false);
+    if (typeof document !== "undefined") {
+      document.cookie = `${ENTRY_POINT_COOKIE}=${entryPoint}; Path=/; Max-Age=300; SameSite=Lax`;
+    }
+    signIn("google", { callbackUrl }, { scope: scopeFor(entryPoint), prompt: "select_account", access_type: "offline", ...signInParams });
+  } : undefined;
   const modal = (
-    <PreConsentExplainer open={open} mode={mode} onConfirm={onConfirm} onCancel={onCancel} />
+    <PreConsentExplainer open={open} mode={mode} onConfirm={onConfirm} onCancel={onCancel} onSignIn={onSignIn} />
   );
   return { trigger, modal };
 }

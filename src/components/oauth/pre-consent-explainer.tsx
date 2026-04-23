@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { GoogleButton } from "./google-button";
 
 export type PreConsentMode = "first-connect" | "reconnect" | "upgrade-scope" | "login";
@@ -10,6 +10,9 @@ interface Props {
   mode: PreConsentMode;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Login mode only: called when user clicks "Continue with Google" from the
+   *  sign-in view (uses prompt=select_account, no forced consent re-screen). */
+  onSignIn?: () => void;
 }
 
 /**
@@ -22,27 +25,29 @@ interface Props {
  *   - first-connect → agent-first value-prop, personalization lead, "Continue with Google" Google-branded button
  *   - reconnect     → one-sentence banner, immediate Continue (sub-second)
  *   - upgrade-scope → explains what new permission we need and why
- *   - login         → same as first-connect UI when shown (cookie-hint absent
- *                     → probable first-time visitor). Returning users (cookie
- *                     present) skip this modal entirely via `useOAuthSignIn`.
+ *   - login         → sign-in view first (select_account, no re-consent); "New
+ *                     here? See how it works →" toggles to the first-connect
+ *                     pitch. Cookie-present returning users skip this modal
+ *                     entirely via `useOAuthSignIn`'s trigger gate.
  */
-export function PreConsentExplainer({ open, mode, onConfirm, onCancel }: Props) {
+export function PreConsentExplainer({ open, mode, onConfirm, onCancel, onSignIn }: Props) {
+  const [showPitch, setShowPitch] = useState(false);
+
+  useEffect(() => {
+    if (!open) setShowPitch(false);
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onCancel]);
 
   if (!open) return null;
 
-  // When we DO show the modal for mode: "login" (cookie-hint absent →
-  // probable first-time user), render the trust-building first-connect
-  // content. Cookie-present returning users skip the modal entirely via
-  // `useOAuthSignIn`'s trigger gate.
-  const isFirstConnect = mode === "first-connect" || mode === "login";
+  const showLoginView = mode === "login" && !showPitch;
+  const isFirstConnect = mode === "first-connect" || (mode === "login" && showPitch);
 
   return (
     <div
@@ -56,13 +61,26 @@ export function PreConsentExplainer({ open, mode, onConfirm, onCancel }: Props) 
         className="w-full max-w-md bg-surface border border-secondary rounded-2xl shadow-2xl p-7 space-y-4"
         onClick={(e) => e.stopPropagation()}
       >
-        {mode === "reconnect" ? <ReconnectBody /> : null}
-        {mode === "upgrade-scope" ? <UpgradeScopeBody /> : null}
-        {isFirstConnect ? <FirstConnectBody /> : null}
+        {showLoginView && onSignIn && (
+          <LoginBody onSignIn={onSignIn} onNewHere={() => setShowPitch(true)} onCancel={onCancel} />
+        )}
 
-        {isFirstConnect ? (
+        {mode === "reconnect" && <ReconnectBody />}
+        {mode === "upgrade-scope" && <UpgradeScopeBody />}
+        {isFirstConnect && <FirstConnectBody />}
+
+        {isFirstConnect && (
           <div className="pt-2 space-y-3">
             <GoogleButton onClick={onConfirm} block />
+            {mode === "login" && (
+              <button
+                type="button"
+                onClick={() => setShowPitch(false)}
+                className="block w-full text-center text-xs text-muted hover:text-secondary underline underline-offset-2 transition py-1"
+              >
+                ← Back
+              </button>
+            )}
             <button
               type="button"
               onClick={onCancel}
@@ -71,7 +89,9 @@ export function PreConsentExplainer({ open, mode, onConfirm, onCancel }: Props) 
               Maybe later
             </button>
           </div>
-        ) : (
+        )}
+
+        {(mode === "reconnect" || mode === "upgrade-scope") && (
           <div className="flex gap-2 pt-2">
             <button
               type="button"
@@ -92,6 +112,40 @@ export function PreConsentExplainer({ open, mode, onConfirm, onCancel }: Props) 
         )}
       </div>
     </div>
+  );
+}
+
+function LoginBody({ onSignIn, onNewHere, onCancel }: {
+  onSignIn: () => void;
+  onNewHere: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <>
+      <h2 id="pre-consent-title" className="text-xl font-semibold text-primary leading-tight">
+        Welcome back.
+      </h2>
+      <p className="text-sm text-secondary leading-relaxed">
+        Sign in to your AgentEnvoy account.
+      </p>
+      <div className="pt-2 space-y-3">
+        <GoogleButton onClick={onSignIn} block />
+        <button
+          type="button"
+          onClick={onNewHere}
+          className="block w-full text-center text-xs text-muted hover:text-secondary underline underline-offset-2 transition py-1"
+        >
+          New here? See how it works →
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="block w-full text-center text-xs text-muted hover:text-secondary underline underline-offset-2 transition py-1"
+        >
+          Maybe later
+        </button>
+      </div>
+    </>
   );
 }
 
