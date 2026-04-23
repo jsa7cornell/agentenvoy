@@ -1,8 +1,10 @@
 // Thread status engine — computes dynamic status labels for thread cards
+import { getInviteeDisplay, getWaitingLabel } from "@/lib/invitee-display";
 
 interface StatusInput {
   status: string;           // "active" | "proposed" | "agreed" | "cancelled" | "escalated" | "expired"
-  inviteeName?: string | null;
+  inviteeNames?: string[];
+  inviteeName?: string | null; // deprecated — use inviteeNames
   lastMessageRole?: string | null;  // "administrator" | "guest" | "system"
   guestEmail?: string | null;
 }
@@ -13,18 +15,19 @@ interface StatusResult {
 }
 
 export function computeThreadStatus(input: StatusInput): StatusResult {
-  const name = input.inviteeName || input.guestEmail || "invitee";
+  const displayName = getInviteeDisplay(input) || input.guestEmail || "invitee";
+  const waitingLabel = getWaitingLabel(input) || `Waiting for ${input.guestEmail || "invitee"}`;
 
   if (input.status === "agreed") return { label: "Confirmed", color: "green" };
   if (input.status === "expired") return { label: "Expired", color: "gray" };
   if (input.status === "escalated") return { label: "Needs your input", color: "red" };
   if (input.status === "cancelled") return { label: "Cancelled", color: "red" };
-  if (input.status === "proposed") return { label: `Waiting for ${name}`, color: "amber" };
+  if (input.status === "proposed") return { label: waitingLabel, color: "amber" };
 
   // Active status — depends on last message
-  if (!input.lastMessageRole) return { label: `Waiting for ${name}`, color: "amber" };
-  if (input.lastMessageRole === "administrator") return { label: `Waiting for ${name}`, color: "amber" };
-  if (input.lastMessageRole === "guest") return { label: `${name} responded`, color: "purple" };
+  if (!input.lastMessageRole) return { label: waitingLabel, color: "amber" };
+  if (input.lastMessageRole === "administrator") return { label: waitingLabel, color: "amber" };
+  if (input.lastMessageRole === "guest") return { label: `${displayName} responded`, color: "purple" };
 
   return { label: "In progress", color: "purple" };
 }

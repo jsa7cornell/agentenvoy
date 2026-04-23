@@ -131,11 +131,20 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   } | null>(null);
   const [topic, setTopic] = useState("");
   const [linkFormat, setLinkFormat] = useState("");
+  const [linkStartTime, setLinkStartTime] = useState<string | null>(null); // "HH:MM" for date-mode events
   const [linkLocation, setLinkLocation] = useState<string | null>(null);
   const [linkActivity, setLinkActivity] = useState<string | null>(null);
   const [linkActivityIcon, setLinkActivityIcon] = useState<string | null>(null);
+  const [linkActivityOptions, setLinkActivityOptions] = useState<string[] | null>(null);
+  const [linkGuestPicksLocation, setLinkGuestPicksLocation] = useState(false);
+  // Whether the guest Envoy chat is visible. True by default when the link has
+  // something to negotiate (activity menu, location TBD, activity without venue).
+  // Guest can also open it manually via the "Chat with Envoy" toggle.
+  const [guestChatOpen, setGuestChatOpen] = useState(false);
   const [linkTimingLabel, setLinkTimingLabel] = useState<string | null>(null);
-  const [inviteeName, setInviteeName] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [inviteeNames, setInviteeNames] = useState<string[]>([]); // full list — used in PR-C group display
+  const [inviteeName, setInviteeName] = useState(""); // deprecated bridge — first of inviteeNames
   const [guestEmail, setGuestEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [archivedData, setArchivedData] = useState<{ hostEmail: string | null; hostName: string | null; hostMeetSlug: string | null } | null>(null);
@@ -176,6 +185,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
   const [slotDuration, setSlotDuration] = useState<number | undefined>(undefined);
   const [slotMinDuration, setSlotMinDuration] = useState<number | undefined>(undefined);
+  const [schedulingMode, setSchedulingMode] = useState<"time" | "date">("time");
   const [isVip, setIsVip] = useState(false);
   // Bilateral chip data — populated only when the session has a logged-in
   // guest whose calendar is connected. When absent, no chips render and the
@@ -349,7 +359,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           // to the browser's local tz to avoid a flash of host-tz content.
           setSlotTimezone(data.timezone);
           if (data.currentLocation) setSlotLocation(data.currentLocation);
-          if (data.duration) setSlotDuration(data.duration);
+          if (data.duration) {
+            setSlotDuration(data.duration);
+            setSchedulingMode(data.duration >= 24 * 60 ? "date" : "time");
+          }
           if (data.minDuration) setSlotMinDuration(data.minDuration);
           if (data.isVip) setIsVip(true);
           if (data.bilateralByDay && typeof data.bilateralByDay === "object") {
@@ -637,6 +650,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     });
   }
 
+  // Date-mode: guest taps a calendar day → build a timed start ISO from the
+  // chosen date + link startTime (default noon) + duration.
+  function handleSelectDate(dateStr: string) {
+    const timeStr = linkStartTime ?? "12:00";
+    const [hh, mm] = timeStr.split(":").map(Number);
+    const startDate = new Date(`${dateStr}T00:00:00`);
+    startDate.setHours(hh, mm ?? 0, 0, 0);
+    const duration = slotDuration ?? 1440;
+    const endDate = new Date(startDate.getTime() + duration * 60_000);
+    proposeFromSlot({ start: startDate.toISOString(), end: endDate.toISOString() });
+  }
+
   async function handleConfirm(proposal: {
     dateTime: string;
     duration: number;
@@ -836,9 +861,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         }
         setTopic(data.link?.topic || "");
         setLinkFormat(data.link?.format || "");
+        setLinkStartTime(typeof (data.link as Record<string, unknown>)?.startTime === "string" ? (data.link as Record<string, unknown>).startTime as string : null);
         setLinkLocation(typeof data.link?.location === "string" && data.link.location.trim() ? data.link.location.trim() : null);
         setLinkActivity(typeof data.link?.activity === "string" && data.link.activity.trim() ? data.link.activity.trim() : null);
         setLinkActivityIcon(typeof data.link?.activityIcon === "string" && data.link.activityIcon.trim() ? data.link.activityIcon.trim() : null);
+        {
+          const opts = (data.link as Record<string, unknown>)?.activityOptions;
+          setLinkActivityOptions(Array.isArray(opts) ? opts as string[] : null);
+          const gp = (data.link as Record<string, unknown>)?.guestPicks as Record<string, unknown> | null | undefined;
+          setLinkGuestPicksLocation(gp?.location === true);
+        }
         setLinkTimingLabel(typeof data.link?.timingLabel === "string" && data.link.timingLabel.trim() ? data.link.timingLabel.trim() : null);
         // Stage 2 state-machine input (N7 fold): surface intent.steering so
         // deriveMode() can pick the exclusive-single-slot offer branch. Null
@@ -853,11 +885,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             typeof steering === "string" && steering.length > 0 ? steering : null,
           );
         }
-        setInviteeName(data.link?.inviteeName || "");
+        const names: string[] = Array.isArray(data.link?.inviteeNames) && (data.link.inviteeNames as string[]).length > 0
+          ? (data.link.inviteeNames as string[])
+          : data.link?.inviteeName ? [data.link.inviteeName] : [];
+        setInviteeNames(names);
+        setInviteeName(names[0] ?? "");
         // Pre-fill the confirm-card form from any info we already have so the
         // guest doesn't have to retype their name/email if Envoy captured it.
         if (data.session?.guestName && !formGuestName) setFormGuestName(data.session.guestName);
-        else if (data.link?.inviteeName && !formGuestName) setFormGuestName(data.link.inviteeName);
+        else if (names[0] && !formGuestName) setFormGuestName(names[0]);
         if (data.session?.guestEmail && !formGuestEmail) setFormGuestEmail(data.session.guestEmail);
         else if (data.link?.inviteeEmail && !formGuestEmail) setFormGuestEmail(data.link.inviteeEmail);
         setSessionStatus(data.status || "active");
@@ -1830,14 +1866,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           >
           <AvailabilityCalendar
             view="week"
+            schedulingMode={schedulingMode}
             slotsByDay={slotsByDay || {}}
             timezone={slotTimezone}
             currentLocation={slotLocation}
             duration={slotDuration}
             minDuration={slotMinDuration}
-            onSelectSlot={!isHost && !confirmed ? (_msg, slot) => {
+            onSelectSlot={!isHost && !confirmed && schedulingMode === "time" ? (_msg, slot) => {
               if (slot) proposeFromSlot(slot);
             } : undefined}
+            onSelectDate={!isHost && !confirmed && schedulingMode === "date" ? handleSelectDate : undefined}
             onTimezoneClick={() => {
               setInput("I\u2019m actually in a different timezone \u2014 ");
               document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
@@ -1853,6 +1891,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   // Find the first administrator message so the inline picker can follow it.
   const firstAdminIdx = messages.findIndex((m) => m.role === "administrator");
+
+  // Guest chat is default-on only when the link has something to negotiate:
+  //   - activity menu (host offered choices)
+  //   - guestPicks.location (host deferred venue selection to guest)
+  //   - physical activity without a location (guest needs to confirm venue)
+  // Hosts always see the full chat. Guests can open it manually regardless.
+  const guestChatAutoOpen =
+    !!(linkActivityOptions && linkActivityOptions.length > 1) ||
+    linkGuestPicksLocation ||
+    !!(linkActivity && !linkLocation);
+  const showGuestChat = isHost || guestChatOpen || guestChatAutoOpen;
 
   const chatContent = (
     <>
@@ -2142,9 +2191,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
             // Inline host_update system messages render as small grey inline text
             // (matches the dashboard ✓ summary style) instead of the emerald bubble.
+            const msgKind = (msg.metadata as Record<string, unknown> | null | undefined)?.kind;
             const isHostUpdateInline =
               msg.role === "system" &&
-              (msg.metadata as Record<string, unknown> | null | undefined)?.kind === "host_update";
+              (msgKind === "host_update" || msgKind === "cancel_event");
             if (isHostUpdateInline) {
               return (
                 <React.Fragment key={msg.id}>
@@ -2673,7 +2723,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               />
             );
           })()}
-            {chatContent}
+            {showGuestChat ? chatContent : (
+              !confirmed && !isHost && (
+                <div className="flex flex-col items-center justify-center py-6 px-4">
+                  <button
+                    type="button"
+                    onClick={() => setGuestChatOpen(true)}
+                    className="text-sm text-muted hover:text-primary transition underline underline-offset-2"
+                  >
+                    Chat with Envoy
+                  </button>
+                </div>
+              )
+            )}
           </div>
         </div>
 

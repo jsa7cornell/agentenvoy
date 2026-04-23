@@ -6,6 +6,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserTimezone } from "@/lib/timezone";
 import { getActiveLocationRule, compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
+import { computeDensityHorizon } from "@/lib/availability-density";
+import { getSchedulingMode } from "@/lib/scheduling-mode";
 import { applyOfficeHoursWindow, type ConfirmedBooking } from "@/lib/office-hours";
 import {
   computeBilateralAvailability,
@@ -221,20 +223,20 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Duration filtering AFTER score filter. Now the consecutive-slot chain
-    // only walks through offerable slots — a 3:30 PM start for a 3-hour meeting
-    // is correctly rejected if 4:00–6:00 PM slots aren't also offered.
+    // Density-aware horizon — skip for self-mode and date-mode links.
     if (!selfMode) {
-      const duration = (linkRules as Record<string, unknown>).duration as number | undefined;
-      const minDuration = (linkRules as Record<string, unknown>).minDuration as number | undefined;
-      if (duration && duration > 30) {
-        const { filterByDuration } = await import("@/lib/scoring");
-        slots = filterByDuration(slots, duration, minDuration);
+      const schedulingMode = getSchedulingMode(linkRules as { duration?: number | null });
+      if (schedulingMode === "time") {
+        const horizonDays = computeDensityHorizon(slots);
+        const cutoff = new Date(Date.now() + horizonDays * 86_400_000);
+        slots = slots.filter((s) => new Date(s.start) < cutoff);
       }
     }
 
-    // Group by day. Uses displayTimezone so a 9pm PT slot groups under the
-    // viewer's calendar day when the viewer is in ET, not under the host's.
+    const slotSchedulingMode = !selfMode
+      ? getSchedulingMode(linkRules as { duration?: number | null })
+      : "time";
+
     const dateFmt = new Intl.DateTimeFormat("en-CA", {
       timeZone: displayTimezone,
       year: "numeric",
@@ -242,17 +244,44 @@ export async function GET(req: NextRequest) {
       day: "2-digit",
     });
 
-    for (const slot of slots) {
-      const dateKey = dateFmt.format(new Date(slot.start));
-      if (!slotsByDay[dateKey]) slotsByDay[dateKey] = [];
-      slotsByDay[dateKey].push({
-        start: slot.start,
-        end: slot.end,
-        score: slot.score,
-        isShortSlot: slot.isShortSlot,
-        // Score 2-3 on VIP links are stretch slots — shown orange in the widget.
-        isStretch: isVip && (slot.score ?? 0) >= 2,
+    if (slotSchedulingMode === "date") {
+      // Date-mode: one entry per viable day (any score ≤ 1 slot present).
+      // Duration filtering skipped — consecutive 30-min slots don't apply.
+      const viableDays = new Set<string>();
+      for (const slot of slots) {
+        if ((slot.score ?? 0) > 1) continue;
+        viableDays.add(dateFmt.format(new Date(slot.start)));
+      }
+      Array.from(viableDays).forEach((day) => {
+        slotsByDay[day] = [{ start: `${day}T00:00:00.000Z`, end: `${day}T00:00:00.000Z`, score: 0 }];
       });
+    } else {
+      // Duration filtering AFTER score filter. Now the consecutive-slot chain
+      // only walks through offerable slots — a 3:30 PM start for a 3-hour meeting
+      // is correctly rejected if 4:00–6:00 PM slots aren't also offered.
+      if (!selfMode) {
+        const duration = (linkRules as Record<string, unknown>).duration as number | undefined;
+        const minDuration = (linkRules as Record<string, unknown>).minDuration as number | undefined;
+        if (duration && duration > 30) {
+          const { filterByDuration } = await import("@/lib/scoring");
+          slots = filterByDuration(slots, duration, minDuration);
+        }
+      }
+
+      // Group by day. Uses displayTimezone so a 9pm PT slot groups under the
+      // viewer's calendar day when the viewer is in ET, not under the host's.
+      for (const slot of slots) {
+        const dateKey = dateFmt.format(new Date(slot.start));
+        if (!slotsByDay[dateKey]) slotsByDay[dateKey] = [];
+        slotsByDay[dateKey].push({
+          start: slot.start,
+          end: slot.end,
+          score: slot.score,
+          isShortSlot: slot.isShortSlot,
+          // Score 2-3 on VIP links are stretch slots — shown orange in the widget.
+          isStretch: isVip && (slot.score ?? 0) >= 2,
+        });
+      }
     }
 
     // ── Bilateral compute. Two paths lead here:

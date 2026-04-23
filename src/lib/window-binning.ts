@@ -226,6 +226,11 @@ export interface BinOptions {
  * Pure function: scored slots for one day → human window cards.
  * Slots with score > 1 (stretch+hidden) are dropped; per §12.8 item 2 the
  * guest render collapses stretch into open and hides score > 1.
+ *
+ * Multi-day exception (durationMinutes ≥ 1440): the scoring model is
+ * calibrated for sub-day meetings; stretch/hidden scores are meaningless
+ * when you need 24+ contiguous hours. Include all slots and return one
+ * card per coalesced band — sub-day splitting makes no sense here.
  */
 export function binSlotsIntoWindows(
   slots: BinningSlot[],
@@ -233,13 +238,33 @@ export function binSlotsIntoWindows(
 ): WindowCard[] {
   const { tz, durationMinutes } = options;
   const durationMs = durationMinutes * 60_000;
+  const isMultiDay = durationMinutes >= 24 * 60;
 
-  const visible = slots.filter((s) => (s.score ?? 0) <= 1);
+  const visible = isMultiDay
+    ? [...slots]
+    : slots.filter((s) => (s.score ?? 0) <= 1);
   if (visible.length === 0) return [];
 
   const bestScore = Math.min(...visible.map((s) => s.score ?? 0));
-
   const bands = coalesceBands(visible);
+
+  if (isMultiDay) {
+    return bands.map((band): WindowCard => {
+      const isPick = band.slots.some((s) => (s.score ?? 0) === bestScore);
+      const defaultStart = band.slots[0]?.start ?? band.startIso;
+      const defaultEnd = new Date(new Date(defaultStart).getTime() + durationMs).toISOString();
+      return {
+        start: band.startIso,
+        end: band.endIso,
+        name: fmtTimeRange(defaultStart, defaultEnd, tz),
+        defaultStart,
+        defaultEnd,
+        slotCount: band.slots.length,
+        isPick,
+      };
+    });
+  }
+
   const split: Band[] = bands.flatMap((b) => splitBand(b, durationMs, tz));
 
   return split.map((band): WindowCard => {

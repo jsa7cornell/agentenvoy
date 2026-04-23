@@ -38,6 +38,12 @@ export interface AgentContext {
     statedAvailability?: string;
   }>;
   conversationHistory: Array<{ role: string; content: string }>;
+  /** Guest-negotiated activity/location/format already locked this session. */
+  negotiatedActivity?: string | null;
+  negotiatedLocation?: string | null;
+  negotiatedFormat?: string | null;
+  /** Host-offered activity menu (activityOptions from link.rules). */
+  activityOptions?: string[] | null;
 }
 
 function getDomain(context: AgentContext): DomainType {
@@ -67,6 +73,10 @@ function buildComposeOptions(context: AgentContext) {
     isGroupEvent: context.isGroupEvent,
     eventParticipants: context.eventParticipants,
     role: context.role,
+    negotiatedActivity: context.negotiatedActivity,
+    negotiatedLocation: context.negotiatedLocation,
+    negotiatedFormat: context.negotiatedFormat,
+    activityOptions: context.activityOptions,
   };
 }
 

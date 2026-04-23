@@ -176,6 +176,8 @@ async function executeAction(
       return handleUpdateAvailabilityRule(action.params, userId);
     case "save_guest_info":
       return handleSaveGuestInfo(action.params, userId, context?.sessionId);
+    case "lock_activity_location":
+      return handleLockActivityLocation(action.params, userId, context?.sessionId);
     default:
       return { success: false, message: `Unknown action: ${action.action}` };
   }
@@ -413,10 +415,16 @@ async function handleCancel(
       ? (params.reason as string)
       : null;
 
+  const hostUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
+
   const result = await cancelSession({
     sessionId: session.id,
     hostId: userId,
     initiator: "agent",
+    initiatorName: hostUser?.name ?? null,
     note: reasonParam,
     notifyAttendees: true,
   });
@@ -749,7 +757,15 @@ async function handleCreateLink(
   }
 
   const code = generateCode();
-  const inviteeName = (params.inviteeName as string) || null;
+  // Accept inviteeNames[] (multi-guest) or legacy inviteeName (single string).
+  // LLM should emit inviteeNames for new links; inviteeName is a shim for old prompts.
+  const rawInviteeNames = params.inviteeNames;
+  const inviteeNames: string[] = Array.isArray(rawInviteeNames)
+    ? (rawInviteeNames as string[]).filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+    : typeof params.inviteeName === "string" && (params.inviteeName as string).trim()
+    ? [(params.inviteeName as string).trim()]
+    : [];
+  const inviteeName = inviteeNames[0] ?? null; // deprecated bridge — remove after inviteeName column drops
   const inviteeEmail = (params.inviteeEmail as string) || null;
   // Host-declared guest TZ (e.g. "Sarah is on EST"). Validated via Intl —
   // invalid zones silently drop to null rather than throw, so a bad LLM
@@ -985,6 +1001,20 @@ async function handleCreateLink(
     if (Object.keys(cleaned).length) guidanceOut = cleaned;
   }
 
+  // activityOptions — ordered list of activities the host is open to
+  // (e.g. ["hike", "coffee", "phone call"]). First entry mirrors `activity`
+  // for backward compat. Stored in link.rules.activityOptions (JSON blob —
+  // no migration). Envoy presents these to the guest as a menu; picking
+  // from the menu always passes the downgrade-ladder check.
+  let activityOptionsOut: string[] | undefined;
+  const rawActivityOptions = params.activityOptions;
+  if (Array.isArray(rawActivityOptions) && rawActivityOptions.length > 1) {
+    const cleaned = rawActivityOptions
+      .filter((o): o is string => typeof o === "string" && o.trim().length > 0)
+      .map((o) => o.trim().slice(0, 60));
+    if (cleaned.length > 1) activityOptionsOut = cleaned;
+  }
+
   // Host-intent steering (proposal 2026-04-21): the LLM classifies the
   // host's phrasing into one of four tiers at create_link time. Accept
   // either top-level `params.intent: { steering }` or bare `params.steering`
@@ -1029,6 +1059,7 @@ async function handleCreateLink(
     ...(timingLabel ? { timingLabel } : {}),
     ...(guestPicksOut ? { guestPicks: guestPicksOut } : {}),
     ...(guidanceOut ? { guestGuidance: guidanceOut } : {}),
+    ...(activityOptionsOut ? { activityOptions: activityOptionsOut } : {}),
   });
 
   // Asymmetric validator (§4.6): step DOWN when the LLM's intent
@@ -1058,14 +1089,13 @@ async function handleCreateLink(
     },
   });
 
-  // Session display title. When no topic was specified, use "HostFirst + GuestName"
-  // so the dashboard shows something meaningful instead of a generic "Catch up".
-  // hostName was fetched above in the combined slug+name lookup.
   const hostFirstName = hostName?.split(/\s+/)[0] || "Host";
+  const { getInviteeDisplay, getWaitingLabel } = await import("@/lib/invitee-display");
+  const inviteeDisplay = getInviteeDisplay({ inviteeNames, inviteeName });
   const title = topic
-    ? `${topic} — ${inviteeName || "Invitee"}`
-    : inviteeName
-    ? `${hostFirstName} + ${inviteeName}`
+    ? `${topic}${inviteeDisplay ? ` — ${inviteeDisplay}` : ""}`
+    : inviteeDisplay
+    ? `${hostFirstName} + ${inviteeDisplay}`
     : `Meeting — ${hostFirstName}`;
 
   const session = await prisma.negotiationSession.create({
@@ -1075,7 +1105,7 @@ async function handleCreateLink(
       type: "calendar",
       status: "active",
       title,
-      statusLabel: `Waiting for ${inviteeName || "invitee"}`,
+      statusLabel: getWaitingLabel({ inviteeNames, inviteeName }),
       format: effectiveFormat,
       duration: (params.duration as number) || 30,
     },
@@ -1086,7 +1116,7 @@ async function handleCreateLink(
 
   return {
     success: true,
-    message: `Created link for ${inviteeName || "invitee"}${topic ? ` (${topic})` : ""}`,
+    message: `Created link for ${inviteeDisplay || "invitee"}${topic ? ` (${topic})` : ""}`,
     data: {
       sessionId: session.id,
       linkId: link.id,
@@ -1630,6 +1660,28 @@ async function handleExpandLink(
     },
   });
 
+  // Clear guest-negotiated values on active sessions when the host edits
+  // location or activity (host edit is authoritative — R2/option-a from
+  // proposal 2026-04-22_guest-activity-location-negotiation). Session-only
+  // write so there's no dual-write trust issue; confirm route reads
+  // negotiatedLocation ?? link.rules.location, so the host's new value
+  // now wins.
+  const negotiatedClearData: Record<string, null> = {};
+  if (patch.location !== undefined) {
+    negotiatedClearData.negotiatedLocation = null;
+    negotiatedClearData.negotiatedFormat = null;
+  }
+  if (patch.activity !== undefined) {
+    negotiatedClearData.negotiatedActivity = null;
+    negotiatedClearData.negotiatedFormat = null;
+  }
+  if (Object.keys(negotiatedClearData).length > 0) {
+    await prisma.negotiationSession.updateMany({
+      where: { linkId: link.id, status: { in: ["active", "pending"] } },
+      data: negotiatedClearData as Parameters<typeof prisma.negotiationSession.updateMany>[0]["data"],
+    });
+  }
+
   // Human-readable confirmation message.
   const changedParts: string[] = [];
   if (patch.isVip !== undefined) {
@@ -2141,5 +2193,140 @@ async function handleUpdateAvailabilityRule(
     success: true,
     message: summary,
     data: addedRuleId ? { id: addedRuleId } : { id },
+  };
+}
+
+// Format inference tokens — parallel to PHYSICAL_ACTIVITY_TOKENS in handleCreateLink.
+// Used by handleLockActivityLocation to derive format from a guest-proposed activity.
+const VIDEO_ACTIVITY_TOKENS = ["zoom", "video call", "video", "google meet", "teams", "facetime", "meet"];
+const PHONE_ACTIVITY_TOKENS = ["phone call", "phone", "call"];
+
+function deriveFormatFromActivity(activityStr: string): "in-person" | "video" | "phone" | null {
+  const lower = activityStr.toLowerCase();
+  if (PHONE_ACTIVITY_TOKENS.some((t) => lower.includes(t))) return "phone";
+  if (VIDEO_ACTIVITY_TOKENS.some((t) => lower.includes(t))) return "video";
+  // Physical tokens (subset of PHYSICAL_ACTIVITY_TOKENS in create_link)
+  const physicalTokens = [
+    "bike", "hike", "run", "walk", "coffee", "lunch", "dinner",
+    "breakfast", "drinks", "swim", "workout", "yoga", "trail",
+  ];
+  if (physicalTokens.some((t) => lower.includes(t))) return "in-person";
+  return null;
+}
+
+// Format downgrade ladder: in-person > video > phone
+// Returns true if `proposed` is a lateral or downward move from `current`.
+function isFormatDowngradeOrLateral(current: string, proposed: string): boolean {
+  const ladder: Record<string, number> = { "in-person": 2, video: 1, phone: 0 };
+  const currentRank = ladder[current] ?? 1;
+  const proposedRank = ladder[proposed] ?? 1;
+  return proposedRank <= currentRank;
+}
+
+/**
+ * Lock a guest-negotiated activity and/or location onto the session.
+ * Called from the guest-facing deal room when the guest proposes or confirms
+ * an activity/location.
+ *
+ * Validates format changes against the downgrade ladder (in-person > video > phone).
+ * Menu picks (activityOptions) always pass — the host pre-approved them.
+ *
+ * Emits a system-bot thread message for the diff trail.
+ */
+async function handleLockActivityLocation(
+  params: Record<string, unknown>,
+  userId: string,
+  sessionId?: string
+): Promise<ActionResult> {
+  const resolvedSessionId = (params.sessionId as string) || sessionId;
+  if (!resolvedSessionId) {
+    return { success: false, message: "Missing sessionId for lock_activity_location" };
+  }
+
+  const session = await prisma.negotiationSession.findUnique({
+    where: { id: resolvedSessionId },
+    select: {
+      id: true,
+      hostId: true,
+      status: true,
+      link: { select: { id: true, rules: true } },
+    },
+  });
+
+  if (!session) return { success: false, message: `Session not found: ${resolvedSessionId}` };
+  if (session.hostId !== userId) return { success: false, message: "Not authorized for this session" };
+  if (session.status === "agreed") {
+    return { success: false, message: "Session is already confirmed — use update_location or update_format for post-confirm changes" };
+  }
+
+  const linkRules = (session.link?.rules as Record<string, unknown> | null) ?? {};
+  const hostActivity = typeof linkRules.activity === "string" ? linkRules.activity : null;
+  const hostFormat = typeof linkRules.format === "string" ? linkRules.format : null;
+  const activityOptions = Array.isArray(linkRules.activityOptions)
+    ? (linkRules.activityOptions as string[])
+    : null;
+
+  const proposedActivity = typeof params.activity === "string" && params.activity.trim()
+    ? params.activity.trim()
+    : null;
+  const proposedLocation = typeof params.location === "string" && params.location.trim()
+    ? params.location.trim()
+    : null;
+
+  // Derive format from the proposed activity (or keep current).
+  let proposedFormat: string | null = null;
+  if (proposedActivity) {
+    proposedFormat = deriveFormatFromActivity(proposedActivity);
+  }
+
+  // Validate format change against the downgrade ladder, unless this is a
+  // menu pick (host pre-approved all options, no ladder check needed).
+  if (proposedFormat && hostFormat) {
+    const isMenuPick = activityOptions?.some(
+      (o) => o.toLowerCase() === proposedActivity?.toLowerCase()
+    );
+    if (!isMenuPick && !isFormatDowngradeOrLateral(hostFormat, proposedFormat)) {
+      return {
+        success: false,
+        message: `Format upgrade not allowed: host set this up as ${hostFormat} — I can't swap to ${proposedFormat}. The guest can contact the host directly to change the meeting type.`,
+      };
+    }
+  }
+
+  // Write negotiated values to the session.
+  await prisma.negotiationSession.update({
+    where: { id: resolvedSessionId },
+    data: {
+      ...(proposedActivity ? { negotiatedActivity: proposedActivity } : {}),
+      ...(proposedLocation ? { negotiatedLocation: proposedLocation } : {}),
+      ...(proposedFormat ? { negotiatedFormat: proposedFormat } : {}),
+      negotiatedLockedBy: "guest",
+    },
+  });
+
+  // Emit a system-bot message as the diff trail (visible to both host and guest).
+  const parts: string[] = [];
+  if (proposedActivity && proposedActivity !== hostActivity) parts.push(proposedActivity);
+  if (proposedLocation) parts.push(`at ${proposedLocation}`);
+  const lockSummary = parts.length > 0 ? parts.join(" ") : proposedActivity ?? proposedLocation ?? "details";
+
+  await prisma.message.create({
+    data: {
+      sessionId: resolvedSessionId,
+      role: "system",
+      content: `✓ Locked in: ${lockSummary} (set by guest)`,
+      metadata: { kind: "activity_location_lock", lockedBy: "guest" } as Prisma.InputJsonValue,
+    },
+  });
+
+  return {
+    success: true,
+    message: `Locked: ${lockSummary}`,
+    data: {
+      negotiatedActivity: proposedActivity,
+      negotiatedLocation: proposedLocation,
+      negotiatedFormat: proposedFormat,
+      lockedBy: "guest",
+    },
   };
 }

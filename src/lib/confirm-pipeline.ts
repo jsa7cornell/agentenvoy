@@ -249,7 +249,9 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   const startTime = new Date(dateTimeStr);
   const durationMin = duration || 30;
   const endTime = new Date(startTime.getTime() + durationMin * 60 * 1000);
-  const meetingFormat = format || "video";
+  // negotiatedFormat (guest-locked via lock_activity_location) takes priority
+  // over the body format param; falls back to "video" when neither is set.
+  const meetingFormat = ((session as Record<string, unknown>).negotiatedFormat as string | null | undefined) ?? format ?? "video";
   attemptSlotStart = startTime;
   attemptSlotEnd = endTime;
 
@@ -469,18 +471,28 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
 
   const guestLabel = guestName || guestEmail || "guest";
   const hostLabel = session.host.name || "Host";
+  const linkRulesObj = (session.link?.rules as Record<string, unknown> | null) || {};
+  // negotiatedActivity (guest-locked) wins over link.rules.activity for the event title.
+  const effectiveActivity =
+    ((session as Record<string, unknown>).negotiatedActivity as string | null | undefined) ??
+    (typeof linkRulesObj.activity === "string" && linkRulesObj.activity.trim()
+      ? linkRulesObj.activity.trim()
+      : null);
   const eventSummary = (() => {
+    if (effectiveActivity) return `${effectiveActivity.charAt(0).toUpperCase() + effectiveActivity.slice(1)} — ${guestLabel}`;
     if (session.link.topic) return `${session.link.topic} — ${guestLabel}`;
     if (meetingFormat === "phone") return `Phone call: ${guestLabel} & ${hostLabel}`;
     return `Meeting with ${guestLabel}`;
   })();
 
-  const linkRulesObj = (session.link?.rules as Record<string, unknown> | null) || {};
   const linkLocation =
     typeof linkRulesObj.location === "string" && linkRulesObj.location.trim()
       ? linkRulesObj.location.trim()
       : null;
+  // negotiatedLocation (guest-locked) takes priority over link.rules.location.
+  const negotiatedLocation = (session as Record<string, unknown>).negotiatedLocation as string | null | undefined;
   const effectiveLocation =
+    negotiatedLocation ||
     location ||
     linkLocation ||
     (meetingFormat === "phone" && hostPhone

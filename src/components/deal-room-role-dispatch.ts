@@ -71,19 +71,18 @@ export function getRoleStyles(
     };
   }
   if (role === "guest_envoy") {
-    // guest_envoy color follows team affiliation, viewer-relative:
-    //   logged-in guest viewer → blue (your team)
-    //   host viewer            → purple (counterparty)
-    //   anonymous fallback     → neutral
+    // guest_envoy color follows team affiliation, viewer-relative.
+    // Uses light bg + dark text (light mode) / subtle tinted dark bg + light
+    // text (dark mode) — same pattern as external_agent for readability.
     const bubble = opts.isGuest
-      ? "bg-blue-900/30 border border-blue-800 text-blue-100 rounded-bl-sm"
+      ? "bg-blue-50 border border-blue-200 text-blue-900 rounded-bl-sm dark:bg-blue-900/30 dark:border-blue-700/40 dark:text-blue-100"
       : opts.isHost
-        ? "bg-purple-900/30 border border-purple-800 text-purple-100 rounded-bl-sm"
+        ? "bg-purple-50 border border-purple-200 text-purple-900 rounded-bl-sm dark:bg-purple-900/30 dark:border-purple-700/40 dark:text-purple-100"
         : "bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm";
     const labelColor = opts.isGuest
-      ? "text-blue-300"
+      ? "text-blue-500 dark:text-blue-300"
       : opts.isHost
-        ? "text-purple-300"
+        ? "text-purple-500 dark:text-purple-300"
         : "text-emerald-400";
     return { bubble, labelColor, rightAligned: false };
   }

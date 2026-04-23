@@ -122,6 +122,33 @@ describe("isSparseLayout (F6)", () => {
   });
 });
 
+describe("binSlotsIntoWindows — multi-day meetings (≥1440 min)", () => {
+  it("includes stretch-scored slots (score > 1) for 24h meetings", () => {
+    // All slots scored > 1 — would be filtered out for sub-day meetings.
+    const s = slots(12, 4, 30, 30, 2); // noon-ish, score=2
+    const cards = binSlotsIntoWindows(s, { tz: TZ, durationMinutes: 1440 });
+    expect(cards.length).toBeGreaterThan(0);
+  });
+
+  it("returns one card per band without sub-day splitting for 24h meetings", () => {
+    // 6 consecutive slots (noon–3pm) — should produce 1 card, not 2-3.
+    const s = slots(12, 6, 30, 30, 0);
+    const cards = binSlotsIntoWindows(s, { tz: TZ, durationMinutes: 1440 });
+    expect(cards.length).toBe(1);
+  });
+
+  it("returns empty when slot list is empty, even for 24h meetings", () => {
+    const cards = binSlotsIntoWindows([], { tz: TZ, durationMinutes: 1440 });
+    expect(cards.length).toBe(0);
+  });
+
+  it("names the card by time range (not day-part) for a 24h window", () => {
+    const s = slots(12, 2, 30, 30, 0);
+    const cards = binSlotsIntoWindows(s, { tz: TZ, durationMinutes: 1440 });
+    expect(cards[0].name).toMatch(/–/); // time-range format, not "Morning" etc.
+  });
+});
+
 describe("assertBinningTz (F1)", () => {
   it("passes when tz matches", () => {
     expect(() => assertBinningTz(TZ, TZ)).not.toThrow();
