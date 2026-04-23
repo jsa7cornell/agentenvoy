@@ -50,6 +50,8 @@ interface AvailabilityCalendarProps {
   hostInitialSource?: string;
   /** First name of the guest — drives initials fallback when guestImage is missing. */
   guestInitialSource?: string;
+  /** Event title shown in the match banner: "We matched these options for your {eventTitle}" */
+  eventTitle?: string;
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
@@ -171,6 +173,43 @@ function SlotPills({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Match header banner ──────────────────────────────────────────────────────
+
+function MatchHeader({ eventTitle }: { eventTitle: string }) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 bg-gradient-to-br from-emerald-950/80 to-cyan-950/60 border-b border-emerald-900/40">
+      {/* Dual-calendar icon */}
+      <div className="relative w-[42px] h-[38px] shrink-0">
+        {/* back calendar */}
+        <div className="absolute bottom-0 left-0 w-[28px] h-[26px] rounded-[5px] border border-cyan-500/60 bg-cyan-950/50 flex flex-col overflow-hidden">
+          <div className="h-[7px] bg-white/10 shrink-0" />
+          <div className="flex-1 grid grid-cols-3 gap-px p-0.5">
+            {[0,1,2,3,4,5].map(i => <div key={i} className="w-[3px] h-[3px] rounded-full bg-white/25 m-auto" />)}
+          </div>
+        </div>
+        {/* front calendar */}
+        <div className="absolute top-0 right-0 w-[28px] h-[26px] rounded-[5px] border border-emerald-400/70 bg-emerald-950/60 flex flex-col overflow-hidden">
+          <div className="h-[7px] bg-white/10 shrink-0" />
+          <div className="flex-1 grid grid-cols-3 gap-px p-0.5">
+            {[true,false,true,false,true,false].map((lit, i) => (
+              <div key={i} className={`w-[3px] h-[3px] rounded-full m-auto ${lit ? "bg-emerald-400" : "bg-white/25"}`} />
+            ))}
+          </div>
+        </div>
+        {/* overlap ring */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[14px] h-[14px] rounded-full border-2 border-emerald-400/90 bg-emerald-400/15 flex items-center justify-center text-[7px] text-emerald-400 font-black">
+          ✦
+        </div>
+      </div>
+      {/* Copy */}
+      <p className="text-[13px] font-extrabold text-white leading-snug">
+        We matched these options for your{" "}
+        <span className="text-emerald-400">{eventTitle}</span>
+      </p>
     </div>
   );
 }
@@ -550,6 +589,7 @@ function WeekView({
   guestImage,
   hostInitialSource,
   guestInitialSource,
+  eventTitle,
 }: Omit<AvailabilityCalendarProps, "view">) {
   // F1: bin in the same tz we render in.
   assertBinningTz(timezone, timezone);
@@ -649,10 +689,17 @@ function WeekView({
     return `${first.monthLabel} ${first.day} – ${last.monthLabel} ${last.day}`;
   })();
 
+  const hasMatches = bilateralByDay
+    ? Object.values(bilateralByDay).some((chips) => chips.some((c) => c.color === "both"))
+    : false;
+
   return (
     <div>
+      {/* Match banner — shown when bilateral overlap found and eventTitle provided */}
+      {hasMatches && eventTitle && <MatchHeader eventTitle={eventTitle} />}
+
       {/* Header slot — e.g., inline CTA chip for calendar connect */}
-      {headerSlot && <div className="mb-3">{headerSlot}</div>}
+      {headerSlot && <div className="mb-3 px-4 pt-3">{headerSlot}</div>}
 
       {/* Week navigation header */}
       <div className="flex items-center justify-between mb-2">
