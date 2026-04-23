@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { GoogleButton } from "./google-button";
 
 export type PreConsentMode = "first-connect" | "reconnect" | "upgrade-scope" | "login";
@@ -49,7 +50,7 @@ export function PreConsentExplainer({ open, mode, onConfirm, onCancel, onSignIn 
   const showLoginView = mode === "login" && !showPitch;
   const isFirstConnect = mode === "first-connect" || (mode === "login" && showPitch);
 
-  return (
+  const modal = (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       role="dialog"
@@ -113,6 +114,8 @@ export function PreConsentExplainer({ open, mode, onConfirm, onCancel, onSignIn 
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }
 
 function LoginBody({ onSignIn, onNewHere, onCancel }: {
