@@ -162,6 +162,10 @@ export interface UserPreferences {
      *  popover. Default "General". Participates in per-host uniqueness with
      *  officeHours[*].name. Added 2026-04-23 (reusable-links proposal). */
     generalLinkName?: string;
+    /** UI theme preference. "auto" computes light/dark from the user's
+     *  timezone (light 05:00–20:00, dark otherwise). Defaults to "dark"
+     *  when absent for existing rows. Persists cross-device. */
+    themeMode?: "light" | "dark" | "auto";
   };
   learned?: Record<string, unknown>;
 }
