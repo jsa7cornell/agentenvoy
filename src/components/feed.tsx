@@ -49,6 +49,99 @@ interface ChannelMsg {
   } | null;
 }
 
+// ── First-run welcome ────────────────────────────────────────────────────
+
+const SUGGESTION_CARDS = [
+  {
+    label: "Schedule my first meeting",
+    sub: "Create a personalized link to share",
+    seed: "Create a personalized meeting link and schedule my first meeting with someone",
+  },
+  {
+    label: "Set my business hours",
+    sub: "Tell me when you're open",
+    seed: "I'm only available Monday through Friday, 9am to 5pm",
+  },
+  {
+    label: "Create Office Hours Link",
+    sub: "Configure availability links for specific meeting types",
+    seed: "Create an office hours link — 30-minute slots during my available windows, anyone can book",
+  },
+  {
+    label: "Protect focus time",
+    sub: "Block off time I won't touch",
+    seed: "Block my mornings before 11am — I need that time for deep work",
+    mobileHidden: true,
+  },
+  {
+    label: "Set meeting buffers",
+    sub: "Space between back-to-backs",
+    seed: "I always need a 10-minute buffer between meetings",
+    mobileHidden: true,
+  },
+  {
+    label: "Schedule a special event",
+    sub: "Send a custom link for a bike ride, coffee, or other special occasion",
+    seed: "Set up a custom link for a special occasion — like a bike ride or coffee with someone",
+    mobileHidden: true,
+  },
+  {
+    label: "Schedule a group gathering",
+    sub: "Find a time that works for everyone",
+    seed: "Set up a group gathering for my team — about an hour, video call, next week",
+    mobileHidden: true,
+    wide: true,
+  },
+] satisfies Array<{ label: string; sub: string; seed: string; mobileHidden?: boolean; wide?: boolean }>;
+
+function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="flex-1 flex flex-col justify-center py-6 gap-5">
+      {/* Envoy welcome bubble */}
+      <div className="flex flex-col gap-1">
+        <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
+          Envoy
+        </span>
+        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-xs leading-relaxed">
+          Hey! I&rsquo;m Envoy — I handle your scheduling so you don&rsquo;t have to. What would you like to set up first?
+        </div>
+      </div>
+
+      {/* Suggestion cards */}
+      <div className="grid grid-cols-2 gap-2">
+        {SUGGESTION_CARDS.map((card) => (
+          <button
+            key={card.label}
+            type="button"
+            onClick={() => onSeed(card.seed)}
+            className={[
+              "text-left rounded-xl border border-secondary bg-surface hover:bg-secondary/40 transition px-3 py-2.5 flex flex-col gap-0.5",
+              card.wide ? "col-span-2" : "",
+              card.mobileHidden && !expanded ? "hidden md:flex" : "flex",
+            ].join(" ")}
+          >
+            <span className="text-xs font-medium text-primary">{card.label}</span>
+            <span className="text-[11px] text-muted leading-snug">{card.sub}</span>
+          </button>
+        ))}
+
+        {/* See more — mobile only, hidden once expanded */}
+        {!expanded && (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="md:hidden col-span-2 text-xs text-muted border border-dashed border-secondary rounded-xl px-3 py-2 hover:text-secondary transition"
+          >
+            See more ↓
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /** Render **bold** and [link](url) markdown in message content */
@@ -677,6 +770,17 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
               clarifierBox.value = { replies: f.quickReplies };
               continue;
             }
+            if (f.type === "reaction") {
+              // Patch the optimistic user message with the reaction emoji.
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === userMsg.id
+                    ? { ...m, metadata: { ...(m.metadata ?? {}), reaction: f.emoji } }
+                    : m,
+                ),
+              );
+              continue;
+            }
             // status frame — supersede any pending one; dwell-gate on render.
             if (f.type !== "status") continue;
             pendingCopy = f.copy;
@@ -716,13 +820,16 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           .replace(/\s*\[ACTION\].*?\[\/ACTION\]\s*/g, "")
           .trim();
 
-        const envoyMsg: ChannelMsg = {
-          id: `temp-envoy-${Date.now()}`,
-          role: "envoy",
-          content: displayContent || content,
-          createdAt: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, envoyMsg]);
+        // Chitchat reactions produce no envoy bubble — finalText is null.
+        if (finalText !== null) {
+          const envoyMsg: ChannelMsg = {
+            id: `temp-envoy-${Date.now()}`,
+            role: "envoy",
+            content: displayContent || content,
+            createdAt: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, envoyMsg]);
+        }
         if (clarifierBox.value) {
           setClarifierState({
             originalText: text,
@@ -793,31 +900,11 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           lands at the sidebar divider; inner wrapper re-centers the content. */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 pt-5 pb-16 flex flex-col gap-1.5">
-        {/* Empty state — only for calibrated users with no messages */}
+        {/* First-run welcome — only for calibrated users with no messages */}
         {messages.length === 0 && !loading && isCalibrated && (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center space-y-4 max-w-sm">
-              <p className="text-sm text-muted">Envoy manages your scheduling. Tell it who to meet with.</p>
-              <div className="flex flex-col gap-2">
-                {[
-                  "Schedule 30 min with Sarah next week",
-                  "Set up a video call with Nathan about the project",
-                  "I\u2019m never available before 9am",
-                ].map((example) => (
-                  <button
-                    key={example}
-                    onClick={() => {
-                      setInput(example);
-                      textareaRef.current?.focus();
-                    }}
-                    className="text-left text-xs text-purple-400 hover:text-purple-300 bg-purple-500/5 hover:bg-purple-500/10 border border-purple-500/10 rounded-lg px-3 py-2 transition"
-                  >
-                    &ldquo;{example}&rdquo;
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+          <FirstRunWelcome
+            onSeed={(seed) => { setInput(seed); textareaRef.current?.focus(); }}
+          />
         )}
 
         {messages.map((msg) => {
@@ -898,24 +985,31 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           // Chat bubble
           const isUser = msg.role === "user";
           const meetLinkMatch = !isUser ? msg.content.match(/(https?:\/\/[^\s]+\/meet\/[^\s]+)/) : null;
+          const reaction = isUser ? (msg.metadata?.reaction as string | undefined) : undefined;
           return (
-            <div
-              key={msg.id}
-              className={`max-w-[72%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                isUser
-                  ? "self-end bg-purple-600 text-white rounded-br-sm"
-                  : "self-start bg-black/5 dark:bg-white/7 rounded-bl-sm"
-              }`}
-            >
+            <div key={msg.id} className={`relative ${isUser ? "self-end" : "self-start"}`}>
               <div
-                className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${
-                  isUser ? "text-white/60" : "text-purple-400"
+                className={`max-w-[72%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                  isUser
+                    ? "bg-purple-600 text-white rounded-br-sm"
+                    : "bg-black/5 dark:bg-white/7 rounded-bl-sm"
                 }`}
               >
-                {isUser ? "You" : "Envoy"}
+                <div
+                  className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${
+                    isUser ? "text-white/60" : "text-purple-400"
+                  }`}
+                >
+                  {isUser ? "You" : "Envoy"}
+                </div>
+                <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
+                {meetLinkMatch && <MeetLinkCard url={meetLinkMatch[1]} />}
               </div>
-              <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
-              {meetLinkMatch && <MeetLinkCard url={meetLinkMatch[1]} />}
+              {reaction && (
+                <div className="absolute -bottom-3 right-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/10 rounded-full px-1.5 py-0.5 text-sm shadow-sm select-none">
+                  {reaction}
+                </div>
+              )}
             </div>
           );
         })}

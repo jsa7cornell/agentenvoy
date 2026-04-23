@@ -1,6 +1,7 @@
 "use client";
 
-import { useOAuthSignIn } from "./use-oauth-signin";
+import { useEffect, useState } from "react";
+import { useOAuthSignIn, hasReturningCookie } from "./use-oauth-signin";
 
 type Variant = "bubble" | "mobile-banner";
 
@@ -17,6 +18,11 @@ interface Props {
  *
  * Rendered at two callsites (in-bubble desktop, mobile sticky banner) so a
  * shared component keeps copy/behavior aligned.
+ *
+ * Returning users (ae_returning cookie present) get "Log in to see your
+ * match" — skips the pitch modal and goes straight to Google select_account.
+ * New users see the trust-building first-connect modal with an escape hatch
+ * ("Already have an account?") for cookie-less returning visitors.
  */
 export function DealRoomConnectCtas({
   variant,
@@ -29,8 +35,11 @@ export function DealRoomConnectCtas({
   // lights up the bilateral availability view immediately.
   void sessionId;
 
+  const [isReturning, setIsReturning] = useState(false);
+  useEffect(() => { setIsReturning(hasReturningCookie()); }, []);
+
   const signUpFlow = useOAuthSignIn({
-    mode: "first-connect",
+    mode: "login",
     entryPoint: "deal-room",
     callbackUrl: `/meet/${slug}${code ? `/${code}` : ""}`,
   });
@@ -52,7 +61,9 @@ export function DealRoomConnectCtas({
               : "w-full px-4 py-3 rounded-xl text-sm font-bold bg-gradient-to-r from-violet-600 via-blue-600 to-cyan-500 hover:from-violet-500 hover:via-blue-500 hover:to-cyan-400 text-white transition-all shadow-lg shadow-blue-900/30 leading-snug"
           }
         >
-          ✦ Connect your calendar — see where you both have time
+          {isReturning
+            ? "Log in to see your match"
+            : "✦ Connect your calendar — see where you both have time"}
         </button>
       </div>
       {signUpFlow.modal}

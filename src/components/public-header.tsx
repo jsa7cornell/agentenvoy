@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LogoFull } from "./logo";
-import { useOAuthSignIn } from "./oauth/use-oauth-signin";
+import { useOAuthSignIn, hasReturningCookie } from "./oauth/use-oauth-signin";
 
 /**
  * Minimal header for public pages (FAQ, Terms, Privacy, Agents).
@@ -19,6 +20,9 @@ export function PublicHeader() {
     mode: "login",
     callbackUrl: "/dashboard",
   });
+
+  const [isReturning, setIsReturning] = useState(false);
+  useEffect(() => { setIsReturning(hasReturningCookie()); }, []);
 
   return (
     <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary">
@@ -44,7 +48,7 @@ export function PublicHeader() {
             onClick={trigger}
             className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md transition font-medium"
           >
-            Sign in / Join
+            {isReturning ? "Sign in" : "Sign in / Join"}
           </button>
         </div>
       </div>
