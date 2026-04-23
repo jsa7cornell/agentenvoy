@@ -65,7 +65,7 @@ function promptForMode(mode: PreConsentMode, isReturning: boolean): string {
   return "consent";
 }
 
-function hasReturningCookie(): boolean {
+export function hasReturningCookie(): boolean {
   if (typeof document === "undefined") return false;
   return document.cookie.split(";").some((c) => {
     const [name, value] = c.trim().split("=");
@@ -132,8 +132,16 @@ export function useOAuthSignIn({
     setOpen(false);
     doSignIn();
   };
+  // Login mode: sign-in view primary action — select_account, no forced consent.
+  const onSignIn = mode === "login" ? () => {
+    setOpen(false);
+    if (typeof document !== "undefined") {
+      document.cookie = `${ENTRY_POINT_COOKIE}=${entryPoint}; Path=/; Max-Age=300; SameSite=Lax`;
+    }
+    signIn("google", { callbackUrl }, { scope: scopeFor(entryPoint), prompt: "select_account", access_type: "offline", ...signInParams });
+  } : undefined;
   const modal = (
-    <PreConsentExplainer open={open} mode={mode} onConfirm={onConfirm} onCancel={onCancel} />
+    <PreConsentExplainer open={open} mode={mode} onConfirm={onConfirm} onCancel={onCancel} onSignIn={onSignIn} />
   );
   return { trigger, modal };
 }

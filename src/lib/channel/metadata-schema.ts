@@ -49,6 +49,7 @@ export const ChannelMessageMetadataSchema = z
     sessionId: z.string().optional(),
     linkCode: z.string().optional(),
     overriddenNarration: z.string().nullable().optional(),
+    reaction: z.string().optional(),
     delegateSpeaker: DelegateSpeakerSchema.optional(),
     actions: z.array(ActionCallSchema).optional(),
     actionResults: z.array(ActionResultRecordSchema).optional(),

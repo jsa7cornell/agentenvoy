@@ -48,8 +48,8 @@ const chatIntentSchema = z.object({
         intent: z.enum(["schedule", "inquire"]),
       }),
     )
-    .max(3)
     .optional(),
+  emoji: z.string().optional(),
 });
 
 export interface ClassifyContext {

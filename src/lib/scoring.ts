@@ -158,6 +158,10 @@ export interface UserPreferences {
     defaultDuration?: number;
     /** Per-event protection overrides set by the host from the availability view. */
     eventProtectionOverrides?: EventProtectionOverride[];
+    /** Display name for the host's default /meet/{slug} link in the "My links"
+     *  popover. Default "General". Participates in per-host uniqueness with
+     *  officeHours[*].name. Added 2026-04-23 (reusable-links proposal). */
+    generalLinkName?: string;
   };
   learned?: Record<string, unknown>;
 }

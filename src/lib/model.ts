@@ -11,10 +11,19 @@
  */
 
 import { gateway } from "ai";
+import { createAnthropic } from "@ai-sdk/anthropic";
 
 /**
- * Returns a gateway model instance for the given Anthropic model ID.
+ * Returns a model instance for the given Anthropic model ID.
+ *
+ * In production and local dev, routes through Vercel AI Gateway.
+ * When BENCH_DIRECT=1, bypasses the gateway and calls Anthropic directly
+ * via ANTHROPIC_API_KEY — used by the bench harness to avoid gateway
+ * rate limits on free-tier credits.
  */
 export function envoyModel(modelId: string) {
+  if (process.env.BENCH_DIRECT === "1") {
+    return createAnthropic({ baseURL: "https://api.anthropic.com/v1" })(modelId);
+  }
   return gateway(`anthropic/${modelId}`);
 }

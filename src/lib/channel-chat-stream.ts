@@ -29,6 +29,14 @@ export type ChannelChatFrame =
     }
   | { type: "text"; content: string }
   | {
+      /** Chitchat reaction — emoji placed on the host's message bubble.
+       *  Client patches the message in-place; no new envoy bubble is added.
+       *  Proposal: chitchat tier. */
+      type: "reaction";
+      emoji: string;
+      messageId: string | null;
+    }
+  | {
       /** Clarifier turn from the chat intent router when kind === "unclear".
        *  Client renders the `text` as an envoy bubble with `quickReplies`
        *  as pill buttons beneath. Clicking a reply re-submits the original
@@ -139,6 +147,11 @@ function parseFrame(line: string): ChannelChatFrame | null {
       })
       .filter((r): r is { label: string; intent: "schedule" | "inquire" } => r !== null);
     return { type: "clarifier", text, quickReplies };
+  }
+  if (type === "reaction") {
+    const emoji = typeof obj.emoji === "string" ? obj.emoji : "👍";
+    const messageId = typeof obj.messageId === "string" ? obj.messageId : null;
+    return { type: "reaction", emoji, messageId };
   }
   return null;
 }

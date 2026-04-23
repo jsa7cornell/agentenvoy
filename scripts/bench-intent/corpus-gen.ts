@@ -22,6 +22,7 @@ export type Axis =
   | "multi-intent conjunctions"
   | "ambiguous pronouns"
   | "off-topic injections"
+  | "scheduling-verb with guest"
   | "mixed adversarial";
 
 export const AXES: Axis[] = [
@@ -31,6 +32,7 @@ export const AXES: Axis[] = [
   "multi-intent conjunctions",
   "ambiguous pronouns",
   "off-topic injections",
+  "scheduling-verb with guest",
   "mixed adversarial",
 ];
 
@@ -44,13 +46,15 @@ const AXIS_INSTRUCTIONS: Record<Exclude<Axis, "mixed adversarial">, string> = {
   "bare-noun continuations":
     "Generate bare noun-phrase continuations of a scheduling thread. Examples: 'bike ride', 'coffee', '1:1', 'standup', 'the review', 'dinner'. These should classify as `schedule` when the topic is referenced in prior context.",
   "echo of prior envoy reply":
-    "Generate messages that are either verbatim copies of the prior envoy turn or 85-95% paraphrases of it. The goal is to probe the echo-detection path.",
+    "Generate messages that are either verbatim copies of the prior envoy turn or 85-95% paraphrases of it. The goal is to probe the echo-detection path. These should all have expectedTier='schedule' — the echo detector routes them to the scheduling pass, not unclear.",
   "multi-intent conjunctions":
     "Generate utterances that combine two intents via 'and'/','/';', e.g. 'book Bob AND update my phone number', 'schedule Jon then change my default duration'. These are genuinely ambiguous.",
   "ambiguous pronouns":
     "Generate utterances with unresolved pronouns: 'move it to Tuesday', 'change that one', 'can you tweak this?', 'reschedule them'.",
   "off-topic injections":
-    "Generate non-scheduling utterances: weather chatter, greetings, random questions, quick thank-yous.",
+    "Generate non-scheduling utterances: weather chatter, greetings, random questions, quick thank-yous. These should all have expectedTier='chitchat'.",
+  "scheduling-verb with guest":
+    "Generate scheduling requests that contain an explicit scheduling verb ('set up', 'book', 'schedule', 'arrange', 'find time', 'grab time', 'get X on the calendar') plus a person name and optional timeframe. Examples: 'set up time with katie for next week', 'book a call with Marcus Thursday', 'find time for Sarah and me this week', 'get something on the calendar with Tom'. These should ALL have expectedTier='schedule' — scheduling verbs must never route to unclear.",
 };
 
 const ExpectedTierSchema = z
@@ -93,7 +97,7 @@ function promptFor(axis: Axis, count: number, fixture: Fixture): string {
 
   const instructions =
     axis === "mixed adversarial"
-      ? "Generate a mix across all six named axes below. Roughly 20% of each:\n" +
+      ? "Generate a mix across all seven named axes below. Roughly 15% of each:\n" +
         Object.entries(AXIS_INSTRUCTIONS)
           .map(([a, inst]) => `  - ${a}: ${inst}`)
           .join("\n")

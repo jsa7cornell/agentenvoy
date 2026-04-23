@@ -32,7 +32,13 @@ export interface AvailabilityRule {
    * the meeting type. linkCode is the public identifier used in the URL.
    */
   officeHours?: {
-    title: string;          // defaults to "Office Hours" on rule creation; host-editable
+    /** Link-directory-display name — the host-facing identifier shown in "My links"
+     *  and matched by the recall intent ("what's my sales pitch link"). Per-host
+     *  unique, case-insensitive. Added 2026-04-23 per reusable-links proposal R1.
+     *  Optional for legacy rules created before 2026-04-23 — callers should use
+     *  getOfficeHoursDisplayName() which falls back to title. */
+    name?: string;
+    title: string;          // meeting-title semantic for calendar events
     format: "video" | "phone" | "in-person";
     durationMinutes: number;
     linkSlug: string;       // denormalized copy of user.meetSlug for fast URL construction
@@ -60,6 +66,26 @@ export interface CompiledOfficeHoursLink {
   windowEnd: string;      // "HH:MM"
   daysOfWeek: number[];   // 0=Sun..6=Sat; empty = every day
   expiryDate?: string;    // ISO date
+}
+
+/**
+ * Resolve the host-facing display name for an office-hours rule. Prefers the
+ * explicit `name` field; falls back to `title` for legacy rules created before
+ * 2026-04-23. Used for "My links" popover labels, uniqueness checks, and recall
+ * matching. Trimmed; case preserved.
+ */
+export function getOfficeHoursDisplayName(officeHours: NonNullable<AvailabilityRule["officeHours"]>): string {
+  const n = (officeHours.name ?? "").trim();
+  if (n) return n;
+  return (officeHours.title ?? "").trim() || "Office Hours";
+}
+
+/**
+ * Normalize a reusable-link name for uniqueness comparison: lowercase, trim,
+ * collapse internal whitespace. "Sales Pitch" == "sales pitch" == " sales  pitch ".
+ */
+export function normalizeLinkName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 /**
