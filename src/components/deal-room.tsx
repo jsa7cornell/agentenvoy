@@ -1884,6 +1884,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             }}
             headerSlot={headerSlot}
             footerSlot={tzPicker}
+            bilateralByDay={bilateralByDay}
+            hostFirstName={(hostName || "").split(/\s+/)[0] || undefined}
+            eventTitle={(() => {
+              const hostFirst = hostName ? hostName.split(" ")[0] : "";
+              const inviteeFirst = inviteeName ? inviteeName.split(" ")[0] : "";
+              if (linkActivity && inviteeFirst) return `${linkActivity} with ${inviteeFirst}`;
+              if (linkActivity && hostFirst) return `${linkActivity} with ${hostFirst}`;
+              if (linkActivity) return linkActivity;
+              return getEventTitle();
+            })()}
           />
           </MatchPulse>
         </div>
