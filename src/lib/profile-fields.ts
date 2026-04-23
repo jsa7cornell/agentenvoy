@@ -33,7 +33,8 @@ export type ProfileFieldKey =
   | "videoProvider"
   | "zoomLink"
   | "defaultDuration"
-  | "timezone";
+  | "timezone"
+  | "themeMode";
 
 type ExplicitPrefs = NonNullable<UserPreferences["explicit"]>;
 

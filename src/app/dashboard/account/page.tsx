@@ -37,6 +37,10 @@ export default function AccountPage() {
   const [defaultLocation, setDefaultLocation] = useState("");
   const [savedDefaultLocation, setSavedDefaultLocation] = useState("");
 
+  // Admin gate for the DevTools section. Fetched from /api/me/ui-prefs;
+  // null while loading so we don't flash DevTools for non-admins.
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+
   // Privacy — F4 debugConsent toggle (beta-cohort access gate).
   const [debugConsent, setDebugConsent] = useState<boolean | null>(null);
   const [debugConsentAt, setDebugConsentAt] = useState<string | null>(null);
@@ -101,6 +105,13 @@ export default function AccountPage() {
         }
       })
       .catch(() => {});
+
+    fetch("/api/me/ui-prefs")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data) setIsAdmin(Boolean(data.isAdmin));
+      })
+      .catch(() => setIsAdmin(false));
   }, []);
 
   useEffect(() => {
@@ -536,8 +547,11 @@ export default function AccountPage() {
           </div>
         </section>
 
-        {/* Dev Tools */}
-        <DevTools />
+        {/* Dev Tools — admin-only. The underlying /api/debug/onboarding-reset
+            endpoint also enforces NODE_ENV !== "production", so hiding this UI
+            for non-admins is the primary gate; the server-side NODE_ENV check
+            remains defense-in-depth for any non-admin who guesses the URL. */}
+        {isAdmin === true && <DevTools />}
 
         {/* Danger Zone */}
         <section className="space-y-3">
