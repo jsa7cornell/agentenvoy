@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
   // Anonymous guests stay null → bilateral compute is skipped and the response
   // falls back to today's host-only shape.
   let guestId: string | null = null;
+  let partialSessionId: string | null = null;
 
   if (selfMode) {
     const authSession = await getServerSession(authOptions);
@@ -71,6 +72,7 @@ export async function GET(req: NextRequest) {
     prefs = (session.host.preferences as Record<string, unknown>) || {};
     linkRules = (session.link?.rules as LinkRules) || {};
     sourceRuleId = session.link?.sourceRuleId ?? null;
+    partialSessionId = sessionId;
   } else {
     return NextResponse.json(
       { error: "Missing sessionId or self param" },
@@ -366,8 +368,49 @@ export async function GET(req: NextRequest) {
   const duration = (!selfMode && (linkRules as Record<string, unknown>).duration as number | undefined) || undefined;
   const minDuration = (!selfMode && (linkRules as Record<string, unknown>).minDuration as number | undefined) || undefined;
 
+  // Partial-attendance picker data: invitee list + per-slot RSVPs. Returned
+  // only when the link has opted in so legacy single/group widgets stay lean.
+  let partialAttendance:
+    | {
+        mode: "allowed";
+        minimumAttendees: number | null;
+        invitees: Array<{ id: string; name: string }>;
+        rsvps: Array<{ inviteeId: string; slotStart: string; status: string }>;
+      }
+    | undefined;
+  if (
+    partialSessionId &&
+    (linkRules as Record<string, unknown>).partialAttendance === "allowed"
+  ) {
+    try {
+      const invs = await prisma.sessionInvitee.findMany({
+        where: { sessionId: partialSessionId },
+        select: { id: true, name: true },
+        orderBy: { createdAt: "asc" },
+      });
+      const rsvps = await prisma.inviteeSlotRsvp.findMany({
+        where: { sessionId: partialSessionId },
+        select: { sessionInviteeId: true, slotStart: true, status: true },
+      });
+      partialAttendance = {
+        mode: "allowed",
+        minimumAttendees:
+          ((linkRules as Record<string, unknown>).minimumAttendees as number | undefined) ?? null,
+        invitees: invs,
+        rsvps: rsvps.map((r) => ({
+          inviteeId: r.sessionInviteeId,
+          slotStart: r.slotStart.toISOString(),
+          status: r.status,
+        })),
+      };
+    } catch (e) {
+      console.warn("[slots] partial-attendance lookup failed (non-blocking):", e);
+    }
+  }
+
   return NextResponse.json({
     slotsByDay,
+    partialAttendance,
     // `timezone` is the viewer's display tz (viewerTz when set + valid, else
     // host tz). Widget labels slots using this; internal scoring stays host-tz.
     timezone: displayTimezone,

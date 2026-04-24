@@ -433,6 +433,64 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     allParticipantSessions = participants.map((p) => p.sessionId);
   }
 
+  // ── Partial attendance (Track 1, proposal 2026-04-23).
+  //
+  // When link.rules.partialAttendance === "allowed", the host has opted in to
+  // letting a slot confirm with a subset of invitees if at least
+  // minimumAttendees can make it. Eligibility per slot comes from
+  // InviteeSlotRsvp — missing row = tentative (eligible); "declined"/"excused"
+  // = not eligible. If fewer than minimumAttendees are eligible, we refuse the
+  // confirm (surfaces as slot_no_longer_offered so the widget re-renders).
+  // Non-eligible invitees get an excused_fallback email after the CAS lands.
+  const partialAllowed =
+    ((session.link.rules as Record<string, unknown> | null)?.partialAttendance as
+      | string
+      | undefined) === "allowed";
+  const minAttendees =
+    ((session.link.rules as Record<string, unknown> | null)?.minimumAttendees as
+      | number
+      | undefined) ?? null;
+  let eligibleInviteeIds: string[] | null = null;
+  const excusedInviteeIds: string[] = [];
+  if (partialAllowed) {
+    const invitees = await prisma.sessionInvitee.findMany({
+      where: { sessionId },
+      select: { id: true, email: true },
+    });
+    if (invitees.length > 0) {
+      const rsvps = await prisma.inviteeSlotRsvp.findMany({
+        where: {
+          sessionId,
+          slotStart: startTime,
+        },
+        select: { sessionInviteeId: true, status: true },
+      });
+      const rsvpByInvitee = new Map(rsvps.map((r) => [r.sessionInviteeId, r.status]));
+      eligibleInviteeIds = [];
+      for (const inv of invitees) {
+        const status = rsvpByInvitee.get(inv.id);
+        if (status === "declined" || status === "excused") {
+          excusedInviteeIds.push(inv.id);
+        } else {
+          eligibleInviteeIds.push(inv.id);
+        }
+      }
+      if (
+        minAttendees != null &&
+        eligibleInviteeIds.length < minAttendees
+      ) {
+        attemptOutcome = "validation_failed";
+        attemptError = `Partial-attendance threshold not met: ${eligibleInviteeIds.length}/${minAttendees} eligible`;
+        return {
+          ok: false,
+          reason: "slot_no_longer_offered",
+          message: "Not enough invitees can make that time.",
+          attempt: buildAttempt(),
+        };
+      }
+    }
+  }
+
   // Body-provided guest info (from the confirm card) takes precedence so
   // guests can correct what Envoy captured earlier in conversation.
   const bodyGuestEmailStr = typeof bodyGuestEmail === "string" && bodyGuestEmail.trim()
@@ -456,9 +514,31 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       `[confirm] sessionId=${sessionId} — no guest email; calendar invite will only have host.`
     );
   }
-  const attendeeEmails = isGroupEvent
-    ? [hostEmail, ...allParticipantEmails.filter((e) => e !== hostEmail)]
-    : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
+  // Partial-attendance: filter calendar attendees to eligible invitees only.
+  const eligibleInviteeEmails: string[] = [];
+  const excusedInviteeEmails: string[] = [];
+  const excusedInviteeNames: string[] = [];
+  if (partialAllowed && eligibleInviteeIds) {
+    const invitees = await prisma.sessionInvitee.findMany({
+      where: { sessionId },
+      select: { id: true, name: true, email: true },
+    });
+    for (const inv of invitees) {
+      if (!inv.email) continue;
+      if (eligibleInviteeIds.includes(inv.id)) {
+        eligibleInviteeEmails.push(inv.email);
+      } else if (excusedInviteeIds.includes(inv.id)) {
+        excusedInviteeEmails.push(inv.email);
+        excusedInviteeNames.push(inv.name);
+      }
+    }
+  }
+  const attendeeEmails =
+    partialAllowed && eligibleInviteeEmails.length > 0
+      ? [hostEmail, ...eligibleInviteeEmails.filter((e) => e !== hostEmail)]
+      : isGroupEvent
+      ? [hostEmail, ...allParticipantEmails.filter((e) => e !== hostEmail)]
+      : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://agentenvoy.ai";
   const dealRoomUrl = session.link.code
@@ -875,6 +955,67 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     }
   } catch (e) {
     console.error("[confirm] guest-flow nudge failed (non-blocking):", e);
+  }
+
+  // Partial-attendance: persist per-invitee slot outcome + excused fallback
+  // email. Confirmed for eligible, excused for non-eligible. Guarded by
+  // partialAllowed so this never fires on single/group legacy flows.
+  if (partialAllowed && eligibleInviteeIds) {
+    try {
+      const allInvitees = [...eligibleInviteeIds, ...excusedInviteeIds];
+      if (allInvitees.length > 0) {
+        await prisma.inviteeSlotRsvp.deleteMany({
+          where: { sessionId, slotStart: startTime },
+        });
+        await prisma.inviteeSlotRsvp.createMany({
+          data: [
+            ...eligibleInviteeIds.map((id) => ({
+              sessionId,
+              sessionInviteeId: id,
+              slotStart: startTime,
+              slotEnd: endTime,
+              status: "confirmed",
+            })),
+            ...excusedInviteeIds.map((id) => ({
+              sessionId,
+              sessionInviteeId: id,
+              slotStart: startTime,
+              slotEnd: endTime,
+              status: "excused",
+            })),
+          ],
+        });
+      }
+    } catch (e) {
+      console.warn("[confirm] InviteeSlotRsvp persist failed (non-blocking):", e);
+    }
+
+    // Excused fallback — notify the non-eligible invitees that the meeting
+    // is going ahead without them and point them at the deal room. Uses the
+    // side-effects dispatcher with purpose "excused_fallback" per proposal P2.
+    if (excusedInviteeEmails.length > 0) {
+      try {
+        const excusedLabel = excusedInviteeNames.join(", ") || "you";
+        await dispatch({
+          kind: "email.send",
+          to: excusedInviteeEmails,
+          subject: `Meeting confirmed — without ${excusedLabel}`,
+          html:
+            `<p>Hi ${excusedLabel},</p>` +
+            `<p>${session.host.name || "The organizer"} confirmed ${
+              session.link.topic || "the meeting"
+            } for a time that didn't work for you. The rest of the group is meeting on ${startTime.toISOString()}.</p>` +
+            `<p>If you'd still like to connect, reply at <a href="${dealRoomUrl}">${dealRoomUrl}</a>.</p>`,
+          context: {
+            sessionId: session.id,
+            hostId: session.hostId,
+            purpose: "excused_fallback",
+          },
+        });
+      } catch (e) {
+        console.warn("[confirm] excused_fallback dispatch failed (non-blocking):", e);
+      }
+    }
   }
 
   // === Meeting confirmation email — sent to both host and guest ===

@@ -301,6 +301,7 @@ model NegotiationLink {
   user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessions        NegotiationSession[]
   participants    SessionParticipant[]
+  invitees        SessionInvitee[]
   consentRequests ConsentRequest[]
   mcpCallLogs     MCPCallLog[]
 
@@ -394,7 +395,9 @@ model NegotiationSession {
   proposals       Proposal[]
   channelMessages ChannelMessage[]
   outcome         NegotiationOutcome?
-  participant     SessionParticipant?
+  participants    SessionParticipant[]
+  invitees        SessionInvitee[]
+  slotRsvps       InviteeSlotRsvp[]
   holds           Hold[]
 }
 
@@ -453,24 +456,88 @@ model Channel {
   createdAt DateTime         @default(now())
 }
 
-// SessionParticipant: tracks each person in a group event
+// SessionParticipant: an arrival on a session — a human clicking in, or an
+// agent connecting via MCP. Multiple arrivals per session are valid (agent +
+// human, phone + desktop). Arrival may point at a SessionInvitee it fulfills;
+// when null, the arrival is an uninvited click-through (forwarded link).
+//
+// 2026-04-23: dropped `@unique([sessionId])` and split invite from arrival
+// (see SessionInvitee). Track 1 multi-user coordination proposal, path B.
 model SessionParticipant {
-  id        String   @id @default(cuid())
-  linkId    String
-  sessionId String   @unique
-  userId    String?
-  email     String?
-  name      String?
-  role      String   @default("guest") // "host" | "guest"
-  status    String   @default("pending") // "pending" | "active" | "agreed" | "declined"
-  joinedAt  DateTime @default(now())
+  id               String   @id @default(cuid())
+  linkId           String
+  sessionId        String
+  sessionInviteeId String?  // nullable — arrival may not match any invite
+  userId           String?
+  email            String?
+  name             String?
+  role             String   @default("guest") // "host" | "guest"
+  status           String   @default("pending") // "pending" | "active" | "agreed" | "declined"
+  joinedAt         DateTime @default(now())
 
-  link    NegotiationLink    @relation(fields: [linkId], references: [id])
-  session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  user    User?              @relation(fields: [userId], references: [id])
+  link           NegotiationLink    @relation(fields: [linkId], references: [id])
+  session        NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user           User?              @relation(fields: [userId], references: [id])
+  sessionInvitee SessionInvitee?    @relation(fields: [sessionInviteeId], references: [id])
 
   @@unique([linkId, email])
   @@index([linkId])
+  @@index([sessionId])
+  @@index([sessionInviteeId])
+}
+
+// SessionInvitee: an invite on a session — the host-defined, stable record of
+// "Will is on the invite for this meeting." One row per named invitee at
+// create_link time. Arrivals (SessionParticipant) attach via sessionInviteeId;
+// RSVPs (InviteeSlotRsvp) attach via sessionInviteeId.
+//
+// Separated from SessionParticipant because invite-state and arrival-state
+// diverge in several real scenarios: guest-agent acts before the human shows
+// up (one invite, multiple arrivals), host uninvites someone who already sent
+// messages (arrival stays, invite deleted), forwarded-link click yields an
+// arrival with no invite. Track 1 multi-user coordination proposal, path B.
+model SessionInvitee {
+  id        String   @id @default(cuid())
+  linkId    String
+  sessionId String
+  name      String
+  email     String?
+  role      String   @default("guest")
+  createdAt DateTime @default(now())
+
+  link         NegotiationLink      @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  session      NegotiationSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  participants SessionParticipant[]
+  rsvps        InviteeSlotRsvp[]
+
+  @@index([sessionId])
+  @@index([linkId])
+}
+
+// InviteeSlotRsvp: per-slot per-invitee availability state for links with
+// partialAttendance enabled. Status transitions:
+//   - "tentative"  → pre-arrival guess (from linked calendar)
+//   - "confirmed"  → invitee (or their agent) explicitly accepted this slot
+//   - "declined"   → invitee (or their agent) explicitly rejected this slot
+//   - "excused"    → confirm pipeline booked without them; courtesy email sent
+//
+// Written only when link.rules.partialAttendance === "allowed". Single-guest
+// and whole-attendance links write zero rows. See 2026-04-23 multi-user
+// coordination proposal §Confirm pipeline for the CAS logic.
+model InviteeSlotRsvp {
+  id               String   @id @default(cuid())
+  sessionId        String
+  sessionInviteeId String
+  slotStart        DateTime
+  slotEnd          DateTime
+  status           String   // "tentative" | "confirmed" | "declined" | "excused"
+  createdAt        DateTime @default(now())
+
+  sessionInvitee SessionInvitee     @relation(fields: [sessionInviteeId], references: [id], onDelete: Cascade)
+  session        NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, sessionInviteeId])
+  @@index([sessionInviteeId, slotStart])
 }
 
 // ChannelMessage: feed-level messages between user and Envoy
