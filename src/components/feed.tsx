@@ -84,9 +84,17 @@ const SUGGESTION_CARDS = [
     sub: "Find a time that works for everyone",
     seed: "Set up a group gathering for my team — about an hour, video call, next week",
     mobileHidden: true,
+    comingSoon: true,
+  },
+  {
+    label: "🔁  Coordinate a recurring event",
+    sub: "Weekly 1:1s, monthly team syncs, standing book clubs",
+    seed: "Help me set up a recurring event",
+    mobileHidden: true,
+    comingSoon: true,
     wide: true,
   },
-] satisfies Array<{ label: string; sub: string; seed: string; mobileHidden?: boolean; wide?: boolean }>;
+] satisfies Array<{ label: string; sub: string; seed: string; mobileHidden?: boolean; wide?: boolean; comingSoon?: boolean }>;
 
 function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
   const [expanded, setExpanded] = useState(false);
@@ -109,14 +117,25 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
           <button
             key={card.label}
             type="button"
-            onClick={() => onSeed(card.seed)}
+            disabled={card.comingSoon}
+            onClick={() => !card.comingSoon && onSeed(card.seed)}
             className={[
-              "text-left rounded-xl border border-secondary bg-surface hover:bg-secondary/40 transition px-3 py-2.5 flex flex-col gap-0.5",
+              "text-left rounded-xl border border-secondary bg-surface transition px-3 py-2.5 flex-col gap-0.5 relative",
               card.wide ? "col-span-2" : "",
               card.mobileHidden && !expanded ? "hidden md:flex" : "flex",
+              card.comingSoon
+                ? "opacity-60 cursor-not-allowed"
+                : "hover:bg-secondary/40",
             ].join(" ")}
           >
-            <span className="text-xs font-medium text-primary">{card.label}</span>
+            <span className="text-xs font-medium text-primary flex items-center gap-1.5">
+              {card.label}
+              {card.comingSoon && (
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-purple-400 border border-purple-500/40 rounded px-1 py-[1px] leading-none">
+                  Coming soon
+                </span>
+              )}
+            </span>
             <span className="text-[11px] text-muted leading-snug">{card.sub}</span>
           </button>
         ))}
