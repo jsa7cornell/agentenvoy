@@ -53,40 +53,34 @@ interface ChannelMsg {
 
 const SUGGESTION_CARDS = [
   {
-    label: "Schedule my first meeting",
-    sub: "Create a personalized link to share",
-    seed: "Create a personalized meeting link and schedule my first meeting with someone",
+    label: "🔗  Set up my primary invite link",
+    sub: "Your main AgentEnvoy link — share it with anyone to book time",
+    seed: "Help me set up my primary AgentEnvoy invite link. Walk me through how it works, then help me configure my business hours, any blocks, buffers between meetings, and anything else I should decide on.",
   },
   {
-    label: "Set my business hours",
-    sub: "Tell me when you're open",
-    seed: "I'm only available Monday through Friday, 9am to 5pm",
+    label: "☕  Find time for coffee",
+    sub: "Grab coffee with someone specific",
+    seed: "Help me set up a coffee with someone — send them a link so we can find a time that works.",
   },
   {
-    label: "Create Office Hours Link",
-    sub: "Configure availability links for specific meeting types",
+    label: "🕐  Create an Office Hours link",
+    sub: "Recurring windows where anyone can book",
     seed: "Create an office hours link — 30-minute slots during my available windows, anyone can book",
   },
   {
-    label: "Protect focus time",
-    sub: "Block off time I won't touch",
+    label: "🧘  Protect focus time",
+    sub: "Block time I won't touch",
     seed: "Block my mornings before 11am — I need that time for deep work",
     mobileHidden: true,
   },
   {
-    label: "Set meeting buffers",
-    sub: "Space between back-to-backs",
-    seed: "I always need a 10-minute buffer between meetings",
+    label: "🎉  Plan a special event",
+    sub: "Custom link for a bike ride, dinner, or other occasion",
+    seed: "Set up a custom link for a special occasion — like a bike ride or dinner with someone",
     mobileHidden: true,
   },
   {
-    label: "Schedule a special event",
-    sub: "Send a custom link for a bike ride, coffee, or other special occasion",
-    seed: "Set up a custom link for a special occasion — like a bike ride or coffee with someone",
-    mobileHidden: true,
-  },
-  {
-    label: "Schedule a group gathering",
+    label: "👥  Schedule a group gathering",
     sub: "Find a time that works for everyone",
     seed: "Set up a group gathering for my team — about an hour, video call, next week",
     mobileHidden: true,
@@ -104,8 +98,8 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
         <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
           Envoy
         </span>
-        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-xs leading-relaxed">
-          Hey! I&rsquo;m Envoy — I handle your scheduling so you don&rsquo;t have to. What would you like to set up first?
+        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+          👋 Hey! I&rsquo;m Envoy — I handle your scheduling so you don&rsquo;t have to. The most important thing to set up first is your <span className="font-medium">primary invite link</span>. Pick one below to get started.
         </div>
       </div>
 
