@@ -9,6 +9,7 @@ import {
 } from "@/lib/time-of-day-theme";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { MatchPulse } from "./match-pulse";
+import { CelebrationBanner } from "./celebration-banner";
 import { DashboardHeader } from "./dashboard-header";
 import { PublicHeader } from "./public-header";
 import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
@@ -192,6 +193,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // when bilateralByDay first becomes non-empty, then resets next tick.
   const [justMatched, setJustMatched] = useState(false);
   const prevHadMatchRef = useRef(false);
+  // Sticky "we celebrated this session" — once justMatched fires, this stays
+  // true for the remainder of the page lifecycle so the celebration banner
+  // (which has no close affordance, by design) lingers as the post-match
+  // callout instead of vanishing on the next render tick. Refresh resets.
+  const [hasCelebrated, setHasCelebrated] = useState(false);
 
   // TZ recovery banner state (Slice 7). When someone raced ahead of the human
   // guest — host, MCP agent, or a proxy — the session's guestTimezone ends up
@@ -425,6 +431,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     const hasMatchNow = !!bilateralByDay && Object.keys(bilateralByDay).length > 0;
     if (hasMatchNow && !prevHadMatchRef.current) {
       setJustMatched(true);
+      setHasCelebrated(true);
       const t = setTimeout(() => setJustMatched(false), 50);
       prevHadMatchRef.current = true;
       return () => clearTimeout(t);
@@ -1857,6 +1864,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               )}
             </div>
           )}
+          {hasCelebrated && !isHost && !confirmed && bilateralByDay && (() => {
+            // Find the first day with a "both free" chip to anchor the headline.
+            const days = Object.keys(bilateralByDay).sort();
+            const firstMatchDay = days.find((d) =>
+              (bilateralByDay[d] || []).some((c) => c.color === "both"),
+            );
+            const matchCount = Object.values(bilateralByDay).filter((v) =>
+              v.some((c) => c.color === "both"),
+            ).length;
+            const dayLabel = firstMatchDay
+              ? new Date(firstMatchDay + "T12:00:00").toLocaleDateString("en-US", {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                })
+              : undefined;
+            return <CelebrationBanner matchCount={matchCount} firstMatchDayLabel={dayLabel} />;
+          })()}
           <MatchPulse
             justMatched={justMatched}
             matchCount={bilateralByDay ? Object.values(bilateralByDay).filter((v) => v.some((c) => c.color === "both")).length : 0}
