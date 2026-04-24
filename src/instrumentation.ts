@@ -45,6 +45,17 @@ export async function register() {
       console.error(
         `[boot] CRITICAL — schema drift detected at startup. Every Prisma query touching these models is failing.\n${summary}`,
       );
+      // Surface on /admin/failures AND email the log recipients. Cooldown
+      // is managed by the dispatcher via SideEffectLog (same 4h window the
+      // cron uses, keyed on purpose=schema_drift) so a cold-start storm
+      // after a bad deploy doesn't spam inboxes. The cron is daily on
+      // Hobby — this boot path is how drift actually gets caught in time.
+      try {
+        const { alertSchemaDrift } = await import("@/lib/schema-drift-alert");
+        await alertSchemaDrift(report, { source: "boot" });
+      } catch (alertErr) {
+        console.error("[boot] schema-drift alert dispatch failed:", alertErr);
+      }
     }
   } catch (err) {
     // The check itself failed (e.g., DB unreachable at boot). Log and move on.
