@@ -46,24 +46,28 @@ export async function register() {
         `[boot] CRITICAL — schema drift detected at startup. Every Prisma query touching these models is failing.\n${summary}`,
       );
       // Surface on /admin/failures. Kept intentionally lean at boot —
-      // importing the email dispatcher would pull googleapis into the
-      // edge bundle via the instrumentation graph. Emails are sent by
-      // triggering the schema-health cron over fetch below.
+      // importing @/lib/route-error would pull dispatcher → googleapis
+      // into the edge bundle via the instrumentation graph. Write the
+      // row directly with prisma; email is dispatched by the cron fetch
+      // below.
       try {
-        const { logRouteError } = await import("@/lib/route-error");
-        logRouteError({
-          route: "instrumentation/boot",
-          method: "GET",
-          statusCode: 500,
-          error: Object.assign(new Error(summary), { name: "SchemaDrift" }),
-          context: {
-            source: "boot",
-            affected: report.affected.map((m) => ({
-              model: m.model,
-              table: m.table,
-              tableMissing: m.tableMissing,
-              missing: m.missing,
-            })),
+        const { prisma } = await import("@/lib/prisma");
+        await prisma.routeError.create({
+          data: {
+            route: "instrumentation/boot",
+            method: "GET",
+            statusCode: 500,
+            errorClass: "SchemaDrift",
+            message: summary.slice(0, 2000),
+            contextJson: {
+              source: "boot",
+              affected: report.affected.map((m) => ({
+                model: m.model,
+                table: m.table,
+                tableMissing: m.tableMissing,
+                missing: m.missing,
+              })),
+            },
           },
         });
       } catch (logErr) {
