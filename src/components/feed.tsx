@@ -394,10 +394,12 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
         }
 
         // Only arm the demo auto-draft if this complete came from advancing
-        // the terminal phase (`defaults_confirm`) in this session. initOnboarding
-        // calls this fn with no fromPhase, so a resumed already-complete
-        // user never arms the draft.
-        if (fromPhase !== "defaults_confirm") {
+        // the terminal phase (`intro`) in this session. initOnboarding calls
+        // this fn with no fromPhase, so a resumed already-complete user
+        // never arms the draft. (Post-2026-04-23 the terminal advance is
+        // intro→complete; the sunset `defaults_confirm` beat is still
+        // accepted as a legacy value for in-flight users.)
+        if (fromPhase !== "intro" && fromPhase !== "defaults_confirm") {
           return;
         }
 

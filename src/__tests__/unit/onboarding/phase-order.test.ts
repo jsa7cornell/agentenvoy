@@ -2,12 +2,10 @@ import { describe, it, expect } from "vitest";
 import { nextPhase, type OnboardingPhase } from "@/lib/onboarding-machine";
 
 describe("nextPhase — active trimmed flow", () => {
-  it("intro → defaults_confirm", () => {
-    expect(nextPhase("intro")).toBe("defaults_confirm");
-  });
-
-  it("defaults_confirm → complete", () => {
-    expect(nextPhase("defaults_confirm")).toBe("complete");
+  it("intro → complete", () => {
+    // Post-2026-04-23 sunset of `defaults_confirm`: intro now advances
+    // directly to `complete`, which inlines the seed-preview bubble.
+    expect(nextPhase("intro")).toBe("complete");
   });
 
   it("complete stays at complete (tail clamp)", () => {
@@ -16,13 +14,12 @@ describe("nextPhase — active trimmed flow", () => {
 });
 
 describe("nextPhase — legacy phase promotion", () => {
-  // Mid-flow users whose stored phase was trimmed in the 2026-04-21 proposal
-  // auto-promote to defaults_confirm rather than getting stuck. This keeps
-  // the unique index in-sync with a linear PHASE_ORDER even after trims.
-  // Phases in the OnboardingPhase union that are NOT in the active
-  // PHASE_ORDER ("intro" → "defaults_confirm" → "complete"). A user whose
-  // stored phase lands in one of these should auto-promote forward.
+  // Mid-flow users whose stored phase was trimmed auto-promote to
+  // `complete` rather than getting stuck. This keeps the PHASE_ORDER
+  // linear even after trims. All legacy values — including the 2026-04-23
+  // sunset `defaults_confirm` — map forward to `complete`.
   const legacyPhases: OnboardingPhase[] = [
+    "defaults_confirm",
     "defaults_format",
     "phone_number",
     "zoom_link",
@@ -34,8 +31,8 @@ describe("nextPhase — legacy phase promotion", () => {
   ];
 
   for (const phase of legacyPhases) {
-    it(`${phase} → defaults_confirm`, () => {
-      expect(nextPhase(phase)).toBe("defaults_confirm");
+    it(`${phase} → complete`, () => {
+      expect(nextPhase(phase)).toBe("complete");
     });
   }
 });

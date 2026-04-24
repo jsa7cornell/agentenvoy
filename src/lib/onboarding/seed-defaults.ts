@@ -3,9 +3,10 @@
  * `2026-04-21_lean-first-run-onboarding-and-returnto_*.md` §2.7.
  *
  * Written from `events.createUser` so a fresh user lands with sensible
- * defaults already set. The `defaults_confirm` onboarding phase then shows
- * the user what was seeded and asks for a single confirmation — "Looks
- * good" or "Change these". Replaces the old 4-phase ask-each-field flow.
+ * defaults already set. The seed-preview is inlined on the `complete`
+ * onboarding message (post-2026-04-23 sunset of `defaults_confirm`;
+ * proposal `2026-04-23_primary-link-config-convergence` §4 V1 item 5);
+ * users tune via the welcome page's 🔗 primary-link flow or chat.
  *
  * Fields NOT seeded (any default is more likely wrong than right): `phone`,
  * `zoomLink`, eveningsPosture. Proposal 3 gap-detectors pick these up
