@@ -809,7 +809,29 @@ export default function AccountPage() {
                       setDeleting(false);
                       return;
                     }
+                    // Scrub all browser state tied to the deleted account so residue
+                    // doesn't follow the next sign-in on this browser. Server cascade
+                    // already wiped the DB; this is the client-side half.
+                    //
+                    // NOTE: if you add a new cookie or localStorage key keyed on
+                    // user/session identifiers anywhere in the app, add it here too.
+                    // See CLAUDE.md / delete-account scrubber contract.
                     document.cookie = "ae_returning=; Path=/; Max-Age=0; SameSite=Lax";
+                    document.cookie = "oauth_entry_point=; Path=/; Max-Age=0; SameSite=Lax";
+                    try {
+                      localStorage.removeItem("theme");
+                      for (const key of Object.keys(localStorage)) {
+                        if (
+                          key.startsWith("seen-primer:") ||
+                          key.startsWith("tz-banner-dismissed:")
+                        ) {
+                          localStorage.removeItem(key);
+                        }
+                      }
+                    } catch {
+                      // localStorage can throw in private-mode Safari and similar.
+                      // Non-fatal — server state is already gone.
+                    }
                     await signOut({ callbackUrl: "/" });
                   } catch {
                     setDeleteError("Network error. Please try again.");
