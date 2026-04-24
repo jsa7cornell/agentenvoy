@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
 
   for (const sess of existingSessions) {
     // Check if participant already exists
-    const existing = await prisma.sessionParticipant.findUnique({
+    const existing = await prisma.sessionParticipant.findFirst({
       where: { sessionId: sess.id },
     });
     if (existing) continue;
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
       // Since sessionId is @unique on SessionParticipant, we can only have one per session.
       // In single mode, the session is shared — so we create the guest participant row only if
       // we didn't already create a host one for this session.
-      const alreadyCreated = await prisma.sessionParticipant.findUnique({
+      const alreadyCreated = await prisma.sessionParticipant.findFirst({
         where: { sessionId: sess.id },
       });
       if (!alreadyCreated) {

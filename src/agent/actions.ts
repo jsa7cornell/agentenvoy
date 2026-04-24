@@ -768,6 +768,25 @@ async function handleCreateLink(
     : [];
   const inviteeName = inviteeNames[0] ?? null; // deprecated bridge — remove after inviteeName column drops
   const inviteeEmail = (params.inviteeEmail as string) || null;
+
+  // Partial-attendance (Track 1, proposal 2026-04-23). Off by default — when
+  // the host opts in, minimumAttendees is required and must be in [1, N-1] for
+  // N invitees (1-person "partial" collapses to whole; N-person is the default).
+  const rawPartial = params.partialAttendance;
+  const partialAttendance: "off" | "allowed" =
+    rawPartial === "allowed" ? "allowed" : "off";
+  let minimumAttendees: number | null = null;
+  if (partialAttendance === "allowed") {
+    const raw = params.minimumAttendees;
+    const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number.parseInt(raw, 10) : NaN;
+    if (!Number.isFinite(n) || n < 1 || (inviteeNames.length > 0 && n >= inviteeNames.length)) {
+      return {
+        success: false,
+        message: `partialAttendance=allowed requires minimumAttendees in [1, ${Math.max(inviteeNames.length - 1, 1)}]`,
+      };
+    }
+    minimumAttendees = n;
+  }
   // Host-declared guest TZ (e.g. "Sarah is on EST"). Validated via Intl —
   // invalid zones silently drop to null rather than throw, so a bad LLM
   // extraction doesn't block link creation.
@@ -1070,6 +1089,9 @@ async function handleCreateLink(
     ...(guestPicksOut ? { guestPicks: guestPicksOut } : {}),
     ...(guidanceOut ? { guestGuidance: guidanceOut } : {}),
     ...(activityOptionsOut ? { activityOptions: activityOptionsOut } : {}),
+    ...(partialAttendance === "allowed"
+      ? { partialAttendance, minimumAttendees }
+      : {}),
   });
 
   // Asymmetric validator (§4.6): step DOWN when the LLM's intent
@@ -1137,6 +1159,20 @@ async function handleCreateLink(
       duration: (params.duration as number) || 30,
     },
   });
+
+  // SessionInvitee rows — one per named invitee. Only the first gets the
+  // link-level email (host typically only collects one contact in v1).
+  if (inviteeNames.length > 0) {
+    await prisma.sessionInvitee.createMany({
+      data: inviteeNames.map((name, i) => ({
+        linkId: link.id,
+        sessionId: session.id,
+        name,
+        email: i === 0 ? inviteeEmail : null,
+        role: "guest",
+      })),
+    });
+  }
 
   const baseUrl = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
   const url = `${baseUrl}/meet/${meetSlug}/${code}`;
