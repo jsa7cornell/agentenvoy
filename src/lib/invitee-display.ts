@@ -51,3 +51,21 @@ export function getInviteeFirstName(link: LinkWithInvitees): string | null {
   if (names.length === 0) return null;
   return names[0].split(/\s+/)[0] || null;
 }
+
+/**
+ * First-names-only display, same shape as getInviteeDisplay.
+ *   0 guests → ""
+ *   1 guest  → "Will"
+ *   2 guests → "Will & Andrew"
+ *   3+       → "Will, Andrew & 1 other"
+ * Used for greeting salutations where last names would feel stiff.
+ */
+export function getInviteeFirstNamesDisplay(link: LinkWithInvitees): string {
+  const firsts = getInviteeNames(link)
+    .map((n) => n.split(/\s+/)[0])
+    .filter((n): n is string => Boolean(n));
+  if (firsts.length === 0) return "";
+  if (firsts.length === 1) return firsts[0];
+  if (firsts.length === 2) return `${firsts[0]} & ${firsts[1]}`;
+  return `${firsts[0]}, ${firsts[1]} & ${firsts.length - 2} other${firsts.length - 2 === 1 ? "" : "s"}`;
+}
