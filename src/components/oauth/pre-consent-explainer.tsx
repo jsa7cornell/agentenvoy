@@ -29,7 +29,9 @@ interface Props {
  *   - login         → sign-in view first (select_account, no re-consent); "New
  *                     here? See how it works →" toggles to the first-connect
  *                     pitch. Cookie-present returning users skip this modal
- *                     entirely via `useOAuthSignIn`'s trigger gate.
+ *                     entirely via `useOAuthSignIn`'s trigger gate — so the
+ *                     copy here is neutral, not "welcome back" (that would
+ *                     greet first-time visitors as returning users).
  */
 export function PreConsentExplainer({ open, mode, onConfirm, onCancel, onSignIn }: Props) {
   const [showPitch, setShowPitch] = useState(false);
@@ -126,10 +128,11 @@ function LoginBody({ onSignIn, onNewHere, onCancel }: {
   return (
     <>
       <h2 id="pre-consent-title" className="text-xl font-semibold text-primary leading-tight">
-        Welcome back.
+        Sign in to AgentEnvoy.
       </h2>
       <p className="text-sm text-secondary leading-relaxed">
-        Sign in to your AgentEnvoy account.
+        Continue with the Google account linked to your AgentEnvoy profile. New
+        here? See how it works below.
       </p>
       <div className="pt-2 space-y-3">
         <GoogleButton onClick={onSignIn} block />
