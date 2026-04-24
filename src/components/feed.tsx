@@ -9,6 +9,7 @@ import { formatDuration } from "@/lib/format-duration";
 import { QuickReplies } from "./onboarding/quick-replies";
 import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
 import { SchedulingStatusChip } from "./scheduling-status-chip";
+import { SchedulingLinksChipList } from "./scheduling-links-chip-list";
 import { GcalUpdateCard } from "./gcal-update-card";
 import { SendFeedbackLink } from "./send-feedback";
 import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
@@ -930,8 +931,9 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
             top of the feed for calibrated users. See proposal
             `2026-04-23_primary-link-config-convergence` §3.2 pattern (a). */}
         {isCalibrated && (
-          <div className="self-center mb-2">
+          <div className="self-center mb-2 w-full flex flex-col items-center gap-2">
             <SchedulingStatusChip />
+            <SchedulingLinksChipList />
           </div>
         )}
         {/* First-run welcome — only for calibrated users with no messages.
