@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseGuestTimeReferences, renderParsedTime } from "@/lib/time-parse";
+import {
+  parseGuestTimeReferences,
+  renderParsedTime,
+  parseBusinessHoursRange,
+} from "@/lib/time-parse";
 
 const ET = "America/New_York";
 const PT = "America/Los_Angeles";
@@ -178,5 +182,66 @@ describe("renderParsedTime", () => {
         viewerTimezone: ET,
       }),
     ).toBeNull();
+  });
+});
+
+describe("parseBusinessHoursRange", () => {
+  it("parses am/pm explicit range", () => {
+    expect(parseBusinessHoursRange("8am to 5pm")).toEqual({
+      startMinutes: 480,
+      endMinutes: 1020,
+    });
+    expect(parseBusinessHoursRange("9:30am-6pm")).toEqual({
+      startMinutes: 570,
+      endMinutes: 1080,
+    });
+  });
+
+  it("infers am/pm for ambiguous bare-hour pairs", () => {
+    // "9 to 5" → 9am / 5pm
+    expect(parseBusinessHoursRange("9 to 5")).toEqual({
+      startMinutes: 540,
+      endMinutes: 1020,
+    });
+    expect(parseBusinessHoursRange("8:30 to 5:30")).toEqual({
+      startMinutes: 510,
+      endMinutes: 1050,
+    });
+  });
+
+  it("accepts 24-hour form", () => {
+    expect(parseBusinessHoursRange("09:00-17:00")).toEqual({
+      startMinutes: 540,
+      endMinutes: 1020,
+    });
+    expect(parseBusinessHoursRange("14 to 18")).toEqual({
+      startMinutes: 840,
+      endMinutes: 1080,
+    });
+  });
+
+  it("inherits meridiem across sides", () => {
+    // start has meridiem, end inherits
+    expect(parseBusinessHoursRange("8am-6")).toEqual({
+      startMinutes: 480,
+      endMinutes: 1080,
+    });
+    // end has meridiem, start inherits am
+    expect(parseBusinessHoursRange("9 to 5pm")).toEqual({
+      startMinutes: 540,
+      endMinutes: 1020,
+    });
+  });
+
+  it("rejects non-30-min-aligned times", () => {
+    expect(parseBusinessHoursRange("8:27 to 5:30")).toBeNull();
+    expect(parseBusinessHoursRange("9:15-5:00")).toBeNull();
+  });
+
+  it("rejects malformed or backwards ranges", () => {
+    expect(parseBusinessHoursRange("")).toBeNull();
+    expect(parseBusinessHoursRange("blah")).toBeNull();
+    expect(parseBusinessHoursRange("5pm to 9am")).toBeNull();
+    expect(parseBusinessHoursRange("9am to 9am")).toBeNull();
   });
 });

@@ -18,8 +18,9 @@
 
 import { useEffect, useState } from "react";
 import { QuickReplies } from "./quick-replies";
+import { parseBusinessHoursRange } from "@/lib/time-parse";
 
-type HourRangeValue = `${number}-${number}`;
+type HourRangeValue = `${number}-${number}` | "__custom__";
 
 const HOURS_OPTIONS: { number: number; label: string; value: HourRangeValue }[] = [
   { number: 1, label: "8am – 4pm", value: "8-16" },
@@ -27,6 +28,7 @@ const HOURS_OPTIONS: { number: number; label: string; value: HourRangeValue }[] 
   { number: 3, label: "9am – 6pm", value: "9-18" },
   { number: 4, label: "10am – 6pm", value: "10-18" },
   { number: 5, label: "Flexible — no restrictions", value: "0-24" },
+  { number: 6, label: "Custom hours (type your own)", value: "__custom__" },
 ];
 
 const DURATION_OPTIONS = [
@@ -74,6 +76,10 @@ export function PrimaryLinkFlow() {
   const [answers, setAnswers] = useState<Answers>({});
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Hours freetext composer state — shown when the user picks "Custom hours".
+  const [hoursFreetext, setHoursFreetext] = useState("");
+  const [hoursFreetextError, setHoursFreetextError] = useState<string | null>(null);
+  const [showHoursFreetext, setShowHoursFreetext] = useState(false);
 
   // Fetch slug + current defaults on mount, then kick off the intro.
   useEffect(() => {
@@ -136,29 +142,55 @@ export function PrimaryLinkFlow() {
     }
   }
 
-  function handleHours(value: string, label: string) {
-    const [sRaw, eRaw] = value.split("-");
-    const s = parseInt(sRaw, 10);
-    const e = parseInt(eRaw, 10);
-    if (!Number.isFinite(s) || !Number.isFinite(e)) return;
-    // Quick-reply values are whole hours; convert to minute-of-day so the
-    // scoring engine stores canonical data. Freetext entry (V1 item 4)
-    // will supply fractional values directly.
+  function commitHours(startMinutes: number, endMinutes: number, userLabel: string) {
     const patch = {
-      businessHoursStartMinutes: s * 60,
-      businessHoursEndMinutes: e * 60,
+      businessHoursStartMinutes: startMinutes,
+      businessHoursEndMinutes: endMinutes,
     };
     setAnswers((a) => ({ ...a, ...patch }));
     setTurns((t) => [
       ...t,
-      { role: "user", content: label },
+      { role: "user", content: userLabel },
       {
         role: "envoy",
         content: <>Got it. What&rsquo;s your default meeting length?</>,
       },
     ]);
     setStep("duration");
+    setShowHoursFreetext(false);
+    setHoursFreetext("");
+    setHoursFreetextError(null);
     void persist(patch);
+  }
+
+  function handleHoursFreetextSubmit() {
+    const parsed = parseBusinessHoursRange(hoursFreetext);
+    if (!parsed) {
+      setHoursFreetextError(
+        'Hmm, I couldn\'t parse that. Try "8:30 to 5:30" or "9am-6pm". Times must be on the half hour.',
+      );
+      return;
+    }
+    commitHours(
+      parsed.startMinutes,
+      parsed.endMinutes,
+      `${formatMinutes(parsed.startMinutes)} – ${formatMinutes(parsed.endMinutes)}`,
+    );
+  }
+
+  function handleHours(value: string, label: string) {
+    if (value === "__custom__") {
+      setShowHoursFreetext(true);
+      setHoursFreetextError(null);
+      return;
+    }
+    const [sRaw, eRaw] = value.split("-");
+    const s = parseInt(sRaw, 10);
+    const e = parseInt(eRaw, 10);
+    if (!Number.isFinite(s) || !Number.isFinite(e)) return;
+    // Quick-reply values are whole hours; convert to minute-of-day so the
+    // scoring engine stores canonical data.
+    commitHours(s * 60, e * 60, label);
   }
 
   function handleDuration(value: string, label: string) {
@@ -280,6 +312,41 @@ export function PrimaryLinkFlow() {
             onSelect={onSelect}
             disabled={saving}
           />
+        </div>
+      )}
+
+      {step === "hours" && showHoursFreetext && (
+        <div className="self-start max-w-[72%] mt-2 flex flex-col gap-1.5">
+          <form
+            onSubmit={(ev) => {
+              ev.preventDefault();
+              handleHoursFreetextSubmit();
+            }}
+            className="flex gap-2"
+          >
+            <input
+              type="text"
+              autoFocus
+              value={hoursFreetext}
+              onChange={(ev) => {
+                setHoursFreetext(ev.target.value);
+                if (hoursFreetextError) setHoursFreetextError(null);
+              }}
+              placeholder="e.g. 8:30 to 5:30"
+              className="flex-1 text-sm px-3.5 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-500/5 text-primary placeholder:text-primary/40 focus:outline-none focus:border-indigo-500/60"
+              disabled={saving}
+            />
+            <button
+              type="submit"
+              disabled={saving || !hoursFreetext.trim()}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm font-medium rounded-xl transition"
+            >
+              Set
+            </button>
+          </form>
+          {hoursFreetextError && (
+            <span className="text-xs text-rose-400 px-1">{hoursFreetextError}</span>
+          )}
         </div>
       )}
 

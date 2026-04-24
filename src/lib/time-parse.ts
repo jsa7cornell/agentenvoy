@@ -165,6 +165,119 @@ export function parseGuestTimeReferences(
 }
 
 /**
+ * Parse a business-hours range string like "8:30 to 5:30", "9-17", "10am-6pm"
+ * into a pair of minute-of-day integers (0–1440). Used by the primary-link
+ * guided flow's Hours freetext entry.
+ *
+ * Rules:
+ *   - Two time references separated by "to", "-", "–", "—", "through",
+ *     "until", "til", "till".
+ *   - Snaps to 30-min alignment (floors 8:27 → 8:30 is wrong; we reject
+ *     non-30-aligned input to keep data canonical — the flow retries).
+ *   - Meridiem inference for ambiguous bare-hour pairs: if start < end as
+ *     written AND start ≤ 12 AND end ≤ 12, treat start as am and end as
+ *     pm (e.g. "9 to 5" → 9am/5pm). 24-hour form wins when unambiguous.
+ *   - Returns null on any parse failure — the flow shows a retry example.
+ */
+export function parseBusinessHoursRange(
+  input: string,
+): { startMinutes: number; endMinutes: number } | null {
+  if (!input || typeof input !== "string") return null;
+  const trimmed = input.trim().toLowerCase();
+  // Split on common range separators. Keep it tight — no multi-range.
+  const parts = trimmed.split(
+    /\s*(?:to|through|until|til|till|[-–—])\s*/,
+  );
+  if (parts.length !== 2) return null;
+  const [left, right] = parts;
+  if (!left || !right) return null;
+
+  // Reuse the single-time regex to extract hour/minute/meridiem from each side.
+  const extract = (
+    s: string,
+  ): { hour: number | null; minute: number; hasMeridiem: boolean; rawHour: number } | null => {
+    const m = /^([0-1]?\d|2[0-3])(?::([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)?$/i.exec(
+      s.trim(),
+    );
+    if (!m) return null;
+    const rawHour = parseInt(m[1], 10);
+    const minute = m[2] ? parseInt(m[2], 10) : 0;
+    const meridiem = m[3];
+    let hour: number | null = null;
+    if (meridiem) {
+      const isPm = /^p/i.test(meridiem);
+      if (rawHour === 12) hour = isPm ? 12 : 0;
+      else if (rawHour >= 1 && rawHour <= 11) hour = isPm ? rawHour + 12 : rawHour;
+      else return null;
+    } else if (rawHour >= 13 && rawHour <= 23) {
+      hour = rawHour;
+    } else {
+      hour = null; // ambiguous — resolve below
+    }
+    return { hour, minute, hasMeridiem: !!meridiem, rawHour };
+  };
+
+  const L = extract(left);
+  const R = extract(right);
+  if (!L || !R) return null;
+
+  let startHour = L.hour;
+  let endHour = R.hour;
+
+  // Resolve ambiguous bare hours. If neither has meridiem, assume start=am,
+  // end=pm when start<=12, end<=12, and start < end as-written (natural
+  // "9 to 5" reading). Otherwise, treat both as 24-h if in-range.
+  if (startHour === null && endHour === null) {
+    // Both sides ambiguous. If either side is > 12, read as 24-hour.
+    // Otherwise treat as a natural day range (am start, pm end).
+    if (L.rawHour > 12 || R.rawHour > 12) {
+      if (L.rawHour <= 23 && R.rawHour <= 23) {
+        startHour = L.rawHour;
+        endHour = R.rawHour;
+      } else {
+        return null;
+      }
+    } else {
+      // "9 to 5", "8:30 to 5:30" — am-pm reading.
+      startHour = L.rawHour === 12 ? 0 : L.rawHour;
+      endHour = R.rawHour === 12 ? 12 : R.rawHour + 12;
+    }
+  } else if (startHour === null) {
+    // Only end has meridiem. Rule: start is am when startRaw is "after" endHr12
+    // on the clock (e.g. "9 to 5pm" → 9 > 5 → 9am). Else pm ("1 to 5pm" → 1pm).
+    if (endHour !== null && endHour >= 12) {
+      const endHr12 = endHour % 12 === 0 ? 12 : endHour % 12;
+      if (L.rawHour > endHr12) {
+        startHour = L.rawHour === 12 ? 0 : L.rawHour; // am
+      } else {
+        startHour = L.rawHour === 12 ? 12 : L.rawHour + 12; // pm
+      }
+    } else {
+      startHour = L.rawHour === 12 ? 0 : L.rawHour;
+    }
+  } else if (endHour === null) {
+    // Only start has meridiem. End inherits am/pm if it's > start's 12h form.
+    if (startHour >= 12) {
+      endHour = R.rawHour === 12 ? 12 : R.rawHour + 12;
+    } else {
+      endHour = R.rawHour > startHour ? R.rawHour : R.rawHour + 12;
+    }
+  }
+
+  if (startHour === null || endHour === null) return null;
+
+  const startMinutes = startHour * 60 + L.minute;
+  const endMinutes = endHour * 60 + R.minute;
+
+  if (startMinutes < 0 || startMinutes > 1440) return null;
+  if (endMinutes < 0 || endMinutes > 1440) return null;
+  if (startMinutes >= endMinutes) return null;
+  if (startMinutes % 30 !== 0 || endMinutes % 30 !== 0) return null;
+
+  return { startMinutes, endMinutes };
+}
+
+/**
  * Render a parsed reference as a human-readable "3:30pm" / "15:00" string
  * suitable for echoing back in the [GROUND TRUTH] block or a confirmation.
  * Returns null when the reference is ambiguous (no hour resolved).
