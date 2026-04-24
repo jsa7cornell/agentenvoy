@@ -914,7 +914,7 @@ export async function POST(req: NextRequest) {
     ).length;
     const isMultiSlot = bookableSlotCount > 1;
     const calendarPitch = isMultiSlot && !isGuest
-      ? "If you connect your calendar I can automagically find the best fit for you!"
+      ? "Also, if you connect your calendar I can automagically find the best fit for you! 🗓️"
       : null;
 
     // Dimension-aware suggest-alt clause. Skipped for directive steering,
@@ -925,10 +925,10 @@ export async function POST(req: NextRequest) {
       const durSet = durationForOpener != null;
       if (!fmtSet && !durSet) return null;
       if (fmtSet && durSet)
-        return "and also free to suggest a different format or meeting length if that's better for you";
+        return "and feel free to suggest a different format ☕📱🚴 or meeting length if that's better for you";
       if (fmtSet)
-        return "and also free to suggest a different format if that's better for you";
-      return "and also free to suggest a different meeting length if that's better for you";
+        return "and feel free to suggest a different format ☕📱🚴 if that's better for you";
+      return "and feel free to suggest a different meeting length if that's better for you";
     })();
 
     // Guest-pick hint — folds the old `hasGuestPicks` / buildOpenWindowGreeting
