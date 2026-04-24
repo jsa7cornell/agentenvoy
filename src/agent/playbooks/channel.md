@@ -62,6 +62,30 @@ Available actions (all use `[ACTION]{"action":"...","params":{...}}[/ACTION]` �
       - Host: "either 3pm Tue or 4pm Wed" → `intent:{steering:"exclusive"}`, rules: {slotOverrides:[{start:"...",end:"...",score:-2},{start:"...",end:"...",score:-2}]} (enumerated slots, not a window).
   - "urgency" is optional. Use "asap" if the user says soon/asap/urgent/high-pri. Use "this-week" or "next-week" if they give a timeframe. Omit if no urgency specified.
   - "isVip" is a binary flag. Set isVip: true when the host signals importance ("important client", "investor", "CEO", "board", "make room for X", "clear my calendar") OR when there's international context ("she's in Europe", "he's in Tokyo") — international ALONE is enough. Default is NOT VIP; omit the field for routine meetings. VIP does NOT auto-unlock protected hours; it signals Envoy to proactively ask the host about opening up stretch hours and to reach into stretch options on guest pushback. Never emit "priority" or priority tier strings.
+  - **RECURRING SERIES — emit `recurrence` when the host frames the link as a sequence.** Phrasings that trigger: "weekly with Sarah", "every other Tuesday", "biweekly 1:1", "recurring 30-min call", "set up our Monday standup", "piano lessons every Thursday for 8 weeks". Shape:
+    ```
+    "recurrence": {
+      "v": "1",
+      "pattern": "weekly" | "biweekly" | "monthly_nth_weekday" | "daily",
+      "timezone": "<host IANA tz from DATE REFERENCE>",
+      "anchor": {
+        "firstDateLocal": "YYYY-MM-DD",    // local date of first occurrence
+        "timeLocal": "HH:mm",              // 24h wall-clock in host tz
+        "durationMin": <int>,              // same as non-recurring duration
+        "dayOfWeek": 0-6,                  // 0=Sun..6=Sat; inferred from firstDateLocal if omitted
+        "weekOfMonth": 1-5                 // ONLY for monthly_nth_weekday; 5 = "last"
+      },
+      "endBy": { "count": <int> } | { "until": "YYYY-MM-DDTHH:mm:ssZ" }
+    }
+    ```
+    - **`pattern`**: `weekly` = every week same weekday; `biweekly` = every 2 weeks; `monthly_nth_weekday` = "2nd Tuesday of each month" style; `daily` = every day. Do NOT emit an RRULE string — emit the structured object; the action handler derives the RRULE server-side.
+    - **`endBy.count` is preferred** for short series (<=20 occurrences, clearly bounded by host phrasing: "for 6 weeks", "8 lessons"). Use `endBy.until` when the host names a calendar end date ("through end of June").
+    - **If the host names a series but gives no end** ("weekly with Sarah"), ask once for a cap before emitting. Unbounded series can be extended later via `update_link` — the default is always bounded.
+    - When `recurrence` is emitted, `rules.preferredDays` and `rules.dateRange` are redundant for pattern matching (the recurrence object is authoritative). You MAY still include them for display; the scoring engine ignores them when `recurrence` is set.
+    - Example: host says "set up a weekly 30-min with Sarah on Mondays for 6 weeks starting May 4":
+    → `[ACTION]{"action":"create_link","params":{"inviteeName":"Sarah","format":"video","duration":30,"recurrence":{"v":"1","pattern":"weekly","timezone":"America/Los_Angeles","anchor":{"firstDateLocal":"2026-05-04","timeLocal":"10:00","durationMin":30},"endBy":{"count":6}}}}[/ACTION]`
+    - Series-level edits (end early, extend, pause, exclude one date, change format forward) go through `update_link` with a `recurrence` param or `seriesChange` param. Per-occurrence edits (move one specific meeting) are handled in the deal-room, NOT the channel — do not emit occurrence-level actions here.
+    - **v1 scope — single-guest only.** Do NOT emit `recurrence` when `inviteeNames` has 2+ entries; recurring group coordination is v2. If the host asks for a recurring series with multiple guests, drop recurrence and say so: "I can set up a single meeting now — recurring group series is coming soon." Also: the welcome-screen "Coordinate a recurring event" card is marked coming-soon; the handler persists the recurrence config but no product surface reads it yet, so don't promise the host a shareable recurring link works end-to-end until the reader slice ships.
   - **MULTI-GUEST RULE — use `inviteeNames` (array) when two or more guests are named.**
     - Single guest: emit `"inviteeName":"Will"` (legacy field, still accepted).
     - Two or more guests: emit `"inviteeNames":["Will","Andrew"]` — do NOT flatten to a single string.

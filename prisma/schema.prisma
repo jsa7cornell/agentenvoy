@@ -295,6 +295,10 @@ model NegotiationLink {
   /// Without the outer parens, Postgres rewrites the default internally and
   /// `prisma migrate diff` reports phantom drift.
   hashSalt        String    @default(dbgenerated("(gen_random_uuid())::text"))
+  /// LinkRecurrence shape (null = one-off). See src/lib/recurrence.ts for the
+  /// TypeScript type. Non-recurring links leave this null. Writing this field
+  /// is the source of truth that a link is a committed series.
+  recurrence      Json?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -304,9 +308,55 @@ model NegotiationLink {
   invitees        SessionInvitee[]
   consentRequests ConsentRequest[]
   mcpCallLogs     MCPCallLog[]
+  occurrences     LinkOccurrence[]
 
   @@index([slug])
   @@index([slug, code])
+}
+
+/// Sparse per-occurrence divergence from a recurring NegotiationLink. A row
+/// exists only when that occurrence deviates from the RRULE-derived default —
+/// cancelled, rescheduled, format-changed, or location-changed. Occurrences
+/// without a row are "nominal" and use the link-level recurrence config.
+///
+/// Identity is (linkId, originalStartAt): the stable anchor is the originally
+/// scheduled start time in UTC, derived from the RRULE. If the host reschedules
+/// the instance, actualStartAt carries the new time; originalStartAt does NOT
+/// move — this mirrors GCal's `originalStartTime` on instance overrides.
+///
+/// counterpartyAck gates host-initiated TIME changes (proposal R4). For non-
+/// time overrides (format, location, cancel), the non-diverging side's
+/// acceptance can be auto-set at divergence time.
+model LinkOccurrence {
+  id               String          @id @default(cuid())
+  linkId           String
+  link             NegotiationLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  /// UTC instant of the original (RRULE-derived) start. Stable identity — does
+  /// not move on reschedule.
+  originalStartAt  DateTime
+  /// "cancelled" | "rescheduled" | "format_changed" | "location_changed"
+  status           String
+  actualStartAt    DateTime?
+  actualEndAt      DateTime?
+  actualFormat     String?
+  actualLocation   String?
+  actualMeetingUrl String?
+  /// Google Calendar event id of the specific instance override (recurringEventId
+  /// points at the master; this id is the instance). Null when we haven't yet
+  /// materialized the GCal instance.
+  gcalInstanceId   String?
+  /// "host" | "guest" — who initiated the divergence.
+  divergedBy       String
+  divergedAt       DateTime        @default(now())
+  /// null until the counterparty confirms a host-initiated TIME change.
+  /// For non-time divergences, auto-set to "accepted" at divergence time since
+  /// either side can freely change format/location within rescheduleWindowDays.
+  /// "accepted" | "rejected" | null.
+  counterpartyAck  String?
+  reason           String?
+
+  @@unique([linkId, originalStartAt])
+  @@index([linkId, status])
 }
 
 model NegotiationSession {
