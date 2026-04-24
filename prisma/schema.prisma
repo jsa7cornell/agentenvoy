@@ -88,6 +88,7 @@ model User {
   agentTokensMinted AgentAccessToken[]   @relation("AgentTokensMinted")
   productEvents     ProductEvent[]
   onboardingEvents  OnboardingEvent[]
+  notifications     Notification[]
 }
 
 /// Lean onboarding instrumentation. See proposal
@@ -299,6 +300,12 @@ model NegotiationLink {
   /// TypeScript type. Non-recurring links leave this null. Writing this field
   /// is the source of truth that a link is a committed series.
   recurrence      Json?
+  /// Google Calendar event id of the recurring master event written at anchor
+  /// commit. Null until the series is committed. Per-instance overrides use
+  /// this id as `recurringEventId` on their instance rows (see
+  /// LinkOccurrence.gcalInstanceId). Cleared if the entire series ends + the
+  /// master event is deleted on GCal.
+  seriesGcalEventId String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -357,6 +364,57 @@ model LinkOccurrence {
 
   @@unique([linkId, originalStartAt])
   @@index([linkId, status])
+}
+
+/// Durable notification stream for the host. Every change that per proposal
+/// 2026-04-22 R2 "always notify" needs to reach a counterparty writes a row
+/// here — host-facing notifications only in v1, keyed by `userId`. Guest-side
+/// notifications for no-account guests fan out via email (Case C); for
+/// account guests, the same `kind` values are emitted with `userId` = guest.
+///
+/// The bell UI + notification center are v1.1+ (see WISHLIST
+/// `notification-bell-and-center`). This model is the v1 write-only stub —
+/// rows land here so nothing is silent at the data layer even before the UI
+/// exists.
+///
+/// `ctaKind` + `ctaPayload` let a future inline affordance ("Confirm this
+/// move") do a one-click dispatch without re-fetching context. Nullable for
+/// notifications that are purely informational.
+model Notification {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Event taxonomy. v1 starting set:
+  /// "schedule_changed" | "awaiting_ack_counterparty" | "awaiting_ack_self"
+  /// | "ack_timed_out" | "session_confirmed" | "session_cancelled"
+  /// | "series_started" | "series_ended" | "guest_signed_up"
+  /// New kinds added over time — stored as string, not enum, so app-layer
+  /// forward-compat is easier (unknown kinds render as a generic row).
+  kind             String
+  sessionId        String?
+  linkId           String?
+  linkOccurrenceId String?
+  /// "host" | "guest" | "system" — who caused the event (not who gets notified).
+  actorKind        String
+  /// Display label for the actor. "Sam" / "you" / "Envoy". Frozen at write
+  /// time (no join) so the notification reads correctly even if the counter-
+  /// party's name changes or is deleted later.
+  actorLabel       String?
+  /// Short one-line summary, e.g. "Sam moved Friday to Thursday".
+  headline         String    @db.VarChar(280)
+  /// Optional longer detail body.
+  detail           String?   @db.Text
+  /// Action type the UI should wire to an inline CTA. null = no CTA.
+  /// "ack_time" | "ack_format" | "ack_location" | "view_deal_room" | null.
+  ctaKind          String?
+  /// Payload shape depends on ctaKind. e.g. for ack_time:
+  /// { occurrenceId, proposedStartAt, proposedEndAt }. JSON for forward-compat.
+  ctaPayload       Json?
+  readAt           DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
 }
 
 model NegotiationSession {
