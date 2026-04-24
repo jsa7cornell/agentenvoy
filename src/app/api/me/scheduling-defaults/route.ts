@@ -69,10 +69,13 @@ export async function GET() {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { preferences: true, meetSlug: true },
-  });
+  const [user, linkCount] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { preferences: true, meetSlug: true },
+    }),
+    prisma.negotiationLink.count({ where: { userId: session.user.id } }),
+  ]);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
   const prefs = (user.preferences as UserPreferences | null) ?? {};
@@ -83,6 +86,13 @@ export async function GET() {
   const bhe = e.businessHoursEnd ?? 17;
   const bhsMin = e.businessHoursStartMinutes ?? bhs * 60;
   const bheMin = e.businessHoursEndMinutes ?? bhe * 60;
+
+  // Block count — structuredRules with action="block". Powers the
+  // scheduling status chip (proposal 2026-04-23 §3.2 pattern a).
+  const structuredRules =
+    (e as { structuredRules?: Array<{ action?: string }> }).structuredRules ?? [];
+  const blockCount = structuredRules.filter((r) => r.action === "block").length;
+
   return NextResponse.json({
     businessHoursStart: bhs,
     businessHoursEnd: bhe,
@@ -91,6 +101,9 @@ export async function GET() {
     defaultDuration: e.defaultDuration ?? 30,
     bufferMinutes: e.bufferMinutes ?? 0,
     meetSlug: user.meetSlug ?? null,
+    // Counts surface on the scheduling status chip.
+    linkCount,
+    blockCount,
   });
 }
 
