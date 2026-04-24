@@ -50,16 +50,21 @@ type Turn =
 type Step = "intro" | "hours" | "duration" | "buffer" | "done";
 
 interface Answers {
-  businessHoursStart?: number;
-  businessHoursEnd?: number;
+  // Minute-of-day bounds (canonical, 30-min aligned). See proposal
+  // `2026-04-23_primary-link-config-convergence` §3.1 Path A.
+  businessHoursStartMinutes?: number;
+  businessHoursEndMinutes?: number;
   defaultDuration?: number;
   bufferMinutes?: number;
 }
 
-function formatHour(h: number): string {
-  if (h === 0 || h === 24) return h === 0 ? "12am" : "12am";
-  if (h === 12) return "12pm";
-  return h < 12 ? `${h}am` : `${h - 12}pm`;
+/** Format a minute-of-day value for display. 510 → "8:30am", 540 → "9am". */
+function formatMinutes(m: number): string {
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  const suffix = h < 12 || h === 24 ? "am" : "pm";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return min === 0 ? `${h12}${suffix}` : `${h12}:${String(min).padStart(2, "0")}${suffix}`;
 }
 
 export function PrimaryLinkFlow() {
@@ -136,7 +141,13 @@ export function PrimaryLinkFlow() {
     const s = parseInt(sRaw, 10);
     const e = parseInt(eRaw, 10);
     if (!Number.isFinite(s) || !Number.isFinite(e)) return;
-    const patch = { businessHoursStart: s, businessHoursEnd: e };
+    // Quick-reply values are whole hours; convert to minute-of-day so the
+    // scoring engine stores canonical data. Freetext entry (V1 item 4)
+    // will supply fractional values directly.
+    const patch = {
+      businessHoursStartMinutes: s * 60,
+      businessHoursEndMinutes: e * 60,
+    };
     setAnswers((a) => ({ ...a, ...patch }));
     setTurns((t) => [
       ...t,
@@ -193,13 +204,13 @@ export function PrimaryLinkFlow() {
             )}
             . I&rsquo;ll offer times{" "}
             <strong>
-              {typeof finalAnswers.businessHoursStart === "number"
-                ? formatHour(finalAnswers.businessHoursStart)
-                : "9am"}
+              {formatMinutes(
+                finalAnswers.businessHoursStartMinutes ?? 540,
+              )}
               –
-              {typeof finalAnswers.businessHoursEnd === "number"
-                ? formatHour(finalAnswers.businessHoursEnd)
-                : "5pm"}
+              {formatMinutes(
+                finalAnswers.businessHoursEndMinutes ?? 1020,
+              )}
             </strong>
             , default to{" "}
             <strong>{finalAnswers.defaultDuration ?? 30}-minute</strong>{" "}
