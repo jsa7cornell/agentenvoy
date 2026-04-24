@@ -51,16 +51,16 @@ export default async function MyLinksPage() {
   const since = new Date(Date.now() - WINDOW_MS);
   const stallCutoff = new Date(Date.now() - STALL_THRESHOLD_MS);
 
-  const [genericLink, created, confirmed, cancelled, stalled] = await Promise.all([
+  const [primaryLink, created, confirmed, cancelled, stalled] = await Promise.all([
     prisma.negotiationLink.findFirst({
-      where: { userId: user.id, type: "generic" },
+      where: { userId: user.id, type: "primary" },
       select: { id: true },
     }),
     prisma.negotiationSession.count({
       where: {
         hostId: user.id,
         createdAt: { gte: since },
-        link: { type: "generic" },
+        link: { type: "primary" },
       },
     }),
     prisma.negotiationSession.count({
@@ -69,7 +69,7 @@ export default async function MyLinksPage() {
         status: "agreed",
         archived: false,
         updatedAt: { gte: since },
-        link: { type: "generic" },
+        link: { type: "primary" },
       },
     }),
     prisma.negotiationSession.count({
@@ -77,7 +77,7 @@ export default async function MyLinksPage() {
         hostId: user.id,
         archived: true,
         updatedAt: { gte: since },
-        link: { type: "generic" },
+        link: { type: "primary" },
       },
     }),
     prisma.negotiationSession.count({
@@ -87,7 +87,7 @@ export default async function MyLinksPage() {
         archived: false,
         updatedAt: { lte: stallCutoff },
         createdAt: { gte: since },
-        link: { type: "generic" },
+        link: { type: "primary" },
       },
     }),
   ]);
@@ -167,9 +167,9 @@ export default async function MyLinksPage() {
             <StatCard label="Cancelled" value={cancelled} since="7d" tone="muted" />
             <StatCard label="Stalled >48h" value={stalled} since="7d" tone={stalled > 0 ? "amber" : "muted"} />
           </div>
-          {!genericLink && (
+          {!primaryLink && (
             <p className="text-xs text-muted mt-3">
-              Heads up — your generic link doesn&apos;t have a corresponding NegotiationLink
+              Heads up — your primary link doesn&apos;t have a corresponding NegotiationLink
               row yet. First guest visit will create one.
             </p>
           )}

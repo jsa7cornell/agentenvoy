@@ -46,7 +46,7 @@ export async function createLink(
     data: {
       userId,
       slug,
-      type: "generic",
+      type: "primary",
       mode: "single",
       rules: overrides.rules ?? ({} as Prisma.InputJsonValue),
     },

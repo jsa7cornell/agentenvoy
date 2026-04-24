@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { parseMeetingUrl, MCP_RATE_LIMITS } from "@/lib/mcp/auth";
 
 describe("parseMeetingUrl", () => {
-  it("parses generic /meet/<slug>", () => {
+  it("parses primary /meet/<slug>", () => {
     const r = parseMeetingUrl("/meet/johnny");
     expect(r.ok).toBe(true);
     if (r.ok) {

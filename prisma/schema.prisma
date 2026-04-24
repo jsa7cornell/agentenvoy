@@ -261,9 +261,9 @@ model ApiKey {
 model NegotiationLink {
   id              String    @id @default(cuid())
   userId          String
-  type            String    @default("generic") // generic | contextual | office_hours
+  type            String    @default("primary") // primary | contextual | office_hours
   mode            String    @default("single") // "single" | "group"
-  slug            String // same as user.meetSlug for generic
+  slug            String // same as user.meetSlug for primary
   code            String?   @unique // unique code for contextual links
   inviteeEmail    String?
   inviteeName     String? // deprecated — use inviteeNames; kept for 2-week read bridge
@@ -283,7 +283,7 @@ model NegotiationLink {
   rules           Json?     @default("{}")
   /// When this link was spawned from an AvailabilityRule (e.g., office hours),
   /// points at the rule ID. The session's offerable slots are filtered through
-  /// the rule's window. Null for normal generic/contextual links. The rule lives
+  /// the rule's window. Null for normal primary/contextual links. The rule lives
   /// in the user's preferences.explicit.structuredRules JSON, not a relation.
   sourceRuleId    String?
   expiresAt       DateTime?
@@ -352,7 +352,7 @@ model NegotiationSession {
   calendarEventId      String?
   guestEmail           String?
   /// Guest's display name, captured on the confirm card. Session-scoped so a
-  /// single generic link can host many named guests without overwriting
+  /// single primary link can host many named guests without overwriting
   /// link.inviteeName. Used in the confirmed event card, calendar invite
   /// attendee name, and reminder emails.
   guestName            String?

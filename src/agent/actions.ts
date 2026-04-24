@@ -293,7 +293,7 @@ async function resolveSessionId(
 
 /**
  * Patch link.rules with a partial change — ONLY for contextual links
- * (one link = one session, so the update is intent-aligned). For generic
+ * (one link = one session, so the update is intent-aligned). For primary
  * links (one link, many sessions) we skip the write so a dashboard tweak
  * for one guest doesn't retroactively change every future guest's
  * experience on the same shared link.
@@ -2372,7 +2372,7 @@ async function handleUpdateAvailabilityRule(
     }
     explicit.generalLinkName = newName;
     summary = `Renamed general link to "${newName}"`;
-    // Return the generic /meet/{slug} URL so the channel reply can display it.
+    // Return the primary /meet/{slug} URL so the channel reply can display it.
     if (user?.meetSlug) {
       const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
       linkUrl = `${origin}/meet/${user.meetSlug}`;

@@ -1,6 +1,6 @@
 {
-  "name": "calendar-no-context-generic-link",
-  "description": "Generic link — no guest name, topic, or format. Agent should ask for basics.",
+  "name": "calendar-no-context-primary-link",
+  "description": "Primary link — no guest name, topic, or format. Agent should ask for basics.",
   "domain": "calendar",
   "context": {
     "role": "coordinator",

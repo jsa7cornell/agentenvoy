@@ -72,14 +72,14 @@ export async function POST(req: NextRequest) {
   });
 
   const baseUrl = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
-  const genericUrl = `${baseUrl}/meet/${user.meetSlug}`;
+  const primaryUrl = `${baseUrl}/meet/${user.meetSlug}`;
   const contextualUrl = `${baseUrl}/meet/${user.meetSlug}/${code}`;
 
   return NextResponse.json({
     link: {
       id: link.id,
       type: "contextual",
-      genericUrl,
+      primaryUrl,
       contextualUrl,
       code,
       inviteeEmail: link.inviteeEmail,

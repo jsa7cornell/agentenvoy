@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { post, sendMessage, HOST_SLUG } from "./helpers";
 
-describe("Generic Deal Room", () => {
-  it("creates a new session with auto-contextual code for a generic slug", async () => {
+describe("Primary Deal Room", () => {
+  it("creates a new session with auto-contextual code for a primary slug", async () => {
     const { status, data } = await post("/api/negotiate/session", {
       slug: HOST_SLUG,
     });
@@ -13,7 +13,7 @@ describe("Generic Deal Room", () => {
     expect(data.greeting.length).toBeGreaterThan(10);
     expect(data.host.name).toBe("Test Host");
     expect(data.code).toBeDefined(); // auto-generated contextual code
-    expect(data.link.type).toBe("contextual"); // auto-upgraded from generic
+    expect(data.link.type).toBe("contextual"); // auto-upgraded from primary
   });
 
   it("creates a DIFFERENT session each time (each guest gets own link)", async () => {

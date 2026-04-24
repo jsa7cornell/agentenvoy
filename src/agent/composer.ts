@@ -214,7 +214,7 @@ function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: str
         );
       } else {
         items.push(
-          `Location signals conflict: Google Calendar working location says "${calHostLocation}", preferences say "${activePrefLocLabel}". If location matters for this meeting (in-person format, travel buffers), clarify with the host. If there is no active dialog (generic invite), be conservative and assume the host is traveling.`
+          `Location signals conflict: Google Calendar working location says "${calHostLocation}", preferences say "${activePrefLocLabel}". If location matters for this meeting (in-person format, travel buffers), clarify with the host. If there is no active dialog (primary invite), be conservative and assume the host is traveling.`
         );
       }
     } else if (calHostLocation) {

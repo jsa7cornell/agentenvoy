@@ -111,7 +111,7 @@ describe("account deletion — end-to-end cascade", () => {
     // Target owns a link with a session, messages, proposals, outcome, hold,
     // participants, consent request, and MCP logs.
     const link = await prisma.negotiationLink.create({
-      data: { userId: target.id, slug: "target-slug", type: "generic", mode: "single" },
+      data: { userId: target.id, slug: "target-slug", type: "primary", mode: "single" },
     });
 
     const hostedSession = await prisma.negotiationSession.create({
@@ -192,7 +192,7 @@ describe("account deletion — end-to-end cascade", () => {
       data: { email: "survivor@test.test", name: "Survivor" },
     });
     const survivorLink = await prisma.negotiationLink.create({
-      data: { userId: survivor.id, slug: "survivor-slug", type: "generic", mode: "single" },
+      data: { userId: survivor.id, slug: "survivor-slug", type: "primary", mode: "single" },
     });
     // Target appears as *guest* on survivor's session — must survive with guestId = null.
     const crossSession = await prisma.negotiationSession.create({
