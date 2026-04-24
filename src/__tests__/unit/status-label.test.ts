@@ -46,26 +46,26 @@ describe("displayStatusLabel", () => {
     ).toBe("Confirmed");
   });
 
-  it("suppresses label on generic links until agreed", () => {
+  it("suppresses label on primary links until agreed", () => {
     expect(
       displayStatusLabel({
         status: "active",
         statusLabel: "Waiting for invitee",
         guestEmail: "bob@example.com",
         guestName: "Bob",
-        linkType: "generic",
+        linkType: "primary",
       })
     ).toBeNull();
   });
 
-  it("shows label on generic links once agreed", () => {
+  it("shows label on primary links once agreed", () => {
     expect(
       displayStatusLabel({
         status: "agreed",
         statusLabel: "Confirmed",
         guestEmail: null,
         guestName: null,
-        linkType: "generic",
+        linkType: "primary",
       })
     ).toBe("Confirmed");
   });

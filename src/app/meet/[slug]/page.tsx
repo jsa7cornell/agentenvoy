@@ -47,7 +47,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function GenericMeetPage({ params }: Props) {
+export default async function PrimaryMeetPage({ params }: Props) {
   const { slug } = await params;
   return (
     <>

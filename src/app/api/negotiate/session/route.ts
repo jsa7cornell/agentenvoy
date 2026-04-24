@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
 
   // Office-hours detection: if a code is provided and matches an active
   // office_hours rule on this user, spawn a fresh child link + session for
-  // this visitor. Each visit creates a new session (generic-link semantics).
+  // this visitor. Each visit creates a new session (primary-link semantics).
   // Runs BEFORE the standard NegotiationLink lookup so office-hours codes
   // don't collide with contextual link codes.
   let officeHoursRule: AvailabilityRule | null = null;
@@ -148,12 +148,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Find the link — contextual (with code) or generic
+  // Find the link — contextual (with code) or primary
   let link;
   let reuseSessionId: string | null = null;
   if (officeHoursRule) {
     // Spawn a fresh child link for this visitor, keyed back to the rule via
-    // sourceRuleId. Generic-link semantics: each visit creates a new link +
+    // sourceRuleId. Primary-link semantics: each visit creates a new link +
     // session, and the guest resumes via the sessionId URL, not the rule's
     // public /meet/{slug}/{code}.
     const oh = officeHoursRule.officeHours!;
@@ -449,21 +449,21 @@ export async function POST(req: NextRequest) {
   } else {
     // Bare-slug visit (`/meet/<slug>` with no code): mint a fresh link +
     // session so the URL has something to persist against. Stamped as
-    // `type: "generic"` so downstream greeting rendering and guest-facing
+    // `type: "primary"` so downstream greeting rendering and guest-facing
     // UI reach the right branches — these links have no inviteeName, no
     // host-personalization, and shouldn't read as "John proposes…" to the
     // guest. Pre-2026-04-21 this was mis-stamped as "contextual" (with a
     // comment apologizing for it); fixed after feedback cmo8d9eqs.
     //
     // Link-rules mirroring (actions.ts:patchLinkRulesForContextual,
-    // update-gcal:141) intentionally skips "generic" type — per-visit
+    // update-gcal:141) intentionally skips "primary" type — per-visit
     // mints don't benefit from rule mirroring anyway (no shared link,
     // no future guests on the same URL).
     const autoCode = generateCode();
     link = await prisma.negotiationLink.create({
       data: {
         userId: user.id,
-        type: "generic",
+        type: "primary",
         slug: user.meetSlug!,
         code: autoCode,
       },
@@ -870,12 +870,12 @@ export async function POST(req: NextRequest) {
     //              voice. Timing is folded into {xxx}.
     //   Branch B-find-time — named invitee with no structural fields set
     //              → "{Host} asked me to find time{ timingLabel}" voice.
-    //   Branch C — anonymous link (type=generic OR sourceRuleId!=null, i.e.
+    //   Branch C — anonymous link (type=primary OR sourceRuleId!=null, i.e.
     //              office-hours child) → agent-voice self-intro. Office-hours
-    //              surface `topic` inline; bare generics use "default is".
+    //              surface `topic` inline; bare primaries use "default is".
     //
     // Rules baked in:
-    //   • `link.type === "generic" || link.sourceRuleId != null` is the ONLY
+    //   • `link.type === "primary" || link.sourceRuleId != null` is the ONLY
     //     gate for anonymous voice. Steering does NOT select the branch.
     //   • Bulleted schedule body (old Branch D) deleted. Calendar widget IS
     //     the enumeration.
@@ -890,7 +890,7 @@ export async function POST(req: NextRequest) {
     //     level calendar access).
     // ────────────────────────────────────────────────────────────────────
 
-    const isAnonymousLink = link.type === "generic" || !!link.sourceRuleId;
+    const isAnonymousLink = link.type === "primary" || !!link.sourceRuleId;
     const isOfficeHoursLink = !!link.sourceRuleId;
 
     const storedSteering = readStoredSteering(linkRules);
@@ -1026,7 +1026,7 @@ export async function POST(req: NextRequest) {
       // ─── Branch C: anonymous-visitor voice ─────────────────────────────
     } else if (isAnonymousLink) {
       // Office-hours children carry a `topic` (e.g. "Coaching hours"). Bare
-      // generic links don't — render the default offer instead.
+      // primary links don't — render the default offer instead.
       const hostTopic =
         isOfficeHoursLink && rawTopic && !isGenericTopic(rawTopic) ? rawTopic : null;
       const pitch = calendarPitch ? ` ${calendarPitch}` : "";

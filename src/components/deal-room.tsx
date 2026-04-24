@@ -905,7 +905,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (data.isGroupEvent) setIsGroupEvent(true);
         if (data.participants) setParticipants(data.participants);
 
-        // Generic link → redirect to persistent contextual URL
+        // Primary link → redirect to persistent contextual URL
         if (!code && data.code) {
           router.replace(`/meet/${slug}/${data.code}`);
         }
@@ -1237,7 +1237,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // --- Archived state ---
   if (archivedData) {
     const hostFirst = archivedData.hostName?.split(" ")[0] || "the host";
-    const genericUrl = archivedData.hostMeetSlug
+    const primaryUrl = archivedData.hostMeetSlug
       ? `/meet/${archivedData.hostMeetSlug}`
       : null;
     return (
@@ -1254,7 +1254,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             <p className="text-sm text-muted mb-6">
               This meeting isn&rsquo;t available right now.
             </p>
-            {genericUrl && (
+            {primaryUrl && (
               <div className="mb-6 p-5 rounded-xl bg-surface-secondary border border-DEFAULT text-left">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2">
                   Book time with {hostFirst}
@@ -1263,7 +1263,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   You can still set up a meeting using {hostFirst}&rsquo;s booking link.
                 </p>
                 <a
-                  href={genericUrl}
+                  href={primaryUrl}
                   className="block w-full text-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition"
                 >
                   Book a time with {hostFirst}
@@ -1583,7 +1583,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             sessions stay visible in the feed (NOT auto-archived) with a
             banner that offers a fresh-start path for whoever's looking:
             • host → dashboard to schedule something new
-            • guest → host's generic /meet/<slug> to reach out again
+            • guest → host's primary /meet/<slug> to reach out again
             Keeps the prior messages accessible (scroll up) while making
             the "this meeting is over; here's what to do next" moment
             unambiguous. Host can still archive manually from the sidebar. */}

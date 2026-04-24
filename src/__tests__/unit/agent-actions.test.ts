@@ -727,12 +727,12 @@ describe("executeActions", () => {
       });
     });
 
-    it("does NOT write to link.rules for generic links (many sessions share the link)", async () => {
+    it("does NOT write to link.rules for primary links (many sessions share the link)", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(
         makeSession({
           link: {
-            id: "link-generic",
-            type: "generic",
+            id: "link-primary",
+            type: "primary",
             inviteeName: null,
             topic: null,
             rules: { format: "video" },
@@ -747,7 +747,7 @@ describe("executeActions", () => {
 
       expect(results[0].success).toBe(true);
       expect(mockPrisma.negotiationSession.update).toHaveBeenCalled();
-      // Generic link rules untouched — per-session change must not leak
+      // Primary link rules untouched — per-session change must not leak
       // to every future guest on the same shared link.
       expect(mockPrisma.negotiationLink.update).not.toHaveBeenCalled();
     });
