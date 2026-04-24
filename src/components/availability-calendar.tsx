@@ -672,6 +672,31 @@ function WeekView({
   const canGoPrev = weekDays[0].dateStr > minDate && weekOffset > 0;
   const canGoNext = weekDays[6].dateStr < maxDate;
 
+  // When the user navigates weeks, keep the chips section open by selecting the
+  // first day in the new week that has windows. Falls back to leaving the prior
+  // selectedDay alone if no day in the new week has anything to show. Prior
+  // behavior cleared selectedDay, which collapsed the chips view and forced
+  // the user to click a day every week change (bug reported 2026-04-23).
+  const navigateWeek = (delta: number) => {
+    const newOffset = weekOffset + delta;
+    setWeekOffset(newOffset);
+    // Compute the new week's days inline (weekDays memo hasn't updated yet)
+    const newWeekStart = new Date(thisWeekStartTime);
+    newWeekStart.setDate(newWeekStart.getDate() + newOffset * 7);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(newWeekStart);
+      d.setDate(d.getDate() + i);
+      const dateStr = toDateStr(d);
+      const windows = windowsByDay[dateStr];
+      if (windows && windows.length > 0) {
+        setSelectedDay(dateStr);
+        return;
+      }
+    }
+    // No windows in the new week — leave selectedDay alone so chips stay open
+    // for the prior selection if/when the user navigates back.
+  };
+
   // Week label: "Apr 12 – 18, 2026"
   const weekLabel = (() => {
     const first = weekDays[0];
@@ -700,7 +725,7 @@ function WeekView({
       {/* Week navigation header */}
       <div className="flex items-center justify-between mb-2">
         <button
-          onClick={() => { setWeekOffset((o) => o - 1); setSelectedDay(null); }}
+          onClick={() => navigateWeek(-1)}
           className={`p-2 rounded-lg hover:bg-surface-secondary transition ${!canGoPrev ? "opacity-25 cursor-default" : "hover:opacity-80"}`}
           disabled={!canGoPrev}
         >
@@ -710,7 +735,7 @@ function WeekView({
         </button>
         <span className="text-xs font-medium text-primary">{weekLabel}</span>
         <button
-          onClick={() => { setWeekOffset((o) => o + 1); setSelectedDay(null); }}
+          onClick={() => navigateWeek(1)}
           className={`p-2 rounded-lg hover:bg-surface-secondary transition ${!canGoNext ? "opacity-25 cursor-default" : "hover:opacity-80"}`}
           disabled={!canGoNext}
         >

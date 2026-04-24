@@ -148,3 +148,97 @@ body {
   }
   .match-pulse-badge { animation: none; }
 }
+
+/* ── Celebration banner — fires once when calendar first matches ─────────
+   Shown above the calendar when the bilateral chips first appear (i.e. just
+   after OAuth completes and matches surface). No close affordance — banner
+   simply lingers as the "we made your matches smarter" callout. */
+@keyframes celebration-drop {
+  0%   { opacity: 0; transform: translateY(-30px) scale(0.92); }
+  60%  { opacity: 1; transform: translateY(4px)   scale(1.02); }
+  100% { opacity: 1; transform: translateY(0)     scale(1); }
+}
+@keyframes celebration-aurora {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+@keyframes celebration-glow-pulse {
+  0%, 100% { opacity: 0.4; transform: translateY(-50%) scale(0.95); }
+  50%      { opacity: 0.9; transform: translateY(-50%) scale(1.15); }
+}
+@keyframes celebration-check-pop {
+  0%   { transform: scale(0); }
+  70%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+@keyframes celebration-ring-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(110,231,183,0.7), 0 0 32px rgba(16,185,129,0.6); }
+  100% { box-shadow: 0 0 0 24px rgba(110,231,183,0), 0 0 32px rgba(16,185,129,0.4); }
+}
+@keyframes celebration-check-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes celebration-text-rise {
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes celebration-confetti {
+  0%   { opacity: 0; transform: translate(0,0) rotate(0); }
+  15%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); }
+}
+@keyframes celebration-sparkle {
+  0%, 100% { opacity: 0; transform: scale(0.5); }
+  50%      { opacity: 1; transform: scale(1.2); }
+}
+
+.celebration-banner {
+  animation: celebration-drop 0.7s cubic-bezier(0.16, 1.2, 0.4, 1) both;
+}
+.celebration-aurora {
+  animation: celebration-aurora 1.4s ease-out 0.3s both;
+  mix-blend-mode: overlay;
+}
+.celebration-glow {
+  animation: celebration-glow-pulse 2.4s ease-in-out infinite;
+}
+.celebration-check-bg {
+  animation:
+    celebration-check-pop 0.5s cubic-bezier(0.34, 1.6, 0.5, 1) 0.25s both,
+    celebration-ring-pulse 1.6s ease-out 0.6s;
+}
+.celebration-check-path {
+  stroke-dasharray: 30; stroke-dashoffset: 30;
+  animation: celebration-check-draw 0.4s ease-out 0.55s forwards;
+}
+.celebration-head {
+  opacity: 0; transform: translateY(8px);
+  animation: celebration-text-rise 0.5s ease-out 0.45s forwards;
+}
+.celebration-sub {
+  opacity: 0; transform: translateY(8px);
+  animation: celebration-text-rise 0.5s ease-out 0.6s forwards;
+}
+.celebration-confetti {
+  opacity: 0;
+  animation: celebration-confetti 1.4s ease-out 0.4s forwards;
+}
+.celebration-sparkle {
+  animation: celebration-sparkle 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .celebration-banner,
+  .celebration-aurora,
+  .celebration-glow,
+  .celebration-check-bg,
+  .celebration-check-path,
+  .celebration-head,
+  .celebration-sub,
+  .celebration-confetti,
+  .celebration-sparkle {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    stroke-dashoffset: 0;
+  }
+}

@@ -33,11 +33,24 @@ function isoAtPT(dateStr: string, hour: number, minute: number): string {
 describe("binSlotsIntoWindows — Jon/John 3h bike ride", () => {
   it("collapses 13 start-time chips into a small number of named windows", () => {
     // 9:00 AM PT to 3:00 PM PT at 30-min steps, 3h meetings. That's 13 slots.
-    const s = slots(9, 13, 30, 180);
+    // Use score=-1 so slots cross the ★ pick threshold; score=0 slots are
+    // offerable but not "preferred" by the host.
+    const s = slots(9, 13, 30, 180, -1);
     const cards = binSlotsIntoWindows(s, { tz: TZ, durationMinutes: 180 });
     expect(cards.length).toBeGreaterThan(0);
     expect(cards.length).toBeLessThanOrEqual(4);
     expect(cards.some((c) => c.isPick)).toBe(true);
+  });
+
+  it("does NOT mark default-score (0) slots as ★ picks", () => {
+    // Regression: prior behavior tied isPick to "matches lowest visible score",
+    // which made every slot a pick when no preferredDays boost was applied
+    // (default score 0 = "best" by tie-breaking, but not actually preferred).
+    // ★ is now reserved for score ≤ -1 (explicit host preference).
+    const s = slots(9, 6, 30, 60, 0);
+    const cards = binSlotsIntoWindows(s, { tz: TZ, durationMinutes: 60 });
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.some((c) => c.isPick)).toBe(false);
   });
 
   it("at least one card names a day-part when the band is primarily inside one", () => {

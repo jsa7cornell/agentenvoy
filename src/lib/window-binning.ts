@@ -245,12 +245,19 @@ export function binSlotsIntoWindows(
     : slots.filter((s) => (s.score ?? 0) <= 1);
   if (visible.length === 0) return [];
 
-  const bestScore = Math.min(...visible.map((s) => s.score ?? 0));
   const bands = coalesceBands(visible);
+
+  // ★ ("pick") tier means *explicitly* host-preferred — score ≤ -1, set by
+  // preferredDays soft-boost (scoring.ts:1860–1891) or other intentional
+  // promotions. Prior implementation flagged isPick when a slot tied the
+  // numerically-lowest score in the visible set, which made every slot a pick
+  // when no preferredDays were configured (default score 0 = "best" by
+  // tie-breaking, but not actually preferred). Bug reported 2026-04-23.
+  const PICK_SCORE_THRESHOLD = -1;
 
   if (isMultiDay) {
     return bands.map((band): WindowCard => {
-      const isPick = band.slots.some((s) => (s.score ?? 0) === bestScore);
+      const isPick = band.slots.some((s) => (s.score ?? 0) <= PICK_SCORE_THRESHOLD);
       const defaultStart = band.slots[0]?.start ?? band.startIso;
       const defaultEnd = new Date(new Date(defaultStart).getTime() + durationMs).toISOString();
       return {
@@ -268,7 +275,7 @@ export function binSlotsIntoWindows(
   const split: Band[] = bands.flatMap((b) => splitBand(b, durationMs, tz));
 
   return split.map((band): WindowCard => {
-    const isPick = band.slots.some((s) => (s.score ?? 0) === bestScore);
+    const isPick = band.slots.some((s) => (s.score ?? 0) <= PICK_SCORE_THRESHOLD);
     const defaultStart = band.slots[0]?.start ?? band.startIso;
     const defaultEnd = band.slots[0]?.end ?? new Date(new Date(defaultStart).getTime() + durationMs).toISOString();
     return {
