@@ -39,6 +39,7 @@ interface ChannelMsg {
     guestTimezoneLabel?: string | null;
     link: {
       inviteeName?: string;
+      inviteeNames?: string[];
       inviteeEmail?: string;
       topic?: string;
       code?: string;
@@ -995,6 +996,13 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                   participants={msg.thread.participants || undefined}
                   isVip={msg.thread.isVip ?? false}
                   guestTimezoneLabel={msg.thread.guestTimezoneLabel || undefined}
+                  inviteeCount={
+                    Array.isArray(msg.thread.link.inviteeNames) && msg.thread.link.inviteeNames.length > 0
+                      ? msg.thread.link.inviteeNames.length
+                      : msg.thread.link.inviteeName
+                      ? 1
+                      : 0
+                  }
                 />
               </div>
             );

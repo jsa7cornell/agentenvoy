@@ -1113,6 +1113,7 @@ async function handleCreateLink(
       slug: meetSlug,
       code,
       inviteeName,
+      inviteeNames,
       inviteeEmail,
       inviteeTimezone,
       topic,
@@ -1139,9 +1140,15 @@ async function handleCreateLink(
 
   const prefix = activityLabel ?? formatPrefix;
   const isGroup = Array.isArray(inviteeNames) && inviteeNames.length > 1;
+  const { getInviteeFirstNamesDisplay } = await import("@/lib/invitee-display");
+  const firstNamesDisplay = getInviteeFirstNamesDisplay({ inviteeNames, inviteeName });
 
   const title =
-    isGroup || !inviteeDisplay
+    isGroup
+      ? prefix
+        ? `${prefix} (${firstNamesDisplay})`
+        : firstNamesDisplay || "Meeting"
+      : !inviteeDisplay
       ? (prefix ?? "Meeting")
       : prefix
       ? `${prefix}: ${inviteeDisplay} + ${hostFirstName}`
@@ -1650,6 +1657,22 @@ async function handleExpandLink(
     patch.location = loc || undefined;
   }
 
+  // Invitee-set swap — a multi-invitee edit ("actually change it to Will and
+  // Mingst") is an update, not a new link. Without this branch the LLM has
+  // no way to swap invitees via update_link and reaches for create_link —
+  // which loses duration and other link-level fields (see 2026-04-23 bug).
+  // Column write happens outside the rules-JSON patch since inviteeName /
+  // inviteeNames live directly on NegotiationLink.
+  let inviteeNamesPatch: string[] | undefined;
+  if (Array.isArray(params.inviteeNames)) {
+    inviteeNamesPatch = (params.inviteeNames as unknown[])
+      .filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+      .map((n) => n.trim().slice(0, 80));
+  } else if (typeof params.inviteeName === "string") {
+    const n = params.inviteeName.trim().slice(0, 80);
+    if (n) inviteeNamesPatch = [n];
+  }
+
   // Host-intent steering (proposal 2026-04-21). Accept nested `intent` or
   // bare `steering`; invalid values are silently dropped (§4.6 validator
   // runs downstream regardless). Ignored from the "needs at least one
@@ -1670,10 +1693,10 @@ async function handleExpandLink(
   const patchKeysForGate = Object.keys(patch).filter(
     (k) => k !== "intent" && k !== "steering",
   );
-  if (patchKeysForGate.length === 0) {
+  if (patchKeysForGate.length === 0 && inviteeNamesPatch === undefined) {
     return {
       success: false,
-      message: "update_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredDays/daysOfWeek, lastResort, dateRange, timingLabel, format, duration, activity, activityIcon, location)",
+      message: "update_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredDays/daysOfWeek, lastResort, dateRange, timingLabel, format, duration, activity, activityIcon, location, inviteeNames)",
     };
   }
 
@@ -1720,8 +1743,78 @@ async function handleExpandLink(
     where: { id: link.id },
     data: {
       rules: mergedRules as Parameters<typeof prisma.negotiationLink.update>[0]["data"]["rules"],
+      ...(inviteeNamesPatch !== undefined
+        ? {
+            inviteeNames: inviteeNamesPatch,
+            inviteeName: inviteeNamesPatch[0] ?? null,
+          }
+        : {}),
     },
   });
+
+  // Invitee-set swap: rebuild SessionInvitee rows on every active session
+  // for this link, and refresh session titles so the dashboard card reflects
+  // the new roster. Delete-then-recreate is safe here — SessionInvitee is an
+  // index of who was invited; per-slot RSVPs hang off it but for the
+  // draft/active phase (where this edit path applies) there's no RSVP data
+  // worth preserving yet.
+  if (inviteeNamesPatch !== undefined) {
+    const activeSessionsForInvitees = await prisma.negotiationSession.findMany({
+      where: { linkId: link.id, status: { in: ["active", "pending"] } },
+      select: { id: true, format: true },
+    });
+    const { getInviteeDisplay, getInviteeFirstNamesDisplay } = await import("@/lib/invitee-display");
+    const hostUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    });
+    const hostFirstName = hostUser?.name?.split(/\s+/)[0] || "Host";
+    const activityRaw = (mergedRules as Record<string, unknown>).activity;
+    const activityLabel = typeof activityRaw === "string" && activityRaw.trim()
+      ? activityRaw.charAt(0).toUpperCase() + activityRaw.slice(1)
+      : null;
+    const isGroupNow = inviteeNamesPatch.length > 1;
+    const inviteeNameSingular = inviteeNamesPatch[0] ?? null;
+    const inviteeDisplay = getInviteeDisplay({
+      inviteeNames: inviteeNamesPatch,
+      inviteeName: inviteeNameSingular,
+    });
+    const firstNamesDisplay = getInviteeFirstNamesDisplay({
+      inviteeNames: inviteeNamesPatch,
+      inviteeName: inviteeNameSingular,
+    });
+
+    for (const s of activeSessionsForInvitees) {
+      await prisma.sessionInvitee.deleteMany({ where: { sessionId: s.id } });
+      if (inviteeNamesPatch.length > 0) {
+        await prisma.sessionInvitee.createMany({
+          data: inviteeNamesPatch.map((name, i) => ({
+            linkId: link.id,
+            sessionId: s.id,
+            name,
+            email: i === 0 ? null : null,
+            role: "guest",
+          })),
+        });
+      }
+      const fmt = typeof s.format === "string" ? s.format : null;
+      const formatPrefix = fmt === "phone" ? "Call" : fmt === "video" ? "VC" : null;
+      const prefix = activityLabel ?? formatPrefix;
+      const nextTitle = isGroupNow
+        ? prefix
+          ? `${prefix} (${firstNamesDisplay})`
+          : firstNamesDisplay || "Meeting"
+        : !inviteeDisplay
+        ? (prefix ?? "Meeting")
+        : prefix
+        ? `${prefix}: ${inviteeDisplay} + ${hostFirstName}`
+        : `${inviteeDisplay} + ${hostFirstName}`;
+      await prisma.negotiationSession.update({
+        where: { id: s.id },
+        data: { title: nextTitle },
+      });
+    }
+  }
 
   // Clear guest-negotiated values on active sessions when the host edits
   // location or activity (host edit is authoritative — R2/option-a from
@@ -1769,6 +1862,9 @@ async function handleExpandLink(
   if (patch.duration !== undefined) changedParts.push(`duration: ${formatDuration(patch.duration as number)}`);
   if (patch.activity !== undefined) changedParts.push(`activity: ${patch.activity ?? "cleared"}`);
   if (patch.location !== undefined) changedParts.push(`location: ${patch.location ?? "cleared"}`);
+  if (inviteeNamesPatch !== undefined) {
+    changedParts.push(`invitees: ${inviteeNamesPatch.join(", ") || "cleared"}`);
+  }
 
   // Post-edit follow-up: drop a short administrator message into every
   // active session on this link so the guest's deal-room shows what

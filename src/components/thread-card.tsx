@@ -35,6 +35,9 @@ interface ThreadCardProps {
    *  first visit. When set, shows as a small "guest in X" chip so the host can
    *  see the timezone context at a glance. */
   guestTimezoneLabel?: string | null;
+  /** Named invitees on the link. When length > 1, a 👥 count chip renders in
+   *  the title row so multi-person invites are visually distinct from 1:1s. */
+  inviteeCount?: number;
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
@@ -73,6 +76,7 @@ export default function ThreadCard({
   isVip = false,
   activityIcon,
   guestTimezoneLabel,
+  inviteeCount,
 }: ThreadCardProps) {
   const style = STATUS_STYLES[statusColor] || STATUS_STYLES.gray;
   const [linkCopied, setLinkCopied] = useState(false);
@@ -141,6 +145,15 @@ export default function ThreadCard({
             {/* VIP badge — only rendered when the link is flagged VIP.
                 Binary flag; no tier ladder. Default non-VIP case stays
                 visually quiet. */}
+            {inviteeCount !== undefined && inviteeCount > 1 && (
+              <span
+                className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/12 text-purple-300"
+                title={`${inviteeCount} invitees`}
+              >
+                <span role="img" aria-label="group">👥</span>
+                {inviteeCount}
+              </span>
+            )}
             {isVip && (
               <span
                 className="flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-purple-500/15 text-purple-400"
