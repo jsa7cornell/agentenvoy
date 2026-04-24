@@ -62,6 +62,7 @@ ALTER TABLE "InviteeSlotRsvp" ADD CONSTRAINT "InviteeSlotRsvp_sessionId_fkey"
 
 -- 3. SessionParticipant: drop @unique(sessionId), add sessionInviteeId.
 ALTER TABLE "SessionParticipant" DROP CONSTRAINT IF EXISTS "SessionParticipant_sessionId_key";
+DROP INDEX IF EXISTS "SessionParticipant_sessionId_key";
 ALTER TABLE "SessionParticipant" ADD COLUMN "sessionInviteeId" TEXT;
 
 CREATE INDEX "SessionParticipant_sessionId_idx" ON "SessionParticipant"("sessionId");
