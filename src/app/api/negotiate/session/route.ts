@@ -12,7 +12,12 @@ import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availabili
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
-import { getInviteeDisplay, getWaitingLabel } from "@/lib/invitee-display";
+import {
+  getInviteeDisplay,
+  getWaitingLabel,
+  getInviteeFirstNamesDisplay,
+  getInviteeNames,
+} from "@/lib/invitee-display";
 import { formatDuration } from "@/lib/format-duration";
 import { getUserTimezone } from "@/lib/timezone";
 import {
@@ -777,12 +782,15 @@ export async function POST(req: NextRequest) {
     // Deterministic template greeting — no LLM, no hallucination risk.
     const hostName = user.name || "the organizer";
     const hostFirstName = hostName.split(/\s+/)[0] || hostName;
-    const inviteeName = link.inviteeName || null;
+
     const rawTopic = link.topic || null;
 
-    // Greeting V2 (Danny spec, 2026-04-18).
-    const firstName = ((link.inviteeNames?.[0] ?? inviteeName ?? "").split(/\s+/)[0]);
-    const greeteeName = firstName || "there";
+    // Greeting V2 (Danny spec, 2026-04-18). Multi-invitee-aware: for a 2+
+    // invitee link we greet "Will & Andrew" rather than just the first name
+    // (feedback cmoc4mue0…, 2026-04-23). Single-invitee behavior unchanged.
+    const inviteeNamesArr = getInviteeNames(link);
+    const isMultiInvitee = inviteeNamesArr.length > 1;
+    const greeteeName = getInviteeFirstNamesDisplay(link) || "there";
 
     // Activity (free-form) — set by the host's LLM at create_link time.
     // Keeps the meeting-type taxonomy expansive rather than discrete.
@@ -1035,9 +1043,28 @@ export async function POST(req: NextRequest) {
         !!activityText ||
         !!linkLocationForOpener;
 
+      // For multi-invitee links, "with you" flattens the group. "with the
+      // three of you" / "with you all" preserves the group framing so the
+      // first guest to arrive sees they're not the only person being
+      // scheduled. N = inviteeCount + host. "the three of you" for N=3,
+      // "you all" for N>=4 (too unwieldy to count inline).
+      const withClause = ((): string => {
+        if (!isMultiInvitee) return `with you and ${hostFirstName}`;
+        const total = inviteeNamesArr.length + 1;
+        if (total === 3) return `with the three of you`;
+        if (total === 4) return `with the four of you`;
+        return `with you all`;
+      })();
+      const findTimeWithClause = ((): string => {
+        if (!isMultiInvitee) return "";
+        const total = inviteeNamesArr.length + 1;
+        if (total === 3) return ` for the three of you`;
+        if (total === 4) return ` for the four of you`;
+        return ` for your group`;
+      })();
       const openerLine = hasProposalSubstance
-        ? `👋 ${greeteeName}! I'm scheduling time with you and ${hostFirstName}. He's proposing ${buildProposalPhrase()}.`
-        : `👋 ${greeteeName}! ${hostFirstName} asked me to find time${timingLabel ? ` ${timingLabel}` : ""}.`;
+        ? `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${buildProposalPhrase()}.`
+        : `👋 ${greeteeName}! ${hostFirstName} asked me to find time${findTimeWithClause}${timingLabel ? ` ${timingLabel}` : ""}.`;
 
       const toneLine = guestGuidance?.tone ? guestGuidance.tone : null;
 
