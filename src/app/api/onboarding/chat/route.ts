@@ -254,9 +254,18 @@ export async function POST(req: NextRequest) {
     }
 
     case "defaults_confirm": {
-      // Seed-and-show: user reviewed defaults and confirmed. Complete
-      // onboarding here — no further phases. If they wanted to tune them,
-      // they clicked through to /dashboard/tuner which doesn't POST here.
+      // Inline "Use Zoom instead" branch — flip provider and route to the
+      // zoom_link phase to capture their personal meeting URL. Otherwise
+      // seed-and-show: complete onboarding here.
+      if (response === "use_zoom") {
+        await updatePrefs(user.id, prefs, explicit, {
+          defaultFormat: "video",
+          videoProvider: "zoom",
+        });
+        await savePhase(user.id, "zoom_link");
+        result = getZoomLinkMessages();
+        return await respondWithPersist(user.id, result);
+      }
       await completeOnboarding(user.id);
       result = getCompleteMessages(ctx);
       await savePhase(user.id, "complete");
@@ -294,12 +303,20 @@ export async function POST(req: NextRequest) {
     }
 
     case "zoom_link": {
+      // After the user lands on this phase (only reachable via the "Use Zoom
+      // instead" branch off defaults_confirm in the current flow), accept the
+      // link if provided and complete onboarding. Previously this fell
+      // through to nextPhase() which routed back to defaults_confirm (legacy
+      // of the old linear flow) — the explicit complete here avoids that.
       const link = (response || "").trim();
       if (link) {
         const freshPrefs = await getFreshPrefs(user.id);
         await updatePrefs(user.id, freshPrefs.prefs, freshPrefs.explicit, { zoomLink: link });
       }
-      break;
+      await completeOnboarding(user.id);
+      result = getCompleteMessages(ctx);
+      await savePhase(user.id, "complete");
+      return await respondWithPersist(user.id, result, { onboardingComplete: true });
     }
 
     case "defaults_duration": {

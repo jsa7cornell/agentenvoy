@@ -166,6 +166,10 @@ export interface UserPreferences {
      *  timezone (light 05:00–20:00, dark otherwise). Defaults to "dark"
      *  when absent for existing rows. Persists cross-device. */
     themeMode?: "light" | "dark" | "auto";
+    /** One-shot seen-flag for the "I just flipped to dark because it's after
+     *  8pm" teachable moment (progressive profile Category C). Set true the
+     *  first time the user dismisses the toast; never shown again after. */
+    seenThemeModeExplainer?: boolean;
   };
   learned?: Record<string, unknown>;
 }
