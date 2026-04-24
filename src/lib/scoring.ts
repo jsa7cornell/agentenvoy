@@ -145,8 +145,15 @@ export interface UserPreferences {
   defaultDuration?: number; // default meeting length in minutes (15, 30, 45, 60, 90)
   explicit?: {
     timezone?: string;
-    businessHoursStart?: number; // hour, default 9
-    businessHoursEnd?: number; // hour, default 18
+    businessHoursStart?: number; // hour, default 9 (legacy — prefer *Minutes)
+    businessHoursEnd?: number; // hour, default 18 (legacy — prefer *Minutes)
+    /** Canonical business-hours bounds as minute-of-day (0–1440), 30-minute
+     *  aligned. Added 2026-04-23 so the primary-link guided flow and the
+     *  scoring engine can represent 8:30 / 5:30 / etc. When present, these
+     *  win over the integer-hour fields. See proposal
+     *  `2026-04-23_primary-link-config-convergence` §3.1 Path A. */
+    businessHoursStartMinutes?: number;
+    businessHoursEndMinutes?: number;
     bufferMinutes?: number;
     blackoutDays?: string[];
     blockedWindows?: BlockedWindow[];
@@ -863,10 +870,10 @@ function scoreSlot(
  * (scoreSlot returned first, this layer doesn't touch events).
  */
 function hoursProtectionLayer(
-  hour: number,
+  slotMinutes: number, // minute-of-day for the slot's start
   isWeekend: boolean,
-  bizStart: number,
-  bizEnd: number
+  bizStartMinutes: number,
+  bizEndMinutes: number
 ): {
   score: number;
   reason: string;
@@ -874,13 +881,22 @@ function hoursProtectionLayer(
   blockCost: BlockCost;
   firmness: BlockFirmness;
 } | null {
+  // Convert to whole-hour edge distances for the score-band thresholds.
+  // The bands were defined in 1h / 2-3h / 4h / 5h+ steps, so we measure
+  // distance in hours (using ceil so 45min-outside still reads as "1h edge").
+  const hour = Math.floor(slotMinutes / 60);
+  const bizStartHour = Math.floor(bizStartMinutes / 60);
+  const bizEndHour = Math.ceil(bizEndMinutes / 60);
+
   if (isWeekend) {
-    const inBizEquivalent = hour >= bizStart && hour < bizEnd;
+    const inBizEquivalent =
+      slotMinutes >= bizStartMinutes && slotMinutes < bizEndMinutes;
     if (inBizEquivalent) {
       return { score: 3, reason: "weekend daytime", kind: "weekend", blockCost: "preference", firmness: "strong" };
     }
     // Weekend edge calculation: distance from nearest biz-equivalent edge.
-    const edgeDistance = hour < bizStart ? bizStart - hour : hour - bizEnd + 1;
+    const edgeDistance =
+      hour < bizStartHour ? bizStartHour - hour : hour - bizEndHour + 1;
     if (edgeDistance <= 2) {
       return { score: 4, reason: "weekend edge", kind: "weekend", blockCost: "preference", firmness: "strong" };
     }
@@ -888,11 +904,12 @@ function hoursProtectionLayer(
   }
 
   // Weekday within biz hours → no bump.
-  if (hour >= bizStart && hour < bizEnd) return null;
+  if (slotMinutes >= bizStartMinutes && slotMinutes < bizEndMinutes) return null;
 
   // Weekday outside biz hours. Distance from the nearest biz-hour edge
   // in whole hours; 0 means immediately adjacent (the 1h edge slot).
-  const distance = hour < bizStart ? bizStart - hour - 1 : hour - bizEnd;
+  const distance =
+    hour < bizStartHour ? bizStartHour - hour - 1 : hour - bizEndHour;
   if (distance <= 0) {
     // 1h edge — near-trivial accommodation.
     return { score: 2, reason: "just outside business hours", kind: "off_hours", blockCost: "preference", firmness: "weak" };
@@ -1141,6 +1158,12 @@ export function computeSchedule(
   const blockedWindows = [...((preferences.explicit?.blockedWindows ?? []) as BlockedWindow[])];
   let bizStart = preferences.explicit?.businessHoursStart ?? 9;
   let bizEnd = preferences.explicit?.businessHoursEnd ?? 18;
+  // Canonical minute-of-day bounds (30-min aligned). Prefer *Minutes fields
+  // when present; fall back to hour * 60 so existing users keep working.
+  // These drive the hours-protection layer's slot comparisons so fractional
+  // boundaries like 8:30 are honored (not silently rounded).
+  let bizStartMinutes = preferences.explicit?.businessHoursStartMinutes ?? bizStart * 60;
+  let bizEndMinutes = preferences.explicit?.businessHoursEndMinutes ?? bizEnd * 60;
 
   // Use compiled rules from LLM preference compiler (stored on user.preferences.compiled)
   const compiled = (preferences as Record<string, unknown>).compiled as CompiledRules | undefined;
@@ -1161,8 +1184,14 @@ export function computeSchedule(
 
   if (compiled) {
     blockedWindows.push(...(compiled.blockedWindows ?? []));
-    if (compiled.businessHoursStart !== undefined) bizStart = compiled.businessHoursStart;
-    if (compiled.businessHoursEnd !== undefined) bizEnd = compiled.businessHoursEnd;
+    if (compiled.businessHoursStart !== undefined) {
+      bizStart = compiled.businessHoursStart;
+      bizStartMinutes = bizStart * 60;
+    }
+    if (compiled.businessHoursEnd !== undefined) {
+      bizEnd = compiled.businessHoursEnd;
+      bizEndMinutes = bizEnd * 60;
+    }
     if (compiled.blackoutDays?.length) {
       const existingBlackout = preferences.explicit?.blackoutDays ?? [];
       preferences = {
@@ -1251,7 +1280,8 @@ export function computeSchedule(
   const GEN_END = 23; // 5 AM through 11 PM (last slot starts at 22:30)
 
   while (current < horizon) {
-    const { hour, isWeekend } = getLocalParts(current, tz);
+    const { hour, minute, isWeekend } = getLocalParts(current, tz);
+    const slotMinutes = hour * 60 + minute;
 
     // Hard gate — outside the generation envelope, no slot exists.
     if (hour < GEN_START || hour >= GEN_END) {
@@ -1276,7 +1306,12 @@ export function computeSchedule(
     // open slots. Real events, blackouts, and blocked windows keep their
     // existing classification — they're more specific than "it's a weekend".
     if (scored.kind === "open" && scored.blockCost === "none") {
-      const layer = hoursProtectionLayer(hour, isWeekend, bizStart, bizEnd);
+      const layer = hoursProtectionLayer(
+        slotMinutes,
+        isWeekend,
+        bizStartMinutes,
+        bizEndMinutes,
+      );
       if (layer) {
         scored.score = layer.score;
         scored.reason = layer.reason;
