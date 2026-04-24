@@ -344,25 +344,36 @@ export function getDefaultsConfirmMessages(ctx: OnboardingContext): PhaseResult 
   const duration = typeof d.defaultDuration === "number" ? d.defaultDuration : 30;
   const buffer = typeof d.bufferMinutes === "number" ? d.bufferMinutes : 0;
   const bufferText = buffer === 0 ? "No buffer" : `${buffer}-min buffer`;
+  // Theme defaults to auto for new users. We don't read the seeded value
+  // here because themeMode isn't part of seededDefaults — it's set to
+  // "auto" implicitly by the ThemePreferenceSync's absent-value fallback
+  // and persisted on the first toggle.
+  const themeLine = "Auto (light during day, dark 8pm–5am)";
+
+  // Only offer "Use Zoom instead" when we seeded Google Meet as the default.
+  // If the user already landed on Zoom (unusual at this stage), skip the
+  // inline switch — they're already where they want.
+  const seededProvider = d.videoProvider === "zoom" ? "zoom" : "google_meet";
+  const options =
+    seededProvider === "google_meet"
+      ? [
+          { number: 1, label: "Looks good, let's go", value: "confirm" },
+          { number: 2, label: "Use Zoom instead", value: "use_zoom" },
+        ]
+      : [{ number: 1, label: "Looks good, let's go", value: "confirm" }];
 
   const content =
     `I've seeded you with sensible defaults so you can start scheduling right away:\n\n` +
     `• **Meeting hours:** ${hours}\n` +
     `• **Format:** ${format}\n` +
     `• **Duration:** ${duration} minutes\n` +
-    `• **Buffer between meetings:** ${bufferText}\n\n` +
+    `• **Buffer between meetings:** ${bufferText}\n` +
+    `• **Theme:** ${themeLine}\n\n` +
     `You can change any of these anytime — just tell me in chat ("no, make my hours 10–6") or tweak them on the [preferences page ↗](/dashboard/tuner).`;
 
   return {
     phase: "defaults_confirm",
-    messages: [
-      {
-        content,
-        options: [
-          { number: 1, label: "Looks good, let's go", value: "confirm" },
-        ],
-      },
-    ],
+    messages: [{ content, options }],
   };
 }
 
