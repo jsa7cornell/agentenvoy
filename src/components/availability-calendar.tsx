@@ -327,60 +327,76 @@ function SlotChipRows({
       hour: "numeric", minute: "2-digit", timeZone: timezone,
     });
 
-  const groups = windows.map((w) => {
-    const ws = new Date(w.start).getTime();
-    const we = new Date(w.end).getTime();
-    return {
-      name: w.name,
-      slots: slotsForDay.filter((s) => {
-        const ss = new Date(s.start).getTime();
-        return ss >= ws && ss < we && (s.score ?? 0) <= 1;
-      }),
-    };
-  }).filter((g) => g.slots.length > 0);
+  // Two-lane bucketing: AM (hour < 12) and PM (hour ≥ 12), tz-aware. Replaces
+  // the prior per-window grouping which (a) created vertical clutter with one
+  // label-row + one pill-row per WindowCard, and (b) could render the same
+  // daypart label twice when window-binning split a band into two non-
+  // contiguous pieces both falling mostly in the morning (bug 2026-04-23).
+  // Bucketing by hour-of-day eliminates the dedup problem entirely.
+  const hourInTz = (iso: string) => {
+    const h = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric", hour12: false, timeZone: timezone,
+    }).format(new Date(iso));
+    return parseInt(h, 10);
+  };
 
-  if (groups.length === 0) {
+  const allSlots = slotsForDay.filter((s) => (s.score ?? 0) <= 1);
+  // `windows` is still consumed for ordering / future window-level features,
+  // but slot pills now render flat by lane. Keep a stable sort so AM/PM rows
+  // read left → right by start time.
+  void windows;
+  const amSlots = allSlots.filter((s) => hourInTz(s.start) < 12)
+    .sort((a, b) => a.start.localeCompare(b.start));
+  const pmSlots = allSlots.filter((s) => hourInTz(s.start) >= 12)
+    .sort((a, b) => a.start.localeCompare(b.start));
+
+  if (amSlots.length === 0 && pmSlots.length === 0) {
     return <p className="text-xs text-muted">No available times</p>;
   }
 
+  const renderChip = (slot: Slot, key: number) => {
+    const isBoth = chipsForDay?.some(
+      (c) => c.color === "both" && c.start === slot.start,
+    );
+    return (
+      <button
+        key={key}
+        onClick={() =>
+          onSelectSlot?.(
+            formatSlotMessage(slot, dateStr, timezone),
+            { start: slot.start, end: slot.end },
+          )
+        }
+        disabled={!onSelectSlot}
+        className={`
+          inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] leading-none border transition-all
+          ${isBoth
+            ? "border-emerald-400/60 bg-emerald-950/30 text-emerald-300 hover:border-emerald-300"
+            : "border-DEFAULT bg-surface-secondary text-primary hover:border-secondary hover:bg-surface"}
+          ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
+        `}
+      >
+        {isBoth && <span className="text-emerald-400 text-[10px]" aria-hidden="true">★</span>}
+        <span className="py-1">{fmt(slot.start)}</span>
+      </button>
+    );
+  };
+
+  const Lane = ({ label, slots }: { label: string; slots: Slot[] }) => (
+    <div className="grid grid-cols-[56px_1fr] gap-2.5 items-start">
+      <div className="text-[10px] uppercase tracking-wider text-muted font-medium pt-1.5">{label}</div>
+      <div className="flex flex-wrap gap-1">
+        {slots.map((slot, si) => renderChip(slot, si))}
+      </div>
+    </div>
+  );
+
   return (
-    <div className="space-y-2.5">
-      {groups.map((g, gi) => (
-        <div key={gi}>
-          <div className="text-[10px] text-muted font-medium mb-1">{g.name}</div>
-          <div className="flex flex-wrap gap-1.5">
-            {g.slots.map((slot, si) => {
-              const isBoth = chipsForDay?.some(
-                (c) => c.color === "both" && c.start === slot.start,
-              );
-              return (
-                <button
-                  key={si}
-                  onClick={() =>
-                    onSelectSlot?.(
-                      formatSlotMessage(slot, dateStr, timezone),
-                      { start: slot.start, end: slot.end },
-                    )
-                  }
-                  disabled={!onSelectSlot}
-                  className={`
-                    flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] border transition-all
-                    ${isBoth
-                      ? "border-emerald-400/60 bg-emerald-950/30 text-emerald-300 hover:border-emerald-300"
-                      : "border-DEFAULT bg-surface-secondary text-primary hover:border-secondary"}
-                    ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
-                  `}
-                >
-                  {isBoth && <span className="text-emerald-400 text-[10px]" aria-hidden="true">★</span>}
-                  {fmt(slot.start)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+    <div className="space-y-1.5">
+      {amSlots.length > 0 && <Lane label="Morning" slots={amSlots} />}
+      {pmSlots.length > 0 && <Lane label="Afternoon" slots={pmSlots} />}
       {looseMutualCount > 0 && (
-        <div className="text-[11px] text-muted italic pt-0.5">
+        <div className="text-[11px] text-muted italic pt-0.5 pl-[66px]">
           + {looseMutualCount} more {hostFirstName || "they"} prefer{hostFirstName ? "s" : ""} but you&rsquo;re busy
         </div>
       )}
