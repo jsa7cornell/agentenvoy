@@ -7,6 +7,7 @@ import { ChannelChatStreamParser, type ChannelChatFrame } from "@/lib/channel-ch
 import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-status";
 import { formatDuration } from "@/lib/format-duration";
 import { QuickReplies } from "./onboarding/quick-replies";
+import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
 import { GcalUpdateCard } from "./gcal-update-card";
 import { SendFeedbackLink } from "./send-feedback";
 import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
@@ -55,7 +56,9 @@ const SUGGESTION_CARDS = [
   {
     label: "🔗  Set up my primary invite link",
     sub: "Your main AgentEnvoy link — share it with anyone to book time",
-    seed: "Help me set up my primary AgentEnvoy invite link. Walk me through how it works, then help me configure my business hours, any blocks, buffers between meetings, and anything else I should decide on.",
+    // This card triggers the PrimaryLinkFlow guided sequence rather than
+    // seeding a prompt. Sentinel — see FirstRunWelcome handler.
+    seed: "__primary_link_flow__",
   },
   {
     label: "☕  Find time for coffee",
@@ -223,6 +226,12 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
   const [initialLoading, setInitialLoading] = useState(true);
   const [calendarConnected, setCalendarConnected] = useState(true);
   const [isCalibrated, setIsCalibrated] = useState(true);
+  // Primary-link guided setup flow — toggled from the 🔗 welcome card.
+  // Replaces the suggestion grid with a scripted Q&A that writes to
+  // scheduling-defaults. Stays active until the user navigates or sends
+  // their first real chat message (at which point the normal feed takes
+  // over because messages.length > 0).
+  const [primaryLinkFlowActive, setPrimaryLinkFlowActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -913,11 +922,23 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           lands at the sidebar divider; inner wrapper re-centers the content. */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 pt-5 pb-16 flex flex-col gap-1.5">
-        {/* First-run welcome — only for calibrated users with no messages */}
-        {messages.length === 0 && !loading && isCalibrated && (
+        {/* First-run welcome — only for calibrated users with no messages.
+            When the user picks the 🔗 primary-link card, we swap the welcome
+            cards out for the guided PrimaryLinkFlow in-place. */}
+        {messages.length === 0 && !loading && isCalibrated && !primaryLinkFlowActive && (
           <FirstRunWelcome
-            onSeed={(seed) => { setInput(seed); textareaRef.current?.focus(); }}
+            onSeed={(seed) => {
+              if (seed === "__primary_link_flow__") {
+                setPrimaryLinkFlowActive(true);
+                return;
+              }
+              setInput(seed);
+              textareaRef.current?.focus();
+            }}
           />
+        )}
+        {messages.length === 0 && !loading && isCalibrated && primaryLinkFlowActive && (
+          <PrimaryLinkFlow />
         )}
 
         {messages.map((msg) => {
