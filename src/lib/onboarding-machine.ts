@@ -18,11 +18,15 @@ import { shortTimezoneLabel, longTimezoneLabel, getTimezoneEntry } from "./timez
 
 export type OnboardingPhase =
   | "intro"
+  // Legacy phase values — no longer part of the active PHASE_ORDER. The
+  // `defaults_confirm` beat was sunset 2026-04-23 per proposal
+  // `2026-04-23_primary-link-config-convergence` §4 V1 item 5: its review
+  // card now renders as a seed-preview bubble inlined with "complete",
+  // and tuning happens via the 🔗 primary-link flow on the welcome page.
+  // Kept in the union so stored `User.onboardingPhase` values from
+  // in-flight users still type-check; `nextPhase()` auto-promotes any of
+  // these to `complete`.
   | "defaults_confirm"
-  // Legacy phase values — no longer part of the active PHASE_ORDER after the
-  // 2026-04-21 lean-onboarding trim, but kept in the union so that stored
-  // `User.onboardingPhase` values from in-flight users still type-check.
-  // `nextPhase()` auto-promotes any of these to `defaults_confirm`.
   | "defaults_format"
   | "phone_number"
   | "zoom_link"
@@ -377,12 +381,32 @@ export function getDefaultsConfirmMessages(ctx: OnboardingContext): PhaseResult 
   };
 }
 
-// Phase 4: Complete
+// Phase 4: Complete — now includes the inlined seed-preview bubble that the
+// sunset `defaults_confirm` phase used to own (proposal
+// `2026-04-23_primary-link-config-convergence` §4 V1 item 5). Tuning
+// happens on the welcome page's 🔗 primary-link flow; mid-session changes
+// go through normal chat.
 export function getCompleteMessages(ctx: OnboardingContext): PhaseResult {
   const slug = ctx.meetSlug || "you";
+  const d = ctx.seededDefaults ?? {};
+  const hours = formatHourRange(d.businessHoursStart, d.businessHoursEnd);
+  const format = formatFormat(d.defaultFormat, d.videoProvider);
+  const duration = typeof d.defaultDuration === "number" ? d.defaultDuration : 30;
+  const buffer = typeof d.bufferMinutes === "number" ? d.bufferMinutes : 0;
+  const bufferText = buffer === 0 ? "No buffer" : `${buffer}-min buffer`;
+
+  const preview =
+    `I've seeded you with sensible defaults so you can start scheduling right away:\n\n` +
+    `• **Meeting hours:** ${hours}\n` +
+    `• **Format:** ${format}\n` +
+    `• **Duration:** ${duration} minutes\n` +
+    `• **Buffer between meetings:** ${bufferText}\n\n` +
+    `Tap the **🔗 primary link** card above to tune hours, duration, and buffer, or just tell me in chat ("use Zoom instead", "make my hours 10–6"). Everything's editable anytime.`;
+
   return {
     phase: "complete",
     messages: [
+      { content: preview },
       {
         content: `You're all set! Your link is **agentenvoy.ai/meet/${slug}** — put it in your email signature and anyone can schedule with you.\n\nLet me show you how this works. I'm drafting a quick 5-minute meet & greet with John Anderson, the founder of AgentEnvoy, so you can see me in action. Watch what happens...`,
       },
@@ -401,7 +425,6 @@ export function getCompleteMessages(ctx: OnboardingContext): PhaseResult {
 // trim via nextPhase() — see proposal §2.1.1.
 export const PHASE_ORDER = [
   "intro",
-  "defaults_confirm",
   "complete",
 ] as const satisfies readonly OnboardingPhase[];
 
@@ -416,10 +439,11 @@ export type ActivePhase = typeof PHASE_ORDER[number];
 
 export function nextPhase(current: OnboardingPhase): OnboardingPhase {
   const idx = (PHASE_ORDER as readonly OnboardingPhase[]).indexOf(current);
-  // Legacy phase not in the active list → jump to defaults_confirm (the
-  // first active phase after intro). Preserves any data already written;
-  // the confirm card reads whatever values exist plus seed fallbacks.
-  if (idx === -1) return "defaults_confirm";
+  // Legacy phase not in the active list (including the sunset
+  // `defaults_confirm`) → jump straight to `complete`. The complete
+  // message inlines the seed-preview bubble; tuning happens on the
+  // welcome page's 🔗 primary-link flow.
+  if (idx === -1) return "complete";
   if (idx >= PHASE_ORDER.length - 1) return "complete";
   return PHASE_ORDER[idx + 1];
 }

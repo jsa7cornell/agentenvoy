@@ -255,12 +255,14 @@ export const authOptions: NextAuthOptions = {
         console.error("Failed to fetch timezone from Google Calendar:", e);
       }
 
-      // Seed-and-show defaults (proposal §2.7) — fresh users land with
-      // sensible defaults (9am–5pm, Google Meet, 30min, no buffer) that
-      // the single `defaults_confirm` onboarding beat surfaces for review.
-      // Replaces the old 4-phase ask-each-field flow. `buildSeededExplicit`
-      // omits timezone when not present; scoring falls back to UTC until
-      // the intro phase captures it.
+      // Seed-and-show defaults — fresh users land with sensible defaults
+      // (9am–5pm, Google Meet, 30min, no buffer). The seed-preview is
+      // inlined on the `complete` onboarding message (post-2026-04-23
+      // sunset of `defaults_confirm`; proposal
+      // `2026-04-23_primary-link-config-convergence` §4 V1 item 5);
+      // tuning happens on the welcome page's 🔗 primary-link flow.
+      // `buildSeededExplicit` omits timezone when not present; scoring
+      // falls back to UTC until the intro phase captures it.
       const preferences: Record<string, unknown> = {
         explicit: buildSeededExplicit({ timezone }),
       };

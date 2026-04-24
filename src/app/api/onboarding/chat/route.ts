@@ -11,7 +11,6 @@ import {
   OnboardingContext,
   getIntroMessages,
   getDefaultsFormatMessages,
-  getDefaultsConfirmMessages,
   getPhoneNumberMessages,
   getZoomLinkMessages,
   getDefaultsDurationMessages,
@@ -254,18 +253,12 @@ export async function POST(req: NextRequest) {
     }
 
     case "defaults_confirm": {
-      // Inline "Use Zoom instead" branch — flip provider and route to the
-      // zoom_link phase to capture their personal meeting URL. Otherwise
-      // seed-and-show: complete onboarding here.
-      if (response === "use_zoom") {
-        await updatePrefs(user.id, prefs, explicit, {
-          defaultFormat: "video",
-          videoProvider: "zoom",
-        });
-        await savePhase(user.id, "zoom_link");
-        result = getZoomLinkMessages();
-        return await respondWithPersist(user.id, result);
-      }
+      // Legacy path — the `defaults_confirm` phase was sunset 2026-04-23
+      // (proposal `2026-04-23_primary-link-config-convergence` §4 V1 item 5).
+      // In-flight users whose stored phase is still `defaults_confirm`
+      // complete immediately; the new `complete` message inlines the
+      // seed-preview bubble. Zoom preference is handled via dashboard chat
+      // after onboarding completes.
       await completeOnboarding(user.id);
       result = getCompleteMessages(ctx);
       await savePhase(user.id, "complete");
@@ -442,6 +435,16 @@ export async function POST(req: NextRequest) {
 
   await savePhase(user.id, next);
 
+  // Intro now advances straight to `complete` (2026-04-23 sunset of the
+  // `defaults_confirm` phase). Mark onboarding complete so the client
+  // transitions into the dashboard surface and the welcome-page's 🔗
+  // primary-link flow becomes the tune affordance.
+  if (next === "complete") {
+    await completeOnboarding(user.id);
+    result = getCompleteMessages(ctx);
+    return await respondWithPersist(user.id, result, { onboardingComplete: true });
+  }
+
   result = getMessagesForPhase(next, ctx);
   return await respondWithPersist(user.id, result);
 }
@@ -451,7 +454,9 @@ export async function POST(req: NextRequest) {
 function getMessagesForPhase(phase: OnboardingPhase, ctx: OnboardingContext): PhaseResult {
   switch (phase) {
     case "intro": return getIntroMessages(ctx);
-    case "defaults_confirm": return getDefaultsConfirmMessages(ctx);
+    // Sunset phase — if a stored legacy value reaches this dispatcher,
+    // render the complete message (which inlines the seed-preview bubble).
+    case "defaults_confirm": return getCompleteMessages(ctx);
     case "defaults_format": return getDefaultsFormatMessages();
     case "phone_number": return getPhoneNumberMessages();
     case "zoom_link": return getZoomLinkMessages();
