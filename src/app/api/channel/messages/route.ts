@@ -64,6 +64,7 @@ export async function GET() {
           link: {
             select: {
               inviteeName: true,
+              inviteeNames: true,
               inviteeEmail: true,
               topic: true,
               code: true,
