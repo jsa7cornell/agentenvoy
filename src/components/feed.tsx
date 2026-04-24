@@ -8,6 +8,7 @@ import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-stat
 import { formatDuration } from "@/lib/format-duration";
 import { QuickReplies } from "./onboarding/quick-replies";
 import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
+import { SchedulingStatusChip } from "./scheduling-status-chip";
 import { GcalUpdateCard } from "./gcal-update-card";
 import { SendFeedbackLink } from "./send-feedback";
 import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
@@ -925,6 +926,14 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           lands at the sidebar divider; inner wrapper re-centers the content. */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 pt-5 pb-16 flex flex-col gap-1.5">
+        {/* Scheduling status chip — read-only posture summary pinned at the
+            top of the feed for calibrated users. See proposal
+            `2026-04-23_primary-link-config-convergence` §3.2 pattern (a). */}
+        {isCalibrated && (
+          <div className="self-center mb-2">
+            <SchedulingStatusChip />
+          </div>
+        )}
         {/* First-run welcome — only for calibrated users with no messages.
             When the user picks the 🔗 primary-link card, we swap the welcome
             cards out for the guided PrimaryLinkFlow in-place. */}
