@@ -74,33 +74,86 @@ export interface TunerSlot {
  * in ("first offer", "stretch", "deep stretch", "never") without having to
  * memorize the numeric score table.
  */
+/** Plain-language title for a slot's availability state. */
 export function slotTierLabel(score: number): string {
-  if (score < 0) return "host preferred";
-  if (score <= 1) return "bookable";
-  if (score <= 3) return "protected (VIP)";
-  return "blocked";
+  if (score < 0) return "Your preferred time";
+  if (score <= 1) return "Available";
+  if (score <= 3) return "Held back";
+  return "Not available";
 }
 
 /**
- * Build a descriptive tooltip string for a slot. Shows tier, score, reason,
- * and (when set) the intrinsic block-cost/firmness label — so a host
- * hovering Tuesday 7 AM sees "stretch (VIP) — off hours · preference:strong".
- * This is the single source of tooltip truth; WeeklyCalendar and DayView
- * both call it.
+ * Human-readable explanation of why a slot is in its current state, and
+ * (where applicable) what to do to change it. Used in both the hover tooltip
+ * and the click popover. No internal jargon (no scores, no "VIP", no
+ * "preference:weak").
  */
+export function slotExplanation(slot: TunerSlot): { body: string; cta: "rules" | "calendar" | null } {
+  const { reason, score, eventSummary } = slot;
+
+  // ── Open / preferred ──────────────────────────────────────────────────
+  if (score < 0) return { body: "Envoy offers these times first.", cta: null };
+  if (score <= 1) {
+    if (reason === "declined invite") return { body: "You declined this event — Envoy treats it as free.", cta: null };
+    if (reason?.startsWith("FYI:")) return { body: "Informational event — Envoy treats this as free.", cta: null };
+    if (reason === "low priority (flexible)") return { body: "Flexible event — Envoy can schedule over this.", cta: null };
+    return { body: "Open for scheduling.", cta: null };
+  }
+
+  // ── Protected (score 2–3) — shown but not offered to guests ──────────
+  if (score <= 3) {
+    if (reason === "just outside business hours")
+      return { body: "Just past when your day ends — Envoy doesn't offer this to guests.", cta: "rules" };
+    if (reason === "off hours")
+      return { body: "Outside your business hours — not offered to guests. Adjust your hours to open this up.", cta: "rules" };
+    if (reason === "weekend daytime")
+      return { body: "Weekend — not offered by default. Tell Envoy if you'd like to take weekend meetings.", cta: "rules" };
+    if (reason === "soft hold")
+      return { body: `Hold block${eventSummary ? ` (${eventSummary})` : ""} — Envoy protects calendar holds. Delete the event to make this available.`, cta: "calendar" };
+    if (reason === "tentative meeting")
+      return { body: `Tentative: ${eventSummary || "unconfirmed meeting"}. Envoy holds this back until confirmed or declined.`, cta: "calendar" };
+    if (reason === "recurring 1:1")
+      return { body: `Recurring 1:1${eventSummary ? ` (${eventSummary})` : ""}. Treated as a soft commitment — decline or delete to free it up.`, cta: "calendar" };
+    if (reason?.startsWith("buffer:"))
+      return { body: "Meeting buffer — Envoy keeps this free between back-to-backs. Tell Envoy to adjust your buffer rules.", cta: "rules" };
+    if (reason === "protected (host set)")
+      return { body: "You set this time as protected.", cta: "rules" };
+    return { body: "Held back — not offered to guests.", cta: "rules" };
+  }
+
+  // ── Blocked (score ≥ 4) — never offered ──────────────────────────────
+  if (reason === "flight")
+    return { body: `Travel${eventSummary ? `: ${eventSummary}` : ""} — Envoy never books over this.`, cta: null };
+  if (reason === "immovable")
+    return { body: `${eventSummary || "Fixed event"} — marked immovable, never offered.`, cta: null };
+  if (reason === "confirmed meeting" || reason === "confirmed group meeting")
+    return { body: `Confirmed: ${eventSummary || "meeting"}`, cta: null };
+  if (reason === "tentative group meeting")
+    return { body: `Group meeting (tentative): ${eventSummary || "meeting"} — Envoy blocks this to avoid double-booking.`, cta: "calendar" };
+  if (reason === "high priority")
+    return { body: `${eventSummary || "High-priority event"} — Envoy never books over this.`, cta: null };
+  if (reason === "out of office")
+    return { body: "Out of office — not available.", cta: "calendar" };
+  if (reason === "sleep hours")
+    return { body: "Sleep hours — Envoy never books this.", cta: null };
+  if (reason === "early morning / late evening")
+    return { body: "Very early or very late — not offered to guests. Adjust your business hours to change this.", cta: "rules" };
+  if (reason === "weekend edge" || reason === "weekend off-hours (sleep)")
+    return { body: "Weekend hours — Envoy doesn't offer this time.", cta: null };
+  if (reason?.startsWith("all-day event:"))
+    return { body: `All-day event — Envoy blocks this time.`, cta: "calendar" };
+  if (reason?.startsWith("blackout day:"))
+    return { body: "Day off — this whole day is blocked.", cta: "rules" };
+  if (reason === "blocked (host set)")
+    return { body: "You set this time as unavailable.", cta: "rules" };
+
+  return { body: eventSummary ? `Busy: ${eventSummary}` : "Not available.", cta: null };
+}
+
+/** @deprecated Use slotExplanation() for UI copy; kept for any legacy callers. */
 export function slotTooltip(slot: TunerSlot): string {
-  const parts: string[] = [
-    `${slotTierLabel(slot.score)} (score ${slot.score})`,
-    slot.reason,
-  ];
-  if (slot.blockCost && slot.blockCost !== "none") {
-    const firm = slot.firmness ? `:${slot.firmness}` : "";
-    parts.push(`${slot.blockCost}${firm}`);
-  }
-  if (slot.eventSummary) {
-    parts.push(slot.eventSummary);
-  }
-  return parts.join(" · ");
+  const { body } = slotExplanation(slot);
+  return `${slotTierLabel(slot.score)} — ${body}`;
 }
 
 interface WeeklyCalendarProps {
@@ -609,13 +662,7 @@ export function WeeklyCalendar({
           }}
         >
           <div className="font-semibold">{slotTierLabel(hoverTooltip.slot.score)}</div>
-          <div className="text-secondary whitespace-nowrap">
-            score {hoverTooltip.slot.score} · {hoverTooltip.slot.reason}
-            {hoverTooltip.slot.blockCost && hoverTooltip.slot.blockCost !== "none" && (
-              <> · {hoverTooltip.slot.blockCost}{hoverTooltip.slot.firmness ? `:${hoverTooltip.slot.firmness}` : ""}</>
-            )}
-            {hoverTooltip.slot.eventSummary && <> · {hoverTooltip.slot.eventSummary}</>}
-          </div>
+          <div className="text-secondary leading-snug">{slotExplanation(hoverTooltip.slot).body}</div>
         </div>,
         document.body,
       )}
@@ -639,21 +686,35 @@ export function WeeklyCalendar({
             }}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            <div className="font-semibold mb-1 text-primary">
-              {slotTierLabel(s.score)}
-            </div>
-            <div className="text-secondary leading-relaxed mb-2">
-              {s.reason}
-              {s.blockCost && s.blockCost !== "none" && (
-                <> · {s.blockCost}{s.firmness ? `:${s.firmness}` : ""}</>
-              )}
-            </div>
-            <a
-              href="/dashboard/availability"
-              className="block text-indigo-500 dark:text-indigo-400 hover:text-indigo-400 dark:hover:text-indigo-300 transition text-[10px] font-medium"
-            >
-              Manage rules &rarr;
-            </a>
+            {(() => {
+              const { body, cta } = slotExplanation(s);
+              return (
+                <>
+                  <div className="font-semibold mb-1 text-primary">
+                    {slotTierLabel(s.score)}
+                  </div>
+                  <div className="text-secondary leading-relaxed mb-2">{body}</div>
+                  {cta === "rules" && (
+                    <a
+                      href="/dashboard/availability"
+                      className="block text-indigo-500 dark:text-indigo-400 hover:text-indigo-400 dark:hover:text-indigo-300 transition text-[10px] font-medium"
+                    >
+                      Adjust your rules &rarr;
+                    </a>
+                  )}
+                  {cta === "calendar" && (
+                    <a
+                      href="https://calendar.google.com"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block text-indigo-500 dark:text-indigo-400 hover:text-indigo-400 dark:hover:text-indigo-300 transition text-[10px] font-medium"
+                    >
+                      Open Google Calendar &rarr;
+                    </a>
+                  )}
+                </>
+              );
+            })()}
           </div>,
           document.body,
         );
