@@ -67,14 +67,14 @@ export function ScopeInterstitial() {
         <div className="flex-1 text-xs text-amber-100 leading-snug">
           <span className="font-medium">Calendar write access needed.</span>{" "}
           We can read your calendar but can&apos;t put confirmed meetings on it.
-          Reconnect to grant full access.
+          Grant write access so Envoy can add confirmed meetings.
         </div>
         <button
           type="button"
           onClick={reconnect.trigger}
           className="text-[11px] font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 px-3 py-1 rounded-md transition flex-shrink-0"
         >
-          Reconnect
+          Grant access
         </button>
         <button
           type="button"
