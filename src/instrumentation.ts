@@ -45,6 +45,46 @@ export async function register() {
       console.error(
         `[boot] CRITICAL — schema drift detected at startup. Every Prisma query touching these models is failing.\n${summary}`,
       );
+      // Surface on /admin/failures. Kept intentionally lean at boot —
+      // importing @/lib/route-error would pull dispatcher → googleapis
+      // into the edge bundle via the instrumentation graph. Write the
+      // row directly with prisma; email is dispatched by the cron fetch
+      // below.
+      try {
+        const { prisma } = await import("@/lib/prisma");
+        await prisma.routeError.create({
+          data: {
+            route: "instrumentation/boot",
+            method: "GET",
+            statusCode: 500,
+            errorClass: "SchemaDrift",
+            message: summary.slice(0, 2000),
+            contextJson: {
+              source: "boot",
+              affected: report.affected.map((m) => ({
+                model: m.model,
+                table: m.table,
+                tableMissing: m.tableMissing,
+                missing: m.missing,
+              })),
+            },
+          },
+        });
+      } catch (logErr) {
+        console.error("[boot] routeError write failed:", logErr);
+      }
+
+      // Fire-and-forget: trigger the schema-health cron over HTTP so it
+      // dispatches the email (dedup'd via SideEffectLog purpose=schema_drift
+      // with a 4h cooldown, so a cold-start storm after a bad deploy = one
+      // email, not many). The cron is daily on Hobby — this fetch is how
+      // drift actually gets caught in time.
+      const cronSecret = process.env.CRON_SECRET;
+      const base = process.env.NEXTAUTH_URL;
+      if (cronSecret && base) {
+        void fetch(`${base}/api/cron/schema-health?secret=${encodeURIComponent(cronSecret)}`)
+          .catch((e) => console.error("[boot] drift alert trigger failed:", e));
+      }
     }
   } catch (err) {
     // The check itself failed (e.g., DB unreachable at boot). Log and move on.
