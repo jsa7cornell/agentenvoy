@@ -26,19 +26,30 @@ interface Props {
  *   - first-connect → agent-first value-prop, personalization lead, "Continue with Google" Google-branded button
  *   - reconnect     → one-sentence banner, immediate Continue (sub-second)
  *   - upgrade-scope → explains what new permission we need and why
- *   - login         → sign-in view first (select_account, no re-consent); "New
- *                     here? See how it works →" toggles to the first-connect
- *                     pitch. Cookie-present returning users skip this modal
- *                     entirely via `useOAuthSignIn`'s trigger gate — so the
- *                     copy here is neutral, not "welcome back" (that would
- *                     greet first-time visitors as returning users).
+ *   - login         → defaults to the first-connect pitch. Cookie-present
+ *                     returning users skip this modal entirely via
+ *                     `useOAuthSignIn`'s trigger gate — so by the time the
+ *                     modal opens with `mode: "login"`, the visitor is
+ *                     either truly new or post-account-delete. Both deserve
+ *                     the value-prop first. "Already have an account? Sign
+ *                     in →" toggles to LoginBody for the rare case (e.g.
+ *                     deleted user signing back in with the same Google
+ *                     account on the same browser, but without the cookie).
+ *                     Pre-2026-04-26 the default was LoginBody, which read
+ *                     like "we recognize you" to deleted users (PR #143).
  */
 export function PreConsentExplainer({ open, mode, onConfirm, onCancel, onSignIn }: Props) {
-  const [showPitch, setShowPitch] = useState(false);
+  // For `mode: "login"` we default to the pitch view. By the time this
+  // modal opens, the cookie shortcut has already filtered out recognized
+  // returning users — so visitors here are truly new or post-delete.
+  // Showing the LoginBody first ("Continue with the Google account linked
+  // to your AgentEnvoy profile") read like "we still recognize you" to
+  // post-delete users (the bug fixed in #143).
+  const [showPitch, setShowPitch] = useState(mode === "login");
 
   useEffect(() => {
-    if (!open) setShowPitch(false);
-  }, [open]);
+    if (!open) setShowPitch(mode === "login");
+  }, [open, mode]);
 
   useEffect(() => {
     if (!open) return;
@@ -81,7 +92,7 @@ export function PreConsentExplainer({ open, mode, onConfirm, onCancel, onSignIn 
                 onClick={() => setShowPitch(false)}
                 className="block w-full text-center text-xs text-muted hover:text-secondary underline underline-offset-2 transition py-1"
               >
-                ← Back
+                Already have an account? Sign in →
               </button>
             )}
             <button

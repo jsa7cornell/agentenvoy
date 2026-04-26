@@ -154,5 +154,23 @@ export async function POST(request: NextRequest) {
     at: new Date().toISOString(),
   });
 
-  return NextResponse.json({ ok: true });
+  // Server-side cookie scrub — belt-and-suspenders alongside the
+  // dashboard/account UI's `document.cookie` clears. Catches any
+  // deletion path that doesn't run that JS (CLI, future admin
+  // tools, or a refactor that moves the delete CTA elsewhere). The
+  // `ae_returning` cookie was readable by the OAuth pre-consent modal
+  // and would otherwise let a deleted user's old browser cookie fast-
+  // path past the new-user pitch on next sign-in (PR #143).
+  const res = NextResponse.json({ ok: true });
+  for (const name of ["ae_returning", "oauth_entry_point"]) {
+    res.cookies.set({
+      name,
+      value: "",
+      path: "/",
+      maxAge: 0,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
+  }
+  return res;
 }
