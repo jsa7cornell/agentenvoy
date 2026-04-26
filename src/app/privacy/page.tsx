@@ -32,12 +32,12 @@ export default function PrivacyPage() {
 
               <div>
                 <h3 className="text-base font-semibold text-primary">
-                  II. We learn only what the negotiation requires.
+                  II. We learn only what the coordination requires.
                 </h3>
                 <p className="mt-1">
                   The minimum knowledge principle. AgentEnvoy accesses only the data necessary to
-                  facilitate the specific negotiation at hand &mdash; nothing more. We don&apos;t build
-                  profiles, mine patterns across negotiations, or retain information beyond its purpose.
+                  facilitate the specific coordination at hand &mdash; nothing more. We don&apos;t build
+                  profiles, mine patterns across coordinations, or retain information beyond its purpose.
                 </p>
               </div>
 
@@ -46,7 +46,7 @@ export default function PrivacyPage() {
                   III. We never advantage one party using the other&apos;s private data.
                 </h3>
                 <p className="mt-1">
-                  AgentEnvoy is a neutral administrator. Information shared by one party is used solely
+                  AgentEnvoy is a neutral coordinator. Information shared by one party is used solely
                   to find mutual ground &mdash; never to give the other party a negotiating edge. Each
                   party sees only the gist of what was shared, not the other&apos;s explicit details.
                 </p>
@@ -79,7 +79,7 @@ export default function PrivacyPage() {
               <li>
                 <code className="text-xs">https://www.googleapis.com/auth/calendar.events</code>{" "}
                 &mdash; to create a calendar event when both parties agree on a time, to place short
-                tentative holds during an active negotiation, and to delete or adjust those events
+                tentative holds during an active coordination, and to delete or adjust those events
                 when you cancel or reschedule through AgentEnvoy.
               </li>
             </ul>
@@ -107,12 +107,12 @@ export default function PrivacyPage() {
               so AgentEnvoy can find a mutual time. This uses{" "}
               <code className="text-xs">https://www.googleapis.com/auth/calendar.readonly</code>{" "}
               &mdash; read-only. We can never create, modify, or delete anything on a guest&apos;s
-              calendar. We read only the free/busy windows needed for the negotiation you&apos;re in.
+              calendar. We read only the free/busy windows needed for the coordination you&apos;re in.
             </p>
 
             <h3 className="text-base font-semibold text-primary mt-6">Data you provide directly</h3>
             <p>
-              Messages you send to Envoy during a negotiation, preferences you set (meeting
+              Messages you send to Envoy during a coordination, preferences you set (meeting
               duration, phone number, video provider, scheduling rules), and any knowledge you
               explicitly teach Envoy about how you prefer to work.
             </p>
@@ -155,7 +155,7 @@ export default function PrivacyPage() {
           {/* --- HOW WE USE IT --- (Google: Data Usage) */}
           <section>
             <h2 className="text-lg font-semibold text-primary">How We Use It</h2>
-            <p>Your data is used for one purpose: facilitating the meeting negotiation in front of you.</p>
+            <p>Your data is used for one purpose: facilitating the meeting coordination in front of you.</p>
             <ul className="list-disc pl-6 space-y-1 mt-2">
               <li>
                 <strong>Scheduling.</strong> Calendar data is used to compute availability, propose
@@ -163,7 +163,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Envoy&apos;s reasoning.</strong> Messages and (optionally) event titles are
-                passed to our AI model so it can respond in the negotiation. Nothing is retained by
+                passed to our AI model so it can respond in the coordination. Nothing is retained by
                 the AI provider beyond the single request that generates each reply.
               </li>
               <li>
@@ -181,7 +181,7 @@ export default function PrivacyPage() {
               </li>
               <li>Build cross-session profiles or behavioral models</li>
               <li>Share one party&apos;s event details or private context with the other party</li>
-              <li>Access more calendar data than the specific negotiation requires</li>
+              <li>Access more calendar data than the specific coordination requires</li>
             </ul>
             <p className="mt-2">
               AgentEnvoy&apos;s use and transfer of information received from Google APIs adheres to
@@ -212,7 +212,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Anthropic (Claude)</strong> &mdash; AI model that powers Envoy. Data shared:
-                negotiation messages and the specific calendar context relevant to the current
+                coordination messages and the specific calendar context relevant to the current
                 conversation (times; titles only if you&apos;ve enabled enhanced access). Anthropic
                 does not retain this data beyond the individual request and does not use it to train
                 models.
@@ -228,7 +228,7 @@ export default function PrivacyPage() {
               </li>
               <li>
                 <strong>Supabase</strong> &mdash; managed PostgreSQL database. Data shared: everything
-                we persist about your account and negotiations is stored here, encrypted at rest.
+                we persist about your account and coordinations is stored here, encrypted at rest.
               </li>
               <li>
                 <strong>Cloudflare</strong> &mdash; DNS for agentenvoy.ai.
@@ -303,7 +303,7 @@ export default function PrivacyPage() {
             <p>We keep data only as long as it serves a purpose.</p>
             <ul className="list-disc pl-6 space-y-2 mt-2">
               <li>
-                <strong>Negotiation sessions</strong> (messages, proposals, outcomes) are retained
+                <strong>Coordination sessions</strong> (messages, proposals, outcomes) are retained
                 for <strong>30 days</strong> after completion, accessible to both parties. After
                 30 days, session data is permanently deleted.
               </li>

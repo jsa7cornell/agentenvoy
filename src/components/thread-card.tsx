@@ -157,7 +157,7 @@ export default function ThreadCard({
             {isVip && (
               <span
                 className="flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-purple-500/15 text-purple-400"
-                title="VIP meeting — Envoy proactively asks about opening extra hours and can reach into stretch options on guest pushback"
+                title="VIP meeting — Envoy proactively asks about opening extra hours and can offer protected slots if the guest pushes back"
               >
                 VIP
               </span>

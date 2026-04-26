@@ -77,7 +77,7 @@ function shortSubtitle(l: LinkEntry): string {
   if (l.expiresAt) {
     bits.push(`expires ${l.expiresAt.slice(0, 10)}`);
   }
-  return bits.join(" · ") || "contextual";
+  return bits.join(" · ") || "single-use";
 }
 
 export function SchedulingLinksChipList() {

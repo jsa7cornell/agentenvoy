@@ -13,8 +13,8 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-semibold text-primary">1. What AgentEnvoy Is</h2>
             <p>
-              AgentEnvoy is an AI-powered scheduling and negotiation platform. An AI agent
-              (&ldquo;Envoy&rdquo;) acts as a neutral administrator &mdash; it coordinates between
+              AgentEnvoy is an AI-powered scheduling and coordination platform. An AI agent
+              (&ldquo;Envoy&rdquo;) acts as a neutral coordinator &mdash; it coordinates between
               parties without representing either side. By using AgentEnvoy, you agree to these terms.
             </p>
           </section>
@@ -28,7 +28,7 @@ export default function TermsPage() {
             </p>
             <ul className="list-disc pl-6 space-y-1 mt-2">
               <li>We treat your information as if it were our own</li>
-              <li>We learn only what the negotiation requires</li>
+              <li>We learn only what the coordination requires</li>
               <li>We never advantage one party using the other&apos;s private data</li>
             </ul>
           </section>
@@ -64,7 +64,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-semibold text-primary">5. AI Agent Behavior</h2>
             <p>
-              Envoy assists with scheduling and negotiations. While we build for accuracy, the AI
+              Envoy assists with scheduling and coordination. While we build for accuracy, the AI
               may occasionally misunderstand context. You are responsible for reviewing and confirming
               any proposed meeting before it is finalized. AgentEnvoy is not liable for scheduling
               conflicts or miscommunications arising from AI-generated proposals.
@@ -85,7 +85,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-lg font-semibold text-primary">7. Data Retention</h2>
             <p>
-              Negotiation session data is retained for 30 days after completion, then permanently
+              Coordination session data is retained for 30 days after completion, then permanently
               deleted. Account data persists for the life of your account. Full details in our{" "}
               <a href="/privacy" className="text-indigo-400 hover:text-indigo-300">Privacy Policy</a>.
             </p>

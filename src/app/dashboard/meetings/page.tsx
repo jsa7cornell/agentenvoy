@@ -162,7 +162,7 @@ export default function MeetingsPage() {
                       <span className="text-xs text-secondary flex-1">
                         {isConfirmed
                           ? "Cancel this meeting? Google Calendar invite will be deleted."
-                          : "Stop this negotiation? The session will be archived."}
+                          : "Stop coordinating this event? The session will be archived."}
                       </span>
                       <button
                         onClick={() => setConfirmCancel(null)}

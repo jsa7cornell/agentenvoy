@@ -754,7 +754,7 @@ export default function AccountPage() {
             <h3 className="text-lg font-semibold text-primary mb-2">Delete your account?</h3>
             <p className="text-sm text-secondary mb-3">
               This permanently deletes your AgentEnvoy account and everything tied to it:
-              profile and preferences, links, negotiation sessions and messages, calendar cache,
+              profile and preferences, links, events and messages, calendar cache,
               and API keys.
             </p>
             <p className="text-sm text-secondary mb-3">

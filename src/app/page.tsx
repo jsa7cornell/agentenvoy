@@ -402,7 +402,7 @@ export default function Home() {
           <div className="max-w-[900px] mx-auto grid md:grid-cols-[1fr_auto_1fr] gap-5 items-center">
             <AgentNode icon="🧑‍💼" label="Your Agent" sub="Claude, ChatGPT, or any MCP client" />
             <Connector />
-            <AgentNode icon="🤝" label="AgentEnvoy" sub="Neutral administrator" highlighted />
+            <AgentNode icon="🤝" label="AgentEnvoy" sub="Neutral coordinator" highlighted />
           </div>
           <div className="max-w-[900px] mx-auto grid md:grid-cols-[1fr_auto_1fr] gap-5 items-center -mt-3">
             <div />
