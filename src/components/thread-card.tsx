@@ -29,7 +29,9 @@ interface ThreadCardProps {
    *  purple VIP badge in the title row. No tier ladder — VIP is binary. */
   isVip?: boolean;
   /** Activity icon emoji (e.g. "🚴", "🏄") from link.rules.activityIcon. When
-   *  provided, replaces the generic calendar icon in the card header. */
+   *  provided, prefixes the card header. Canonical set (per CODEBASE-CLEANUP
+   *  §22): 🚴 bike · 🏄 surf · ☕ coffee · 🍽️ dinner · 💻 video · 📱 phone ·
+   *  📍 in-person · 👤 1:1. Fallback when unset is 🕐 (clock). */
   activityIcon?: string;
   /** Short TZ label (e.g. "CEST", "JST") detected from the guest's browser on
    *  first visit. When set, shows as a small "guest in X" chip so the host can
@@ -125,7 +127,7 @@ export default function ThreadCard({
         <div className="w-8 h-8 rounded-lg bg-purple-500/12 flex items-center justify-center text-sm flex-shrink-0">
           {activityIcon
             ? <span role="img">{activityIcon}</span>
-            : <span role="img" aria-label="calendar">&#128197;</span>
+            : <span role="img" aria-label="clock">&#128336;</span>
           }
         </div>
         <div className="min-w-0 flex-1">

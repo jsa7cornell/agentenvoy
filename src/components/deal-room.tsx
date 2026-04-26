@@ -1147,20 +1147,23 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   }
 
   // --- Meeting emoji picker ---
-  // Priority: venue keyword (from location) > format (video/phone/in-person) > fallback.
-  // Keep the list short + additive — overly specific matches create noise.
+  // Canonical set per CODEBASE-CLEANUP §22 / SPEC-2.0 §3.6:
+  //   🚴 bike · 🏄 surf · ☕ coffee · 🍽️ dinner · 💻 video · 📱 phone ·
+  //   📍 in-person · 👤 1:1 · 🕐 fallback.
+  // The host-set `activityIcon` (from `link.rules.activityIcon`) takes
+  // precedence whenever it's available; this picker is the format/venue
+  // derivation used when no host icon is set. Priority: venue keyword
+  // (location) > format > fallback (empty — caller decides whether to use
+  // the 🕐 clock). Non-canonical emoji from older branches (🍸 / 🌳 / 🏋️
+  // / ✈️ / 🏨 / 🏢 / 🏠) were retired in PR-8 of the v2 refactor — the
+  // canonical 8 (+ fallback) cover the activity vocabulary the LLM emits.
   function getMeetingEmoji(format: string | null | undefined, location: string | null | undefined): string {
     const loc = (location ?? "").toLowerCase();
     if (loc) {
       if (/\b(cafe|café|coffee|starbucks|blue bottle|philz|peets|peet's)\b/.test(loc)) return "☕";
       if (/\b(restaurant|bistro|dinner|lunch|brunch|grill|kitchen|tavern)\b/.test(loc)) return "🍽️";
-      if (/\b(bar|pub|cocktail|lounge|brewery)\b/.test(loc)) return "🍸";
-      if (/\b(park|garden|outdoor|trail|hike|hiking|walk)\b/.test(loc)) return "🌳";
-      if (/\b(gym|fitness|yoga|studio)\b/.test(loc)) return "🏋️";
-      if (/\b(airport|terminal|flight)\b/.test(loc)) return "✈️";
-      if (/\b(hotel|lobby|lobbies|inn|suite)\b/.test(loc)) return "🏨";
-      if (/\b(office|hq|headquarters|workspace|coworking|wework)\b/.test(loc)) return "🏢";
-      if (/\b(home|house|my place|apartment|apt)\b/.test(loc)) return "🏠";
+      if (/\b(bike|biking|cycle|cycling|trail|ride)\b/.test(loc)) return "🚴";
+      if (/\b(surf|surfing|beach|ocean)\b/.test(loc)) return "🏄";
       // Zoom / Meet / Teams URLs land here when location is the meet link
       if (/\b(zoom\.us|meet\.google|teams\.microsoft|webex)\b/.test(loc)) return "💻";
     }
@@ -1419,9 +1422,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             ? "ring-1 " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-500/40 bg-amber-500/5")
             : ""
       }`}>
-        {/* Row 1: Title + status */}
+        {/* Row 1: Title + status. The activity emoji prefixes the title per
+            SPEC-2.0 §3.6 (event card). Host-set `activityIcon` wins; falls
+            back to format-derived canonical emoji; final fallback is 🕐
+            when no activity / format signal is present. */}
         <div className="flex items-center gap-2.5 mb-1.5">
           <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />
+          {(() => {
+            const titleEmoji = linkActivityIcon || getMeetingEmoji(eventFormat || linkFormat, eventLocation || linkLocation) || "🕐";
+            return <span className="flex-shrink-0 select-none text-sm" aria-hidden="true">{titleEmoji}</span>;
+          })()}
           <span className="text-sm font-semibold text-primary truncate">{getEventTitle()}</span>
           {isVip && <span className="text-[10px] text-amber-500/60 dark:text-amber-400/50 flex-shrink-0 select-none" title="Priority meeting">★</span>}
           <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color} flex-shrink-0`}>{statusConfig.label}</span>
@@ -2430,7 +2440,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 <div className="space-y-1 text-sm text-primary">
                   <p>&#128197; {dt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: slotTimezone })}</p>
                   <p>&#128336; {dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: slotTimezone })} ({formatDuration(effective.duration)})</p>
-                  <p>&#128241; {effective.format.charAt(0).toUpperCase() + effective.format.slice(1)}</p>
+                  <p>{getMeetingEmoji(effective.format, null) || "🕐"} {effective.format.charAt(0).toUpperCase() + effective.format.slice(1)}</p>
                   {effective.location && <p>&#128205; {effective.location}</p>}
                 </div>
                 {inPast && (
