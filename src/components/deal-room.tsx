@@ -1260,7 +1260,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   Book time with {hostFirst}
                 </div>
                 <p className="text-sm text-secondary mb-4">
-                  You can still set up a meeting using {hostFirst}&rsquo;s booking link.
+                  You can still set up a meeting using {hostFirst}&rsquo;s link.
                 </p>
                 <a
                   href={primaryUrl}

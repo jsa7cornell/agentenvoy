@@ -82,7 +82,7 @@ export default function ArchivePage() {
           <div>
             <h1 className="text-lg font-semibold">Archived Meetings</h1>
             <p className="text-sm text-muted mt-0.5">
-              Past and completed negotiations
+              Past and completed events
             </p>
           </div>
           <button

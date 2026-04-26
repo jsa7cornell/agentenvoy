@@ -125,7 +125,7 @@ export async function GET() {
     if (!c.code) continue;
     links.push({
       kind: "contextual",
-      title: c.topic || c.inviteeName || "Contextual link",
+      title: c.topic || c.inviteeName || "Single-use link",
       url: `${baseUrl}/meet/${c.slug}/${c.code}`,
       slug: c.slug,
       code: c.code,

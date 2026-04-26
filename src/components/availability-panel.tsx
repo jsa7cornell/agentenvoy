@@ -1235,7 +1235,7 @@ export function AvailabilityPanel({
                 <p className="text-xs text-secondary mb-3">
                   {clickedSession.status === "agreed"
                     ? <>Cancel this meeting? The Google Calendar invite will be deleted and{" "}{clickedSession.guestName || "your guest"} will be notified.</>
-                    : <>Stop this negotiation? The session will be closed and {clickedSession.guestName || "your guest"} won&apos;t receive a new meeting.</>}
+                    : <>Stop coordinating this event? The session will be closed and {clickedSession.guestName || "your guest"} won&apos;t receive a new meeting.</>}
                 </p>
                 {clickedSession.status === "agreed" && (
                   <label className="block mb-3">
