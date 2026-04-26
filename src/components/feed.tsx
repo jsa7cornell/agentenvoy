@@ -171,13 +171,18 @@ function ForwardChips({ onSeed }: { onSeed: (seed: string) => void }) {
 /** Bubble used in the first-run + returning-dormant variants — readback
  *  of the user's currently-seeded scheduling posture so they know what
  *  we're working with. Reusable so a "still right?" nudge for dormant
- *  users gets the same affordances as the first-run intro. */
+ *  users gets the same affordances as the first-run intro.
+ *
+ *  Per mockups/mobile-v2.html §1 Frame 1: the standalone-link card was
+ *  pulled OUT of this bubble (was previously rendered inline at the bottom
+ *  for first-run). It now renders as a sibling under the bubble in
+ *  FirstRunWelcome — keeps the readback bubble focused on posture and lets
+ *  the link card carry an indigo-ringed "ready to share" affordance. */
 function PostureBubble({ p }: { p: SeededPosture }) {
   const bizRange = `${formatBizMinutes(p.businessHoursStartMinutes)}–${formatBizMinutes(p.businessHoursEndMinutes)}`;
   const tzLabel = p.timezone ? shortTimezoneLabel(p.timezone) : "";
   const provider =
     VIDEO_PROVIDER_DISPLAY[p.videoProvider] ?? p.videoProvider;
-  const meetUrl = p.meetSlug ? `agentenvoy.ai/meet/${p.meetSlug}` : null;
   const isFirstRun = p.welcomeVariant === "first-run";
 
   return (
@@ -218,14 +223,38 @@ function PostureBubble({ p }: { p: SeededPosture }) {
         <div className="mt-2 text-[12px] text-muted">
           All customizable any time.
         </div>
-        {isFirstRun && meetUrl && (
-          <>
-            <div className="mt-3 mb-1 text-[12px] text-muted">
-              Your link is ready to share:
-            </div>
-            <MeetLinkCard url={`https://${meetUrl}`} />
-          </>
-        )}
+      </div>
+    </div>
+  );
+}
+
+/** Standalone "your standard link is ready" card — renders under the
+ *  PostureBubble in the first-run welcome. Indigo-ringed, uppercase
+ *  micro-label header, URL + Copy in a tinted inset row. Mirrors the
+ *  `.standalone-link-card` block in mockups/mobile-v2.html §1 Frame 1. */
+function StandardLinkReadyCard({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="self-start w-full max-w-lg bg-surface border border-indigo-500/40 rounded-xl px-3.5 py-3 flex flex-col gap-2">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
+        <span aria-hidden="true">🔗</span>
+        Your standard link is ready
+      </div>
+      <div className="flex items-center gap-2 bg-surface-secondary border border-border rounded-lg px-3 py-1.5">
+        <code className="font-mono text-[11px] text-primary truncate flex-1">
+          {url}
+        </code>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(`https://${url}`);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+          className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold rounded-md transition flex-shrink-0"
+        >
+          {copied ? "Copied!" : "Copy"}
+        </button>
       </div>
     </div>
   );
@@ -334,6 +363,14 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
       </div>
 
       <PostureBubble p={posture} />
+
+      {/* Standalone link-card — pulled out of the posture bubble per the
+          mockup so the link reads as its own "ready to share" affordance
+          rather than a footnote. Only rendered for first-run (existing
+          users on the dormant variant haven't been issued a fresh link). */}
+      {posture.meetSlug && (
+        <StandardLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
+      )}
 
       {/* Forward bubble */}
       <div className="flex flex-col gap-1">
@@ -1180,7 +1217,9 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           />
         )}
         {messages.length === 0 && !loading && isCalibrated && primaryLinkFlowActive && (
-          <PrimaryLinkFlow />
+          <PrimaryLinkFlow
+            onDismiss={() => setPrimaryLinkFlowActive(false)}
+          />
         )}
 
         {messages.map((msg) => {
