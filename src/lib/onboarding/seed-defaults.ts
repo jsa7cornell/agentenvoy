@@ -8,6 +8,11 @@
  * proposal `2026-04-23_primary-link-config-convergence` §4 V1 item 5);
  * users tune via the welcome page's 🔗 primary-link flow or chat.
  *
+ * **Seed-everything principle (decided 2026-04-26):** at signup we lift
+ * whatever Google will give us via `fetchGoogleOnboardingSeed()` and
+ * merge it OVER the hardcoded defaults below. Hardcoded values are the
+ * floor; Google values win when present. The user tunes from there.
+ *
  * Fields NOT seeded (any default is more likely wrong than right): `phone`,
  * `zoomLink`, eveningsPosture. Proposal 3 gap-detectors pick these up
  * contextually when they're first needed.
@@ -31,8 +36,19 @@
  * to read all calendars — no migration; the change applies to fresh
  * sign-ups only.
  */
+import type { GoogleOnboardingSeed } from "@/lib/google-onboarding-seed";
+
+export interface SeedDefaultsOpts {
+  /** Browser-inferred timezone, used as a fallback only. Google's value
+   *  (when present in `googleSeed`) wins. */
+  timezone?: string;
+  /** Everything `fetchGoogleOnboardingSeed()` could pull. Each field
+   *  independently optional. Merged OVER hardcoded defaults. */
+  googleSeed?: GoogleOnboardingSeed;
+}
+
 export function buildSeededExplicit(
-  opts: { timezone?: string } = {},
+  opts: SeedDefaultsOpts = {},
 ): Record<string, unknown> {
   const seeded: Record<string, unknown> = {
     businessHoursStart: 9,
@@ -43,6 +59,26 @@ export function buildSeededExplicit(
     bufferMinutes: 0,
     activeCalendarIds: ["primary"],
   };
+
+  // Browser-inferred timezone is the fallback. Google's wins below.
   if (opts.timezone) seeded.timezone = opts.timezone;
+
+  // Merge whatever Google gave us OVER the hardcoded defaults.
+  const g = opts.googleSeed;
+  if (g) {
+    if (g.timezone) seeded.timezone = g.timezone;
+    if (g.locale) seeded.locale = g.locale;
+    if (g.weekStart !== undefined) seeded.weekStart = g.weekStart;
+    if (g.use24HourTime !== undefined) seeded.use24HourTime = g.use24HourTime;
+    if (g.defaultDuration !== undefined) {
+      seeded.defaultDuration = g.defaultDuration;
+    }
+    // prefersMeet is a soft signal — Google's "true" reinforces our
+    // hardcoded videoProvider:"google_meet". A "false" doesn't tell us
+    // what they DO prefer (Google doesn't expose that), so we leave the
+    // default in place. Stored as-is for downstream consumers.
+    if (g.prefersMeet !== undefined) seeded.prefersMeet = g.prefersMeet;
+  }
+
   return seeded;
 }
