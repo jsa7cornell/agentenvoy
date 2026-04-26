@@ -18,6 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { QuickReplies } from "./quick-replies";
+import { WelcomeCelebration } from "./welcome-celebration";
 import { parseBusinessHoursRange } from "@/lib/time-parse";
 
 type HourRangeValue = `${number}-${number}` | "__custom__";
@@ -69,8 +70,17 @@ function formatMinutes(m: number): string {
   return min === 0 ? `${h12}${suffix}` : `${h12}:${String(min).padStart(2, "0")}${suffix}`;
 }
 
-export function PrimaryLinkFlow() {
+interface PrimaryLinkFlowProps {
+  /** Fires when the host taps the celebration's "Back to chat" CTA at the
+   *  end of the flow. Caller should clear its `primaryLinkFlowActive` state
+   *  so the steady-state Home re-renders. Optional — older callers that
+   *  don't pass it simply leave the flow rendered (legacy behaviour). */
+  onDismiss?: () => void;
+}
+
+export function PrimaryLinkFlow({ onDismiss }: PrimaryLinkFlowProps = {}) {
   const [meetSlug, setMeetSlug] = useState<string | null>(null);
+  const [name, setName] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [step, setStep] = useState<Step>("intro");
   const [answers, setAnswers] = useState<Answers>({});
@@ -89,6 +99,7 @@ export function PrimaryLinkFlow() {
       .then((data) => {
         if (cancelled || !data) return;
         setMeetSlug(data.meetSlug ?? null);
+        setName(data.name ?? null);
         setTurns([
           {
             role: "envoy",
@@ -277,12 +288,24 @@ export function PrimaryLinkFlow() {
           ? handleBuffer
           : () => {};
 
+  // Legacy copy handler — kept for the fallback link card below the
+  // celebration when no `onDismiss` is wired (older callers). New callers
+  // get the celebration's own Copy button + Back-to-chat CTA.
   const copyLink = () => {
     if (!meetSlug) return;
     navigator.clipboard.writeText(`https://agentenvoy.ai/meet/${meetSlug}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  /** First-name extract for the celebration headline. Mirrors feed.tsx's
+   *  `firstNameOf`; kept local so the onboarding tree doesn't depend on
+   *  the feed component. */
+  function firstNameOf(n: string | null): string | null {
+    if (!n) return null;
+    const first = n.split(/\s+/)[0]?.trim();
+    return first ? first : null;
+  }
 
   return (
     <div className="flex-1 flex flex-col py-6 gap-3">
@@ -350,7 +373,21 @@ export function PrimaryLinkFlow() {
         </div>
       )}
 
-      {step === "done" && meetSlug && (
+      {/* Tune-preferences flow completion. The "All set!" Envoy recap
+          bubble (above) does the literal readback; the celebration drops
+          in alongside as the moment-marker, per mockups/mobile-v2.html
+          §1 Frame 5 + CODEBASE-CLEANUP item 21.
+          When no `onDismiss` is wired (legacy callers), fall through to a
+          calm link card so the host still has a copy affordance. */}
+      {step === "done" && onDismiss && (
+        <WelcomeCelebration
+          firstName={firstNameOf(name)}
+          meetSlug={meetSlug}
+          onDismiss={onDismiss}
+        />
+      )}
+
+      {step === "done" && !onDismiss && meetSlug && (
         <div className="self-start mt-2 bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 flex items-center gap-3 max-w-lg">
           <code className="text-xs text-purple-400 truncate flex-1">
             agentenvoy.ai/meet/{meetSlug}
