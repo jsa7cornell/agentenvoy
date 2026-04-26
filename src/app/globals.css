@@ -1,61 +1,11 @@
+/* Design tokens (light + dark) — see tokens.css for the source of truth.
+   Kept in a separate file so DESIGN.md §2 sync passes are a single-file diff.
+   Per CSS spec, @import must precede other rules. */
+@import "./tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-:root {
-  /* Legacy (used by body) */
-  --background: #fafaf9;
-  --foreground: #18181b;
-
-  /* Surfaces */
-  --surface: #ffffff;
-  --surface-secondary: #f4f4f5;
-  --surface-tertiary: #e7e7ea;
-  --surface-inset: #f5f5f4;
-
-  /* Text */
-  --text-primary: #18181b;
-  --text-secondary: #3f3f46;
-  --text-muted: #71717a;
-  --text-inverted: #fafafa;
-
-  /* Borders */
-  --border: #d4d4d8;
-  --border-secondary: #e4e4e7;
-
-  /* Accent */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-surface: #eef2ff;
-  --accent-2: #a855f7;
-  --accent-3: #22d3ee;
-  --accent-glow: rgba(79, 70, 229, 0.22);
-}
-
-.dark {
-  --background: #0a0a0f;
-  --foreground: #e8e8f0;
-
-  --surface: #0a0a0f;
-  --surface-secondary: #27272a;
-  --surface-tertiary: #3f3f46;
-  --surface-inset: #18181b;
-
-  --text-primary: #f4f4f5;
-  --text-secondary: #a1a1aa;
-  --text-muted: #71717a;
-  --text-inverted: #18181b;
-
-  --border: #3f3f46;
-  --border-secondary: #27272a;
-
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
-  --accent-surface: rgba(99, 102, 241, 0.15);
-  --accent-2: #c084fc;
-  --accent-3: #67e8f9;
-  --accent-glow: rgba(99, 102, 241, 0.32);
-}
 
 body {
   color: var(--foreground);

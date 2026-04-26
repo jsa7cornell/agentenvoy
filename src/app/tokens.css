@@ -1,0 +1,78 @@
+/**
+ * Design tokens — single source of truth for color values.
+ *
+ * Reconciled with DESIGN.md §2 "Color palette & roles".
+ * Path: handoff/claude-design/DESIGN.md
+ *
+ * Naming note: DESIGN.md §2 names the brand tokens `--brand-primary`,
+ * `--brand-accent`, `--brand-glow`. This codebase uses `--accent`,
+ * `--accent-2`, and `--accent-glow` for the same roles. The values are
+ * aligned with DESIGN.md; the names are kept to avoid touching the 34
+ * call-sites in components and `tailwind.config.ts`. Treat the names as
+ * aliases:
+ *
+ *   --accent       <=> --brand-primary
+ *   --accent-2     <=> --brand-accent
+ *   --accent-glow  <=> --brand-glow (color portion; the full shadow is
+ *                       composed in tailwind.config.ts boxShadow)
+ *
+ * Borders in dark mode use rgba(255,255,255,...) per DESIGN.md so they
+ * read as a soft tint over any surface, not as a flat zinc line.
+ */
+
+:root {
+  /* Page background / foreground (legacy aliases — kept in sync with
+     `--surface` and `--text-primary` per DESIGN.md §2 "page background"
+     usage rule). */
+  --background: #ffffff;
+  --foreground: #0a0a0f;
+
+  /* Surfaces */
+  --surface: #ffffff;
+  --surface-secondary: #f4f4f5;
+  --surface-tertiary: #e7e7ea;
+  --surface-inset: #d4d4d8;
+
+  /* Text */
+  --text-primary: #0a0a0f;
+  --text-secondary: #52525b;
+  --text-muted: #71717a;
+  --text-inverted: #fafafa;
+
+  /* Borders */
+  --border: #d4d4d8;
+  --border-secondary: #e4e4e7;
+
+  /* Accent (== brand) */
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-surface: #eef2ff;
+  --accent-2: #a855f7;
+  --accent-3: #22d3ee;
+  --accent-glow: rgba(79, 70, 229, 0.22);
+}
+
+.dark {
+  --background: #0a0a0f;
+  --foreground: #fafafa;
+
+  --surface: #0a0a0f;
+  --surface-secondary: #18181b;
+  --surface-tertiary: #27272a;
+  --surface-inset: #3f3f46;
+
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --text-inverted: #0a0a0f;
+
+  --border: rgba(255, 255, 255, 0.15);
+  --border-secondary: rgba(255, 255, 255, 0.08);
+
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-surface: rgba(99, 102, 241, 0.15);
+  --accent-2: #a855f7;
+  --accent-3: #67e8f9;
+  --accent-glow: rgba(99, 102, 241, 0.32);
+}
