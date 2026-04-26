@@ -55,29 +55,43 @@ interface ChannelMsg {
   } | null;
 }
 
-// ── First-run welcome ────────────────────────────────────────────────────
+// ── First-run welcome — variant dispatcher ───────────────────────────────
 
 /**
- * First-run greeting — shown on Home for calibrated users with no
- * messages yet. Reads the seeded posture (`/api/me/scheduling-defaults`),
- * shows the user what we lifted from their Google account, and offers
- * three forward chips (decided 2026-04-26):
+ * Home greeting — switches on a server-resolved welcome-variant
+ * (`/api/me/scheduling-defaults` returns `welcomeVariant`).
  *
- *   - Coordinate a meeting → seeds an Envoy prompt to start a coordination
- *   - Explore features → seeds a "show me what you can do" prompt
- *   - Tune preferences → triggers PrimaryLinkFlow guided 3-step
+ * Variants (state matrix per SPEC-2.0 §3.3):
  *
- * Replaces the previous 7-card discovery grid (coffee / office hours /
- * focus time / special event / group / recurring). The 3-chip set
- * compresses those into the three real next-moves; specific kinds of
- * meetings surface naturally from the chat once "Coordinate a meeting"
- * is tapped. Design refactor (in progress) may revisit.
+ *   - "first-run"          — true new host. Full 3-bubble greeting with
+ *                            seeded-posture readback + 3 forward chips.
+ *   - "guest-first"        — signed up after a guest experience. Single
+ *                            bubble acknowledging the prior interaction
+ *                            + 3 forward chips. NO posture readback (the
+ *                            user already saw Envoy from the guest side).
+ *   - "returning-dormant"  — has messages, last activity ≥ 14 days ago.
+ *                            Light "welcome back" bubble + 3 chips.
+ *                            STUB — renders null until copy/UX lands.
+ *   - "active"             — recent messages. Renders null. The chip
+ *                            stack is the implicit "current setup."
  *
- * Greeting bubble templates the seeded values so the user sees what
- * we lifted from Google + the hardcoded floor: business hours +
- * timezone, default duration + video provider, primary calendar.
- * "All customizable any time" sets the right expectation.
+ * The 3 forward chips (`Coordinate a meeting / Explore features / Tune
+ * preferences`) are extracted as `<ForwardChips>` and shared across
+ * variants — same actions, different surrounding framing.
+ *
+ * 2026-04-26: this replaces the legacy onboarding-machine flow for
+ * cold sign-ups. `events.createUser` now sets `lastCalibratedAt`
+ * immediately (seed-everything fully configured the user at signup),
+ * so /api/onboarding/chat never runs for new users; the demo-draft
+ * auto-fire is gone with it. In-flight users from before this change
+ * still see the legacy machine until they finish.
  */
+
+type WelcomeVariant =
+  | "first-run"
+  | "guest-first"
+  | "returning-dormant"
+  | "active";
 
 interface SeededPosture {
   name: string | null;
@@ -87,6 +101,8 @@ interface SeededPosture {
   videoProvider: string;
   timezone: string | null;
   meetSlug: string | null;
+  welcomeVariant: WelcomeVariant;
+  guestFirstContext: { hostName: string | null; date: string } | null;
 }
 
 const VIDEO_PROVIDER_DISPLAY: Record<string, string> = {
@@ -113,6 +129,108 @@ function firstNameOf(name: string | null): string {
   return name.split(/\s+/)[0];
 }
 
+/** Three forward chips reused across all greeting variants. Same actions
+ *  (coordinate / explore / tune); the bubble copy around them is what
+ *  changes per variant. */
+function ForwardChips({ onSeed }: { onSeed: (seed: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2 px-1">
+      <button
+        type="button"
+        onClick={() =>
+          onSeed(
+            "Help me coordinate a meeting — let's find a time and set up an invite.",
+          )
+        }
+        className="text-xs px-3 py-1.5 rounded-full bg-purple-600 hover:bg-purple-500 text-white font-medium transition"
+      >
+        Coordinate a meeting
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onSeed(
+            "Tell me what you can do — show me your most useful features like office hours, group events, and specialty invite links.",
+          )
+        }
+        className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-primary transition"
+      >
+        Explore features
+      </button>
+      <button
+        type="button"
+        onClick={() => onSeed("__primary_link_flow__")}
+        className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-primary transition"
+      >
+        Tune preferences
+      </button>
+    </div>
+  );
+}
+
+/** Bubble used in the first-run + returning-dormant variants — readback
+ *  of the user's currently-seeded scheduling posture so they know what
+ *  we're working with. Reusable so a "still right?" nudge for dormant
+ *  users gets the same affordances as the first-run intro. */
+function PostureBubble({ p }: { p: SeededPosture }) {
+  const bizRange = `${formatBizMinutes(p.businessHoursStartMinutes)}–${formatBizMinutes(p.businessHoursEndMinutes)}`;
+  const tzLabel = p.timezone ? shortTimezoneLabel(p.timezone) : "";
+  const provider =
+    VIDEO_PROVIDER_DISPLAY[p.videoProvider] ?? p.videoProvider;
+  const meetUrl = p.meetSlug ? `agentenvoy.ai/meet/${p.meetSlug}` : null;
+  const isFirstRun = p.welcomeVariant === "first-run";
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
+        Envoy
+      </span>
+      <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+        <div className="mb-2">
+          {isFirstRun
+            ? "I've already set you up using your Google Calendar:"
+            : "Quick refresher on your current setup:"}
+        </div>
+        <ul className="space-y-1 text-[13px] tabular-nums">
+          <li>
+            <span aria-hidden="true">⏰</span>{" "}
+            <span className="text-muted">Business hours:</span>{" "}
+            <span className="font-medium">{bizRange}</span>
+            {tzLabel && (
+              <>
+                , <span className="font-medium">{tzLabel}</span>
+              </>
+            )}
+          </li>
+          <li>
+            <span aria-hidden="true">⏱️</span>{" "}
+            <span className="text-muted">Default meetings:</span>{" "}
+            <span className="font-medium">
+              {p.defaultDuration}-minute {provider}
+            </span>
+          </li>
+          <li>
+            <span aria-hidden="true">📅</span>{" "}
+            <span className="text-muted">Reading from:</span>{" "}
+            <span className="font-medium">your primary calendar</span>
+          </li>
+        </ul>
+        <div className="mt-2 text-[12px] text-muted">
+          All customizable any time.
+        </div>
+        {isFirstRun && meetUrl && (
+          <>
+            <div className="mt-3 mb-1 text-[12px] text-muted">
+              Your link is ready to share:
+            </div>
+            <MeetLinkCard url={`https://${meetUrl}`} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
   const [posture, setPosture] = useState<SeededPosture | null>(null);
 
@@ -130,6 +248,8 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
           videoProvider: data.videoProvider ?? "google_meet",
           timezone: data.timezone ?? null,
           meetSlug: data.meetSlug ?? null,
+          welcomeVariant: (data.welcomeVariant as WelcomeVariant) ?? "first-run",
+          guestFirstContext: data.guestFirstContext ?? null,
         });
       })
       .catch(() => {});
@@ -138,26 +258,59 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
     };
   }, []);
 
-  // Render skeleton-free fallback with hardcoded floor values until the
-  // fetch resolves. Same shape; values just aren't templated yet. Avoids
-  // a flash of empty bubble.
-  const p: SeededPosture = posture ?? {
-    name: null,
-    businessHoursStartMinutes: 540,
-    businessHoursEndMinutes: 1020,
-    defaultDuration: 30,
-    videoProvider: "google_meet",
-    timezone: null,
-    meetSlug: null,
-  };
+  // Don't render anything until the variant is known. The fetch is fast;
+  // showing a flash of generic content while the server decides which
+  // variant we are would be worse than a moment of empty space. (The
+  // chip stack above us is already rendered, so the page isn't blank.)
+  if (!posture) return null;
 
-  const firstName = firstNameOf(p.name);
-  const bizRange = `${formatBizMinutes(p.businessHoursStartMinutes)}–${formatBizMinutes(p.businessHoursEndMinutes)}`;
-  const tzLabel = p.timezone ? shortTimezoneLabel(p.timezone) : "";
-  const provider =
-    VIDEO_PROVIDER_DISPLAY[p.videoProvider] ?? p.videoProvider;
-  const meetUrl = p.meetSlug ? `agentenvoy.ai/meet/${p.meetSlug}` : null;
+  // Active steady-state: no greeting. The chip stack at the top of the
+  // feed is the implicit "current setup" affordance.
+  if (posture.welcomeVariant === "active") return null;
 
+  // Returning-dormant: stub for now — slot wired but copy/UX deferred.
+  // Renders null in this PR; will become a "welcome back" bubble +
+  // posture refresher + chips in a follow-up once the design lands.
+  // TODO(returning-dormant): light bubble, posture refresher, ForwardChips.
+  if (posture.welcomeVariant === "returning-dormant") return null;
+
+  // Guest-first: user came in via someone else's link, signed up,
+  // landed on Home. Acknowledge the prior interaction; skip the
+  // posture readback (they saw Envoy from the guest side already).
+  if (posture.welcomeVariant === "guest-first") {
+    const ctx = posture.guestFirstContext;
+    const hostName = ctx?.hostName ?? "someone";
+    const dateLabel = ctx?.date
+      ? new Date(ctx.date).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        })
+      : null;
+    return (
+      <div className="flex-1 flex flex-col justify-center py-6 gap-4">
+        <h1 className="text-xl sm:text-2xl font-semibold text-primary px-1">
+          👋 Welcome back, {firstNameOf(posture.name)}.
+        </h1>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
+            Envoy
+          </span>
+          <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+            I see you joined {hostName}&rsquo;s meeting
+            {dateLabel ? ` on ${dateLabel}` : ""} — now you&rsquo;ve got
+            your own AgentEnvoy account. I can coordinate meetings on
+            your behalf the same way: share a link, your invitee chats
+            with me, I work out a time. Want to set up your first one?
+          </div>
+        </div>
+
+        <ForwardChips onSeed={onSeed} />
+      </div>
+    );
+  }
+
+  // first-run (default): full intro.
   return (
     <div className="flex-1 flex flex-col justify-center py-6 gap-4">
       {/* Welcome — H1 for the page itself. Pin at top, not in the chat
@@ -172,7 +325,7 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
           Envoy
         </span>
         <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
-          👋 Hey {firstName} — I&rsquo;m Envoy. I run{" "}
+          👋 Hey {firstNameOf(posture.name)} — I&rsquo;m Envoy. I run{" "}
           <em className="not-italic font-medium text-purple-300">personalized</em>{" "}
           scheduling on your behalf so you don&rsquo;t have to chase
           calendars. Share a link, your invitee chats with me, and I work
@@ -180,56 +333,9 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
         </div>
       </div>
 
-      {/* Seeded-posture summary bubble. Shows the user what we lifted
-          from Google + the hardcoded floor (9–5 always; everything else
-          may be a Google override). */}
-      <div className="flex flex-col gap-1">
-        <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
-          Envoy
-        </span>
-        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
-          <div className="mb-2">
-            I&rsquo;ve already set you up using your Google Calendar:
-          </div>
-          <ul className="space-y-1 text-[13px] tabular-nums">
-            <li>
-              <span aria-hidden="true">⏰</span>{" "}
-              <span className="text-muted">Business hours:</span>{" "}
-              <span className="font-medium">{bizRange}</span>
-              {tzLabel && (
-                <>
-                  , <span className="font-medium">{tzLabel}</span>
-                </>
-              )}
-            </li>
-            <li>
-              <span aria-hidden="true">⏱️</span>{" "}
-              <span className="text-muted">Default meetings:</span>{" "}
-              <span className="font-medium">
-                {p.defaultDuration}-minute {provider}
-              </span>
-            </li>
-            <li>
-              <span aria-hidden="true">📅</span>{" "}
-              <span className="text-muted">Reading from:</span>{" "}
-              <span className="font-medium">your primary calendar</span>
-            </li>
-          </ul>
-          <div className="mt-2 text-[12px] text-muted">
-            All customizable any time.
-          </div>
-          {meetUrl && (
-            <>
-              <div className="mt-3 mb-1 text-[12px] text-muted">
-                Your link is ready to share:
-              </div>
-              <MeetLinkCard url={`https://${meetUrl}`} />
-            </>
-          )}
-        </div>
-      </div>
+      <PostureBubble p={posture} />
 
-      {/* Forward bubble + 3 chips */}
+      {/* Forward bubble */}
       <div className="flex flex-col gap-1">
         <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
           Envoy
@@ -242,37 +348,7 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 px-1">
-        <button
-          type="button"
-          onClick={() =>
-            onSeed(
-              "Help me coordinate a meeting — let's find a time and set up an invite.",
-            )
-          }
-          className="text-xs px-3 py-1.5 rounded-full bg-purple-600 hover:bg-purple-500 text-white font-medium transition"
-        >
-          Coordinate a meeting
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            onSeed(
-              "Tell me what you can do — show me your most useful features like office hours, group events, and specialty invite links.",
-            )
-          }
-          className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-primary transition"
-        >
-          Explore features
-        </button>
-        <button
-          type="button"
-          onClick={() => onSeed("__primary_link_flow__")}
-          className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-primary transition"
-        >
-          Tune preferences
-        </button>
-      </div>
+      <ForwardChips onSeed={onSeed} />
     </div>
   );
 }

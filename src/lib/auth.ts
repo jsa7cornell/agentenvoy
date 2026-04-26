@@ -14,6 +14,7 @@ import {
   type HostEntryPoint,
 } from "@/lib/oauth/required-scopes";
 import { buildSeededExplicit } from "@/lib/onboarding/seed-defaults";
+import { logCalibrationWrite } from "@/lib/calibration-audit";
 import { fetchGoogleOnboardingSeed } from "@/lib/google-onboarding-seed";
 
 // Dev-only credentials provider — NEVER available in production
@@ -238,21 +239,34 @@ export const authOptions: NextAuthOptions = {
 
       // Seed-and-show defaults. Hardcoded floor (9am–5pm, Google Meet,
       // 30min, no buffer) gets overlaid by anything Google gave us.
-      // Seed-preview is inlined on the `complete` onboarding message
-      // (post-2026-04-23 sunset of `defaults_confirm`; proposal
-      // `2026-04-23_primary-link-config-convergence` §4 V1 item 5);
-      // tuning happens on the welcome page's 🔗 primary-link flow.
       const preferences: Record<string, unknown> = {
         explicit: buildSeededExplicit({ googleSeed }),
       };
+
+      // 2026-04-26: with seed-everything (PR #138), calibration is done
+      // at signup — there's no scalar left to ask. We mark the user
+      // calibrated immediately so the legacy onboarding-machine
+      // (intro→complete with demo-draft auto-fire) is skipped, and the
+      // first-run greeting is owned by `<FirstRunWelcome>` in feed.tsx.
+      // The onboarding-machine code stays in place as a legacy fallback
+      // for any in-flight users whose `lastCalibratedAt` is still null
+      // when this lands; their next /api/onboarding/chat GET sees the
+      // calibrated bounce path and redirects to /dashboard.
+      const calibratedAt = new Date();
+      logCalibrationWrite({
+        userId: user.id,
+        value: calibratedAt,
+        source: "createUser-seed-everything",
+      });
 
       await prisma.user.update({
         where: { id: user.id },
         data: {
           meetSlug: slug,
           preferences: preferences as Prisma.InputJsonValue,
+          lastCalibratedAt: calibratedAt,
           persistentKnowledge: [
-            "- This host has not been calibrated yet. Run the onboarding calibration exercise to learn their scheduling preferences.",
+            "- This host's scheduling posture was seeded from their Google Calendar at signup (timezone, locale, week-start, default meeting length, video-call autoadd preference). Hardcoded floor: 9am–5pm, 30-min Google Meet, no buffer, primary-calendar-only read.",
             "- Default posture: balanced — offer open slots, flag flexible blocks, ask before moving anything.",
             "- Default to 30-minute meetings unless context suggests otherwise.",
             "- Prefer consolidating meetings on fewer days over spreading them out.",
