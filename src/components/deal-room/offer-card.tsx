@@ -81,6 +81,12 @@ export function OfferCard({
   const formatLabel = format
     ? format.charAt(0).toUpperCase() + format.slice(1)
     : null;
+  // Format-row emoji from canonical set (CODEBASE-CLEANUP §22 / SPEC-2.0
+  // §3.6): 💻 video, 📱 phone, 👤 in-person, 🕐 fallback.
+  const formatEmoji = format === "video" ? "💻"
+    : format === "phone" ? "📱"
+    : format === "in-person" ? "👤"
+    : "🕐";
 
   return (
     <div className="flex justify-start" data-testid="deal-room-offer-card">
@@ -108,7 +114,7 @@ export function OfferCard({
             <p>
               🕐 {timeLabel} ({formatDuration(durationMin)})
             </p>
-            {formatLabel && <p>📱 {formatLabel}</p>}
+            {formatLabel && <p>{formatEmoji} {formatLabel}</p>}
             {location && <p>📍 {location}</p>}
           </div>
           <button
