@@ -91,10 +91,11 @@ export function looksFabricated(clarifier: string): boolean {
   // "Did you want to schedule X as a meeting, or are you letting me know
   // you're unavailable…" — the exact Failure-C shape.
   if (s.includes("as a meeting") && s.includes("unavailable")) return true;
-  // "Do you want to schedule or add an availability rule…" — the other
+  // "Do you want to schedule [that] or add an availability rule…" — the other
   // observed dead-end binary (schedule-vs-rule) that v1 can't even route to.
-  if (s.includes("schedule or") && s.includes("rule")) return true;
-  if (s.includes("schedule or") && s.includes("availability")) return true;
+  // Matches both "schedule or" and "schedule that or" (Haiku variant).
+  if (/schedule\b.{0,20}\bor\b/.test(s) && s.includes("rule")) return true;
+  if (/schedule\b.{0,20}\bor\b/.test(s) && s.includes("availability")) return true;
   return false;
 }
 
