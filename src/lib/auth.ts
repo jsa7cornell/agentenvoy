@@ -3,7 +3,6 @@ import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { Prisma } from "@prisma/client";
-import { google } from "googleapis";
 import { prisma } from "./prisma";
 import { dispatchWelcomeEmailOnce } from "@/lib/emails/welcome";
 import { cookies } from "next/headers";
@@ -15,6 +14,7 @@ import {
   type HostEntryPoint,
 } from "@/lib/oauth/required-scopes";
 import { buildSeededExplicit } from "@/lib/onboarding/seed-defaults";
+import { fetchGoogleOnboardingSeed } from "@/lib/google-onboarding-seed";
 
 // Dev-only credentials provider — NEVER available in production
 const devProvider =
@@ -230,41 +230,20 @@ export const authOptions: NextAuthOptions = {
         slug = `${base}${counter}`;
         counter++;
       }
-      // Fetch timezone from Google Calendar settings
-      let timezone: string | undefined;
-      try {
-        const account = await prisma.account.findFirst({
-          where: { userId: user.id, provider: "google" },
-        });
-        if (account?.access_token) {
-          const oauth2Client = new google.auth.OAuth2(
-            process.env.GOOGLE_CLIENT_ID,
-            process.env.GOOGLE_CLIENT_SECRET
-          );
-          oauth2Client.setCredentials({
-            access_token: account.access_token,
-            refresh_token: account.refresh_token,
-          });
-          const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-          const res = await calendar.settings.get({ setting: "timezone" });
-          if (res.data.value) {
-            timezone = res.data.value;
-          }
-        }
-      } catch (e) {
-        console.error("Failed to fetch timezone from Google Calendar:", e);
-      }
+      // Pull whatever Google will give us — timezone, locale, weekStart,
+      // 12/24h preference, default meeting length, Meet auto-add. One
+      // round-trip via `settings.list()`. Defensive: returns {} on any
+      // failure, never blocks signup. See `google-onboarding-seed.ts`.
+      const googleSeed = await fetchGoogleOnboardingSeed(user.id);
 
-      // Seed-and-show defaults — fresh users land with sensible defaults
-      // (9am–5pm, Google Meet, 30min, no buffer). The seed-preview is
-      // inlined on the `complete` onboarding message (post-2026-04-23
-      // sunset of `defaults_confirm`; proposal
+      // Seed-and-show defaults. Hardcoded floor (9am–5pm, Google Meet,
+      // 30min, no buffer) gets overlaid by anything Google gave us.
+      // Seed-preview is inlined on the `complete` onboarding message
+      // (post-2026-04-23 sunset of `defaults_confirm`; proposal
       // `2026-04-23_primary-link-config-convergence` §4 V1 item 5);
       // tuning happens on the welcome page's 🔗 primary-link flow.
-      // `buildSeededExplicit` omits timezone when not present; scoring
-      // falls back to UTC until the intro phase captures it.
       const preferences: Record<string, unknown> = {
-        explicit: buildSeededExplicit({ timezone }),
+        explicit: buildSeededExplicit({ googleSeed }),
       };
 
       await prisma.user.update({
