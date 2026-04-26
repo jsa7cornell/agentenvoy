@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoFull } from "./logo";
 import { MyLinksPopover } from "./my-links-popover";
+import { MobileDashboardHeader } from "./mobile/mobile-dashboard-header";
 import { useOAuthSignIn, hasReturningCookie } from "./oauth/use-oauth-signin";
 import { onboardingCallbackUrl } from "@/lib/onboarding/return-to";
 
@@ -24,6 +25,13 @@ interface ConnectionStatus {
  *
  * Never build a bespoke header for a single page. Inline banners below the
  * header can vary freely, but the header itself is always this component.
+ *
+ * **Responsive split (Phase 1 PR 3, 2026-04-26).** At and above the `md:`
+ * breakpoint the signed-in viewer sees the desktop chrome below. Below `md:`
+ * we render `<MobileDashboardHeader>` instead — the v2 three-element topbar
+ * (avatar | "Event Links" header pill | calendar icon). Desktop chrome stays
+ * untouched until Phase 2; the anonymous branch is unchanged in either mode.
+ * See `refactor-package-2026-04-25/SPEC-2.0.md` §3.1.
  */
 export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: string } = {}) {
   const { data: session, status: sessionStatus } = useSession();
@@ -99,7 +107,13 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
   }
 
   return (
-    <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0">
+    <>
+      {/* Mobile chrome (below `md:`) — three-element topbar. Phase 1 PR 3. */}
+      <MobileDashboardHeader session={session!} />
+
+      {/* Desktop chrome (`md:` and up) — unchanged from production. Phase 2
+          owns the desktop rebuild. */}
+      <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0 hidden md:block">
       <div className="px-4 sm:px-6 py-2.5 flex items-center gap-3">
         {/* Logo → home for the signed-in viewer. Points at /dashboard for the
             primary account entry; the highlight state only applies when
@@ -193,6 +207,7 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
           </span>
         </Link>
       </div>
-    </header>
+      </header>
+    </>
   );
 }
