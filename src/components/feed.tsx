@@ -11,6 +11,7 @@ import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
 import { SchedulingStatusChip } from "./scheduling-status-chip";
 import { SchedulingLinksChipList } from "./scheduling-links-chip-list";
 import { SchedulingBlocksChip } from "./scheduling-blocks-chip";
+import { shortTimezoneLabel } from "@/lib/timezone";
 import { GcalUpdateCard } from "./gcal-update-card";
 import { SendFeedbackLink } from "./send-feedback";
 import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
@@ -56,107 +57,221 @@ interface ChannelMsg {
 
 // ── First-run welcome ────────────────────────────────────────────────────
 
-const SUGGESTION_CARDS = [
-  {
-    label: "🔗  Set up my primary invite link",
-    sub: "Your main AgentEnvoy link — share it with anyone to book time",
-    // This card triggers the PrimaryLinkFlow guided sequence rather than
-    // seeding a prompt. Sentinel — see FirstRunWelcome handler.
-    seed: "__primary_link_flow__",
-  },
-  {
-    label: "☕  Find time for coffee",
-    sub: "Grab coffee with someone specific",
-    seed: "Help me set up a coffee with someone — send them a link so we can find a time that works.",
-  },
-  {
-    label: "🕐  Create an Office Hours link",
-    sub: "Recurring windows where anyone can book",
-    seed: "Create an office hours link — 30-minute slots during my available windows, anyone can book",
-  },
-  {
-    label: "🧘  Protect focus time",
-    sub: "Block time I won't touch",
-    seed: "Block my mornings before 11am — I need that time for deep work",
-    mobileHidden: true,
-  },
-  {
-    label: "🎉  Plan a special event",
-    sub: "Custom link for a bike ride, dinner, or other occasion",
-    seed: "Set up a custom link for a special occasion — like a bike ride or dinner with someone",
-    mobileHidden: true,
-  },
-  {
-    label: "👥  Schedule a group gathering",
-    sub: "Find a time that works for everyone",
-    seed: "Set up a group gathering for my team — about an hour, video call, next week",
-    mobileHidden: true,
-    comingSoon: true,
-  },
-  {
-    label: "🔁  Coordinate a recurring event",
-    sub: "Weekly 1:1s, monthly team syncs, standing book clubs",
-    seed: "Help me set up a recurring event",
-    mobileHidden: true,
-    comingSoon: true,
-    wide: true,
-  },
-] satisfies Array<{ label: string; sub: string; seed: string; mobileHidden?: boolean; wide?: boolean; comingSoon?: boolean }>;
+/**
+ * First-run greeting — shown on Home for calibrated users with no
+ * messages yet. Reads the seeded posture (`/api/me/scheduling-defaults`),
+ * shows the user what we lifted from their Google account, and offers
+ * three forward chips (decided 2026-04-26):
+ *
+ *   - Coordinate a meeting → seeds an Envoy prompt to start a coordination
+ *   - Explore features → seeds a "show me what you can do" prompt
+ *   - Tune preferences → triggers PrimaryLinkFlow guided 3-step
+ *
+ * Replaces the previous 7-card discovery grid (coffee / office hours /
+ * focus time / special event / group / recurring). The 3-chip set
+ * compresses those into the three real next-moves; specific kinds of
+ * meetings surface naturally from the chat once "Coordinate a meeting"
+ * is tapped. Design refactor (in progress) may revisit.
+ *
+ * Greeting bubble templates the seeded values so the user sees what
+ * we lifted from Google + the hardcoded floor: business hours +
+ * timezone, default duration + video provider, primary calendar.
+ * "All customizable any time" sets the right expectation.
+ */
+
+interface SeededPosture {
+  name: string | null;
+  businessHoursStartMinutes: number;
+  businessHoursEndMinutes: number;
+  defaultDuration: number;
+  videoProvider: string;
+  timezone: string | null;
+  meetSlug: string | null;
+}
+
+const VIDEO_PROVIDER_DISPLAY: Record<string, string> = {
+  google_meet: "Google Meet",
+  zoom: "Zoom",
+  webex: "Webex",
+  teams: "Microsoft Teams",
+  phone: "phone",
+  in_person: "in-person",
+};
+
+function formatBizMinutes(m: number): string {
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  const suffix = h < 12 || h === 24 ? "am" : "pm";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return min === 0
+    ? `${h12}${suffix}`
+    : `${h12}:${String(min).padStart(2, "0")}${suffix}`;
+}
+
+function firstNameOf(name: string | null): string {
+  if (!name) return "there";
+  return name.split(/\s+/)[0];
+}
 
 function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
-  const [expanded, setExpanded] = useState(false);
+  const [posture, setPosture] = useState<SeededPosture | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/me/scheduling-defaults")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setPosture({
+          name: data.name ?? null,
+          businessHoursStartMinutes: data.businessHoursStartMinutes ?? 540,
+          businessHoursEndMinutes: data.businessHoursEndMinutes ?? 1020,
+          defaultDuration: data.defaultDuration ?? 30,
+          videoProvider: data.videoProvider ?? "google_meet",
+          timezone: data.timezone ?? null,
+          meetSlug: data.meetSlug ?? null,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Render skeleton-free fallback with hardcoded floor values until the
+  // fetch resolves. Same shape; values just aren't templated yet. Avoids
+  // a flash of empty bubble.
+  const p: SeededPosture = posture ?? {
+    name: null,
+    businessHoursStartMinutes: 540,
+    businessHoursEndMinutes: 1020,
+    defaultDuration: 30,
+    videoProvider: "google_meet",
+    timezone: null,
+    meetSlug: null,
+  };
+
+  const firstName = firstNameOf(p.name);
+  const bizRange = `${formatBizMinutes(p.businessHoursStartMinutes)}–${formatBizMinutes(p.businessHoursEndMinutes)}`;
+  const tzLabel = p.timezone ? shortTimezoneLabel(p.timezone) : "";
+  const provider =
+    VIDEO_PROVIDER_DISPLAY[p.videoProvider] ?? p.videoProvider;
+  const meetUrl = p.meetSlug ? `agentenvoy.ai/meet/${p.meetSlug}` : null;
 
   return (
-    <div className="flex-1 flex flex-col justify-center py-6 gap-5">
-      {/* Envoy welcome bubble */}
+    <div className="flex-1 flex flex-col justify-center py-6 gap-4">
+      {/* Welcome — H1 for the page itself. Pin at top, not in the chat
+          column, so it reads as a page header rather than another bubble. */}
+      <h1 className="text-xl sm:text-2xl font-semibold text-primary px-1">
+        🎉 Welcome to AgentEnvoy.
+      </h1>
+
+      {/* Envoy intro bubble */}
       <div className="flex flex-col gap-1">
         <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
           Envoy
         </span>
         <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
-          👋 Hey! I&rsquo;m Envoy — I handle your scheduling so you don&rsquo;t have to. The most important thing to set up first is your <span className="font-medium">primary invite link</span>. Pick one below to get started.
+          👋 Hey {firstName} — I&rsquo;m Envoy. I run{" "}
+          <em className="not-italic font-medium text-purple-300">personalized</em>{" "}
+          scheduling on your behalf so you don&rsquo;t have to chase
+          calendars. Share a link, your invitee chats with me, and I work
+          out a time tailored to each guest.
         </div>
       </div>
 
-      {/* Suggestion cards */}
-      <div className="grid grid-cols-2 gap-2">
-        {SUGGESTION_CARDS.map((card) => (
-          <button
-            key={card.label}
-            type="button"
-            disabled={card.comingSoon}
-            onClick={() => !card.comingSoon && onSeed(card.seed)}
-            className={[
-              "text-left rounded-xl border border-secondary bg-surface transition px-3 py-2.5 flex-col gap-0.5 relative",
-              card.wide ? "col-span-2" : "",
-              card.mobileHidden && !expanded ? "hidden md:flex" : "flex",
-              card.comingSoon
-                ? "opacity-60 cursor-not-allowed"
-                : "hover:bg-secondary/40",
-            ].join(" ")}
-          >
-            <span className="text-xs font-medium text-primary flex items-center gap-1.5">
-              {card.label}
-              {card.comingSoon && (
-                <span className="text-[9px] font-semibold uppercase tracking-wide text-purple-400 border border-purple-500/40 rounded px-1 py-[1px] leading-none">
-                  Coming soon
-                </span>
+      {/* Seeded-posture summary bubble. Shows the user what we lifted
+          from Google + the hardcoded floor (9–5 always; everything else
+          may be a Google override). */}
+      <div className="flex flex-col gap-1">
+        <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
+          Envoy
+        </span>
+        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+          <div className="mb-2">
+            I&rsquo;ve already set you up using your Google Calendar:
+          </div>
+          <ul className="space-y-1 text-[13px] tabular-nums">
+            <li>
+              <span aria-hidden="true">⏰</span>{" "}
+              <span className="text-muted">Business hours:</span>{" "}
+              <span className="font-medium">{bizRange}</span>
+              {tzLabel && (
+                <>
+                  , <span className="font-medium">{tzLabel}</span>
+                </>
               )}
-            </span>
-            <span className="text-[11px] text-muted leading-snug">{card.sub}</span>
-          </button>
-        ))}
+            </li>
+            <li>
+              <span aria-hidden="true">⏱️</span>{" "}
+              <span className="text-muted">Default meetings:</span>{" "}
+              <span className="font-medium">
+                {p.defaultDuration}-minute {provider}
+              </span>
+            </li>
+            <li>
+              <span aria-hidden="true">📅</span>{" "}
+              <span className="text-muted">Reading from:</span>{" "}
+              <span className="font-medium">your primary calendar</span>
+            </li>
+          </ul>
+          <div className="mt-2 text-[12px] text-muted">
+            All customizable any time.
+          </div>
+          {meetUrl && (
+            <>
+              <div className="mt-3 mb-1 text-[12px] text-muted">
+                Your link is ready to share:
+              </div>
+              <MeetLinkCard url={`https://${meetUrl}`} />
+            </>
+          )}
+        </div>
+      </div>
 
-        {/* See more — mobile only, hidden once expanded */}
-        {!expanded && (
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="md:hidden col-span-2 text-xs text-muted border border-dashed border-secondary rounded-xl px-3 py-2 hover:text-secondary transition"
-          >
-            See more ↓
-          </button>
-        )}
+      {/* Forward bubble + 3 chips */}
+      <div className="flex flex-col gap-1">
+        <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
+          Envoy
+        </span>
+        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+          Let&rsquo;s keep going. I can show you powerful features like
+          office hours and group events, or help you set specific
+          preferences for different kinds of meetings — or you can hand
+          me your first meeting and let&rsquo;s just go.
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 px-1">
+        <button
+          type="button"
+          onClick={() =>
+            onSeed(
+              "Help me coordinate a meeting — let's find a time and set up an invite.",
+            )
+          }
+          className="text-xs px-3 py-1.5 rounded-full bg-purple-600 hover:bg-purple-500 text-white font-medium transition"
+        >
+          Coordinate a meeting
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            onSeed(
+              "Tell me what you can do — show me your most useful features like office hours, group events, and specialty invite links.",
+            )
+          }
+          className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-primary transition"
+        >
+          Explore features
+        </button>
+        <button
+          type="button"
+          onClick={() => onSeed("__primary_link_flow__")}
+          className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-primary transition"
+        >
+          Tune preferences
+        </button>
       </div>
     </div>
   );

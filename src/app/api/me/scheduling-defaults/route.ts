@@ -72,7 +72,7 @@ export async function GET() {
   const [user, linkCount] = await Promise.all([
     prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { preferences: true, meetSlug: true },
+      select: { preferences: true, meetSlug: true, name: true },
     }),
     prisma.negotiationLink.count({ where: { userId: session.user.id } }),
   ]);
@@ -93,6 +93,13 @@ export async function GET() {
     (e as { structuredRules?: Array<{ action?: string }> }).structuredRules ?? [];
   const blockCount = structuredRules.filter((r) => r.action === "block").length;
 
+  // Seeded posture surfaces in the first-run greeting (2026-04-26+) so
+  // the user sees the values we lifted from Google + the hardcoded
+  // floor. Display-only on the greeting; no scoring impact.
+  const tz = (e as { timezone?: string }).timezone ?? null;
+  const videoProvider =
+    (e as { videoProvider?: string }).videoProvider ?? "google_meet";
+
   return NextResponse.json({
     businessHoursStart: bhs,
     businessHoursEnd: bhe,
@@ -104,6 +111,10 @@ export async function GET() {
     // Counts surface on the scheduling status chip.
     linkCount,
     blockCount,
+    // Greeting-card display fields (2026-04-26+).
+    timezone: tz,
+    videoProvider,
+    name: user.name ?? null,
   });
 }
 
