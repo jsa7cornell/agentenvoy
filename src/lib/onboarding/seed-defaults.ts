@@ -17,6 +17,19 @@
  * `defaultFormat`, string `videoProvider`, integer `defaultDuration`,
  * integer `bufferMinutes`. Values are chosen per John's seed-and-show
  * pass: 9am–5pm, Google Meet, 30-minute meetings, no buffer.
+ *
+ * `activeCalendarIds: ["primary"]` (added 2026-04-26): a brand-new user's
+ * connected Google account often surfaces 5+ calendars (work, personal,
+ * holidays, family, subscribed feeds). Reading all of them at once leaks
+ * irrelevant busy-time into availability scoring. Seeding the filter to
+ * just the primary calendar — Google's canonical alias for the calendar
+ * tied to the signing-in email — gets new users to a working "this is
+ * MY calendar" mental model. Users broaden via the picker in the
+ * availability panel; `activeCalendarIds` is honored by sync, scoring,
+ * and live reads (see `src/lib/calendar.ts:251/464/544`,
+ * `src/lib/scoring.ts:161`). Existing users without the field continue
+ * to read all calendars — no migration; the change applies to fresh
+ * sign-ups only.
  */
 export function buildSeededExplicit(
   opts: { timezone?: string } = {},
@@ -28,6 +41,7 @@ export function buildSeededExplicit(
     videoProvider: "google_meet",
     defaultDuration: 30,
     bufferMinutes: 0,
+    activeCalendarIds: ["primary"],
   };
   if (opts.timezone) seeded.timezone = opts.timezone;
   return seeded;
