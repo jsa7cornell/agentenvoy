@@ -18,12 +18,12 @@
  * §3.1 and `mockups/mobile-v2.html` §3 for the visual contract.
  *
  * Cyan dot on the header pill indicates that one or more sessions are in
- * `awaiting_ack_self` state. Today the codebase has no aggregated count
- * endpoint (the `Notification` model is write-only — the bell UI is v1.1+
- * per `WISHLIST.md notification-bell-and-center`). The dot is therefore
- * prop-driven (`hasAwaitingAck`) and defaults to `false` until an aggregator
- * lands. Wiring the data source is a separate decision-surface flagged in the
- * PR description.
+ * `awaiting_ack_self` state. Backed by `/api/dashboard/badge-counts`, which
+ * counts unread notifications of kind `awaiting_ack_self` for the signed-in
+ * user. The component self-fetches on mount and revalidates every 30s; the
+ * dot is decorative, so fetch failures render nothing rather than surfacing
+ * an error. The notification bell / center in `WISHLIST.md
+ * notification-bell-and-center` will share this aggregator when it lands.
  */
 
 import { useEffect, useState } from "react";
@@ -34,17 +34,50 @@ import { EventLinksSheet } from "./event-links-sheet";
 
 interface MobileDashboardHeaderProps {
   session: Session;
-  /** Truthy when at least one session is in `awaiting_ack_self`. Prop-driven
-   * because the codebase has no aggregator yet — see the file header. */
-  hasAwaitingAck?: boolean;
 }
 
-export function MobileDashboardHeader({
-  session,
-  hasAwaitingAck = false,
-}: MobileDashboardHeaderProps) {
+const BADGE_COUNTS_REVALIDATE_MS = 30_000;
+
+export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
+  const [awaitingAck, setAwaitingAck] = useState(0);
+
+  // Fetch the cyan-dot count on mount and revalidate every 30s. Defensive: a
+  // fetch failure keeps the previous value (initially 0 → no dot), since the
+  // dot is decorative and the underlying data is informational. The cleanup
+  // both clears the interval and aborts an in-flight fetch on unmount.
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function load() {
+      try {
+        const res = await fetch("/api/dashboard/badge-counts", {
+          signal: controller.signal,
+          credentials: "same-origin",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { awaitingAck?: unknown };
+        if (cancelled) return;
+        if (typeof data.awaitingAck === "number" && Number.isFinite(data.awaitingAck)) {
+          setAwaitingAck(data.awaitingAck);
+        }
+      } catch {
+        // Silent fail — dot is decorative.
+      }
+    }
+
+    load();
+    const timer = setInterval(load, BADGE_COUNTS_REVALIDATE_MS);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, []);
+
+  const hasAwaitingAck = awaitingAck > 0;
 
   // Lock body scroll while either sheet is open. Mobile sheets cover the
   // viewport; without this the underlying page scrolls when users drag on
