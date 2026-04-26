@@ -481,6 +481,12 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
       messages: Array<{ content: string; options?: QuickReplyOption[]; delay?: number }>;
       autoAdvance?: boolean;
       onboardingComplete?: boolean;
+      /** Server short-circuited because `lastCalibratedAt` was already
+       *  set (cold-mount race protection — see onboarding/chat
+       *  route.ts comment). Treat as state-sync only: flip
+       *  isCalibrated, clear phase/options, do NOT emit any messages,
+       *  do NOT re-arm the demo-draft. Diagnosed 2026-04-26. */
+      alreadyCalibrated?: boolean;
       placeholder?: string;
     },
     // Belt-and-suspenders gate for the demo auto-draft: only arm the
@@ -491,6 +497,17 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     // advance, so this is defense-in-depth.
     fromPhase?: OnboardingPhase,
     ) => {
+      // Server already-calibrated short-circuit — sync state, no emits.
+      // This response shape comes from the duplicate-fire race fix; both
+      // racing POSTs arrive but only the first does any real work.
+      if (data.alreadyCalibrated) {
+        setIsCalibrated(true);
+        setOnboardingPhase(null);
+        setActiveOptions(null);
+        setInputPlaceholder(null);
+        return;
+      }
+
       // Onboarding finished — switch to normal chat mode (no reload)
       if (data.onboardingComplete) {
         for (const msg of data.messages) {
@@ -519,6 +536,24 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
         // accepted as a legacy value for in-flight users.)
         if (fromPhase !== "intro" && fromPhase !== "defaults_confirm") {
           return;
+        }
+
+        // Cross-mount idempotency guard for the demo-draft. Server-side
+        // already-calibrated short-circuit catches the common case, but
+        // a sessionStorage flag survives any pathological remount path
+        // (Next.js prefetch, parallel mount in dev, etc.) and ensures
+        // the auto-draft only fires once per signed-in browser session.
+        // Diagnosed 2026-04-26: cold-mount race produced 2× demo drafts
+        // and 2× orphan link cards.
+        try {
+          if (sessionStorage.getItem("envoy:demo-draft-fired") === "1") {
+            return;
+          }
+          sessionStorage.setItem("envoy:demo-draft-fired", "1");
+        } catch {
+          // sessionStorage unavailable (private mode, SSR window): the
+          // server short-circuit and React mount semantics are still in
+          // place; proceed without the cross-mount guard.
         }
 
         // Auto-fire a test meeting after a short pause so the user sees the
