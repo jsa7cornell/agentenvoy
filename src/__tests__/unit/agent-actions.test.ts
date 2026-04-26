@@ -268,6 +268,9 @@ const mockPrisma = vi.hoisted(() => ({
     update: vi.fn(),
     updateMany: vi.fn(),
   },
+  sessionInvitee: {
+    createMany: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: mockPrisma }));
@@ -283,6 +286,7 @@ vi.mock("@/lib/calendar", () => ({
     htmlLink: "https://calendar.google.com/test",
   })),
   deleteCalendarEvent: vi.fn(async () => undefined),
+  invalidateSchedule: vi.fn(async () => undefined),
 }));
 
 // Test fixtures
@@ -322,6 +326,7 @@ describe("executeActions", () => {
     mockPrisma.negotiationSession.update.mockResolvedValue({});
     mockPrisma.message.create.mockResolvedValue({});
     mockPrisma.message.count.mockResolvedValue(1);
+    mockPrisma.sessionInvitee.createMany.mockResolvedValue({ count: 0 });
   });
 
   // --- Archive ---
@@ -503,11 +508,12 @@ describe("executeActions", () => {
   // --- Cancel ---
 
   describe("cancel", () => {
-    // Post-2026-04-20 PR #16: handleCancel routes through the shared
+    // Post-2026-04-22 c7967d9: handleCancel routes through the shared
     // cancelSession() pipeline. statusLabel is always "Cancelled by host"
-    // for agent-initiated cancels (via statusLabelFor(initiator)); the old
-    // reason-as-statusLabel behavior moved into cancellationNote + the
-    // system-message content.
+    // for agent-initiated cancels (via statusLabelFor(initiator)); the reason
+    // is stored in cancellationNote on the session, NOT embedded in the
+    // system message content. The system message content comes from
+    // cancelIndicatorFor() — a name-based indicator like "Meeting cancelled by host".
     it("cancels a session, notes the reason, and posts a system message", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(
         makeSession({ calendarEventId: null })
@@ -531,11 +537,13 @@ describe("executeActions", () => {
           }),
         })
       );
+      // system message is a timeline indicator, NOT the reason text —
+      // reason lives in cancellationNote (asserted above).
       expect(mockPrisma.message.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           sessionId: "session-1",
           role: "system",
-          content: expect.stringContaining("Host unavailable"),
+          content: expect.stringContaining("Meeting cancelled"),
         }),
       });
     });
@@ -1034,7 +1042,8 @@ describe("executeActions", () => {
       expect(mockPrisma.negotiationSession.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           hostId: HOST_USER_ID,
-          title: "Q3 Planning — Sarah",
+          // Title format changed in 753229d: "Topic: Guest + Host"
+          title: "Q3 Planning: Sarah + Host",
           format: "video",
           duration: 45,
         }),
@@ -1054,8 +1063,8 @@ describe("executeActions", () => {
 
       expect(results[0].success).toBe(true);
       expect(results[0].data?.url).toContain("/meet/john-ctx/");
-      // Title should use host first name + guest name
-      expect(results[0].data?.title).toBe("John + Noah");
+      // Title format changed in 753229d: "Guest + Host" (guest first, then host first name)
+      expect(results[0].data?.title).toBe("Noah + John");
     });
 
     it("looks up meetSlug from user when not in context", async () => {
