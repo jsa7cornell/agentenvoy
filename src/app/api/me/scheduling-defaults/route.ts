@@ -69,12 +69,44 @@ export async function GET() {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const [user, linkCount] = await Promise.all([
+  const userId = session.user.id;
+  const RETURNING_DORMANT_THRESHOLD_DAYS = 14;
+
+  // Single Promise.all for the read fanout. We need the user row + the
+  // counts that drive the welcome-variant decision (per the state matrix
+  // in SPEC-2.0 §3.3 — first-run / guest-first / returning-dormant /
+  // active).
+  const [
+    user,
+    linkCount,
+    messageCount,
+    guestSessionCount,
+    participantCount,
+    hostedSessionCount,
+    lastChannelMessage,
+    recentGuestSession,
+  ] = await Promise.all([
     prisma.user.findUnique({
-      where: { id: session.user.id },
+      where: { id: userId },
       select: { preferences: true, meetSlug: true, name: true },
     }),
-    prisma.negotiationLink.count({ where: { userId: session.user.id } }),
+    prisma.negotiationLink.count({ where: { userId } }),
+    prisma.channelMessage.count({ where: { channel: { userId } } }),
+    prisma.negotiationSession.count({ where: { guestId: userId } }),
+    prisma.sessionParticipant.count({ where: { userId } }),
+    prisma.negotiationSession.count({ where: { hostId: userId } }),
+    prisma.channelMessage.findFirst({
+      where: { channel: { userId } },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+    // Surface the most-recent guest experience so the guest-first
+    // variant can name the host ("you joined Sarah's meeting on Apr 22").
+    prisma.negotiationSession.findFirst({
+      where: { guestId: userId },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, host: { select: { name: true } } },
+    }),
   ]);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
@@ -100,6 +132,44 @@ export async function GET() {
   const videoProvider =
     (e as { videoProvider?: string }).videoProvider ?? "google_meet";
 
+  // Welcome-variant resolution. See the state matrix in SPEC-2.0 §3.3.
+  // Order matters — the first match wins.
+  type WelcomeVariant =
+    | "first-run"
+    | "guest-first"
+    | "returning-dormant"
+    | "active";
+  let welcomeVariant: WelcomeVariant;
+  if (messageCount > 0) {
+    const lastAt = lastChannelMessage?.createdAt;
+    const daysSince = lastAt
+      ? (Date.now() - lastAt.getTime()) / (1000 * 60 * 60 * 24)
+      : 0;
+    welcomeVariant =
+      daysSince >= RETURNING_DORMANT_THRESHOLD_DAYS
+        ? "returning-dormant"
+        : "active";
+  } else if (
+    hostedSessionCount === 0 &&
+    (guestSessionCount > 0 || participantCount > 0)
+  ) {
+    // No host messages yet, but the user already participated as a guest
+    // somewhere — they came in via someone else's link first.
+    welcomeVariant = "guest-first";
+  } else {
+    welcomeVariant = "first-run";
+  }
+
+  // guest-first context — only set when relevant; lets the client render
+  // "you joined {hostName}'s meeting on {date}" without another fetch.
+  const guestFirstContext =
+    welcomeVariant === "guest-first" && recentGuestSession
+      ? {
+          hostName: recentGuestSession.host?.name ?? null,
+          date: recentGuestSession.createdAt.toISOString(),
+        }
+      : null;
+
   return NextResponse.json({
     businessHoursStart: bhs,
     businessHoursEnd: bhe,
@@ -115,6 +185,9 @@ export async function GET() {
     timezone: tz,
     videoProvider,
     name: user.name ?? null,
+    // Welcome-variant dispatch + context (2026-04-26+).
+    welcomeVariant,
+    guestFirstContext,
   });
 }
 
