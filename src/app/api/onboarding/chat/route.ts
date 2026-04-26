@@ -201,6 +201,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
+  // Already-calibrated short-circuit — guards against the cold-mount
+  // race where Feed's initOnboarding fires twice (Next.js prefetch /
+  // parallel mount), GETs both return `intro + autoAdvance` because
+  // lastCalibratedAt hasn't been set yet, both schedule POSTs, and the
+  // second POST otherwise re-emits the complete-phase messages, double-
+  // persists, and re-arms the client-side demo-draft setTimeout.
+  // (Diagnosed 2026-04-26 via Vercel runtime logs showing 2× POSTs to
+  // /api/onboarding/chat 2s apart followed by 2× /api/channel/chat.)
+  // `alreadyCalibrated` tells the client to harmonize state (set
+  // isCalibrated=true, clear phase) without re-emitting messages or
+  // re-arming any post-onboarding setTimeouts.
+  if (user.lastCalibratedAt) {
+    return NextResponse.json({
+      phase: "complete",
+      messages: [],
+      onboardingComplete: false,
+      alreadyCalibrated: true,
+    });
+  }
+
   const body = await req.json();
   const { phase: currentPhase, response, responseLabel } = body as {
     phase: OnboardingPhase;
