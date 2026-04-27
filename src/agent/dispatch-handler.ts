@@ -32,6 +32,110 @@ import { narrateFailures, narrateTimeout, narrateFinalizeError } from "@/agent/a
 import { readFileSync } from "fs";
 import { join } from "path";
 
+/**
+ * Detect the Office Hours **create** intent inside an LLM-emitted action.
+ *
+ * Shape produced by `rule.md`'s ladder (see playbooks/rule.md, examples
+ * "Create an Office Hours link" / "Create an office hours link for 30-min
+ * video calls on Tuesdays"):
+ *
+ *   { action: "update_availability_rule",
+ *     params: { operation: "add", rule: { action: "office_hours", ... } } }
+ *
+ * We intercept ONLY the `add` case for `office_hours` — `update` /
+ * `remove` / `rename_general` and non-Office-Hours rule actions
+ * (`block` / `allow` / `buffer` / `prefer` / `limit` / `location` /
+ * `no_in_person`) still flow through `actions.ts` unchanged. The
+ * `action.params.rule.action === "office_hours"` discriminator is
+ * sufficient — see the brief §7.3.
+ *
+ * Vocabulary discipline: `r.action === "office_hours"` is the snake-case
+ * **wire keyword** for the **Office Hours** feature (capitalized in copy).
+ * It is unrelated to `User.preferences.explicit.businessHoursStart` /
+ * `businessHoursEnd` (the host's daily window — "Business hours") which
+ * is touched only by `handleUpdateBusinessHours` and is NOT in scope here.
+ */
+export function isOfficeHoursAddAction(action: ActionRequest): boolean {
+  if (action.action !== "update_availability_rule") return false;
+  const params = action.params as Record<string, unknown>;
+  if (params.operation !== "add") return false;
+  const rule = params.rule as Record<string, unknown> | undefined;
+  if (!rule) return false;
+  return rule.action === "office_hours";
+}
+
+/**
+ * Project an LLM-emitted office_hours rule onto the `OfficeHoursProposal`
+ * shape consumed by the confirmation card/sheet. Defensive against partial
+ * LLM payloads — fields the LLM omitted are filled with sensible defaults.
+ */
+export interface OfficeHoursProposalPayload {
+  originalText: string;
+  title: string;
+  format: "video" | "phone" | "in-person";
+  durationMinutes: number;
+  daysOfWeek: number[];
+  timeStart: string;
+  timeEnd: string;
+  effectiveDate?: string;
+  expiryDate?: string;
+}
+
+export function projectProposal(action: ActionRequest): OfficeHoursProposalPayload {
+  const params = action.params as Record<string, unknown>;
+  const rule = (params.rule as Record<string, unknown> | undefined) ?? {};
+  const officeHours = (rule.officeHours as Record<string, unknown> | undefined) ?? {};
+
+  const titleRaw =
+    (typeof officeHours.name === "string" && officeHours.name.trim()) ||
+    (typeof officeHours.title === "string" && officeHours.title.trim()) ||
+    "Office Hours";
+  const formatRaw = officeHours.format;
+  const format: OfficeHoursProposalPayload["format"] =
+    formatRaw === "phone" || formatRaw === "in-person" ? formatRaw : "video";
+  const durRaw = officeHours.durationMinutes;
+  const durationMinutes =
+    typeof durRaw === "number" && [15, 20, 30, 45, 60, 90].includes(durRaw) ? durRaw : 30;
+
+  const days = Array.isArray(rule.daysOfWeek)
+    ? (rule.daysOfWeek as unknown[]).filter(
+        (d): d is number => typeof d === "number" && d >= 0 && d <= 6,
+      )
+    : [0, 1, 2, 3, 4, 5, 6];
+
+  const timeStart =
+    typeof rule.timeStart === "string" && /^\d{2}:\d{2}$/.test(rule.timeStart)
+      ? rule.timeStart
+      : "09:00";
+  const timeEnd =
+    typeof rule.timeEnd === "string" && /^\d{2}:\d{2}$/.test(rule.timeEnd)
+      ? rule.timeEnd
+      : "17:00";
+
+  const today = new Date().toISOString().slice(0, 10);
+  const effectiveDate =
+    typeof rule.effectiveDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rule.effectiveDate)
+      ? rule.effectiveDate
+      : today;
+  const expiryDate =
+    typeof rule.expiryDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rule.expiryDate)
+      ? rule.expiryDate
+      : undefined;
+
+  return {
+    originalText: typeof rule.originalText === "string" ? rule.originalText : "",
+    title: titleRaw,
+    format,
+    durationMinutes,
+    daysOfWeek:
+      days.length > 0 ? Array.from(new Set(days)).sort((a, b) => a - b) : [0, 1, 2, 3, 4, 5, 6],
+    timeStart,
+    timeEnd,
+    effectiveDate,
+    expiryDate,
+  };
+}
+
 // Small cache so we load each playbook at most once per process.
 const playbookCache = new Map<string, string>();
 
@@ -177,7 +281,32 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
   }
 
   const fullText = first.text;
-  const actions = parseActions(fullText);
+  const allActions = parseActions(fullText);
+
+  // ── Office Hours create-flow interception (Phase 1 PR 5) ────────────────
+  // When the LLM emits `update_availability_rule` with operation:"add" and
+  // rule.action:"office_hours", we DO NOT execute the rule write here.
+  // Instead we persist a `system` ChannelMessage with `metadata.kind ===
+  // "rule_proposal"` carrying the proposed payload; the feed renders that
+  // as a desktop card or mobile bottom sheet, and the host commits via
+  // POST /api/availability-rules/confirm. Mirrors the existing
+  // gcal_update_proposal pattern (actions.ts:447 / feed.tsx:1293).
+  //
+  // Non-Office-Hours rule actions (block / allow / buffer / location /
+  // remove / update / rename_general) and all other action kinds still
+  // flow through executeActions unchanged. The `office_hours` keyword is
+  // the snake-case wire identifier for the **Office Hours** feature; it
+  // is unrelated to the host's "Business hours" window (`businessHoursStart`
+  // / `businessHoursEnd`), which is touched only by `handleUpdateBusinessHours`.
+  const interceptedProposals: Array<{ action: ActionRequest; payload: OfficeHoursProposalPayload }> = [];
+  const actions: ActionRequest[] = [];
+  for (const a of allActions) {
+    if (isOfficeHoursAddAction(a)) {
+      interceptedProposals.push({ action: a, payload: projectProposal(a) });
+    } else {
+      actions.push(a);
+    }
+  }
 
   let actionResults: ActionResult[] = [];
   let timedOut = false;
@@ -204,6 +333,31 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
     }
   }
 
+  // For each intercepted Office Hours proposal, persist a `system`
+  // ChannelMessage that carries the parsed-but-not-yet-written rule. The
+  // feed renders this as a confirmation card (desktop) or sheet (mobile).
+  // We must persist the user message first (await `userMsgPersist`) so
+  // the proposal row appears AFTER it in the channel timeline.
+  if (interceptedProposals.length > 0) {
+    await userMsgPersist;
+    let channel = await prisma.channel.findUnique({ where: { userId } });
+    if (!channel) channel = await prisma.channel.create({ data: { userId } });
+    for (const { payload } of interceptedProposals) {
+      await prisma.channelMessage.create({
+        data: {
+          channelId: channel.id,
+          role: "system",
+          content: `Envoy is proposing a new Office Hours link · ${payload.title}`,
+          metadata: {
+            kind: "rule_proposal",
+            ruleAction: "office_hours",
+            proposal: payload as unknown as Prisma.InputJsonValue,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    }
+  }
+
   emitStatus("finalizing");
 
   let displayText = stripActionBlocks(fullText);
@@ -219,6 +373,18 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
       overriddenNarration = displayText || null;
       displayText = narrateFailures(actions, actionResults, displayText);
     }
+  }
+
+  // When an Office Hours `add` was intercepted, the LLM text is typically
+  // "Your X link is ready — I'll share the URL once it saves." which is
+  // misleading at the proposal stage (the rule hasn't been written yet).
+  // Replace it with a proposal-stage prompt matching the mockup copy
+  // (mobile-v2.html §2). Keep the original narration available on the
+  // metadata for replay/observability.
+  if (interceptedProposals.length > 0) {
+    overriddenNarration = displayText || overriddenNarration;
+    displayText =
+      "Sounds great. Here's what I'm setting up — review and tap \"Looks good\" to create it:";
   }
 
   const additions: Partial<ChannelMessageMetadata> = {};
@@ -237,6 +403,29 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
         ...(r.data ? { data: r.data } : {}),
       };
     });
+  }
+  // Record intercepted proposals on the envoy turn's metadata for
+  // observability + replay. The actual rule write happens later when the
+  // host taps "Looks good" on the card/sheet.
+  if (interceptedProposals.length > 0) {
+    const existingActions = additions.actions ?? [];
+    const existingResults = additions.actionResults ?? [];
+    additions.actions = [
+      ...existingActions,
+      ...interceptedProposals.map(({ action }) => ({
+        action: action.action,
+        params: (action.params ?? {}) as Record<string, unknown>,
+      })),
+    ];
+    additions.actionResults = [
+      ...existingResults,
+      ...interceptedProposals.map(({ action }) => ({
+        action: action.action,
+        success: true,
+        message: "proposal_persisted_awaiting_host_confirmation",
+        data: { intercepted: true, kind: "rule_proposal" },
+      })),
+    ];
   }
   const envoyMetadata = mergeChannelMetadata(
     overriddenNarration ? { overriddenNarration } : null,
