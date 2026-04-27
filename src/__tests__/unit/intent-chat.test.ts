@@ -10,8 +10,11 @@
 import { describe, it, expect } from "vitest";
 import {
   normalizeChatIntent,
+  normalizeGuestChatIntent,
+  normalizeHostChatIntent,
   validateChatIntent,
   CHAT_INTENT_VALUES,
+  HOST_CHAT_INTENT_VALUES,
 } from "@/lib/intent";
 import {
   looksFabricated,
@@ -262,5 +265,89 @@ describe("unclear + missing/fabricated clarifier → closed-set fallback", () =>
     const out = validateChatIntent(substituted);
     expect(out.kind).toBe("unclear");
     expect(out.clarifier).toMatch(/default/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 5 PR 3 (CODEBASE-CLEANUP §10) — host-side intent extension.
+// Pure data-structure / type-level change; classifier behavior is unchanged
+// in PR 3 (PR 4 introduces the role-aware schema).
+// ---------------------------------------------------------------------------
+
+describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3)", () => {
+  it("contains exactly the 5 host-side values in order", () => {
+    expect([...HOST_CHAT_INTENT_VALUES]).toEqual([
+      "edit_preference",
+      "create_link",
+      "query_calendar",
+      "query_event",
+      "chat",
+    ]);
+    expect(HOST_CHAT_INTENT_VALUES).toHaveLength(5);
+  });
+
+  it("every host value normalizes via the full-union normalizeChatIntent", () => {
+    for (const v of HOST_CHAT_INTENT_VALUES) {
+      expect(normalizeChatIntent(v)).toBe(v);
+    }
+  });
+
+  it("every host value normalizes via normalizeHostChatIntent", () => {
+    for (const v of HOST_CHAT_INTENT_VALUES) {
+      expect(normalizeHostChatIntent(v)).toBe(v);
+    }
+  });
+
+  it("every host value is rejected by normalizeGuestChatIntent", () => {
+    for (const v of HOST_CHAT_INTENT_VALUES) {
+      expect(normalizeGuestChatIntent(v)).toBeNull();
+    }
+  });
+
+  it("every guest value normalizes via normalizeGuestChatIntent and is rejected by normalizeHostChatIntent", () => {
+    for (const v of CHAT_INTENT_VALUES) {
+      expect(normalizeGuestChatIntent(v)).toBe(v);
+      expect(normalizeHostChatIntent(v)).toBeNull();
+    }
+  });
+
+  it("guest and host sets are disjoint (combined size = 11)", () => {
+    const combined = new Set<string>([
+      ...CHAT_INTENT_VALUES,
+      ...HOST_CHAT_INTENT_VALUES,
+    ]);
+    expect(combined.size).toBe(11);
+  });
+
+  it("validateChatIntent passes host values through the default branch", () => {
+    expect(validateChatIntent({ kind: "edit_preference" })).toEqual({
+      kind: "edit_preference",
+    });
+    expect(validateChatIntent({ kind: "create_link" })).toEqual({
+      kind: "create_link",
+    });
+    expect(validateChatIntent({ kind: "query_calendar" })).toEqual({
+      kind: "query_calendar",
+    });
+    expect(validateChatIntent({ kind: "query_event" })).toEqual({
+      kind: "query_event",
+    });
+    expect(validateChatIntent({ kind: "chat" })).toEqual({ kind: "chat" });
+  });
+
+  it("validateChatIntent strips clarifier/quickReplies/emoji from host kinds (default-branch behavior)", () => {
+    const out = validateChatIntent({
+      kind: "edit_preference",
+      clarifier: "ignored",
+      quickReplies: [{ label: "x", intent: "schedule" }],
+      emoji: "👍",
+    });
+    expect(out).toEqual({ kind: "edit_preference" });
+  });
+
+  it("normalizeChatIntent rejects unknown values that resemble host intents", () => {
+    expect(normalizeChatIntent("EDIT_PREFERENCE")).toBeNull();
+    expect(normalizeChatIntent("preferences")).toBeNull();
+    expect(normalizeChatIntent("createLink")).toBeNull();
   });
 });

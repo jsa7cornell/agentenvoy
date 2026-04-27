@@ -10,6 +10,7 @@
  * emit the classification. Failure mode collapses to network/provider
  * errors only, handled by the retry policy (§2.7).
  */
+// Schema constrained to CHAT_INTENT_VALUES (guest values only) by design — see lib/intent.ts (Phase 5 PR 3) for HOST_CHAT_INTENT_VALUES; PR 4 will introduce a role-aware schema.
 
 import { generateObject } from "ai";
 import { z } from "zod";
