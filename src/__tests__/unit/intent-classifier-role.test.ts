@@ -19,9 +19,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const generateObjectMock = vi.fn();
-const recordSpanMock = vi.fn(
-  async (_name: string, fn: () => Promise<unknown>, _metadata?: Record<string, unknown>) => fn(),
-);
+const recordSpanMock = vi.fn(async (...args: unknown[]) => {
+  // Mocked recordSpan: invoke the wrapped fn and return its result so the
+  // outer classifier sees the same shape as a no-op span. Args are
+  // captured via `mock.calls` for assertion.
+  const fn = args[1] as () => Promise<unknown>;
+  return fn();
+});
 
 vi.mock("ai", () => ({
   generateObject: (args: unknown) => generateObjectMock(args),
@@ -32,8 +36,7 @@ vi.mock("@/lib/model", () => ({
 }));
 
 vi.mock("@/lib/langfuse", () => ({
-  recordSpan: (name: string, fn: () => Promise<unknown>, metadata?: Record<string, unknown>) =>
-    recordSpanMock(name, fn, metadata),
+  recordSpan: (...args: unknown[]) => recordSpanMock(...args),
 }));
 
 import { classifyChatIntent } from "@/agent/intent-classifier";
@@ -42,10 +45,10 @@ describe("classifyChatIntent — role plumbing", () => {
   beforeEach(() => {
     generateObjectMock.mockReset();
     recordSpanMock.mockClear();
-    recordSpanMock.mockImplementation(
-      async (_name: string, fn: () => Promise<unknown>, _metadata?: Record<string, unknown>) =>
-        fn(),
-    );
+    recordSpanMock.mockImplementation(async (...args: unknown[]) => {
+      const fn = args[1] as () => Promise<unknown>;
+      return fn();
+    });
   });
 
   afterEach(() => {
