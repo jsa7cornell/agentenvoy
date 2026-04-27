@@ -41,3 +41,9 @@ next-env.d.ts
 
 # bench harness output (not CI-blocking, not versioned)
 /scripts/bench-intent/out/
+
+# Eval candidate dumps — extracted from production via
+# `npm run eval:extract-candidates`. Phase 5 curated output (host.jsonl
+# and guest.jsonl one level up) IS checked in; the raw candidates are
+# not.
+/eval/golden-sets/_candidates/*.jsonl
