@@ -152,12 +152,14 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
             )}
           </Link>
 
-          {/* Event Links tab (center). Links to /dashboard/meetings — PR 3
-              will alias this to /dashboard/event-links. Cyan dot when one or
-              more sessions are awaiting host acknowledgement. */}
+          {/* Event Links tab (center). Links to /dashboard/event-links
+              (Phase 2 PR 3). The `isEventLinks` matcher still accepts the
+              legacy `/dashboard/meetings` route so deep links highlight.
+              Cyan dot when one or more sessions are awaiting host
+              acknowledgement. */}
           <div className="justify-self-center">
             <Link
-              href="/dashboard/meetings"
+              href="/dashboard/event-links"
               className={`relative flex items-center gap-2 rounded-lg px-3 py-1.5 transition ${
                 isEventLinks
                   ? "bg-accent/15 ring-1 ring-accent/40 text-accent"
