@@ -3,18 +3,21 @@
 /**
  * Mobile bottom-sheet for editing a reusable link from the Event Links sheet.
  *
- * Opens when the host taps **Edit** on any reusable-link card. The dialog is
- * variant-aware: Office Hours embeds `RuleFormFields` (PR 5's reusable form
- * body) and POSTs to `/api/availability-rules/edit`; the Primary variant
- * surfaces a stub for now (Phase 2 will wire its config) since Primary's
- * config (default duration / format / business hours) lives in the
- * Preferences drawer, not on the link object itself.
+ * Opens when the host taps **Edit** on any reusable-link card. The dialog
+ * gates its editable form on `row.recurringWindowConfig != null` — i.e.,
+ * the link has an attached recurring window — rather than on
+ * `row.kind === "office_hours"`. Today Office Hours is the only such
+ * variant; any future recurring-window-backed reusable (e.g. a sales-intro
+ * link with weekday slots) inherits the editable form automatically. Links
+ * without a recurring window (Primary) surface a stub pointing to
+ * Preferences, since their config lives there, not on the link object.
  *
  * Visual contract: bottom-sheet chrome mirrors `rule-confirm-sheet.tsx`
  * (max-h 88vh, drag handle, pinned footer with primary/cancel actions).
  *
  * Vocabulary: "Primary link" (capitalized — SPEC-2.0 §2.2), "Office Hours"
- * (capitalized — feature name).
+ * (capitalized — feature name). Header copy stays variant-aware on
+ * `row.kind` for now; the gate alone has been generalized in this PR.
  */
 
 import { useEffect, useState } from "react";
@@ -43,15 +46,15 @@ export function EventLinksEditDialog({
   const [error, setError] = useState<string | null>(null);
 
   // Hydrate the editable form-state from the row whenever a new row is
-  // selected — Office Hours only. Primary doesn't carry editable
-  // OfficeHoursProposal fields, so we leave `proposal` null and render the
-  // Primary stub body instead.
+  // selected — gated on the presence of an attached recurring window
+  // (variant-agnostic). Links without a recurring window (e.g. Primary)
+  // leave `proposal` null and fall through to the stub body.
   useEffect(() => {
-    if (!row || row.kind !== "office_hours" || !row.officeHoursConfig) {
+    if (!row || !row.recurringWindowConfig) {
       setProposal(null);
       return;
     }
-    const cfg = row.officeHoursConfig;
+    const cfg = row.recurringWindowConfig;
     setProposal({
       originalText: cfg.originalText,
       title: cfg.name ?? cfg.title,
@@ -105,9 +108,14 @@ export function EventLinksEditDialog({
 
   if (!row) return null;
 
+  // Gate the editable form on the presence of an attached recurring
+  // window (variant-agnostic). Header/footer copy still varies on
+  // `row.kind` so today's Office Hours / Primary labels stay verbatim;
+  // when a future variant lands, only the copy table needs a touch-up.
+  const hasRecurringWindow = !!row.recurringWindowConfig;
   const isOfficeHours = row.kind === "office_hours";
   const canSave =
-    isOfficeHours &&
+    hasRecurringWindow &&
     proposal !== null &&
     proposal.title.trim().length > 0 &&
     proposal.daysOfWeek.length > 0;
@@ -153,7 +161,7 @@ export function EventLinksEditDialog({
 
         {/* Scrollable form body */}
         <div className="flex-1 overflow-y-auto px-4 pb-3 flex flex-col gap-2.5">
-          {isOfficeHours && proposal ? (
+          {hasRecurringWindow && proposal ? (
             <RuleFormFields
               value={proposal}
               onChange={setProposal}
@@ -174,7 +182,7 @@ export function EventLinksEditDialog({
 
         {/* Pinned footer actions */}
         <div className="border-t border-black/10 dark:border-white/10 px-4 py-3 flex gap-2 bg-background">
-          {isOfficeHours ? (
+          {hasRecurringWindow ? (
             <button
               type="button"
               onClick={handleSave}
@@ -189,9 +197,9 @@ export function EventLinksEditDialog({
             type="button"
             onClick={() => !submitting && onDismiss()}
             disabled={submitting}
-            className={`${isOfficeHours ? "flex-1" : "w-full"} rounded-lg bg-transparent border border-black/10 dark:border-white/10 text-foreground/70 hover:bg-black/5 dark:hover:bg-white/5 text-sm font-semibold px-3 py-3 transition-colors`}
+            className={`${hasRecurringWindow ? "flex-1" : "w-full"} rounded-lg bg-transparent border border-black/10 dark:border-white/10 text-foreground/70 hover:bg-black/5 dark:hover:bg-white/5 text-sm font-semibold px-3 py-3 transition-colors`}
           >
-            {isOfficeHours ? "Cancel" : "Close"}
+            {hasRecurringWindow ? "Cancel" : "Close"}
           </button>
         </div>
       </div>
