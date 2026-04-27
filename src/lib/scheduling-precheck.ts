@@ -42,6 +42,34 @@ const TOPIC_ALLOWLIST: readonly string[] = [
   "walk",
 ];
 
+// ---------------------------------------------------------------------------
+// Naming stopwords — words that can appear in "with X" / "for X" / "and X"
+// patterns but are NOT names. Used by messageNamesUnrecognizedGuest() to
+// avoid suppressing the thread fallback for benign phrases like "for me",
+// "with the team", "next Monday".
+// ---------------------------------------------------------------------------
+const NAMING_STOPWORDS: ReadonlySet<string> = new Set([
+  // pronouns
+  "me", "you", "him", "her", "them", "us", "it", "i", "we", "they", "he", "she",
+  // determiners
+  "the", "a", "an", "this", "that", "these", "those",
+  // possessives
+  "my", "your", "his", "our", "their",
+  // generic people words
+  "someone", "anyone", "somebody", "anybody", "everyone", "everybody",
+  "people", "nobody", "team", "guys", "folks", "everybody", "all",
+  // time words
+  "now", "today", "tomorrow", "tonight", "yesterday", "next", "last",
+  "morning", "afternoon", "evening", "night", "soon", "later", "then",
+  // weekdays
+  "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+  // months
+  "january", "february", "march", "april", "may", "june", "july",
+  "august", "september", "october", "november", "december",
+  // affirmations
+  "yes", "no", "ok", "okay", "sure", "maybe",
+]);
+
 export type PrecheckResult =
   | { kind: "deterministic-create"; args: DeterministicCreateArgs; reason: string }
   | { kind: "marco-disambiguate"; existingLinkCode: string; guest: string; reason: string }
@@ -103,6 +131,40 @@ function findGuestsInText(
     }
   }
   return out;
+}
+
+/**
+ * Detect whether the current message names a person who is NOT one of the
+ * known active-session guests. Used to suppress the thread-fallback when the
+ * host is clearly asking about a new guest.
+ *
+ * 2026-04-27 prod regression (PR-ε): host had an active link with Katie, then
+ * asked "get time with bob, phone call". `findGuestsInText(message)` returned
+ * empty, the code fell through to the thread-fallback, and matched Katie from
+ * earlier turns — producing a marco-disambiguate for the wrong guest.
+ *
+ * Heuristic: scan for "with X", "for X", "and X" where X is a 2–30 letter
+ * word, lower-case it, drop NAMING_STOPWORDS and any token equal to a known
+ * active-session guest. If anything remains, the message is naming someone
+ * unrecognized → suppress the thread fallback and let Sonnet handle it.
+ *
+ * Intentionally permissive — false positives (suppressing thread fallback)
+ * are recovered by Sonnet, false negatives (the bug we just hit) are not.
+ */
+export function messageNamesUnrecognizedGuest(
+  message: string,
+  knownCandidates: string[],
+): boolean {
+  const known = new Set(knownCandidates.map((c) => c.toLowerCase()));
+  const re = /\b(?:with|for|and)\s+([A-Za-z]{2,30})\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(message)) !== null) {
+    const candidate = m[1].toLowerCase();
+    if (NAMING_STOPWORDS.has(candidate)) continue;
+    if (known.has(candidate)) continue;
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -201,6 +263,15 @@ export function schedulingPrecheck(input: PrecheckInput): PrecheckResult {
   if (inMessage.length === 1) {
     named = inMessage[0];
   } else {
+    // Guard before thread-fallback: if the message itself names a *new*
+    // person (not in active sessions), don't anchor on a stale guest from
+    // earlier turns. PR-ε / 2026-04-27 prod regression — see helper above.
+    if (messageNamesUnrecognizedGuest(input.userMessage, activeCandidates)) {
+      return {
+        kind: "fall-through-to-sonnet",
+        reason: `message names unrecognized guest${echoSuffix}`,
+      };
+    }
     // Fallback: guest names from active sessions appearing in the last ~10
     // thread turns (not the current message, which we already checked).
     const threadText = input.recentThreadTurns.map((t) => t.content).join("\n");

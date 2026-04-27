@@ -271,4 +271,113 @@ describe("schedulingPrecheck", () => {
       expect(result.args.duration).toBeNull();
     }
   });
+
+  // -------------------------------------------------------------------------
+  // PR-ε / 2026-04-27 prod regression: thread-fallback over-anchoring.
+  // Host had an active link with Katie, then asked "get time with bob, phone
+  // call". The thread-fallback re-resolved to Katie because Bob isn't a
+  // known guest. Fix: if the message names a *new* person, suppress thread
+  // fallback and hand off to Sonnet.
+  // -------------------------------------------------------------------------
+
+  it("falls through when message names a new guest unknown to active sessions (Bob/Katie regression)", () => {
+    const result = schedulingPrecheck(
+      baseInput({
+        userMessage: "get time with bob, phone call",
+        activeSessions: [
+          {
+            id: "sess_katie",
+            title: "John + Katie",
+            guestName: "Katie",
+            linkCode: "katielink",
+            status: "active",
+          },
+        ],
+        recentThreadTurns: [
+          { role: "user", content: "set up time with Katie next week" },
+          { role: "envoy", content: "I'll send Katie a link" },
+        ],
+      }),
+    );
+    expect(result.kind).toBe("fall-through-to-sonnet");
+    if (result.kind === "fall-through-to-sonnet") {
+      expect(result.reason).toContain("unrecognized guest");
+    }
+  });
+
+  it("preserves thread-fallback when message has no naming pattern (e.g. 'reschedule')", () => {
+    // No "with X" / "for X" / "and X" in the message → guard doesn't fire →
+    // thread-fallback resolves to Katie → marco-disambiguate (existing link).
+    const result = schedulingPrecheck(
+      baseInput({
+        userMessage: "let's reschedule it",
+        activeSessions: [
+          {
+            id: "sess_katie",
+            title: "John + Katie",
+            guestName: "Katie",
+            linkCode: "katielink",
+            status: "active",
+          },
+        ],
+        recentThreadTurns: [
+          { role: "user", content: "set up time with Katie next week" },
+        ],
+      }),
+    );
+    expect(result.kind).toBe("marco-disambiguate");
+    if (result.kind === "marco-disambiguate") {
+      expect(result.guest).toBe("Katie");
+    }
+  });
+
+  it("does not suppress on benign 'for me' / 'with the team' phrasing (stopwords)", () => {
+    // "for me" → "me" is a stopword, no suppression. Thread-fallback resolves
+    // Jon and produces marco-disambiguate as it would have pre-PR-ε.
+    const result = schedulingPrecheck(
+      baseInput({
+        userMessage: "block out 30 min for me tomorrow",
+        activeSessions: [
+          {
+            id: "sess_jon",
+            title: "John + Jon",
+            guestName: "Jon",
+            linkCode: "jonlink",
+            status: "active",
+          },
+        ],
+        recentThreadTurns: [
+          { role: "user", content: "schedule a ride with Jon" },
+        ],
+      }),
+    );
+    expect(result.kind).toBe("marco-disambiguate");
+  });
+
+  it("does not suppress when the named token IS a known guest from active sessions", () => {
+    // "with Jon" matches the regex but Jon is a known guest → not unrecognized
+    // → guard doesn't fire. (And inMessage already resolved Jon, so this path
+    // isn't even hit — but the helper is called only via the else branch.
+    // This test covers a near-miss where the message-name set is empty for
+    // case reasons; here we confirm the stopword/known-guest filtering is
+    // robust to multiple "with X" hits.)
+    const result = schedulingPrecheck(
+      baseInput({
+        userMessage: "talk with Jon and Jon's team about it",
+        activeSessions: [
+          {
+            id: "sess_jon",
+            title: "John + Jon",
+            guestName: "Jon",
+            linkCode: "jonlink",
+            status: "active",
+          },
+        ],
+      }),
+    );
+    // Direct match on Jon in the message — deterministic-create or
+    // marco-disambiguate. The point of this test is that we don't crash and
+    // don't over-suppress on a benign multi-mention message.
+    expect(result.kind).toBe("marco-disambiguate");
+  });
 });
