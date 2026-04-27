@@ -1395,9 +1395,9 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           const meetLinkMatch = !isUser ? msg.content.match(/(https?:\/\/[^\s]+\/meet\/[^\s]+)/) : null;
           const reaction = isUser ? (msg.metadata?.reaction as string | undefined) : undefined;
           return (
-            <div key={msg.id} className={`relative ${isUser ? "self-end" : "self-start"}`}>
+            <div key={msg.id} className={`relative max-w-[88%] ${isUser ? "self-end" : "self-start"}`}>
               <div
-                className={`max-w-[88%] w-fit rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   isUser
                     ? "bg-purple-600 text-white rounded-br-sm"
                     : "bg-black/5 dark:bg-white/7 rounded-bl-sm"
