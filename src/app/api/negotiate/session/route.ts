@@ -18,7 +18,6 @@ import {
   getInviteeFirstNamesDisplay,
   getInviteeNames,
 } from "@/lib/invitee-display";
-import { formatDuration } from "@/lib/format-duration";
 import { getUserTimezone } from "@/lib/timezone";
 import {
   resolveSeedGuestTimezoneForCreate,
@@ -28,6 +27,7 @@ import {
   formatLabel,
   computeCanonicalWeekLabel,
 } from "@/lib/greeting-template";
+import { selectGreeting, type GreetingInput } from "@/agent/greetings/registry";
 // formatAvailabilitySlotList / formatAvailabilityProse / formatStretchDays /
 // buildOpenWindowGreeting removed 2026-04-23 when the bulleted schedule body
 // and guestPicks open-window template were folded into the unified greeting
@@ -42,7 +42,6 @@ import {
 import {
   deriveLegacy,
   hasExclusiveOverride,
-  isSingleSlotExclusive,
   readStoredSteering,
 } from "@/lib/intent";
 import { computeDensityHorizon } from "@/lib/availability-density";
@@ -789,7 +788,6 @@ export async function POST(req: NextRequest) {
     // invitee link we greet "Will & Andrew" rather than just the first name
     // (feedback cmoc4mue0…, 2026-04-23). Single-invitee behavior unchanged.
     const inviteeNamesArr = getInviteeNames(link);
-    const isMultiInvitee = inviteeNamesArr.length > 1;
     const greeteeName = getInviteeFirstNamesDisplay(link) || "there";
 
     // Activity (free-form) — set by the host's LLM at create_link time.
@@ -957,131 +955,39 @@ export async function POST(req: NextRequest) {
       return `${hint}.`;
     })();
 
-    // Build the proposal phrase ({xxx} in "He's proposing {xxx}.") composing
-    // duration / format / activity / location / timingLabel. Activity leads
-    // when set; otherwise duration+format; otherwise bare format or duration.
-    const buildProposalPhrase = (): string => {
-      const durStr = durationForOpener ? formatDuration(durationForOpener) : null;
-      const fmtWord = formatLabel(effectiveFormat);
-      let head: string;
-      if (activityText) {
-        const article = /^[aeiou]/i.test(activityText) ? "an" : "a";
-        head = durStr ? `${durStr} for ${activityText}` : `${article} ${activityText}`;
-      } else if (durStr && fmtWord) {
-        head = `a ${durStr} ${fmtWord}`;
-      } else if (durStr) {
-        head = durStr;
-      } else if (fmtWord) {
-        const article = /^[aeiou]/i.test(fmtWord) ? "an" : "a";
-        head = `${article} ${fmtWord}`;
-      } else {
-        head = "time";
-      }
-      const locPart = linkLocationForOpener ? ` in ${linkLocationForOpener}` : "";
-      const timingPart = timingLabel ? ` ${timingLabel}` : "";
-      return `${head}${locPart}${timingPart}`;
+    // Pre-filter `rawTopic` for the registry: the anonymous template surfaces
+    // it inline, but only when it's a real host-authored topic — generic
+    // chat-talk ("meeting", "catch up") gets stripped here so the registry
+    // stays pure. Non-anonymous branches don't read `rawTopic`.
+    const filteredTopicForRegistry =
+      rawTopic && !isGenericTopic(rawTopic) ? rawTopic : null;
+
+    // Build the registry input bundle. Mirrors the exact shape the previous
+    // inlined branches read; the registry resolver picks the matching
+    // template and renders.
+    const greetingInput: GreetingInput = {
+      hostFirstName,
+      hostTimezone,
+      greeteeName,
+      inviteeCount: inviteeNamesArr.length,
+      linkRules,
+      isAnonymousLink,
+      isOfficeHoursLink,
+      effectiveSteering,
+      activityText,
+      linkLocationForOpener,
+      durationForOpener,
+      effectiveDuration,
+      effectiveFormat,
+      rawTopic: filteredTopicForRegistry,
+      meetingDescShort,
+      timingLabel,
+      guestPickHint,
+      suggestAltClause,
+      calendarPitch,
+      toneLine: guestGuidance?.tone ? guestGuidance.tone : null,
     };
-
-    // ─── Branch A: single-slot exclusive ─────────────────────────────────
-    if (
-      !isAnonymousLink &&
-      effectiveSteering === "exclusive" &&
-      isSingleSlotExclusive(linkRules)
-    ) {
-      const durStr = effectiveDuration ? formatDuration(effectiveDuration) : null;
-      const activityPart = activityText ? ` for ${activityText}` : "";
-      const locPart = linkLocationForOpener ? ` at ${linkLocationForOpener}` : "";
-      const durPart = durStr ? `${durStr}` : "some time";
-      const slotStartIso = ((): string | null => {
-        const overrides = (linkRules?.slotOverrides ?? []) as Array<{
-          start?: unknown;
-          score?: unknown;
-        }>;
-        const hit = overrides.find(
-          (o) => typeof o.start === "string" && o.score === -2,
-        );
-        return hit && typeof hit.start === "string" ? hit.start : null;
-      })();
-      const whenPart = ((): string => {
-        if (!slotStartIso) return "";
-        const d = new Date(slotStartIso);
-        if (Number.isNaN(d.getTime())) return "";
-        const day = new Intl.DateTimeFormat("en-US", {
-          timeZone: hostTimezone,
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        }).format(d);
-        const time = new Intl.DateTimeFormat("en-US", {
-          timeZone: hostTimezone,
-          hour: "numeric",
-          minute: "2-digit",
-          timeZoneName: "short",
-        }).format(d);
-        return ` on ${day} at ${time}`;
-      })();
-      const proposal = `${durPart}${activityPart}${locPart}${whenPart}`;
-      greeting = `👋 ${greeteeName}! Envoy lined up a time — ${proposal}. Confirm below, or let me know if anything needs to shift.`;
-
-      // ─── Branch C: anonymous-visitor voice ─────────────────────────────
-    } else if (isAnonymousLink) {
-      // Office-hours children carry a `topic` (e.g. "Coaching hours"). Bare
-      // primary links don't — render the default offer instead.
-      const hostTopic =
-        isOfficeHoursLink && rawTopic && !isGenericTopic(rawTopic) ? rawTopic : null;
-      const pitch = calendarPitch ? ` ${calendarPitch}` : "";
-      const body = hostTopic
-        ? `These are ${hostFirstName}'s ${hostTopic} — ${meetingDescShort}s within the available windows below.${pitch}`
-        : `${hostFirstName}'s default is ${meetingDescShort} sometime within the available windows below.${pitch}`;
-      greeting = [`👋 I'm ${hostFirstName}'s scheduling agent.`, body].join("\n");
-
-      // ─── Branch B: named invitee (proposal or find-time) ───────────────
-    } else {
-      const hasProposalSubstance =
-        !!effectiveFormat ||
-        durationForOpener != null ||
-        !!activityText ||
-        !!linkLocationForOpener;
-
-      // For multi-invitee links, "with you" flattens the group. "with the
-      // three of you" / "with you all" preserves the group framing so the
-      // first guest to arrive sees they're not the only person being
-      // scheduled. N = inviteeCount + host. "the three of you" for N=3,
-      // "you all" for N>=4 (too unwieldy to count inline).
-      const withClause = ((): string => {
-        if (!isMultiInvitee) return `with you and ${hostFirstName}`;
-        const total = inviteeNamesArr.length + 1;
-        if (total === 3) return `with the three of you`;
-        if (total === 4) return `with the four of you`;
-        return `with you all`;
-      })();
-      const findTimeWithClause = ((): string => {
-        if (!isMultiInvitee) return "";
-        const total = inviteeNamesArr.length + 1;
-        if (total === 3) return ` for the three of you`;
-        if (total === 4) return ` for the four of you`;
-        return ` for your group`;
-      })();
-      const openerLine = hasProposalSubstance
-        ? `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${buildProposalPhrase()}.`
-        : `👋 ${greeteeName}! ${hostFirstName} asked me to find time${findTimeWithClause}${timingLabel ? ` ${timingLabel}` : ""}.`;
-
-      const toneLine = guestGuidance?.tone ? guestGuidance.tone : null;
-
-      // Closing: "Pick a time below[, <suggest-alt>]. [<calendar pitch>]"
-      const closingBase = suggestAltClause
-        ? `Pick a time below, ${suggestAltClause}.`
-        : "Pick a time below.";
-      const closingParts = [closingBase];
-      if (calendarPitch) closingParts.push(calendarPitch);
-      const closing = closingParts.join(" ");
-
-      const blocks: string[] = [openerLine];
-      if (toneLine) blocks.push(toneLine);
-      if (guestPickHint) blocks.push(guestPickHint);
-      blocks.push(closing);
-      greeting = blocks.join("\n\n");
-    }
+    greeting = selectGreeting(greetingInput).render(greetingInput);
   }
 
   // Save the greeting message
