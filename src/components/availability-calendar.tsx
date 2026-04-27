@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { DragSlotPicker } from "./drag-slot-picker";
+import { selectPickerVariant } from "./picker/registry";
 import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
 import {
   binSlotsIntoWindows,
@@ -23,7 +24,8 @@ interface BilateralChip {
   color: "both" | "one";
 }
 
-interface AvailabilityCalendarProps {
+// exported for picker/registry.ts only — do not import elsewhere
+export interface AvailabilityCalendarProps {
   slotsByDay: Record<string, Slot[]>;
   timezone: string;
   onSelectSlot?: (formattedTime: string, slot: { start: string; end: string }) => void;
@@ -585,7 +587,8 @@ function TimezoneLabel({ timezone, onClick }: { timezone: string; onClick?: () =
 
 // ─── Week View ────────────────────────────────────────────────────────
 
-function WeekView({
+// exported for picker/registry.ts only — do not import elsewhere
+export function WeekView({
   slotsByDay,
   timezone,
   onSelectSlot,
@@ -846,7 +849,8 @@ function WeekView({
 
 // ─── Month View (original) ────────────────────────────────────────────
 
-function MonthView({
+// exported for picker/registry.ts only — do not import elsewhere
+export function MonthView({
   slotsByDay,
   timezone,
   onSelectSlot,
@@ -1030,7 +1034,8 @@ function MonthView({
 // onSelectDate instead of revealing time-slot pills. Used for multi-day
 // events (duration ≥ 24h) where the guest picks a start date, not a time.
 
-function DatePickerView({
+// exported for picker/registry.ts only — do not import elsewhere
+export function DatePickerView({
   slotsByDay,
   timezone: _timezone,
   onSelectDate,
@@ -1148,7 +1153,7 @@ function DatePickerView({
 
 export function AvailabilityCalendar(props: AvailabilityCalendarProps) {
   const { view = "month", schedulingMode = "time", ...rest } = props;
-  if (schedulingMode === "date") return <DatePickerView {...rest} />;
-  if (view === "week") return <WeekView {...rest} />;
-  return <MonthView {...rest} />;
+  const variant = selectPickerVariant({ view, schedulingMode });
+  const Component = variant.Component;
+  return <Component {...rest} />;
 }
