@@ -13,6 +13,7 @@
     "test:e2e": "vitest run --config vitest.config.ts",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "bench:intent": "tsx scripts/bench-intent/run.ts",
+    "eval:extract-candidates": "tsx scripts/eval-candidates/extract.ts",
     "prepare": "husky"
   },
   "prisma": {
