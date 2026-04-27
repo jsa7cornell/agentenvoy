@@ -5,18 +5,11 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoFull } from "./logo";
-import { MyLinksPopover } from "./my-links-popover";
 import { MobileDashboardHeader } from "./mobile/mobile-dashboard-header";
 import { useOAuthSignIn, hasReturningCookie } from "./oauth/use-oauth-signin";
 import { onboardingCallbackUrl } from "@/lib/onboarding/return-to";
 
-interface ConnectionStatus {
-  google: {
-    connected: boolean;
-    calendar: boolean;
-    scopes: string[];
-  };
-}
+const BADGE_COUNTS_REVALIDATE_MS = 30_000;
 
 /**
  * Site header. Single component across every page — host dashboard, logged-in
@@ -26,48 +19,68 @@ interface ConnectionStatus {
  * Never build a bespoke header for a single page. Inline banners below the
  * header can vary freely, but the header itself is always this component.
  *
- * **Responsive split (Phase 1 PR 3, 2026-04-26).** At and above the `md:`
- * breakpoint the signed-in viewer sees the desktop chrome below. Below `md:`
- * we render `<MobileDashboardHeader>` instead — the v2 three-element topbar
- * (avatar | "Event Links" header pill | calendar icon). Desktop chrome stays
- * untouched until Phase 2; the anonymous branch is unchanged in either mode.
- * See `refactor-package-2026-04-25/SPEC-2.0.md` §3.1.
+ * **Responsive split.** At and above the `md:` breakpoint the signed-in viewer
+ * sees the v2 desktop chrome below — three-element layout (Logo+Home left |
+ * Event Links tab center | Avatar+Preferences right). Below `md:` we render
+ * `<MobileDashboardHeader>` instead — the v2 three-element topbar (avatar |
+ * "Event Links" header pill | calendar icon). The anonymous branch is
+ * unchanged in either mode. See `refactor-package-2026-04-25/SPEC-2.0.md`
+ * §3.1 and `mockups/desktop-v2.html` for the visual contract.
+ *
+ * Cyan dot on the Event Links tab indicates one or more sessions are in
+ * `awaiting_ack_self` state (same `/api/dashboard/badge-counts` aggregator
+ * used by mobile, revalidating every 30s). Decorative — fetch failures render
+ * nothing.
  */
 export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: string } = {}) {
   const { data: session, status: sessionStatus } = useSession();
   const pathname = usePathname();
-  const [connStatus, setConnStatus] = useState<ConnectionStatus | null>(null);
-
-  const meetSlug = session?.user?.meetSlug;
-  const meetUrl = meetSlug
-    ? `${typeof window !== "undefined" ? window.location.origin : ""}/meet/${meetSlug}`
-    : null;
-
-  useEffect(() => {
-    fetch("/api/connections/status")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data) setConnStatus(data);
-      })
-      .catch(() => {});
-  }, []);
 
   const [isReturning, setIsReturning] = useState(false);
   useEffect(() => { setIsReturning(hasReturningCookie()); }, []);
 
-  const calendarConnected = connStatus?.google?.calendar ?? false;
-  const hasPreferences =
-    session?.user?.preferences &&
-    Object.keys(session.user.preferences as Record<string, unknown>).length > 0;
-
-  const showAction = (connStatus && !calendarConnected) || !hasPreferences;
-  const actionLabel = connStatus && !calendarConnected ? "Connect calendar" : "Set preferences";
-
-  const isAvailability = pathname.startsWith("/dashboard/availability");
-  const isMeetings = pathname.startsWith("/dashboard/meetings");
   const isAccount = pathname.startsWith("/dashboard/account");
   const isDashboard = pathname === "/dashboard" || pathname === "/dashboard/";
+  // Future-proofs the PR 3 swap from /dashboard/meetings → /dashboard/event-links.
+  const isEventLinks =
+    pathname.startsWith("/dashboard/meetings") ||
+    pathname.startsWith("/dashboard/event-links");
   const isSignedIn = sessionStatus === "authenticated" && !!session?.user;
+
+  // Cyan-dot fetch — mirrors the pattern in mobile-dashboard-header.tsx.
+  const [awaitingAck, setAwaitingAck] = useState(0);
+  useEffect(() => {
+    if (!isSignedIn) return;
+    let cancelled = false;
+    const controller = new AbortController();
+
+    async function load() {
+      try {
+        const res = await fetch("/api/dashboard/badge-counts", {
+          signal: controller.signal,
+          credentials: "same-origin",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { awaitingAck?: unknown };
+        if (cancelled) return;
+        if (typeof data.awaitingAck === "number" && Number.isFinite(data.awaitingAck)) {
+          setAwaitingAck(data.awaitingAck);
+        }
+      } catch {
+        // Silent fail — dot is decorative.
+      }
+    }
+
+    load();
+    const timer = setInterval(load, BADGE_COUNTS_REVALIDATE_MS);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [isSignedIn]);
+
+  const hasAwaitingAck = awaitingAck > 0;
 
   // `mode: "login"` — anonymous viewers on a logged-in-host surface (deal
   // room, etc.) are likely returning users. `useOAuthSignIn` suppresses the
@@ -106,107 +119,118 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
     );
   }
 
+  const firstName = session?.user?.name?.split(" ")[0];
+
   return (
     <>
-      {/* Mobile chrome (below `md:`) — three-element topbar. Phase 1 PR 3. */}
+      {/* Mobile chrome (below `md:`) — three-element topbar. */}
       <MobileDashboardHeader session={session!} />
 
-      {/* Desktop chrome (`md:` and up) — unchanged from production. Phase 2
-          owns the desktop rebuild. */}
-      <header className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0 hidden md:block">
-      <div className="px-4 sm:px-6 py-2.5 flex items-center gap-3">
-        {/* Logo → home for the signed-in viewer. Points at /dashboard for the
-            primary account entry; the highlight state only applies when
-            they're actually on /dashboard. */}
-        <Link
-          href="/dashboard"
-          className={`flex-shrink-0 transition ${isDashboard ? "opacity-100" : "opacity-60 hover:opacity-100"}`}
-          title="AgentEnvoy"
-        >
-          <LogoFull height={22} className="text-primary" />
-        </Link>
+      {/* Desktop chrome (`md:` and up) — v2 three-element layout. */}
+      <header
+        className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0 hidden md:block"
+        data-testid="desktop-dashboard-header"
+      >
+        <div className="grid grid-cols-[auto_1fr_auto] items-center px-6 py-3 gap-x-4">
+          {/* Logo + Home (left) — active state when on /dashboard. */}
+          <Link
+            href="/dashboard"
+            className={`relative flex items-center gap-2 rounded-lg px-2 py-1.5 transition ${
+              isDashboard
+                ? "bg-accent/15 ring-1 ring-accent/40 text-accent"
+                : "text-secondary hover:bg-surface-secondary/60 hover:text-primary"
+            }`}
+            data-active={isDashboard ? "true" : undefined}
+            title="AgentEnvoy — Home"
+          >
+            <LogoFull height={22} className={isDashboard ? "text-accent" : "text-primary"} />
+            {isDashboard && (
+              <span className="text-sm font-semibold">· Home</span>
+            )}
+            {isDashboard && (
+              <span className="absolute left-2 right-2 -bottom-[13px] h-0.5 bg-accent rounded-full" />
+            )}
+          </Link>
 
-        {/* My Links — popover with General + office-hours links. Full
-            management lives at /dashboard/my-links (linked from the footer). */}
-        {meetUrl && <MyLinksPopover />}
+          {/* Event Links tab (center). Links to /dashboard/meetings — PR 3
+              will alias this to /dashboard/event-links. Cyan dot when one or
+              more sessions are awaiting host acknowledgement. */}
+          <div className="justify-self-center">
+            <Link
+              href="/dashboard/meetings"
+              className={`relative flex items-center gap-2 rounded-lg px-3 py-1.5 transition ${
+                isEventLinks
+                  ? "bg-accent/15 ring-1 ring-accent/40 text-accent"
+                  : "text-secondary hover:bg-surface-secondary/60 hover:text-primary"
+              }`}
+              data-active={isEventLinks ? "true" : undefined}
+              data-testid="desktop-header-event-links"
+              title="Event Links"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.776a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.25 8.016"
+                />
+              </svg>
+              <span className="text-sm font-medium">Event Links</span>
+              {hasAwaitingAck && (
+                <span
+                  className="w-2 h-2 rounded-full bg-cyan-400"
+                  aria-label="One or more events need your attention"
+                  data-testid="desktop-header-awaiting-ack-dot"
+                />
+              )}
+              {isEventLinks && (
+                <span className="absolute left-3 right-3 -bottom-[13px] h-0.5 bg-accent rounded-full" />
+              )}
+            </Link>
+          </div>
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Action badge — compact */}
-        {showAction && (
+          {/* Avatar + name + Preferences (right) — active state on /dashboard/account. */}
           <Link
             href="/dashboard/account"
-            className="hidden sm:flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 rounded-full px-2.5 py-1 hover:border-amber-500/40 transition"
+            className={`relative flex items-center gap-2 rounded-lg px-2 py-1 transition ${
+              isAccount
+                ? "bg-accent/15 ring-1 ring-accent/40 text-accent"
+                : "text-secondary hover:bg-surface-secondary/60 hover:text-primary"
+            }`}
+            data-active={isAccount ? "true" : undefined}
+            data-testid="desktop-header-account"
+            title="Preferences"
           >
-            <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-            <span className="text-[10px] font-medium text-amber-600 dark:text-amber-300">
-              {actionLabel}
-            </span>
+            {session?.user?.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={session.user.image}
+                alt=""
+                className={`w-7 h-7 rounded-full ${isAccount ? "ring-2 ring-accent" : ""}`}
+              />
+            ) : (
+              <div className={`w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center ${isAccount ? "ring-2 ring-accent" : ""}`}>
+                <span className="text-[10px] font-bold text-white">
+                  {session?.user?.name?.charAt(0)?.toUpperCase() || "?"}
+                </span>
+              </div>
+            )}
+            {firstName && (
+              <span className="text-sm font-medium">{firstName}</span>
+            )}
+            {isAccount && (
+              <span className="text-sm font-semibold">· Preferences</span>
+            )}
+            {isAccount && (
+              <span className="absolute left-2 right-2 -bottom-[13px] h-0.5 bg-accent rounded-full" />
+            )}
           </Link>
-        )}
-
-        {/* Availability */}
-        <Link
-          href="/dashboard/availability"
-          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition ${
-            isAvailability
-              ? "bg-accent/15 text-accent"
-              : "text-muted hover:text-secondary hover:bg-surface-secondary/60"
-          }`}
-          title="Availability"
-        >
-          <svg className="w-[16px] h-[16px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-          </svg>
-          <span className="text-xs font-medium hidden sm:inline">Availability</span>
-        </Link>
-
-        {/* Meetings */}
-        <Link
-          href="/dashboard/meetings"
-          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition ${
-            isMeetings
-              ? "bg-accent/15 text-accent"
-              : "text-muted hover:text-secondary hover:bg-surface-secondary/60"
-          }`}
-          title="Meetings"
-        >
-          <svg className="w-[16px] h-[16px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-          </svg>
-          <span className="text-xs font-medium hidden sm:inline">Meetings</span>
-        </Link>
-
-        {/* Profile → Account */}
-        <Link
-          href="/dashboard/account"
-          className={`flex items-center gap-2 rounded-lg px-2 py-1 transition ${
-            isAccount
-              ? "bg-accent/10"
-              : "hover:bg-surface-secondary/60"
-          }`}
-          title="My Account"
-        >
-          {session?.user?.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={session.user.image}
-              alt=""
-              className={`w-7 h-7 rounded-full ${isAccount ? "ring-2 ring-accent" : ""}`}
-            />
-          ) : (
-            <div className={`w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center ${isAccount ? "ring-2 ring-accent" : ""}`}>
-              <span className="text-[10px] font-bold text-white">
-                {session?.user?.name?.charAt(0)?.toUpperCase() || "?"}
-              </span>
-            </div>
-          )}
-          <span className="text-xs text-muted hidden sm:inline">
-            {session?.user?.name?.split(" ")[0]}
-          </span>
-        </Link>
-      </div>
+        </div>
       </header>
     </>
   );
