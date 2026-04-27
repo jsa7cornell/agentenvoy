@@ -232,28 +232,45 @@ export default function AccountPage() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-8 space-y-8">
-        {/* Profile Header */}
+      {/*
+        Phase 2 PR 4 — Preferences (full page).
+        Section order matches the v2 mobile drawer body field-for-field
+        (`src/components/mobile/preferences-drawer.tsx`) so a host sees the
+        same shape on both surfaces. Mockup canon: `mockups/desktop-v2.html` §6.
+        Vocabulary: lowercase "Location preferences" / "Meeting preferences",
+        page title is "Preferences" (not "Account"); the route stays
+        /dashboard/account until a Phase 6 rename.
+      */}
+      <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Page heading — explicit "Preferences" title, distinct from the
+            identity row beneath it. Mockup §6 implies the identity card carries
+            the title role; we promote it for clarity at desktop widths. */}
+        <h1 className="text-2xl font-semibold tracking-tight text-primary">Preferences</h1>
+
+        {/* Identity row — avatar, name, email, sign out. Matches mobile drawer
+            "Identity" block in `preferences-drawer.tsx`. */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {session.user?.image ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={session.user.image} alt="" className="w-12 h-12 rounded-full" />
+              <img src={session.user.image} alt="" className="w-14 h-14 rounded-full" />
             ) : (
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
+              <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
                 <span className="text-lg font-bold text-white">
                   {session.user?.name?.charAt(0)?.toUpperCase() || "?"}
                 </span>
               </div>
             )}
             <div>
-              <h1 className="text-lg font-semibold">{session.user?.name}</h1>
-              <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-primary leading-tight">
+                {session.user?.name}
+              </h2>
+              <div className="flex items-center gap-2 mt-0.5">
                 <p className="text-sm text-muted">{session.user?.email}</p>
                 <span className="text-muted">&middot;</span>
                 <button
                   onClick={() => signOut({ callbackUrl: "/" })}
-                  className="text-xs text-muted hover:text-secondary transition"
+                  className="text-xs text-muted hover:text-secondary transition underline-offset-2 hover:underline"
                 >
                   Sign out
                 </button>
@@ -336,9 +353,11 @@ export default function AccountPage() {
           <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
             Other Agents
           </h2>
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          {/* Mockup §6 renders three equal columns at desktop widths. The
+              cards stay placeholder ("Coming soon"). */}
+          <div className="grid grid-cols-3 gap-2">
             {[1, 2, 3].map((n) => (
-              <div key={n} className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-inset/50 border border-secondary opacity-50 flex-shrink-0 w-36">
+              <div key={n} className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface-inset/50 border border-secondary opacity-50 min-w-0">
                 <div className="w-7 h-7 rounded-lg bg-surface-tertiary flex items-center justify-center flex-shrink-0">
                   <svg className="w-3.5 h-3.5 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082" />
@@ -353,10 +372,10 @@ export default function AccountPage() {
           </div>
         </section>
 
-        {/* Location Preferences */}
+        {/* Location preferences */}
         <section>
           <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
-            Location Preferences
+            Location preferences
           </h2>
           <div className="bg-surface-inset/50 border border-secondary rounded-xl p-4 space-y-4">
             {/* Default Time Zone */}
@@ -399,10 +418,10 @@ export default function AccountPage() {
           </div>
         </section>
 
-        {/* Meeting Preferences */}
+        {/* Meeting preferences */}
         <section>
           <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
-            Meeting Preferences
+            Meeting preferences
           </h2>
           <div className="bg-surface-inset/50 border border-secondary rounded-xl p-4 space-y-4">
             {/* Default meeting length */}
@@ -553,13 +572,17 @@ export default function AccountPage() {
             remains defense-in-depth for any non-admin who guesses the URL. */}
         {isAdmin === true && <DevTools />}
 
-        {/* Danger Zone */}
-        <section className="space-y-3">
-          <h2 className="text-sm font-medium text-secondary">Danger Zone</h2>
+        {/* Danger zone — section heading uses the same uppercase tracking-widest
+            style as every other Preferences section (and matches the mobile
+            drawer body) so the page reads as a single rhythm. */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
+            Danger zone
+          </h2>
           <div className="border border-red-500/40 bg-red-500/5 rounded-xl px-4 py-4 flex items-center justify-between gap-4">
             <div className="text-sm">
               <div className="text-primary font-medium">Delete your account</div>
-              <div className="text-secondary text-xs mt-1">
+              <div className="text-secondary text-xs mt-1 leading-relaxed">
                 Permanently deletes your AgentEnvoy account, links, sessions, messages, calendar cache,
                 preferences, and API keys. Meetings already on your Google Calendar will stay there.
                 This cannot be undone.
