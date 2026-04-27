@@ -72,7 +72,7 @@ export interface DeterministicCreateArgs {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function escapeRegex(s: string): string {
+export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
@@ -221,14 +221,23 @@ export function schedulingPrecheck(input: PrecheckInput): PrecheckResult {
     };
   }
 
-  // Step 2: existing active link for guest?
-  // "agreed" status sessions are confirmed meetings — a new request for the
-  // same guest is always a new meeting, not a disambiguation candidate.
+  // Step 2: existing link for guest?
+  // Both "active" and "agreed" sessions count as existing links here.
+  //
+  // Proposal §9.3.3 originally treated "agreed" sessions as confirmed
+  // meetings that don't count — a new request for the same guest would
+  // always be a new meeting. John's 2026-04-27 call (Round-2 review on
+  // PR #83): silently creating a duplicate link when the host says
+  // something like "shift the Jon ride to Friday" about an already-agreed
+  // session is worse than letting the marco clarifier fire. The marco
+  // clarifier ("use existing or create new?") is a safer holding pattern.
+  // A proper reschedule-intent ("just move it") is logged as a WISHLIST
+  // follow-up — that's where "shift X to Y" eventually lands.
   const existing = input.activeSessions.find(
     (s) =>
       s.guestName &&
       s.guestName.toLowerCase() === named!.toLowerCase() &&
-      s.status === "active" &&
+      (s.status === "active" || s.status === "agreed") &&
       s.linkCode,
   );
 

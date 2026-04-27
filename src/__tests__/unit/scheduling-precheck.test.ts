@@ -63,8 +63,11 @@ describe("schedulingPrecheck", () => {
   });
 
   it("returns deterministic-create when guest comes from active sessions (no active link)", () => {
-    // Guest "Jon" has only an archived / agreed session, which shouldn't
-    // count. New request → deterministic-create.
+    // Guest "Jon" has only a cancelled session, which doesn't count as an
+    // existing link. New request → deterministic-create.
+    // (Note: "agreed" sessions DO count — see Round-2 marco-disambiguate
+    // case below. We use "cancelled" here to exercise the no-existing-link
+    // path with a guest who is otherwise resolvable.)
     const result = schedulingPrecheck(
       baseInput({
         userMessage: "Set up a 3-hour bike ride with Jon for next week",
@@ -74,7 +77,7 @@ describe("schedulingPrecheck", () => {
             title: "John + Jon",
             guestName: "Jon",
             linkCode: "oldcode",
-            status: "agreed",
+            status: "cancelled",
           },
         ],
       }),
@@ -123,9 +126,9 @@ describe("schedulingPrecheck", () => {
             title: "John + Sarah",
             guestName: "Sarah",
             linkCode: "abcdef",
-            // Not "active" — simulate a closed/agreed session so a new
-            // request is a fresh create.
-            status: "agreed",
+            // Cancelled session doesn't count as an existing link, so
+            // this is a fresh create. (Round-2 fix: "agreed" WOULD count.)
+            status: "cancelled",
           },
         ],
       }),
@@ -206,7 +209,12 @@ describe("schedulingPrecheck", () => {
     }
   });
 
-  it("treats agreed-status sessions as non-blocking (new request creates new)", () => {
+  it("treats agreed-status sessions as existing links — marco-disambiguate (Round-2 fix)", () => {
+    // Per John's 2026-04-27 Round-2 call on PR #83: an "agreed" session for
+    // the same guest must NOT silently spawn a duplicate link. Route to
+    // marco-disambiguate so the host explicitly chooses (new link vs reuse).
+    // Reschedule-intent ("just move it") is a WISHLIST follow-up, not in
+    // PR #83 scope.
     const result = schedulingPrecheck(
       baseInput({
         userMessage: "coffee with Alice tomorrow",
@@ -221,11 +229,10 @@ describe("schedulingPrecheck", () => {
         ],
       }),
     );
-    expect(result.kind).toBe("deterministic-create");
-    if (result.kind === "deterministic-create") {
-      expect(result.args.inviteeName).toBe("Alice");
-      expect(result.args.dateRangeKeyword).toBe("tomorrow");
-      expect(result.args.topic).toBe("coffee");
+    expect(result.kind).toBe("marco-disambiguate");
+    if (result.kind === "marco-disambiguate") {
+      expect(result.guest).toBe("Alice");
+      expect(result.existingLinkCode).toBe("agreedlink");
     }
   });
 

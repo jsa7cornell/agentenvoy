@@ -54,7 +54,12 @@ describe("scheduling-precheck integration — Jon-case end-to-end", () => {
     }
   });
 
-  it("routes to deterministic-create when the Jon link is 'agreed' (not 'active')", () => {
+  it("routes to marco-disambiguate when the Jon link is 'agreed' (Round-2 fix)", () => {
+    // Per John's 2026-04-27 Round-2 call on PR #83: an "agreed" session for
+    // the same guest must route to marco-disambiguate so the host
+    // explicitly chooses (new link vs reuse) rather than silently spawning
+    // a duplicate. Reschedule-intent ("just move it") is a follow-up
+    // (WISHLIST §1p), not in PR #83 scope.
     const activeSessions = [
       {
         id: "cmo9jxs1w-session",
@@ -62,6 +67,31 @@ describe("scheduling-precheck integration — Jon-case end-to-end", () => {
         guestName: "Jon",
         linkCode: "qx4bmg",
         status: "agreed",
+      },
+    ];
+    const result = schedulingPrecheck({
+      classifiedIntent: "schedule",
+      userMessage: "Set up a 3-hour bike ride with Jon for next week",
+      activeSessions,
+      recentThreadTurns: [],
+      echoFlag: false,
+    });
+
+    expect(result.kind).toBe("marco-disambiguate");
+    if (result.kind === "marco-disambiguate") {
+      expect(result.existingLinkCode).toBe("qx4bmg");
+      expect(result.guest).toBe("Jon");
+    }
+  });
+
+  it("routes to deterministic-create when the Jon link is 'cancelled' (no usable existing link)", () => {
+    const activeSessions = [
+      {
+        id: "cmo9jxs1w-session",
+        title: "John + Jon",
+        guestName: "Jon",
+        linkCode: "qx4bmg",
+        status: "cancelled",
       },
     ];
     const result = schedulingPrecheck({

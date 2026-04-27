@@ -32,6 +32,7 @@ import { computeProfileGaps } from "@/lib/profile-gaps";
 import type { CalendarEvent } from "@/lib/calendar";
 import {
   schedulingPrecheck,
+  escapeRegex,
   type PrecheckResult,
   type DeterministicCreateArgs,
 } from "@/lib/scheduling-precheck";
@@ -447,109 +448,140 @@ export async function POST(req: NextRequest) {
           // ------------------------------------------------------------
           let precheckResult: PrecheckResult | null = null;
           let precheckCreateHint: string | null = null;
+          // Tracks whether the marco-disambiguate branch has begun emitting
+          // to the client. Once true, a thrown exception below cannot be
+          // recovered by falling through to Sonnet (we'd double-stream onto
+          // a half-closed response) — so we re-throw and let the outer
+          // catch surface it as a user-visible error. Pre-commit failures
+          // (Prisma blips, precheck-compute bugs) degrade gracefully.
+          // Round-2 fix on PR #83 (2026-04-27).
+          let precheckCommittedToClient = false;
           if (intent === "schedule") {
-            const [precheckSessions, recentTurns] = await Promise.all([
-              prisma.negotiationSession.findMany({
-                where: { hostId: safeUser.id, archived: false },
-                include: {
-                  link: { select: { inviteeName: true, code: true } },
-                },
-                orderBy: { updatedAt: "desc" },
-                take: 20,
-              }),
-              prisma.channelMessage.findMany({
-                where: { channelId: safeChannel.id },
-                orderBy: { createdAt: "desc" },
-                take: 10,
-                select: { role: true, content: true },
-              }),
-            ]);
-            const mapped = precheckSessions.map((s) => ({
-              id: s.id,
-              title: s.title ?? null,
-              guestName: s.link?.inviteeName ?? null,
-              linkCode: s.link?.code ?? null,
-              status: s.status,
-            }));
-            precheckResult = schedulingPrecheck({
-              classifiedIntent: "schedule",
-              userMessage: message,
-              activeSessions: mapped,
-              recentThreadTurns: recentTurns.slice().reverse(),
-              // TODO: wire PR-β echo detector when it lands. Defaults to
-              // false; does not change decisions.
-              echoFlag: false,
-            });
-
-            console.log(
-              JSON.stringify({
-                event: "scheduling_precheck",
-                userId: safeUser.id,
-                kind: precheckResult.kind,
-                reason: precheckResult.reason,
+            try {
+              const [precheckSessions, recentTurns] = await Promise.all([
+                prisma.negotiationSession.findMany({
+                  where: { hostId: safeUser.id, archived: false },
+                  include: {
+                    link: { select: { inviteeName: true, code: true } },
+                  },
+                  orderBy: { updatedAt: "desc" },
+                  take: 20,
+                }),
+                prisma.channelMessage.findMany({
+                  where: { channelId: safeChannel.id },
+                  orderBy: { createdAt: "desc" },
+                  take: 10,
+                  select: { role: true, content: true },
+                }),
+              ]);
+              const mapped = precheckSessions.map((s) => ({
+                id: s.id,
+                title: s.title ?? null,
+                guestName: s.link?.inviteeName ?? null,
+                linkCode: s.link?.code ?? null,
+                status: s.status,
+              }));
+              precheckResult = schedulingPrecheck({
+                classifiedIntent: "schedule",
+                userMessage: message,
+                activeSessions: mapped,
+                recentThreadTurns: recentTurns.slice().reverse(),
+                // TODO: wire PR-β echo detector when it lands. Defaults to
+                // false; does not change decisions.
                 echoFlag: false,
-                namedGuest:
-                  precheckResult.kind === "deterministic-create"
-                    ? precheckResult.args.inviteeName
-                    : precheckResult.kind === "marco-disambiguate"
-                      ? precheckResult.guest
-                      : null,
-                topic:
-                  precheckResult.kind === "deterministic-create"
-                    ? precheckResult.args.topic
-                    : null,
-                duration:
-                  precheckResult.kind === "deterministic-create"
-                    ? precheckResult.args.duration
-                    : null,
-              }),
-            );
-
-            // Marco-disambiguate: skip Sonnet entirely, emit the clarifier
-            // question directly. Next user turn will arrive with a clear
-            // priorEnvoyTurn that the classifier can use.
-            if (precheckResult.kind === "marco-disambiguate") {
-              await userMsgPersist;
-              const { guest, existingLinkCode } = precheckResult;
-              const topicHint = (() => {
-                // Best-effort topic pull for the message — reuse the
-                // existing-link's topic when available, else generic.
-                const hit = precheckSessions.find(
-                  (s) =>
-                    s.link?.inviteeName &&
-                    guest &&
-                    s.link.inviteeName.toLowerCase() === guest.toLowerCase() &&
-                    s.link?.code === existingLinkCode,
-                );
-                return hit?.title
-                  ? hit.title.replace(new RegExp(`\\b${guest}\\b`, "gi"), "").replace(/\s*\+\s*/g, " ").trim().toLowerCase() || "meeting"
-                  : "meeting";
-              })();
-              const text = `I already have a ${guest} ${topicHint} link (${existingLinkCode}) — want a second one, or should I tweak that one?`;
-              await prisma.channelMessage.create({
-                data: {
-                  channelId: safeChannel.id,
-                  role: "envoy",
-                  content: text,
-                },
               });
-              controller.enqueue(
-                encoder.encode(
-                  JSON.stringify({ type: "text", content: text }) + "\n",
-                ),
-              );
-              controller.close();
-              return;
-            }
 
-            // Deterministic-create: use the injected-hint path (proposal
-            // alternative in §9.3.3). We bias Sonnet's system prompt with
-            // a required-ACTION directive; the existing action-emission
-            // guard retries if the model drops the block. This avoids
-            // rearchitecting the stream pipeline to emit actions server-
-            // side — documented choice (PR description).
-            if (precheckResult.kind === "deterministic-create") {
-              precheckCreateHint = buildDeterministicCreateHint(precheckResult.args);
+              console.log(
+                JSON.stringify({
+                  event: "scheduling_precheck",
+                  userId: safeUser.id,
+                  kind: precheckResult.kind,
+                  reason: precheckResult.reason,
+                  echoFlag: false,
+                  namedGuest:
+                    precheckResult.kind === "deterministic-create"
+                      ? precheckResult.args.inviteeName
+                      : precheckResult.kind === "marco-disambiguate"
+                        ? precheckResult.guest
+                        : null,
+                  topic:
+                    precheckResult.kind === "deterministic-create"
+                      ? precheckResult.args.topic
+                      : null,
+                  duration:
+                    precheckResult.kind === "deterministic-create"
+                      ? precheckResult.args.duration
+                      : null,
+                }),
+              );
+
+              // Marco-disambiguate: skip Sonnet entirely, emit the clarifier
+              // question directly. Next user turn will arrive with a clear
+              // priorEnvoyTurn that the classifier can use.
+              if (precheckResult.kind === "marco-disambiguate") {
+                await userMsgPersist;
+                const { guest, existingLinkCode } = precheckResult;
+                const topicHint = (() => {
+                  // Best-effort topic pull for the message — reuse the
+                  // existing-link's topic when available, else generic.
+                  const hit = precheckSessions.find(
+                    (s) =>
+                      s.link?.inviteeName &&
+                      guest &&
+                      s.link.inviteeName.toLowerCase() === guest.toLowerCase() &&
+                      s.link?.code === existingLinkCode,
+                  );
+                  return hit?.title
+                    ? hit.title.replace(new RegExp(`\\b${escapeRegex(guest)}\\b`, "gi"), "").replace(/\s*\+\s*/g, " ").trim().toLowerCase() || "meeting"
+                    : "meeting";
+                })();
+                const text = `I already have a ${guest} ${topicHint} link (${existingLinkCode}) — want a second one, or should I tweak that one?`;
+                await prisma.channelMessage.create({
+                  data: {
+                    channelId: safeChannel.id,
+                    role: "envoy",
+                    content: text,
+                  },
+                });
+                precheckCommittedToClient = true;
+                controller.enqueue(
+                  encoder.encode(
+                    JSON.stringify({ type: "text", content: text }) + "\n",
+                  ),
+                );
+                controller.close();
+                return;
+              }
+
+              // Deterministic-create: use the injected-hint path (proposal
+              // alternative in §9.3.3). We bias Sonnet's system prompt with
+              // a required-ACTION directive; the existing action-emission
+              // guard retries if the model drops the block. This avoids
+              // rearchitecting the stream pipeline to emit actions server-
+              // side — documented choice (PR description).
+              if (precheckResult.kind === "deterministic-create") {
+                precheckCreateHint = buildDeterministicCreateHint(precheckResult.args);
+              }
+            } catch (precheckErr) {
+              if (precheckCommittedToClient) {
+                throw precheckErr;
+              }
+              const err =
+                precheckErr instanceof Error
+                  ? precheckErr
+                  : new Error(String(precheckErr));
+              console.error(
+                JSON.stringify({
+                  event: "scheduling_precheck_failed",
+                  userId: safeUser.id,
+                  errName: err.name,
+                  errMessage: err.message,
+                  stack: err.stack,
+                }),
+              );
+              precheckResult = null;
+              precheckCreateHint = null;
+              // Fall through to the Sonnet pipeline below.
             }
           }
 
@@ -901,6 +933,34 @@ export async function POST(req: NextRequest) {
                 console.warn(
                   `[channel/chat] inquire tier emitted ${parsed.length} action block(s); stripping. userId=${safeUser.id}`,
                 );
+              }
+              // Silent-drift telemetry (Round-2 fix on PR #83, 2026-04-27).
+              // We injected a deterministic create_link hint, but Sonnet
+              // emerged with no create_link action — likely Sonnet chose to
+              // clarify instead. Per John's call: clarifying is acceptable
+              // (the precheck context naturally re-runs next turn with the
+              // host's reply). We only need the rate to be observable.
+              if (
+                precheckCreateHint &&
+                precheckResult?.kind === "deterministic-create"
+              ) {
+                const emittedCreateLink = parsed.some(
+                  (a) => a.action === "create_link",
+                );
+                if (!emittedCreateLink) {
+                  console.log(
+                    JSON.stringify({
+                      event: "precheck_silent_drift",
+                      userId: safeUser.id,
+                      inviteeName: precheckResult.args.inviteeName,
+                      topic: precheckResult.args.topic,
+                      duration: precheckResult.args.duration,
+                      dateRangeKeyword: precheckResult.args.dateRangeKeyword,
+                      emittedActions: parsed.map((a) => a.action),
+                      responseSample: text.slice(0, 200),
+                    }),
+                  );
+                }
               }
               const actions = isInquireTier ? [] : parsed;
               let actionResults: ActionResult[] = [];
