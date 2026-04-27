@@ -1,0 +1,5 @@
+Classify the host's chat-turn intent. Phase 5 PR-3 wires this template to the real classifier prompt (`src/agent/intent-classifier.ts` + `src/agent/playbooks/intent-classifier.md`); for now this placeholder exercises the harness end-to-end so the eval suite has something to run.
+
+Host turn: {{utterance}}
+
+Return one of: schedule, profile, rule, inquire, unclear, chitchat. Reply with the single word.

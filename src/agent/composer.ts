@@ -8,6 +8,7 @@ import { formatDuration } from "@/lib/format-duration";
 import { parseGuestTimeReferences, renderParsedTime } from "@/lib/time-parse";
 import { readProfileField } from "@/lib/profile-fields";
 import type { UserPreferences } from "@/lib/scoring";
+import { recordSpanSync } from "@/lib/langfuse";
 
 // --- Playbook cache (read once per cold start) ---
 
@@ -99,7 +100,38 @@ export interface ComposeOptions {
   activityOptions?: string[] | null;
 }
 
+/**
+ * Compose the layered system prompt for the agent. Pure string assembly —
+ * no LLM calls in this function or this file. The actual `generateText` /
+ * `streamText` invocations that consume this prompt live in
+ * `src/agent/administrator.ts:streamAgentResponse` /
+ * `generateAgentResponse`.
+ *
+ * Langfuse instrumentation note (Phase 5 PR-1):
+ *   This function is wrapped with `recordSpanSync("composer.compose", ...)`
+ *   so dev-time Langfuse traces capture the prompt-assembly step. Why here
+ *   rather than at the downstream LLM call site: composer.ts is the
+ *   prompt-path's named primary entry (and the convergence target for
+ *   Phase 5 PRs 4–5 — host + guest both flow through it). Tracing here
+ *   means every assembled prompt is observable regardless of which caller
+ *   ultimately invokes the LLM. The wrapper is byte-identical to a plain
+ *   call when `LANGFUSE_ENABLED !== "true"` — no behavior change in
+ *   production.
+ */
 export function composeSystemPrompt(options: ComposeOptions): string {
+  return recordSpanSync(
+    "composer.compose",
+    () => composeSystemPromptInner(options),
+    {
+      domain: options.domain,
+      role: options.role,
+      sessionId: options.sessionId,
+      isGroupEvent: options.isGroupEvent ?? false,
+    },
+  );
+}
+
+function composeSystemPromptInner(options: ComposeOptions): string {
   const sections: string[] = [];
 
   // Layer 0: Ground Truth Protocol (loaded FIRST — deterministic data rules)

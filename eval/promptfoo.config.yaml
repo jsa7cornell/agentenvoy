@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Promptfoo eval — AgentEnvoy host + guest dialog regression catching.
+#
+# Phase 5 PR-1 status:
+#   - Prompt files are 3-line placeholders. Phase 5 PR-3 wires them to the
+#     real composer + intent-classifier prompt paths.
+#   - Golden sets are 5-turn placeholders per role. Phase 5 PR-2 swaps in
+#     John's curated 100-turn frozen set.
+#   - CI activation deferred — once curated golden sets land, a follow-up
+#     PR adds .github/workflows/eval.yml + an ANTHROPIC_API_KEY secret +
+#     a budgeted-spend guard.
+#
+# Reference: refactor-package-2026-04-25/CODEBASE-CLEANUP.md item 9,
+#            refactor-package-2026-04-25/SPEC-2.0.md §6.4.
+
+description: Phase 5 eval - host + guest dialog regression catching
+
+prompts:
+  - file://prompts/composer-host.txt
+  - file://prompts/composer-guest.txt
+  - file://prompts/intent-classifier.txt
+
+# Anthropic provider via the AI SDK gateway envelope. The smoke-test path
+# uses ANTHROPIC_API_KEY directly. CI activation will route through the
+# gateway (matching production); for local dry-runs, exporting
+# ANTHROPIC_API_KEY suffices.
+providers:
+  - id: anthropic:messages:claude-sonnet-4-6
+    config:
+      apiKey: ${ANTHROPIC_API_KEY}
+
+# Each role's golden set is a separate JSONL file. Promptfoo loads
+# file:// paths relative to the config file. Each line must be a
+# complete test case: { vars, assert?, description?, metadata? }.
+tests:
+  - file://golden-sets/host.jsonl
+  - file://golden-sets/guest.jsonl
+
+# Default assertions applied to every test case unless the case
+# overrides them. The LLM-as-judge rubric is loaded inline from
+# judge-rubric.md — Promptfoo expands file:// in `value:` for
+# llm-rubric assertions.
+defaultTest:
+  assert:
+    - type: llm-rubric
+      value: file://judge-rubric.md
+      threshold: 0.7
