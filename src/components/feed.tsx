@@ -1397,7 +1397,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           return (
             <div key={msg.id} className={`relative ${isUser ? "self-end" : "self-start"}`}>
               <div
-                className={`max-w-[72%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                className={`max-w-[88%] w-fit rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   isUser
                     ? "bg-purple-600 text-white rounded-br-sm"
                     : "bg-black/5 dark:bg-white/7 rounded-bl-sm"

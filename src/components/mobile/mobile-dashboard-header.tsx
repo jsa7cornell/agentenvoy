@@ -108,7 +108,13 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
     session.user?.email?.charAt(0)?.toUpperCase() ||
     "?";
 
+  // The header sets `backdrop-filter: blur(...)` for its scroll halo. Per the
+  // CSS spec, a non-`none` backdrop-filter creates a containing block for any
+  // `position: fixed` descendant — which would clip the drawer/sheet to the
+  // header's box (~56px tall) instead of the viewport. Render the drawer and
+  // sheet as siblings of <header>, not children, so they escape the trap.
   return (
+    <>
     <header
       className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0 flex md:hidden"
       data-testid="mobile-dashboard-header"
@@ -166,7 +172,12 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.776a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.25 8.016"
+                d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 6"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M14 11a5 5 0 0 0-7.07 0l-1.41 1.41a5 5 0 0 0 7.07 7.07L14 18"
               />
             </svg>
             <span>Event Links</span>
@@ -206,15 +217,16 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
         </div>
       </div>
 
-      <PreferencesDrawer
-        open={prefsOpen}
-        onClose={() => setPrefsOpen(false)}
-        session={session}
-      />
-      <EventLinksSheet
-        open={linksOpen}
-        onClose={() => setLinksOpen(false)}
-      />
     </header>
+    <PreferencesDrawer
+      open={prefsOpen}
+      onClose={() => setPrefsOpen(false)}
+      session={session}
+    />
+    <EventLinksSheet
+      open={linksOpen}
+      onClose={() => setLinksOpen(false)}
+    />
+    </>
   );
 }
