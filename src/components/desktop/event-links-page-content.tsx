@@ -177,7 +177,7 @@ export function EventLinksPageContent() {
               url: `${origin}/meet/${oh.linkSlug}/${oh.linkCode}`,
               icon: "🕐",
               ruleId: r.id,
-              officeHoursConfig: {
+              recurringWindowConfig: {
                 title: oh.title,
                 name: oh.name,
                 format: oh.format,

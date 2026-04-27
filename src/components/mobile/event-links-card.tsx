@@ -42,11 +42,16 @@ export interface ReusableLinkRow {
   url: string;
   /** Visual signifier — emoji per the mockup (🔗, 🕐, 📱, etc.). */
   icon: string;
-  /** Office Hours only — the rule id used by the Edit dialog. */
+  /** Recurring-window-backed reusables only — the rule id used by the
+   *  Edit dialog. Office Hours is the most common variant today; other
+   *  recurring-window-backed variants populate this the same way. */
   ruleId?: string;
-  /** Office Hours only — the underlying officeHours config the Edit dialog
-   *  hydrates from (title / format / duration / window / days). */
-  officeHoursConfig?: {
+  /** Set when the link has an attached recurring window — the editable
+   *  config the Edit dialog hydrates from (title / format / duration /
+   *  window / days). The Edit dialog gates its editable form on the
+   *  presence of this field, not on `kind`, so any future variant with a
+   *  recurring window inherits the editable form for free. */
+  recurringWindowConfig?: {
     title: string;
     name?: string;
     format: "video" | "phone" | "in-person";
