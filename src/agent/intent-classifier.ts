@@ -10,8 +10,6 @@
  * emit the classification. Failure mode collapses to network/provider
  * errors only, handled by the retry policy (§2.7).
  */
-// Schema constrained to CHAT_INTENT_VALUES (guest values only) by design — see lib/intent.ts (Phase 5 PR 3) for HOST_CHAT_INTENT_VALUES; PR 4 will introduce a role-aware schema.
-
 import { generateObject } from "ai";
 import { z } from "zod";
 import { readFileSync } from "fs";
@@ -19,20 +17,31 @@ import { join } from "path";
 import { envoyModel } from "@/lib/model";
 import {
   CHAT_INTENT_VALUES,
+  HOST_CHAT_INTENT_VALUES,
   validateChatIntent,
   type ChatIntent,
   type ChatIntentBlock,
+  type HostChatIntent,
 } from "@/lib/intent";
 import { recordSpan } from "@/lib/langfuse";
 
-let classifierPlaybook = "";
+let guestClassifierPlaybook = "";
+let hostClassifierPlaybook = "";
 try {
-  classifierPlaybook = readFileSync(
+  guestClassifierPlaybook = readFileSync(
     join(process.cwd(), "src", "agent", "playbooks", "intent-classifier.md"),
     "utf-8",
   );
 } catch (e) {
-  console.error("Failed to load intent-classifier.md:", e);
+  console.error("Failed to load intent-classifier.md (guest):", e);
+}
+try {
+  hostClassifierPlaybook = readFileSync(
+    join(process.cwd(), "src", "agent", "playbooks", "intent-classifier-host.md"),
+    "utf-8",
+  );
+} catch (e) {
+  console.error("Failed to load intent-classifier-host.md (host):", e);
 }
 
 const CLASSIFIER_MODEL = "claude-haiku-4-5-20251001";
@@ -40,7 +49,7 @@ const CLASSIFIER_MAX_TOKENS = 256;
 const CLASSIFIER_TIMEOUT_MS = 5000;
 const CLASSIFIER_RETRY_BACKOFF_MS = 250;
 
-const chatIntentSchema = z.object({
+const guestChatIntentSchema = z.object({
   kind: z.enum(CHAT_INTENT_VALUES),
   clarifier: z.string().optional(),
   quickReplies: z
@@ -52,6 +61,10 @@ const chatIntentSchema = z.object({
     )
     .optional(),
   emoji: z.string().optional(),
+});
+
+const hostChatIntentSchema = z.object({
+  kind: z.enum(HOST_CHAT_INTENT_VALUES),
 });
 
 export interface ClassifyContext {
@@ -144,7 +157,10 @@ function buildUserPrompt(message: string, ctx: ClassifyContext): string {
 async function callClassifier(
   message: string,
   ctx: ClassifyContext,
+  role: "host" | "guest",
 ): Promise<{ block: ChatIntentBlock; rawKind: string | null; rawClarifier: string | null }> {
+  const playbook = role === "host" ? hostClassifierPlaybook : guestClassifierPlaybook;
+  const schema = role === "host" ? hostChatIntentSchema : guestChatIntentSchema;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CLASSIFIER_TIMEOUT_MS);
   try {
@@ -157,21 +173,33 @@ async function callClassifier(
         generateObject({
           model: envoyModel(CLASSIFIER_MODEL),
           maxOutputTokens: CLASSIFIER_MAX_TOKENS,
-          system: classifierPlaybook,
+          system: playbook,
           prompt: buildUserPrompt(message, ctx),
-          schema: chatIntentSchema,
+          schema,
           abortSignal: controller.signal,
         }),
       {
         model: CLASSIFIER_MODEL,
+        role,
         hasActiveSessions: !!ctx.activeSessionsSummary,
         hasPriorTurn: !!ctx.priorEnvoyTurn,
         echoFlag: !!ctx.echoFlag,
       },
     );
     const rawKind = typeof object?.kind === "string" ? object.kind : null;
+
+    if (role === "host") {
+      // Host emits { kind } only — no clarifier / quickReplies / emoji.
+      // Fabrication detection / closed-set substitution is guest-only
+      // (depends on the `unclear` tier, which is not in the host enum).
+      const validated = validateChatIntent(object);
+      return { block: validated, rawKind, rawClarifier: null };
+    }
+
     const rawClarifier =
-      typeof object?.clarifier === "string" ? object.clarifier : null;
+      typeof (object as { clarifier?: unknown })?.clarifier === "string"
+        ? ((object as { clarifier?: string }).clarifier ?? null)
+        : null;
     // Schema-amendment (proposal §9.3.2): if Haiku returned `unclear` with
     // either no clarifier or a fabricated-looking one, substitute a
     // closed-set clarifier BEFORE validation — otherwise the validator's
@@ -208,6 +236,7 @@ async function callClassifier(
 export async function classifyChatIntent(
   message: string,
   ctx: ClassifyContext = {},
+  role: "host" | "guest" = "guest",
 ): Promise<ClassifyResult> {
   const start = Date.now();
   const fabricatedFrom = (rawClarifier: string | null, rawKind: string | null) =>
@@ -216,7 +245,7 @@ export async function classifyChatIntent(
       !rawClarifier ||
       !rawClarifier.trim());
   try {
-    const { block, rawKind, rawClarifier } = await callClassifier(message, ctx);
+    const { block, rawKind, rawClarifier } = await callClassifier(message, ctx, role);
     return {
       intent: block,
       latencyMs: Date.now() - start,
@@ -228,7 +257,7 @@ export async function classifyChatIntent(
     console.warn("[intent-classifier] first call failed, retrying once:", firstErr);
     await new Promise((r) => setTimeout(r, CLASSIFIER_RETRY_BACKOFF_MS));
     try {
-      const { block, rawKind, rawClarifier } = await callClassifier(message, ctx);
+      const { block, rawKind, rawClarifier } = await callClassifier(message, ctx, role);
       return {
         intent: block,
         latencyMs: Date.now() - start,
@@ -237,12 +266,16 @@ export async function classifyChatIntent(
         fabricationDetected: fabricatedFrom(rawClarifier, rawKind),
       };
     } catch (secondErr) {
+      const fallbackKind: ChatIntent =
+        role === "host"
+          ? ("chat" satisfies HostChatIntent)
+          : ("schedule" satisfies ChatIntent);
       console.error(
-        "[intent-classifier] second call failed, falling back to schedule:",
+        `[intent-classifier] second call failed, falling back to ${fallbackKind}:`,
         secondErr,
       );
       return {
-        intent: { kind: "schedule" satisfies ChatIntent },
+        intent: { kind: fallbackKind },
         latencyMs: Date.now() - start,
         retried: true,
         rawKind: null,
