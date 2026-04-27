@@ -6,9 +6,15 @@ import Feed from "@/components/feed";
 import { AvailabilityPanel } from "@/components/availability-panel";
 import { validateReturnTo } from "@/lib/onboarding/return-to";
 
+// v2 layout — mockup §Home is `grid-template-columns:1fr 1.2fr` (chat
+// narrower than calendar). At a 1440px desktop viewport the spec ratio
+// puts chat at ~654px; we round to 660 as the resizable default. Min/max
+// are unchanged so users who preferred the wider chat from v1 can still
+// drag back. See refactor-package-2026-04-25/mockups/desktop-v2.html
+// .home-body / .chat-pane.
 const CHAT_MIN = 400;
 const CHAT_MAX = 860;
-const CHAT_DEFAULT = 732; // 20% wider than original 610
+const CHAT_DEFAULT = 660;
 
 function DashboardPageInner() {
   const [chatWidth, setChatWidth] = useState(CHAT_DEFAULT);
@@ -77,7 +83,11 @@ function DashboardPageInner() {
         className="hidden md:flex flex-col items-center justify-center flex-shrink-0 w-[5px] cursor-col-resize group z-10 relative"
         onMouseDown={onMouseDown}
       >
-        <div className="absolute inset-y-0 left-[2px] w-px bg-secondary group-hover:bg-indigo-500/60 transition-colors" />
+        {/* Divider line — v2 mockup §Home uses `var(--border)` (stronger
+            line) for the chat-pane / cal-pane split. Tailwind's
+            `bg-border` doesn't exist (the token lives on `borderColor`
+            only), so reference the CSS variable directly. */}
+        <div className="absolute inset-y-0 left-[2px] w-px bg-[var(--border)] group-hover:bg-indigo-500/60 transition-colors" />
         {/* Grab pill — appears on hover so it's discoverable */}
         <div className="relative z-10 flex flex-col gap-[3px] opacity-0 group-hover:opacity-100 transition-opacity">
           <span className="w-[3px] h-[3px] rounded-full bg-indigo-400" />
