@@ -244,18 +244,18 @@ export async function handleGetAvailability(
   let slots: ScoredSlot[] = applyEventOverrides(schedule.slots, rules, timezone);
 
   // Office-hours transform if the link was spawned from a rule.
-  if (link.sourceRuleId) {
+  if (link.recurringWindowId) {
     const explicit = prefs.explicit as Record<string, unknown> | undefined;
     const allRules =
       (explicit?.structuredRules as AvailabilityRule[] | undefined) ?? [];
     const compiledLinks = compileOfficeHoursLinks(allRules);
-    const compiled = compiledLinks.find((l) => l.ruleId === link.sourceRuleId);
+    const compiled = compiledLinks.find((l) => l.ruleId === link.recurringWindowId);
     if (compiled) {
       const siblings = await prisma.negotiationSession.findMany({
         where: {
           status: "agreed",
           agreedTime: { not: null },
-          link: { sourceRuleId: link.sourceRuleId },
+          link: { recurringWindowId: link.recurringWindowId },
         },
         select: { agreedTime: true, duration: true },
       });

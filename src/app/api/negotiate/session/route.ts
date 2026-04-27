@@ -153,7 +153,7 @@ export async function POST(req: NextRequest) {
   let reuseSessionId: string | null = null;
   if (officeHoursRule) {
     // Spawn a fresh child link for this visitor, keyed back to the rule via
-    // sourceRuleId. Primary-link semantics: each visit creates a new link +
+    // recurringWindowId. Primary-link semantics: each visit creates a new link +
     // session, and the guest resumes via the sessionId URL, not the rule's
     // public /meet/{slug}/{code}.
     const oh = officeHoursRule.officeHours!;
@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
         slug: user.meetSlug!,
         code: childCode,
         topic: oh.title,
-        sourceRuleId: officeHoursRule.id,
+        recurringWindowId: officeHoursRule.id,
         rules: {
           format: oh.format,
           duration: oh.durationMinutes,
@@ -706,7 +706,7 @@ export async function POST(req: NextRequest) {
         where: {
           status: "agreed",
           agreedTime: { not: null },
-          link: { sourceRuleId: officeHoursRule.id },
+          link: { recurringWindowId: officeHoursRule.id },
           id: { not: session.id },
         },
         select: { agreedTime: true, duration: true },
@@ -870,12 +870,12 @@ export async function POST(req: NextRequest) {
     //              voice. Timing is folded into {xxx}.
     //   Branch B-find-time — named invitee with no structural fields set
     //              → "{Host} asked me to find time{ timingLabel}" voice.
-    //   Branch C — anonymous link (type=primary OR sourceRuleId!=null, i.e.
+    //   Branch C — anonymous link (type=primary OR recurringWindowId!=null, i.e.
     //              office-hours child) → agent-voice self-intro. Office-hours
     //              surface `topic` inline; bare primaries use "default is".
     //
     // Rules baked in:
-    //   • `link.type === "primary" || link.sourceRuleId != null` is the ONLY
+    //   • `link.type === "primary" || link.recurringWindowId != null` is the ONLY
     //     gate for anonymous voice. Steering does NOT select the branch.
     //   • Bulleted schedule body (old Branch D) deleted. Calendar widget IS
     //     the enumeration.
@@ -890,8 +890,8 @@ export async function POST(req: NextRequest) {
     //     level calendar access).
     // ────────────────────────────────────────────────────────────────────
 
-    const isAnonymousLink = link.type === "primary" || !!link.sourceRuleId;
-    const isOfficeHoursLink = !!link.sourceRuleId;
+    const isAnonymousLink = link.type === "primary" || !!link.recurringWindowId;
+    const isOfficeHoursLink = !!link.recurringWindowId;
 
     const storedSteering = readStoredSteering(linkRules);
     const effectiveSteering = storedSteering ?? deriveLegacy(linkRules);

@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   let hostId: string;
   let prefs: Record<string, unknown>;
   let linkRules: LinkRules = {};
-  let sourceRuleId: string | null = null;
+  let recurringWindowId: string | null = null;
   // guestId is set only when the session has a logged-in guest (bilateral path).
   // Anonymous guests stay null → bilateral compute is skipped and the response
   // falls back to today's host-only shape.
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
         hostId: true,
         guestId: true,
         host: { select: { preferences: true } },
-        link: { select: { rules: true, sourceRuleId: true } },
+        link: { select: { rules: true, recurringWindowId: true } },
       },
     });
     if (!session) {
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
     guestId = session.guestId;
     prefs = (session.host.preferences as Record<string, unknown>) || {};
     linkRules = (session.link?.rules as LinkRules) || {};
-    sourceRuleId = session.link?.sourceRuleId ?? null;
+    recurringWindowId = session.link?.recurringWindowId ?? null;
     partialSessionId = sessionId;
   } else {
     return NextResponse.json(
@@ -144,10 +144,10 @@ export async function GET(req: NextRequest) {
     // Office-hours transform: if this session was spawned from an office_hours
     // rule, filter slots through the rule's window + days, override soft
     // protection, and subtract already-booked sibling sessions for the same rule.
-    if (sourceRuleId) {
+    if (recurringWindowId) {
       const allRules = (explicit?.structuredRules as AvailabilityRule[] | undefined) ?? [];
       const compiledLinks = compileOfficeHoursLinks(allRules);
-      const compiled = compiledLinks.find((l) => l.ruleId === sourceRuleId);
+      const compiled = compiledLinks.find((l) => l.ruleId === recurringWindowId);
       if (compiled) {
         // Sibling confirmed bookings — any other session spawned from the same
         // rule that has a confirmed agreedTime. These are the slots guest A already
@@ -156,7 +156,7 @@ export async function GET(req: NextRequest) {
           where: {
             status: "agreed",
             agreedTime: { not: null },
-            link: { sourceRuleId: sourceRuleId },
+            link: { recurringWindowId: recurringWindowId },
             ...(sessionId ? { id: { not: sessionId } } : {}),
           },
           select: { agreedTime: true, duration: true },

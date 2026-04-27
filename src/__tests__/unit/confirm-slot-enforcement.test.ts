@@ -135,7 +135,7 @@ function stubSession({ status }: { status: string } = { status: "active" }) {
       topic: null,
       inviteeName: null,
       inviteeEmail: null,
-      sourceRuleId: null,
+      recurringWindowId: null,
     },
     host: {
       id: hostId,
@@ -257,7 +257,7 @@ describe("confirmBooking — N2 slot-still-offered enforcement", () => {
         topic: null,
         inviteeName: null,
         inviteeEmail: null,
-        sourceRuleId: null,
+        recurringWindowId: null,
       },
       host: {
         id: hostId,
