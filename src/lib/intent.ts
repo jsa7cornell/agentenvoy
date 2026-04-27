@@ -262,6 +262,13 @@ export function readStoredSteering(rules: MaybeRules): Steering | null {
 // classifier runs as a dedicated Haiku call ahead of the scheduling pass —
 // NOT inline with scheduling. See §1.3 of the proposal for why (256-line
 // channel.md too dense to absorb a second classifier).
+//
+// Phase 5 PR 3 (CODEBASE-CLEANUP §10): extended with `HOST_CHAT_INTENT_VALUES`
+// — the host-side enum the role-aware classifier (PR 4) and composer
+// convergence (PR 5) will switch on. Today's classifier schema is still
+// constrained to the guest tuple; the host extension is forward-only data
+// structure so downstream consumers can take a dependency without further
+// enum churn.
 // ---------------------------------------------------------------------------
 
 export const CHAT_INTENT_VALUES = [
@@ -273,9 +280,44 @@ export const CHAT_INTENT_VALUES = [
   "chitchat",
 ] as const;
 
-export type ChatIntent = (typeof CHAT_INTENT_VALUES)[number];
+/**
+ * Host-side chat intents (Phase 5 PR 3, CODEBASE-CLEANUP §10).
+ *
+ * Emitted by the role-aware classifier when the dashboard chat composer
+ * receives a host message. Ships ahead of PR 4 (role-aware classifier) and
+ * PR 5 (composer convergence) so downstream consumers can switch on the
+ * full union without further enum churn.
+ *
+ * Today (PR 3) the classifier schema in `intent-classifier.ts` is still
+ * constrained to `CHAT_INTENT_VALUES` (guest-only) — PR 4 will introduce
+ * a role-aware schema variant. Values added here are forward-only.
+ *
+ *   - `edit_preference`  — host wants to update Preferences (working hours,
+ *                          default duration, default format, etc.).
+ *   - `create_link`      — host wants to create a reusable / one-off link.
+ *   - `query_calendar`   — host wants to know what's on their calendar.
+ *   - `query_event`      — host wants details on a specific upcoming event.
+ *   - `chat`             — neutral host chitchat / catch-all routed back to
+ *                          the composer for free-form response.
+ */
+export const HOST_CHAT_INTENT_VALUES = [
+  "edit_preference",
+  "create_link",
+  "query_calendar",
+  "query_event",
+  "chat",
+] as const;
 
-const CHAT_INTENT_SET = new Set<string>(CHAT_INTENT_VALUES);
+export type GuestChatIntent = (typeof CHAT_INTENT_VALUES)[number];
+export type HostChatIntent = (typeof HOST_CHAT_INTENT_VALUES)[number];
+export type ChatIntent = GuestChatIntent | HostChatIntent;
+
+const CHAT_INTENT_SET = new Set<string>([
+  ...CHAT_INTENT_VALUES,
+  ...HOST_CHAT_INTENT_VALUES,
+]);
+const GUEST_CHAT_INTENT_SET = new Set<string>(CHAT_INTENT_VALUES);
+const HOST_CHAT_INTENT_SET = new Set<string>(HOST_CHAT_INTENT_VALUES);
 
 /**
  * Quick-reply shape emitted by the classifier when `kind === "unclear"`.
@@ -300,12 +342,36 @@ export type ChatIntentBlock = {
 };
 
 /**
- * Coerce unknown input (Haiku tool-use output, `userIntentHint` from POST)
- * into a valid ChatIntent. Returns the tier string if valid, else null.
+ * Coerce unknown input (Haiku tool-use output, `userIntentHint` from POST,
+ * client-emitted hint, etc.) into a valid ChatIntent. Returns the tier
+ * string if valid for either role, else null.
+ *
+ * For role-specific narrowing use `normalizeGuestChatIntent` /
+ * `normalizeHostChatIntent`.
  */
 export function normalizeChatIntent(input: unknown): ChatIntent | null {
   if (typeof input !== "string") return null;
   return CHAT_INTENT_SET.has(input) ? (input as ChatIntent) : null;
+}
+
+/**
+ * Role-narrowed normalizer — returns the value only if it's in the guest
+ * subset. Used by code paths where a host intent would be a category error
+ * (e.g., the guest-side classifier validator).
+ */
+export function normalizeGuestChatIntent(input: unknown): GuestChatIntent | null {
+  if (typeof input !== "string") return null;
+  return GUEST_CHAT_INTENT_SET.has(input) ? (input as GuestChatIntent) : null;
+}
+
+/**
+ * Role-narrowed normalizer — returns the value only if it's in the host
+ * subset. Used by code paths where a guest intent would be a category error
+ * (e.g., the host-side classifier in PR 4).
+ */
+export function normalizeHostChatIntent(input: unknown): HostChatIntent | null {
+  if (typeof input !== "string") return null;
+  return HOST_CHAT_INTENT_SET.has(input) ? (input as HostChatIntent) : null;
 }
 
 /**
@@ -320,6 +386,12 @@ export function normalizeChatIntent(input: unknown): ChatIntent | null {
  *   - `kind === "unclear"` but no clarifier text → `schedule` (matches
  *     today's behavior; avoids a dead-end empty clarifier bubble)
  *   - quick-replies with invalid/stub-tier intent → dropped
+ *
+ * Phase 5 PR 3 (CODEBASE-CLEANUP §10): host-side intents added in
+ * `HOST_CHAT_INTENT_VALUES` fall through the default `return { kind }`
+ * branch by design. The chitchat/unclear special cases are guest-only.
+ * PR 4 will introduce a host-specific validator when the role-aware
+ * classifier ships.
  */
 export function validateChatIntent(raw: unknown): ChatIntentBlock {
   if (!raw || typeof raw !== "object") {
