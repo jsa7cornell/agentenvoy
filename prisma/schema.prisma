@@ -282,11 +282,12 @@ model NegotiationLink {
   hostNote        String?   @db.VarChar(280)
   topic           String?
   rules           Json?     @default("{}")
-  /// When this link was spawned from an AvailabilityRule (e.g., office hours),
-  /// points at the rule ID. The session's offerable slots are filtered through
-  /// the rule's window. Null for normal primary/contextual links. The rule lives
-  /// in the user's preferences.explicit.structuredRules JSON, not a relation.
-  sourceRuleId    String?
+  /// The recurring window this link is bound to (formerly sourceRuleId, used
+  /// only for office hours). Now generalized to any reusable variant: the
+  /// session's offerable slots are filtered through the window. Null for
+  /// normal primary/contextual links. The window lives in the user's
+  /// preferences.explicit.structuredRules JSON, not a relation.
+  recurringWindowId String?
   expiresAt       DateTime?
   /// Per-link salt for hashing guest emails in MCPCallLog. Postgres ≥13
   /// built-in `gen_random_uuid()` (no pgcrypto). Prevents cross-link
