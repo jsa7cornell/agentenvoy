@@ -22,6 +22,7 @@ import {
   type ChatIntent,
   type ChatIntentBlock,
 } from "@/lib/intent";
+import { recordSpan } from "@/lib/langfuse";
 
 let classifierPlaybook = "";
 try {
@@ -146,14 +147,27 @@ async function callClassifier(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CLASSIFIER_TIMEOUT_MS);
   try {
-    const { object } = await generateObject({
-      model: envoyModel(CLASSIFIER_MODEL),
-      maxOutputTokens: CLASSIFIER_MAX_TOKENS,
-      system: classifierPlaybook,
-      prompt: buildUserPrompt(message, ctx),
-      schema: chatIntentSchema,
-      abortSignal: controller.signal,
-    });
+    // Langfuse instrumentation (Phase 5 PR-1): wrap the LLM call so dev-time
+    // traces capture intent classification. No-op when LANGFUSE_ENABLED !==
+    // "true"; production sees zero overhead. See src/lib/langfuse.ts.
+    const { object } = await recordSpan(
+      "intent-classifier.classify",
+      () =>
+        generateObject({
+          model: envoyModel(CLASSIFIER_MODEL),
+          maxOutputTokens: CLASSIFIER_MAX_TOKENS,
+          system: classifierPlaybook,
+          prompt: buildUserPrompt(message, ctx),
+          schema: chatIntentSchema,
+          abortSignal: controller.signal,
+        }),
+      {
+        model: CLASSIFIER_MODEL,
+        hasActiveSessions: !!ctx.activeSessionsSummary,
+        hasPriorTurn: !!ctx.priorEnvoyTurn,
+        echoFlag: !!ctx.echoFlag,
+      },
+    );
     const rawKind = typeof object?.kind === "string" ? object.kind : null;
     const rawClarifier =
       typeof object?.clarifier === "string" ? object.clarifier : null;

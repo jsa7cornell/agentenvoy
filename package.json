@@ -14,6 +14,9 @@
     "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "bench:intent": "tsx scripts/bench-intent/run.ts",
     "eval:extract-candidates": "tsx scripts/eval-candidates/extract.ts",
+    "eval:promptfoo": "promptfoo eval --config eval/promptfoo.config.yaml",
+    "eval:langfuse:up": "docker compose -f docker-compose.langfuse.yml up -d",
+    "eval:langfuse:down": "docker compose -f docker-compose.langfuse.yml down",
     "prepare": "husky"
   },
   "prisma": {
@@ -55,7 +58,9 @@
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "husky": "^9.1.7",
+    "langfuse": "^3.38.20",
     "postcss": "^8",
+    "promptfoo": "^0.121.8",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.21.0",
     "typescript": "^5",
