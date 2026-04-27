@@ -110,6 +110,13 @@ export async function GET(req: NextRequest) {
   // calendar. Undefined in the response when there is no bilateral signal —
   // client falls back to the existing host-only widget.
   let bilateralByDay: Record<string, BilateralSlot[]> | undefined;
+  // WISHLIST §1o PR-α: when the compute pipeline throws, the catch sets this
+  // flag so the response shape becomes `{ slotsByDay: null, error:
+  // "compute_failed", ... }` instead of the previous silent fall-through to
+  // `slotsByDay: {}` (which was indistinguishable on the wire from a clean
+  // run with zero offerable slots). The client routes on this for the
+  // "couldn't load times — refresh" affordance.
+  let computeFailed = false;
 
   try {
     const schedule = await getOrComputeSchedule(hostId);
@@ -135,7 +142,15 @@ export async function GET(req: NextRequest) {
     }
 
     if (!schedule.connected) {
-      return NextResponse.json({ slotsByDay: {}, timezone: displayTimezone });
+      // Status disambiguation (WISHLIST §1o PR-α): explicit
+      // `calendar_disconnected` lets the client render a "host needs to
+      // reconnect" inline message instead of falling through to the empty-
+      // state path that previously also matched a swallowed exception.
+      return NextResponse.json({
+        slotsByDay: {},
+        timezone: displayTimezone,
+        status: "calendar_disconnected",
+      });
     }
 
     // Apply event-level overrides from link rules
@@ -360,7 +375,31 @@ export async function GET(req: NextRequest) {
       }
     }
   } catch (e) {
-    console.log("Slots endpoint error:", e);
+    // WISHLIST §1o PR-α: structured error log so production occurrences leave
+    // a 24h trail on Vercel (`console.error` surfaces as level: error in the
+    // runtime logs filter). Previously this was a `console.log` swallow that
+    // produced 200 responses with `slotsByDay: {}` — indistinguishable on the
+    // wire from a clean run with zero offerable slots. PR-β will use this
+    // captured stack trace to fix the actual root cause.
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error("[slots] compute pipeline failed", {
+      sessionId,
+      hostId,
+      selfMode,
+      errName: err.name,
+      errMessage: err.message,
+      stack: err.stack,
+    });
+    computeFailed = true;
+  }
+
+  if (computeFailed) {
+    return NextResponse.json({
+      slotsByDay: null,
+      error: "compute_failed",
+      timezone: displayTimezone,
+      hostTimezone,
+    });
   }
 
   const isVipLink = !selfMode && !!(linkRules as Record<string, unknown>).isVip;
@@ -408,6 +447,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // WISHLIST §1o PR-α: `status: "no_slots"` is set when the pipeline ran
+  // cleanly to completion but produced zero offerable slots after filters
+  // (real product state — host has nothing to offer in the horizon). The
+  // calendar-disconnected and compute-failed paths return early above with
+  // their own status/error fields, so reaching here always means a clean run.
+  const isEmpty = Object.keys(slotsByDay).length === 0;
   return NextResponse.json({
     slotsByDay,
     partialAttendance,
@@ -420,5 +465,6 @@ export async function GET(req: NextRequest) {
     minDuration,
     isVip: isVipLink || undefined,
     bilateralByDay,
+    ...(isEmpty ? { status: "no_slots" as const } : {}),
   });
 }

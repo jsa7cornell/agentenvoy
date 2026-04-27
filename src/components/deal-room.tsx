@@ -185,6 +185,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [slotMinDuration, setSlotMinDuration] = useState<number | undefined>(undefined);
   const [schedulingMode, setSchedulingMode] = useState<"time" | "date">("time");
   const [isVip, setIsVip] = useState(false);
+  // WISHLIST §1o PR-α: three-state response from `/api/negotiate/slots`
+  // disambiguates the previously-silent fall-through where any compute throw,
+  // disconnected calendar, or genuine zero-slot state all returned the same
+  // empty `slotsByDay: {}` payload. `null` here means "haven't fetched yet"
+  // — the picker bubble's existing `slotsByDay==null` guard already short-
+  // circuits in that pre-fetch window so no inline message flashes.
+  const [slotFetchState, setSlotFetchState] = useState<
+    | { kind: "idle" }
+    | { kind: "ok" }
+    | { kind: "no_slots" }
+    | { kind: "calendar_disconnected" }
+    | { kind: "compute_failed" }
+  >({ kind: "idle" });
   // Bilateral chip data — populated only when the session has a logged-in
   // guest whose calendar is connected. When absent, no chips render and the
   // existing host-only availability widget carries the interaction load.
@@ -338,6 +351,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   //
   // The `tz` param is display-only: it only affects day-key grouping and the
   // returned `timezone` label. Scoring/filtering stays host-tz server-side.
+  //
+  // Response shape (WISHLIST §1o PR-α): the route now disambiguates three
+  // previously-conflated empty states. We branch on `error`/`status` to
+  // route the inline UX (no_slots / calendar_disconnected / compute_failed)
+  // — see `renderPickerBubble` for the rendered messages.
   useEffect(() => {
     if (!sessionId) return;
     const url = new URL("/api/negotiate/slots", window.location.origin);
@@ -355,22 +373,39 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     fetch(url.toString())
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data) {
-          setSlotsByDay(data.slotsByDay);
-          // Widget rendering tz — server echoes the tz it grouped by. When
-          // viewerTimezone is set this will match it; pre-seed we fall back
-          // to the browser's local tz to avoid a flash of host-tz content.
-          setSlotTimezone(data.timezone);
-          if (data.currentLocation) setSlotLocation(data.currentLocation);
-          if (data.duration) {
-            setSlotDuration(data.duration);
-            setSchedulingMode(data.duration >= 24 * 60 ? "date" : "time");
-          }
-          if (data.minDuration) setSlotMinDuration(data.minDuration);
-          if (data.isVip) setIsVip(true);
-          if (data.bilateralByDay && typeof data.bilateralByDay === "object") {
-            setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
-          }
+        if (!data) return;
+        // WISHLIST §1o PR-α: compute pipeline threw on the server. Echo a
+        // client-side warn beacon (separate from the structured `console.error`
+        // the route logs) so a Sentry-style listener / debug session can pair
+        // the missing-widget UX with the failed fetch.
+        if (data.error === "compute_failed") {
+          console.warn("[deal-room] slots compute_failed", { sessionId });
+          setSlotsByDay(null);
+          setSlotFetchState({ kind: "compute_failed" });
+          if (data.timezone) setSlotTimezone(data.timezone);
+          return;
+        }
+        setSlotsByDay(data.slotsByDay);
+        // Widget rendering tz — server echoes the tz it grouped by. When
+        // viewerTimezone is set this will match it; pre-seed we fall back
+        // to the browser's local tz to avoid a flash of host-tz content.
+        setSlotTimezone(data.timezone);
+        if (data.currentLocation) setSlotLocation(data.currentLocation);
+        if (data.duration) {
+          setSlotDuration(data.duration);
+          setSchedulingMode(data.duration >= 24 * 60 ? "date" : "time");
+        }
+        if (data.minDuration) setSlotMinDuration(data.minDuration);
+        if (data.isVip) setIsVip(true);
+        if (data.bilateralByDay && typeof data.bilateralByDay === "object") {
+          setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
+        }
+        if (data.status === "calendar_disconnected") {
+          setSlotFetchState({ kind: "calendar_disconnected" });
+        } else if (data.status === "no_slots") {
+          setSlotFetchState({ kind: "no_slots" });
+        } else {
+          setSlotFetchState({ kind: "ok" });
         }
       })
       .catch(() => {});
@@ -1792,7 +1827,81 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // here to avoid rendering two widgets. Host-view and confirmed-view keep
   // the picker as today.
   const renderPickerBubble = (keyPrefix: string) => {
-    if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
+    // WISHLIST §1o PR-α: when the slot fetch resolved to one of the three
+    // empty/error states, render an inline message between greeting and
+    // composer instead of silently returning null. Guards skip host-view
+    // and confirmed-view — both legitimately have no actionable picker
+    // here and shouldn't surface the new copy.
+    if (!slotsByDay || Object.keys(slotsByDay).length === 0) {
+      if (isHost || confirmed) return null;
+      const inline = (() => {
+        if (slotFetchState.kind === "compute_failed") {
+          return (
+            <div
+              key={`${keyPrefix}-slot-compute-failed`}
+              className="flex justify-start"
+            >
+              <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-amber-500/10 border border-amber-500/20 px-4 py-3 text-sm text-amber-200 leading-snug">
+                <div className="text-[10px] font-bold uppercase tracking-wider mb-1 text-amber-300">
+                  Envoy
+                </div>
+                <div>
+                  Couldn&apos;t load times right now.{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== "undefined") window.location.reload();
+                    }}
+                    className="underline underline-offset-2 hover:text-amber-100"
+                  >
+                    Refresh to try again
+                  </button>
+                  .
+                </div>
+              </div>
+            </div>
+          );
+        }
+        if (slotFetchState.kind === "calendar_disconnected") {
+          return (
+            <div
+              key={`${keyPrefix}-slot-calendar-disconnected`}
+              className="flex justify-start"
+            >
+              <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-surface-secondary border border-DEFAULT px-4 py-3 text-sm text-primary leading-snug">
+                <div className="text-[10px] font-bold uppercase tracking-wider mb-1 text-emerald-400">
+                  Envoy
+                </div>
+                <div>
+                  The host needs to reconnect their calendar — please use the
+                  chat below and I&apos;ll loop them in.
+                </div>
+              </div>
+            </div>
+          );
+        }
+        if (slotFetchState.kind === "no_slots") {
+          return (
+            <div
+              key={`${keyPrefix}-slot-no-slots`}
+              className="flex justify-start"
+            >
+              <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-surface-secondary border border-DEFAULT px-4 py-3 text-sm text-primary leading-snug">
+                <div className="text-[10px] font-bold uppercase tracking-wider mb-1 text-emerald-400">
+                  Envoy
+                </div>
+                <div>
+                  No times available right now — please use the chat below and
+                  we&apos;ll find something that works.
+                </div>
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })();
+      return inline;
+    }
     if (dealRoomMode === "offer" && !confirmed && !isHost) return null;
     // Timezone picker (shipped 2026-04-21 per guest-tz-ux-three-primitives).
     // Sits above any other header content. Rendered whenever the guest is a
