@@ -286,7 +286,7 @@ export default function AccountPage() {
           </h2>
           <div className={`rounded-xl border transition ${
             calendarConnected
-              ? "bg-emerald-900/10 border-emerald-700/30"
+              ? "bg-emerald-50 dark:bg-emerald-900/10 border-emerald-300/60 dark:border-emerald-700/30"
               : "bg-surface-inset/50 border-secondary"
           }`}>
             <button
@@ -313,7 +313,7 @@ export default function AccountPage() {
                 <div className="text-sm font-medium text-primary">
                   {calendarConnected ? "Connected" : "Connect Google Calendar"}
                 </div>
-                <div className={`text-xs ${calendarConnected ? "text-emerald-400" : "text-muted"}`}>
+                <div className={`text-xs ${calendarConnected ? "text-emerald-700 dark:text-emerald-400" : "text-muted"}`}>
                   {calendarConnected ? session.user?.email : "Read events and create meetings on your behalf"}
                 </div>
               </div>
@@ -340,7 +340,7 @@ export default function AccountPage() {
                   }
                   setCalendarFilterModal(true);
                 }}
-                className="w-full px-4 py-2 text-xs text-muted hover:text-secondary border-t border-emerald-800/30 text-left transition hover:bg-black/5 dark:hover:bg-white/5"
+                className="w-full px-4 py-2 text-xs text-muted hover:text-secondary border-t border-emerald-300/60 dark:border-emerald-800/30 text-left transition hover:bg-black/5 dark:hover:bg-white/5"
               >
                 Manage calendars
               </button>
@@ -540,7 +540,7 @@ export default function AccountPage() {
                   </p>
                 ) : null}
                 {privacyError ? (
-                  <p className="text-[10px] text-red-400 mt-2">{privacyError}</p>
+                  <p className="text-[10px] text-red-600 dark:text-red-400 mt-2">{privacyError}</p>
                 ) : null}
               </div>
               <button
@@ -590,7 +590,7 @@ export default function AccountPage() {
             </div>
             <button
               onClick={() => { setDeleteConfirmEmail(""); setDeleteError(""); setDeleteModal(true); }}
-              className="shrink-0 px-3 py-2 text-xs rounded-lg border border-red-500/60 text-red-400 hover:bg-red-500/10 transition"
+              className="shrink-0 px-3 py-2 text-xs rounded-lg border border-red-500/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition"
             >
               Delete Account
             </button>
@@ -600,7 +600,7 @@ export default function AccountPage() {
         {/* Save button */}
         <div className={`flex items-center justify-end gap-2 transition-opacity duration-200 ${isDirty ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
           {saveMessage && (
-            <span className={`text-xs ${saveMessage === "Saved" ? "text-emerald-400" : "text-red-400"}`}>
+            <span className={`text-xs ${saveMessage === "Saved" ? "text-emerald-700 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
               {saveMessage}
             </span>
           )}
@@ -635,8 +635,8 @@ export default function AccountPage() {
               <div>
                 <h3 className="text-sm font-semibold text-primary">Google Calendar</h3>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-xs text-emerald-400">Connected</span>
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 dark:bg-emerald-400" />
+                  <span className="text-xs text-emerald-700 dark:text-emerald-400">Connected</span>
                 </div>
               </div>
             </div>
@@ -660,7 +660,7 @@ export default function AccountPage() {
               <button
                 onClick={handleDisconnectCalendar}
                 disabled={disconnecting}
-                className="flex-1 px-3 py-2 text-xs font-medium text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition disabled:opacity-50"
+                className="flex-1 px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition disabled:opacity-50"
               >
                 {disconnecting ? "Disconnecting..." : "Disconnect Calendar"}
               </button>
@@ -803,7 +803,7 @@ export default function AccountPage() {
             />
 
             {deleteError && (
-              <div className="text-xs text-red-400 mb-3">{deleteError}</div>
+              <div className="text-xs text-red-600 dark:text-red-400 mb-3">{deleteError}</div>
             )}
 
             <div className="flex gap-2">

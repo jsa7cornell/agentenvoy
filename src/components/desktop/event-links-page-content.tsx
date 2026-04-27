@@ -114,16 +114,21 @@ function buildEventSub(s: UpcomingEventRow): string {
 }
 
 function statusPillColor(bucket: string): { bg: string; text: string } {
+  // Each pill carries a soft tinted background plus a saturated text color.
+  // Light + dark variants pair a darker text-700 against the same -500/10 wash
+  // (legible on a white surface) with the lighter dark-mode -400 (legible on
+  // a near-black surface). See `mockups/desktop-v2.html` light + dark token
+  // blocks; these reuse Tailwind palette steps that match the mockup hexes.
   switch (bucket) {
     case "confirmed":
-      return { bg: "bg-green-500/10", text: "text-green-400" };
+      return { bg: "bg-green-500/10", text: "text-green-700 dark:text-green-400" };
     case "needs_you":
-      return { bg: "bg-amber-500/10", text: "text-amber-400" };
+      return { bg: "bg-amber-500/10", text: "text-amber-700 dark:text-amber-400" };
     case "past":
-      return { bg: "bg-zinc-500/10", text: "text-zinc-400" };
+      return { bg: "bg-zinc-500/10", text: "text-zinc-600 dark:text-zinc-400" };
     case "coordinating":
     default:
-      return { bg: "bg-indigo-500/10", text: "text-indigo-400" };
+      return { bg: "bg-indigo-500/10", text: "text-indigo-700 dark:text-indigo-400" };
   }
 }
 
@@ -367,7 +372,7 @@ export function EventLinksPageContent() {
                   return (
                     <li
                       key={s.id}
-                      className="flex items-center gap-3 px-4 py-3 rounded-xl border border-red-500/30 bg-red-950/20"
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl border border-red-500/30 bg-red-50 dark:bg-red-950/20"
                       data-testid="desktop-event-links-cancel-confirm"
                     >
                       <span className="text-sm text-secondary flex-1">
@@ -390,7 +395,7 @@ export function EventLinksPageContent() {
                           }
                         }}
                         disabled={cancelling === s.id || archiving === s.id}
-                        className="text-xs font-medium text-red-400 hover:text-red-300 border border-red-500/30 rounded px-3 py-1.5 transition disabled:opacity-50"
+                        className="text-xs font-medium text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 border border-red-500/30 rounded px-3 py-1.5 transition disabled:opacity-50"
                       >
                         {cancelling === s.id || archiving === s.id ? "…" : "Yes"}
                       </button>
@@ -423,7 +428,7 @@ export function EventLinksPageContent() {
                       <button
                         type="button"
                         onClick={() => setConfirmCancelId(s.id)}
-                        className="flex-shrink-0 text-xs text-red-400 hover:text-red-300 transition px-2"
+                        className="flex-shrink-0 text-xs text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 transition px-2"
                         data-testid={`desktop-event-links-cancel-${s.id}`}
                         title="Cancel"
                       >
