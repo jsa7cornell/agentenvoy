@@ -196,15 +196,15 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
 
         {/* Right slot — context-sensitive:
             - On /dashboard chat: calendar icon → /dashboard/availability.
-            - On /dashboard/availability: back arrow → /dashboard so the user
-              has an obvious return path (otherwise they feel "stuck"). */}
+            - On /dashboard/availability: close (×) → /dashboard so leaving
+              the surface feels like dismissing a panel rather than navigating. */}
         <div className="justify-self-end">
           <Link
             href={onAvailability ? "/dashboard" : "/dashboard/availability"}
             className="w-9 h-9 rounded-full bg-surface-secondary/60 border border-secondary flex items-center justify-center text-secondary hover:text-primary hover:border-accent/50 transition"
-            title={onAvailability ? "Back to chat" : "Availability"}
-            aria-label={onAvailability ? "Back to chat" : "Go to Availability"}
-            data-testid={onAvailability ? "mobile-header-back-to-chat" : "mobile-header-availability"}
+            title={onAvailability ? "Close" : "Availability"}
+            aria-label={onAvailability ? "Close Availability" : "Go to Availability"}
+            data-testid={onAvailability ? "mobile-header-close-availability" : "mobile-header-availability"}
           >
             {onAvailability ? (
               <svg
@@ -217,7 +217,7 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  d="M15.75 19.5L8.25 12l7.5-7.5"
+                  d="M6 18L18 6M6 6l12 12"
                 />
               </svg>
             ) : (
