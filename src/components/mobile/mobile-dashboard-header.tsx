@@ -28,6 +28,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { Session } from "next-auth";
 import { PreferencesDrawer } from "./preferences-drawer";
 import { EventLinksSheet } from "./event-links-sheet";
@@ -42,6 +43,8 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const [awaitingAck, setAwaitingAck] = useState(0);
+  const pathname = usePathname();
+  const onAvailability = pathname?.startsWith("/dashboard/availability") ?? false;
 
   // Fetch the cyan-dot count on mount and revalidate every 30s. Defensive: a
   // fetch failure keeps the previous value (initially 0 → no dot), since the
@@ -191,28 +194,47 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
           </button>
         </div>
 
-        {/* Calendar icon — right → /dashboard/availability route */}
+        {/* Right slot — context-sensitive:
+            - On /dashboard chat: calendar icon → /dashboard/availability.
+            - On /dashboard/availability: back arrow → /dashboard so the user
+              has an obvious return path (otherwise they feel "stuck"). */}
         <div className="justify-self-end">
           <Link
-            href="/dashboard/availability"
+            href={onAvailability ? "/dashboard" : "/dashboard/availability"}
             className="w-9 h-9 rounded-full bg-surface-secondary/60 border border-secondary flex items-center justify-center text-secondary hover:text-primary hover:border-accent/50 transition"
-            title="Availability"
-            aria-label="Go to Availability"
-            data-testid="mobile-header-availability"
+            title={onAvailability ? "Back to chat" : "Availability"}
+            aria-label={onAvailability ? "Back to chat" : "Go to Availability"}
+            data-testid={onAvailability ? "mobile-header-back-to-chat" : "mobile-header-availability"}
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={1.8}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
-              />
-            </svg>
+            {onAvailability ? (
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15.75 19.5L8.25 12l7.5-7.5"
+                />
+              </svg>
+            ) : (
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.8}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
+                />
+              </svg>
+            )}
           </Link>
         </div>
       </div>

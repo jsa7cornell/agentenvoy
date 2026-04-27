@@ -293,7 +293,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="mobile-event-links-title"
-        className={`absolute inset-x-0 bottom-0 bg-surface border-t border-secondary rounded-t-[18px] max-h-[88%] overflow-y-auto px-4 py-3 transition-transform duration-300 ease-out ${
+        className={`absolute inset-x-0 bottom-0 bg-surface border-t border-secondary rounded-t-[18px] h-[88%] overflow-y-auto px-4 py-3 transition-transform duration-300 ease-out ${
           open ? "translate-y-0" : "translate-y-full"
         }`}
       >
