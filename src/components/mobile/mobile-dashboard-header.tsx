@@ -14,7 +14,7 @@
  *
  * Lives only at the mobile breakpoint — `dashboard-header.tsx` decides which
  * branch to render based on `md:` so desktop chrome is untouched (Phase 2
- * owns the desktop rebuild). See `refactor-package-2026-04-25/SPEC-2.0.md`
+ * owns the desktop rebuild). See `SPEC.md`
  * §3.1 and `mockups/mobile-v2.html` §3 for the visual contract.
  *
  * Cyan dot on the header pill indicates that one or more sessions are in

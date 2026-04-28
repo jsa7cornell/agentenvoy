@@ -7,7 +7,7 @@
  * Past per `PROJECT-PLAN.md` line 112; this classifier is the canonical
  * mapping (so the future Phase 2 desktop equivalent shares it).
  *
- * Vocabulary: pill labels follow SPEC-2.0 §2.6 — "Coordination" not
+ * Vocabulary: pill labels follow SPEC §2.6 — "Coordination" not
  * "Negotiation", abbreviated "Coord." on the chip.
  */
 import { describe, it, expect } from "vitest";
@@ -131,7 +131,7 @@ describe("filter constants", () => {
     }
   });
 
-  it('uses "Coord." (per SPEC-2.0 §2.6) for the coordinating chip', () => {
+  it('uses "Coord." (per SPEC §2.6) for the coordinating chip', () => {
     expect(EVENT_FILTER_LABELS.coordinating).toBe("Coord.");
   });
 

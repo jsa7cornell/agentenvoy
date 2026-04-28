@@ -1182,7 +1182,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   }
 
   // --- Meeting emoji picker ---
-  // Canonical set per CODEBASE-CLEANUP §22 / SPEC-2.0 §3.6:
+  // Canonical set per CODEBASE-CLEANUP §22 / SPEC §3.6:
   //   🚴 bike · 🏄 surf · ☕ coffee · 🍽️ dinner · 💻 video · 📱 phone ·
   //   📍 in-person · 👤 1:1 · 🕐 fallback.
   // The host-set `activityIcon` (from `link.parameters.activityIcon`) takes
@@ -1458,7 +1458,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             : ""
       }`}>
         {/* Row 1: Title + status. The activity emoji prefixes the title per
-            SPEC-2.0 §3.6 (event card). Host-set `activityIcon` wins; falls
+            SPEC §3.6 (event card). Host-set `activityIcon` wins; falls
             back to format-derived canonical emoji; final fallback is 🕐
             when no activity / format signal is present. */}
         <div className="flex items-center gap-2.5 mb-1.5">

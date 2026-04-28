@@ -16,7 +16,7 @@
  * Edit dialog opens on Edit tap; Office Hours variant embeds PR 5's
  * `RuleFormFields` and POSTs to `/api/availability-rules/edit`.
  *
- * Vocabulary: "Primary link" (capitalized — SPEC-2.0 §2.2; matches
+ * Vocabulary: "Primary link" (capitalized — SPEC §2.2; matches
  * `NegotiationLink.type === "primary"`); "Office Hours" (capitalized —
  * feature name); status pill labels per `event-links-buckets.ts`.
  *

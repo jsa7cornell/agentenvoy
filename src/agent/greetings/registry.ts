@@ -54,7 +54,7 @@
  *
  * Anonymous voice fires on the primary link AND on reusables backed by a
  * recurring window (Office-Hours-style). All other reusable variants and
- * single-use links use personalized voice. See [SPEC-2.0.md §2.5.4 + §3.6].
+ * single-use links use personalized voice. See [SPEC.md §2.5.4 + §3.6].
  */
 
 import { formatDuration } from "@/lib/format-duration";

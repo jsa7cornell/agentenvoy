@@ -24,7 +24,7 @@ const BADGE_COUNTS_REVALIDATE_MS = 30_000;
  * Event Links tab center | Avatar+Preferences right). Below `md:` we render
  * `<MobileDashboardHeader>` instead — the v2 three-element topbar (avatar |
  * "Event Links" header pill | calendar icon). The anonymous branch is
- * unchanged in either mode. See `refactor-package-2026-04-25/SPEC-2.0.md`
+ * unchanged in either mode. See `SPEC.md`
  * §3.1 and `mockups/desktop-v2.html` for the visual contract.
  *
  * Cyan dot on the Event Links tab indicates one or more sessions are in

@@ -15,7 +15,7 @@
  * Visual contract: bottom-sheet chrome mirrors `rule-confirm-sheet.tsx`
  * (max-h 88vh, drag handle, pinned footer with primary/cancel actions).
  *
- * Vocabulary: "Primary link" (capitalized — SPEC-2.0 §2.2), "Office Hours"
+ * Vocabulary: "Primary link" (capitalized — SPEC §2.2), "Office Hours"
  * (capitalized — feature name). Header copy stays variant-aware on
  * `row.kind` for now; the gate alone has been generalized in this PR.
  */

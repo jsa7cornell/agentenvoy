@@ -137,13 +137,13 @@ of the reply.
 ## Reference
 
 This rubric implements the four-dimension specification from
-[`refactor-package-2026-04-25/CODEBASE-CLEANUP.md`][cleanup] item 9
+[`archive/refactor-package-2026-04-25/CODEBASE-CLEANUP.md`][cleanup] item 9
 ("LLM-as-judge rubric scoring each turn on: intent correctness, tone,
 constraint adherence, hallucination") and
-[`refactor-package-2026-04-25/PROJECT-PLAN.md`][plan] Phase 5
+[`archive/refactor-package-2026-04-25/PROJECT-PLAN.md`][plan] Phase 5
 deliverables. The 0.70 threshold matches the
-[`SPEC-2.0.md`][spec] §6.4 guidance.
+[`SPEC.md`][spec] §6.4 guidance.
 
-[cleanup]: ../../refactor-package-2026-04-25/CODEBASE-CLEANUP.md
-[plan]: ../../refactor-package-2026-04-25/PROJECT-PLAN.md
-[spec]: ../../refactor-package-2026-04-25/SPEC-2.0.md
+[cleanup]: ../../archive/refactor-package-2026-04-25/CODEBASE-CLEANUP.md
+[plan]: ../../archive/refactor-package-2026-04-25/PROJECT-PLAN.md
+[spec]: ../../SPEC.md

@@ -6,7 +6,7 @@
  * (`/api/tuner/preferences` + `/api/negotiate/sessions?archived=false`) and
  * the same `event-links-buckets.ts` classifier the sheet uses.
  *
- * Visual contract: `refactor-package-2026-04-25/mockups/desktop-v2.html` §5
+ * Visual contract: `mockups/desktop-v2.html` §5
  * (`.links-body` — single-column 1fr grid, two stacked groups, max-width
  * 1120px, padding 32/48). Mobile users continue to see the slide-up sheet
  * via the topbar; desktop users land on this route.

@@ -21,11 +21,11 @@
  * its own `desktop-event-links-*` IDs for top-level chrome (filter
  * chips, event rows).
  *
- * Vocabulary discipline: "Primary link" (capitalized — SPEC-2.0 §2.2,
+ * Vocabulary discipline: "Primary link" (capitalized — SPEC §2.2,
  * not "Standard link" despite the mockup string). "Office Hours"
  * (capitalized — feature name). "Event Links" (plural — page title).
  *
- * Mockup ref: `refactor-package-2026-04-25/mockups/desktop-v2.html` §5
+ * Mockup ref: `mockups/desktop-v2.html` §5
  * lines 700-770 (light + dark parity).
  */
 

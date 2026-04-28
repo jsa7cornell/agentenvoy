@@ -81,7 +81,7 @@ export function OfferCard({
   const formatLabel = format
     ? format.charAt(0).toUpperCase() + format.slice(1)
     : null;
-  // Format-row emoji from canonical set (CODEBASE-CLEANUP §22 / SPEC-2.0
+  // Format-row emoji from canonical set (CODEBASE-CLEANUP §22 / SPEC
   // §3.6): 💻 video, 📱 phone, 👤 in-person, 🕐 fallback.
   const formatEmoji = format === "video" ? "💻"
     : format === "phone" ? "📱"

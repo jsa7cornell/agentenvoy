@@ -3,7 +3,7 @@
 /**
  * Per-link card for the Event Links sheet's "Reusable links" group.
  *
- * Visual contract: see `refactor-package-2026-04-25/mockups/mobile-v2.html`
+ * Visual contract: see `mockups/mobile-v2.html`
  * §4 lines 972-995. Two-row layout — header (icon + name + sub + Edit) on
  * top, URL+Copy chip strip on the bottom.
  *
@@ -18,7 +18,7 @@
  * variants render in the neutral surface tone.
  *
  * Vocabulary: copy uses **Primary link** (capitalized) for the host's default
- * reusable link — matches `NegotiationLink.type === "primary"` and SPEC-2.0
+ * reusable link — matches `NegotiationLink.type === "primary"` and SPEC
  * §2.2. **Office Hours** (capitalized — feature name) labels the recurring-
  * window-backed reusable variant.
  */

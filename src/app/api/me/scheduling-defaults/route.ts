@@ -74,7 +74,7 @@ export async function GET() {
 
   // Single Promise.all for the read fanout. We need the user row + the
   // counts that drive the welcome-variant decision (per the state matrix
-  // in SPEC-2.0 §3.3 — first-run / guest-first / returning-dormant /
+  // in SPEC §3.3 — first-run / guest-first / returning-dormant /
   // active).
   const [
     user,
@@ -132,7 +132,7 @@ export async function GET() {
   const videoProvider =
     (e as { videoProvider?: string }).videoProvider ?? "google_meet";
 
-  // Welcome-variant resolution. See the state matrix in SPEC-2.0 §3.3.
+  // Welcome-variant resolution. See the state matrix in SPEC §3.3.
   // Order matters — the first match wins.
   type WelcomeVariant =
     | "first-run"

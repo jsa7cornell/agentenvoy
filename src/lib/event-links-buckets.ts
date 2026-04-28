@@ -9,7 +9,7 @@
  *
  * Status values come from `NegotiationSession.status` — same shape returned
  * by `/api/negotiate/sessions?archived=false`. Vocabulary follows
- * `SPEC-2.0.md §2.6` (Coordination, not Negotiation; user-facing pills only).
+ * `SPEC.md §2.6` (Coordination, not Negotiation; user-facing pills only).
  */
 export type EventBucket = "coordinating" | "confirmed" | "needs_you" | "past";
 export type EventFilter = "all" | EventBucket;

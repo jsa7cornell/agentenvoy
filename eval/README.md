@@ -2,7 +2,7 @@
 
 This directory holds the **Phase 5 eval infrastructure** for AgentEnvoy:
 Promptfoo (CI-track regression catching) and Langfuse (dev-track trace
-inspection). Per [`refactor-package-2026-04-25/CODEBASE-CLEANUP.md`][cleanup]
+inspection). Per [`archive/refactor-package-2026-04-25/CODEBASE-CLEANUP.md`][cleanup]
 item 9, the two tools split:
 
 - **Promptfoo** — primary, runs in CI on every PR that touches the
@@ -72,4 +72,4 @@ locally, but:
   `intent-classifier.ts` (gated behind `LANGFUSE_ENABLED`); they no-op
   in production.
 
-[cleanup]: ../../refactor-package-2026-04-25/CODEBASE-CLEANUP.md
+[cleanup]: ../../archive/refactor-package-2026-04-25/CODEBASE-CLEANUP.md

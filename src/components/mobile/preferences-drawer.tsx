@@ -8,7 +8,7 @@
  *   Identity → Google Calendar → Other Agents → Location preferences
  *   → Meeting preferences → Appearance → Privacy → Delete account
  *
- * Per `refactor-package-2026-04-25/PROJECT-PLAN.md` Phase 1 PR 6 and
+ * Per `archive/refactor-package-2026-04-25/PROJECT-PLAN.md` Phase 1 PR 6 and
  * `mockups/mobile-v2.html` §5, the mobile drawer hosts the same fields,
  * vocabulary, and validation as the desktop Account page — only the chrome
  * differs. State hooks and fetch endpoints are intentional copies of
