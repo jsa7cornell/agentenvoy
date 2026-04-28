@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { formatDuration } from "@/lib/format-duration";
+import { canNativeShare, shareInvite } from "@/lib/share-invite";
 
 interface ThreadMessage {
   id: string;
@@ -34,6 +35,38 @@ interface ThreadSession {
 interface ThreadPanelProps {
   sessionId: string;
   onClose: () => void;
+}
+
+function ThreadLinkActions({ url, topic }: { url: string; topic?: string }) {
+  const [copied, setCopied] = useState(false);
+  const [shareSupported, setShareSupported] = useState(false);
+  useEffect(() => {
+    setShareSupported(canNativeShare());
+  }, []);
+  return (
+    <div className="ml-auto flex items-center gap-3">
+      {shareSupported && (
+        <button
+          onClick={() => {
+            void shareInvite({ url, topic });
+          }}
+          className="text-purple-400 hover:text-purple-300 font-medium"
+        >
+          Share
+        </button>
+      )}
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(url);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+        className="text-purple-400 hover:text-purple-300 font-medium"
+      >
+        {copied ? "Copied" : "Copy link"}
+      </button>
+    </div>
+  );
 }
 
 // Parse confirmation proposal from agent messages
@@ -152,15 +185,10 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
         {session.duration && <span>{formatDuration(session.duration)}</span>}
         {session.link.inviteeEmail && <span>{session.link.inviteeEmail}</span>}
         {session.link.code && (
-          <button
-            onClick={() => {
-              const url = `${window.location.origin}/meet/${session.link.slug}/${session.link.code}`;
-              navigator.clipboard.writeText(url);
-            }}
-            className="ml-auto text-purple-400 hover:text-purple-300 font-medium"
-          >
-            Copy link
-          </button>
+          <ThreadLinkActions
+            url={`${typeof window !== "undefined" ? window.location.origin : ""}/meet/${session.link.slug}/${session.link.code}`}
+            topic={session.title || session.link.topic}
+          />
         )}
       </div>
 

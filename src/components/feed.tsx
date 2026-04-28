@@ -15,6 +15,7 @@ import { RuleConfirmSheet } from "./onboarding/rule-confirm-sheet";
 import type { OfficeHoursProposal } from "./onboarding/rule-form-fields";
 import { SendFeedbackLink } from "./send-feedback";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
+import { canNativeShare, shareInvite } from "@/lib/share-invite";
 import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
 
 interface ChannelMsg {
@@ -678,11 +679,25 @@ function renderMarkdown(text: string): React.ReactNode[] {
   });
 }
 
-function MeetLinkCard({ url }: { url: string }) {
+function MeetLinkCard({ url, topic }: { url: string; topic?: string }) {
   const [copied, setCopied] = useState(false);
+  const [shareSupported, setShareSupported] = useState(false);
+  useEffect(() => {
+    setShareSupported(canNativeShare());
+  }, []);
   return (
     <div className="mt-3 bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 flex items-center gap-3">
       <code className="text-xs text-purple-400 truncate flex-1">{url}</code>
+      {shareSupported && (
+        <button
+          onClick={() => {
+            void shareInvite({ url, topic });
+          }}
+          className="px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 text-xs font-medium rounded-md transition flex-shrink-0"
+        >
+          Share
+        </button>
+      )}
       <button
         onClick={() => {
           navigator.clipboard.writeText(url);

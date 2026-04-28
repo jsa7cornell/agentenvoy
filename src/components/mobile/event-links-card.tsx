@@ -24,6 +24,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { canNativeShare, shareInvite } from "@/lib/share-invite";
 
 export type ReusableLinkKind = "primary" | "office_hours";
 
@@ -80,10 +81,10 @@ interface EventLinksCardProps {
 
 export function EventLinksCard({ row, onEdit }: EventLinksCardProps) {
   const [copied, setCopied] = useState(false);
-  const [canNativeShare, setCanNativeShare] = useState(false);
+  const [shareSupported, setShareSupported] = useState(false);
 
   useEffect(() => {
-    setCanNativeShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
+    setShareSupported(canNativeShare());
   }, []);
 
   function copy() {
@@ -93,23 +94,16 @@ export function EventLinksCard({ row, onEdit }: EventLinksCardProps) {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  async function share() {
-    if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
-      copy();
-      return;
-    }
-    try {
-      await navigator.share({
-        title: row.name,
-        text: `Book time with me — ${row.name}`,
-        url: row.url,
-      });
-    } catch {
-      // AbortError = user dismissed the sheet; nothing to do.
-    }
-  }
-
   const isPrimary = row.kind === "primary";
+
+  async function share() {
+    // Primary link → generic friendly invite. Office Hours / other named
+    // reusables → bucket-named invite ("Find a time during Office Hours:").
+    await shareInvite({
+      url: row.url,
+      bucket: isPrimary ? undefined : row.name,
+    });
+  }
 
   return (
     <div
@@ -155,7 +149,7 @@ export function EventLinksCard({ row, onEdit }: EventLinksCardProps) {
         <span className="text-[11px] font-mono text-secondary truncate flex-1 min-w-0">
           {row.url.replace(/^https?:\/\//, "")}
         </span>
-        {isPrimary && canNativeShare && (
+        {isPrimary && shareSupported && (
           <button
             type="button"
             onClick={share}
