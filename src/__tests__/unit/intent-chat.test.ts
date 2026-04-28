@@ -274,16 +274,18 @@ describe("unclear + missing/fabricated clarifier → closed-set fallback", () =>
 // in PR 3 (PR 4 introduces the role-aware schema).
 // ---------------------------------------------------------------------------
 
-describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3)", () => {
-  it("contains exactly the 5 host-side values in order", () => {
+describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3 + chat-decisioning-layer-redesign PR1)", () => {
+  it("contains exactly the 7 host-side values in order (PR1 split create_link → create/modify/cancel)", () => {
     expect([...HOST_CHAT_INTENT_VALUES]).toEqual([
       "edit_preference",
       "create_link",
+      "modify_link",
+      "cancel_link",
       "query_calendar",
       "query_event",
       "chat",
     ]);
-    expect(HOST_CHAT_INTENT_VALUES).toHaveLength(5);
+    expect(HOST_CHAT_INTENT_VALUES).toHaveLength(7);
   });
 
   it("every host value normalizes via the full-union normalizeChatIntent", () => {
@@ -311,12 +313,12 @@ describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3)", () => {
     }
   });
 
-  it("guest and host sets are disjoint (combined size = 11)", () => {
+  it("guest and host sets are disjoint (combined size = 13)", () => {
     const combined = new Set<string>([
       ...CHAT_INTENT_VALUES,
       ...HOST_CHAT_INTENT_VALUES,
     ]);
-    expect(combined.size).toBe(11);
+    expect(combined.size).toBe(13);
   });
 
   it("validateChatIntent passes host values through the default branch", () => {

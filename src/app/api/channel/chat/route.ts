@@ -35,7 +35,6 @@ import { computeProfileGaps } from "@/lib/profile-gaps";
 import type { CalendarEvent } from "@/lib/calendar";
 import {
   schedulingPrecheck,
-  escapeRegex,
   type PrecheckResult,
   type DeterministicCreateArgs,
 } from "@/lib/scheduling-precheck";
