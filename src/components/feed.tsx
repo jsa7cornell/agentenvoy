@@ -482,12 +482,18 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
 
   const isOnboarding = !isCalibrated && onboardingPhase !== null && onboardingPhase !== "complete";
 
-  // Composer prefill bus — MyLinksPopover dispatches `envoy:prefill-composer`
-  // with a seeded string when the host clicks Rename or Create office-hours.
+  // Composer prefill bus — two delivery paths feed the same primitive:
+  //
+  //  1. **CustomEvent** (`envoy:prefill-composer`) — fires from in-page
+  //     dispatchers that don't navigate (MyLinksPopover, mobile Event
+  //     Links sheet). Feed is already mounted; the listener catches it.
+  //  2. **sessionStorage** (`envoy:pending-prefill`) — used by surfaces
+  //     that DO navigate to /dashboard (desktop event-links page).
+  //     CustomEvents don't survive route changes, and a setTimeout-after-
+  //     push race gets lost when Feed mounts later than expected. The
+  //     stashed value is consumed once on mount and cleared.
   useEffect(() => {
-    function onPrefill(e: Event) {
-      const ce = e as CustomEvent<string>;
-      const text = typeof ce.detail === "string" ? ce.detail : "";
+    function applyPrefill(text: string) {
       if (!text) return;
       setInput(text);
       textareaRef.current?.focus();
@@ -497,7 +503,24 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
         try { el.setSelectionRange(len, len); } catch {}
       }
     }
+    function onPrefill(e: Event) {
+      const ce = e as CustomEvent<string>;
+      const text = typeof ce.detail === "string" ? ce.detail : "";
+      applyPrefill(text);
+    }
     window.addEventListener("envoy:prefill-composer", onPrefill);
+    // Drain any pending prefill from a cross-route navigation (desktop
+    // event-links → /dashboard). Wrapped in try/catch — sessionStorage
+    // can throw in private-mode browsers.
+    try {
+      const pending = sessionStorage.getItem("envoy:pending-prefill");
+      if (pending) {
+        sessionStorage.removeItem("envoy:pending-prefill");
+        applyPrefill(pending);
+      }
+    } catch {
+      // ignore
+    }
     return () => window.removeEventListener("envoy:prefill-composer", onPrefill);
   }, []);
 

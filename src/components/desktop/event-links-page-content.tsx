@@ -219,14 +219,20 @@ export function EventLinksPageContent() {
   }, [events, filter]);
 
   function handleCreateReusable() {
-    // Composer lives on /dashboard. Send the prefill once we land there so
-    // the home page's chat input picks it up.
+    // Composer lives on /dashboard. We can't dispatch a CustomEvent here
+    // because Feed isn't mounted yet — the listener attaches *after*
+    // navigation completes, racing the dispatch and losing the prefill.
+    // Stash the prefill in sessionStorage; Feed consumes + clears it on
+    // mount. Same one-shot semantics as the event bus, navigation-safe.
     if (typeof window !== "undefined") {
-      const event = new CustomEvent("envoy:prefill-composer", {
-        detail: "Create a new Office Hours link for ",
-      });
-      // Fire after navigation so the composer is mounted.
-      setTimeout(() => window.dispatchEvent(event), 100);
+      try {
+        sessionStorage.setItem(
+          "envoy:pending-prefill",
+          "Create a new Office Hours link for ",
+        );
+      } catch {
+        // sessionStorage can throw in private-mode browsers.
+      }
     }
     router.push("/dashboard");
   }
