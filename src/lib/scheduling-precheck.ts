@@ -72,11 +72,41 @@ const NAMING_STOPWORDS: ReadonlySet<string> = new Set([
 
 export type PrecheckResult =
   | { kind: "deterministic-create"; args: DeterministicCreateArgs; reason: string }
-  | { kind: "marco-disambiguate"; existingLinkCode: string; guest: string; reason: string }
+  | { kind: "deterministic-modify"; sessionId: string; linkCode: string; reason: string }
+  | { kind: "deterministic-cancel"; sessionId: string; linkCode: string; reason: string }
+  | {
+      kind: "multi-match-disambiguate";
+      matchedLinkIds: string[];
+      matchedSessions: Array<{ linkCode: string; guest: string; topic: string }>;
+      originatingIntent: "create_link" | "modify_link" | "cancel_link";
+      reason: string;
+    }
   | { kind: "fall-through-to-sonnet"; reason: string };
 
+/**
+ * Classified intents the precheck recognises.
+ *
+ * - The new host enum split (`create_link` / `modify_link` / `cancel_link`)
+ *   per the 2026-04-27 chat-decisioning-layer-redesign proposal.
+ * - The legacy `"schedule"` value is kept exclusively for the guest call-site
+ *   (`/api/negotiate/message` → administrator) so this module remains a
+ *   single resolution surface during the migration. Host call-sites must
+ *   pass one of the new event-shaped intents instead.
+ * - Non-event intents (`profile` / `rule` / `inquire` / `unclear`) fall
+ *   through immediately at the top gate.
+ */
+export type PrecheckClassifiedIntent =
+  | "create_link"
+  | "modify_link"
+  | "cancel_link"
+  | "schedule"
+  | "profile"
+  | "rule"
+  | "inquire"
+  | "unclear";
+
 export interface PrecheckInput {
-  classifiedIntent: "schedule" | "profile" | "rule" | "inquire" | "unclear";
+  classifiedIntent: PrecheckClassifiedIntent;
   userMessage: string;
   activeSessions: Array<{
     id: string;
@@ -240,8 +270,44 @@ function guestCandidates(sessions: PrecheckInput["activeSessions"]): string[] {
 // Main
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the `matchedSessions` payload for a multi-match-disambiguate result.
+ * Strips the guest's name out of the title to leave a topic-only descriptor;
+ * empties become "session" so the marco prose still has something to render.
+ */
+function buildMatchedSessions(
+  matched: PrecheckInput["activeSessions"],
+  guest: string,
+): Array<{ linkCode: string; guest: string; topic: string }> {
+  return matched
+    .filter((s): s is typeof s & { linkCode: string } => Boolean(s.linkCode))
+    .map((s) => {
+      let topic = s.title ?? "";
+      if (topic) {
+        topic = topic.replace(new RegExp(`\\b${escapeRegex(guest)}\\b`, "gi"), "");
+        topic = topic.replace(/\s*\+\s*/g, " ").replace(/\s+/g, " ").trim();
+      }
+      return {
+        linkCode: s.linkCode,
+        guest,
+        topic: topic || "session",
+      };
+    });
+}
+
 export function schedulingPrecheck(input: PrecheckInput): PrecheckResult {
-  if (input.classifiedIntent !== "schedule") {
+  // Top gate: only run guest-resolution for event-shaped intents. Per the
+  // 2026-04-27 chat-decisioning-layer-redesign §2.2/§2.3, the new host
+  // enum splits the legacy `"schedule"` into create/modify/cancel; the
+  // guest endpoint still passes `"schedule"` and is handled identically
+  // to `create_link` in this module (zero guest-pipeline regression).
+  const eventShaped =
+    input.classifiedIntent === "create_link" ||
+    input.classifiedIntent === "modify_link" ||
+    input.classifiedIntent === "cancel_link" ||
+    input.classifiedIntent === "schedule";
+
+  if (!eventShaped) {
     return {
       kind: "fall-through-to-sonnet",
       reason: `intent is ${input.classifiedIntent}`,
@@ -292,19 +358,10 @@ export function schedulingPrecheck(input: PrecheckInput): PrecheckResult {
     };
   }
 
-  // Step 2: existing link for guest?
-  // Both "active" and "agreed" sessions count as existing links here.
-  //
-  // Proposal §9.3.3 originally treated "agreed" sessions as confirmed
-  // meetings that don't count — a new request for the same guest would
-  // always be a new meeting. John's 2026-04-27 call (Round-2 review on
-  // PR #83): silently creating a duplicate link when the host says
-  // something like "shift the Jon ride to Friday" about an already-agreed
-  // session is worse than letting the marco clarifier fire. The marco
-  // clarifier ("use existing or create new?") is a safer holding pattern.
-  // A proper reschedule-intent ("just move it") is logged as a WISHLIST
-  // follow-up — that's where "shift X to Y" eventually lands.
-  const existing = input.activeSessions.find(
+  // Step 2: collect existing active/agreed sessions for the named guest.
+  // Both "active" and "agreed" count as existing links — the multi-match
+  // surface ("you have two Katie links") is the SAME for both statuses.
+  const existingMatches = input.activeSessions.filter(
     (s) =>
       s.guestName &&
       s.guestName.toLowerCase() === named!.toLowerCase() &&
@@ -312,33 +369,116 @@ export function schedulingPrecheck(input: PrecheckInput): PrecheckResult {
       s.linkCode,
   );
 
-  if (existing && existing.linkCode) {
+  const matchCount = existingMatches.length;
+  const intent = input.classifiedIntent;
+
+  // ---------------------------------------------------------------------
+  // CREATE_LINK (and legacy "schedule")
+  // ---------------------------------------------------------------------
+  // Per §2.3 R1 verification (handleCreateLink is reversible-without-side-
+  // effects pre-confirm), a single match defaults to create. Multi-match
+  // genuinely needs the user to pick which existing link they meant — that's
+  // when marco fires. The previous "active or agreed → marco" branch is
+  // dropped entirely (PLAYBOOK Rule 19e protects against re-introduction).
+  if (intent === "create_link" || intent === "schedule") {
+    if (matchCount >= 2) {
+      return {
+        kind: "multi-match-disambiguate",
+        matchedLinkIds: existingMatches
+          .map((s) => s.linkCode)
+          .filter((c): c is string => Boolean(c)),
+        matchedSessions: buildMatchedSessions(existingMatches, named),
+        originatingIntent: "create_link",
+        reason: `multi-match for ${named}: ${matchCount} active/agreed links${echoSuffix}`,
+      };
+    }
+    // 0 or 1 existing match → deterministic create. R1 default-to-create.
+    const topic = extractTopic(
+      input.userMessage,
+      named,
+      input.activeSessions,
+      input.recentThreadTurns,
+    );
+    const duration = extractDuration(input.userMessage);
+    const dateRangeKeyword = extractDateRangeKeyword(input.userMessage);
     return {
-      kind: "marco-disambiguate",
-      existingLinkCode: existing.linkCode,
-      guest: named,
-      reason: `existing active link for ${named}${echoSuffix}`,
+      kind: "deterministic-create",
+      args: {
+        inviteeName: named,
+        topic,
+        duration,
+        dateRangeKeyword,
+      },
+      reason:
+        matchCount === 0
+          ? `named guest ${named}, no active link${echoSuffix}`
+          : `named guest ${named}, single match defaults to create (R1)${echoSuffix}`,
     };
   }
 
-  // Step 3: deterministic create.
-  const topic = extractTopic(
-    input.userMessage,
-    named,
-    input.activeSessions,
-    input.recentThreadTurns,
-  );
-  const duration = extractDuration(input.userMessage);
-  const dateRangeKeyword = extractDateRangeKeyword(input.userMessage);
+  // ---------------------------------------------------------------------
+  // MODIFY_LINK
+  // ---------------------------------------------------------------------
+  if (intent === "modify_link") {
+    if (matchCount >= 2) {
+      return {
+        kind: "multi-match-disambiguate",
+        matchedLinkIds: existingMatches
+          .map((s) => s.linkCode)
+          .filter((c): c is string => Boolean(c)),
+        matchedSessions: buildMatchedSessions(existingMatches, named),
+        originatingIntent: "modify_link",
+        reason: `multi-match for ${named}: ${matchCount} active/agreed links${echoSuffix}`,
+      };
+    }
+    if (matchCount === 1) {
+      const m = existingMatches[0];
+      return {
+        kind: "deterministic-modify",
+        sessionId: m.id,
+        linkCode: m.linkCode!,
+        reason: `single match for ${named}, modify_link${echoSuffix}`,
+      };
+    }
+    return {
+      kind: "fall-through-to-sonnet",
+      reason: `modify_link with no existing link for ${named}${echoSuffix}`,
+    };
+  }
 
+  // ---------------------------------------------------------------------
+  // CANCEL_LINK
+  // ---------------------------------------------------------------------
+  if (intent === "cancel_link") {
+    if (matchCount >= 2) {
+      return {
+        kind: "multi-match-disambiguate",
+        matchedLinkIds: existingMatches
+          .map((s) => s.linkCode)
+          .filter((c): c is string => Boolean(c)),
+        matchedSessions: buildMatchedSessions(existingMatches, named),
+        originatingIntent: "cancel_link",
+        reason: `multi-match for ${named}: ${matchCount} active/agreed links${echoSuffix}`,
+      };
+    }
+    if (matchCount === 1) {
+      const m = existingMatches[0];
+      return {
+        kind: "deterministic-cancel",
+        sessionId: m.id,
+        linkCode: m.linkCode!,
+        reason: `single match for ${named}, cancel_link${echoSuffix}`,
+      };
+    }
+    return {
+      kind: "fall-through-to-sonnet",
+      reason: `cancel_link with no existing link for ${named}${echoSuffix}`,
+    };
+  }
+
+  // Unreachable per the eventShaped gate above; defensive.
   return {
-    kind: "deterministic-create",
-    args: {
-      inviteeName: named,
-      topic,
-      duration,
-      dateRangeKeyword,
-    },
-    reason: `named guest ${named}, no active link${echoSuffix}`,
+    kind: "fall-through-to-sonnet",
+    reason: `unhandled intent ${intent}${echoSuffix}`,
   };
 }
