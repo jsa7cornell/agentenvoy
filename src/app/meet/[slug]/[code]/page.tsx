@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { DealRoom } from "@/components/deal-room";
 import { formatDuration } from "@/lib/format-duration";
+import { parseLinkParameters } from "@/lib/link-parameters";
 
 interface Props {
   params: Promise<{ slug: string; code: string }>;
@@ -34,8 +35,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const guestName = link?.inviteeName;
   const guestFirst = guestName ? guestName.split(" ")[0] : null;
   const topic = link?.topic;
-  const rules = (link?.parameters as Record<string, unknown>) || {};
-  const format = rules.format as string | undefined;
+  const rules = parseLinkParameters(link?.parameters);
+  const format = rules.format;
   // rules.duration is stored as raw minutes (number or numeric string).
   // Previously coerced straight into the description, which leaked raw
   // "180" into the iMessage unfurl for a 3h link. Run through formatDuration

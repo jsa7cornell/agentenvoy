@@ -25,6 +25,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAdminSession } from "@/lib/admin-auth";
 import { prisma } from "@/lib/prisma";
 import { dispatch } from "@/lib/side-effects/dispatcher";
+import { parseLinkParameters } from "@/lib/link-parameters";
 
 export const dynamic = "force-dynamic";
 
@@ -129,7 +130,7 @@ export async function POST(req: NextRequest) {
     ...(session.guestEmail ? [session.guestEmail] : []),
   ];
 
-  const linkRulesObj = (session.link.parameters as Record<string, unknown> | null) || {};
+  const linkRulesObj = parseLinkParameters(session.link.parameters);
   const linkLocation =
     typeof linkRulesObj.location === "string" && linkRulesObj.location.trim()
       ? linkRulesObj.location.trim()

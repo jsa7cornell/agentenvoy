@@ -22,6 +22,7 @@ import { writeProfileField } from "@/lib/profile-fields";
 import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
 import { parseRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { UserPreferences } from "@/lib/scoring";
+import { parseLinkParameters } from "@/lib/link-parameters";
 
 // --- Helpers ---
 
@@ -311,7 +312,7 @@ async function patchLinkRulesForContextual(
   changes: Record<string, unknown>,
 ): Promise<void> {
   if (link.type !== "contextual") return;
-  const existing = (link.parameters as Record<string, unknown>) || {};
+  const existing = parseLinkParameters(link.parameters);
   const next: Record<string, unknown> = { ...existing };
   for (const [k, v] of Object.entries(changes)) {
     if (v === null || v === undefined) delete next[k];
@@ -639,7 +640,7 @@ async function handleUpdateTime(
       timeZone: hostTz,
     });
     const proposedDate = dateFmt.format(parsed as Date); // YYYY-MM-DD
-    const existingRules = (session.link.parameters as Record<string, unknown>) || {};
+    const existingRules = parseLinkParameters(session.link.parameters);
     const existingRange = (existingRules.dateRange as { start?: string; end?: string } | undefined) || undefined;
     if (existingRange && (existingRange.start || existingRange.end)) {
       const nextRange: { start?: string; end?: string } = { ...existingRange };
@@ -1628,7 +1629,7 @@ async function handleExpandLink(
   // Merge new rule fragments onto the existing rules, then normalize the
   // whole thing so day-name arrays and dateRange stay canonical even if the
   // host started from a mixed-shape row.
-  const existingRules = (link.parameters as Record<string, unknown>) || {};
+  const existingRules = parseLinkParameters(link.parameters);
   const patch: Record<string, unknown> = {};
   if (typeof params.isVip === "boolean") patch.isVip = params.isVip;
   if (typeof params.allowWeekends === "boolean") patch.allowWeekends = params.allowWeekends;
@@ -2605,7 +2606,7 @@ async function handleLockActivityLocation(
     return { success: false, message: "Session is already confirmed — use update_location or update_format for post-confirm changes" };
   }
 
-  const linkRules = (session.link?.parameters as Record<string, unknown> | null) ?? {};
+  const linkRules = parseLinkParameters(session.link?.parameters);
   const hostActivity = typeof linkRules.activity === "string" ? linkRules.activity : null;
   const hostFormat = typeof linkRules.format === "string" ? linkRules.format : null;
   const activityOptions = Array.isArray(linkRules.activityOptions)

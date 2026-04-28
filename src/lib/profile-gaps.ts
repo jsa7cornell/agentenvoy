@@ -32,6 +32,7 @@
 import { prisma } from "@/lib/prisma";
 import { readProfileField } from "@/lib/profile-fields";
 import type { UserPreferences } from "@/lib/scoring";
+import { parseLinkParameters } from "@/lib/link-parameters";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -186,8 +187,11 @@ async function loadBehaviorSnapshot(userId: string): Promise<BehaviorSnapshot> {
   // counts as one override. Tally per-value frequency.
   const durationCounts = new Map<number, number>();
   for (const link of links) {
-    const rules = (link.parameters as Record<string, unknown> | null) ?? null;
-    const dur = rules && typeof rules.durationMinutes === "number" ? (rules.durationMinutes as number) : null;
+    const rules = parseLinkParameters(link.parameters);
+    // `durationMinutes` is a legacy parameter not in the canonical
+    // LinkParameters schema (modern code uses `duration`); read via passthrough.
+    const durationMinutes = (rules as Record<string, unknown>).durationMinutes;
+    const dur = typeof durationMinutes === "number" ? durationMinutes : null;
     if (dur != null) {
       durationCounts.set(dur, (durationCounts.get(dur) ?? 0) + 1);
     }
