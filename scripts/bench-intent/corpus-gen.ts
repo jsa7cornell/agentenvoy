@@ -23,6 +23,7 @@ export type Axis =
   | "ambiguous pronouns"
   | "off-topic injections"
   | "scheduling-verb with guest"
+  | "host create vs modify vs cancel"
   | "mixed adversarial";
 
 export const AXES: Axis[] = [
@@ -33,6 +34,7 @@ export const AXES: Axis[] = [
   "ambiguous pronouns",
   "off-topic injections",
   "scheduling-verb with guest",
+  "host create vs modify vs cancel",
   "mixed adversarial",
 ];
 
@@ -41,6 +43,8 @@ export function isAxis(v: string): v is Axis {
 }
 
 const AXIS_INSTRUCTIONS: Record<Exclude<Axis, "mixed adversarial">, string> = {
+  "host create vs modify vs cancel":
+    "Generate host dashboard-chat utterances (role: 'host') that discriminate between creating a NEW scheduling link vs changing an EXISTING link vs cancelling an EXISTING link. Include clear creation verbs ('make/create/set up/book/schedule/grab/find time'), clear modification verbs ('change/move/shift/reschedule/update the existing X'), and clear cancellation verbs ('cancel/remove/drop/delete the existing X'). Also include ambiguous cases that should default to 'create_link' per R1 (e.g. 'Katie next week' with no explicit verb). Aim for 3-4 create_link, 3-4 modify_link, 2-3 cancel_link. Note: these use the host enum, not the guest enum.",
   "short affirmatives after Envoy clarifier":
     "Generate very short affirmative follow-ups a host might type after Envoy asked a clarifying yes/no question. Examples: 'yes', 'yeah', 'new', 'new one', 'go ahead', 'do it', 'sure', 'yep', bare tokens. Most should classify as `schedule` when the prior envoy turn was a schedule clarifier.",
   "bare-noun continuations":
@@ -57,8 +61,26 @@ const AXIS_INSTRUCTIONS: Record<Exclude<Axis, "mixed adversarial">, string> = {
     "Generate scheduling requests that contain an explicit scheduling verb ('set up', 'book', 'schedule', 'arrange', 'find time', 'grab time', 'get X on the calendar') plus a person name and optional timeframe. Examples: 'set up time with katie for next week', 'book a call with Marcus Thursday', 'find time for Sarah and me this week', 'get something on the calendar with Tom'. These should ALL have expectedTier='schedule' — scheduling verbs must never route to unclear.",
 };
 
+// Guest intents (legacy guest pipeline) + Host intents (PR1 chat-decisioning-
+// layer-redesign). The bench runs both guest and host scenarios; the `host`
+// flag on the fixture controls which enum and playbook the classifier uses.
 const ExpectedTierSchema = z
-  .enum(["schedule", "profile", "rule", "inquire", "unclear"])
+  .enum([
+    // Guest enum
+    "schedule",
+    "profile",
+    "rule",
+    "inquire",
+    "unclear",
+    // Host enum (PR1 — chat-decisioning-layer-redesign 2026-04-27)
+    "create_link",
+    "modify_link",
+    "cancel_link",
+    "edit_preference",
+    "query_calendar",
+    "query_event",
+    "chat",
+  ])
   .optional();
 
 const UtteranceSchema = z.object({
