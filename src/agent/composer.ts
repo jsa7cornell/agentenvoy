@@ -12,8 +12,8 @@ import { recordSpanSync } from "@/lib/langfuse";
 import {
   groundTruthPlaybook,
   voicePlaybook,
-  negotiationPlaybook,
   dealroomGuestComposer,
+  dealroomHostComposer,
 } from "./playbooks/index";
 
 // --- Model configuration per domain ---
@@ -76,16 +76,22 @@ export interface ComposeOptions {
    * Agent role this composer is serving. Today: `AgentRole`
    * (`"coordinator" | "administrator"`) from the deal-room negotiator
    * pipeline — the dashboard chat route assembles its system prompt
-   * inline rather than going through this composer.
-   *
-   * Per the 2026-04-27 chat-decisioning-layer-redesign §2.4, PR3 of that
-   * proposal introduces a `"host" | "guest"` role parameter when the
-   * dealroom composer split lands. PR1 leaves the field as `string`
-   * (the existing AgentRole values would not narrow cleanly to
-   * `"host" | "guest"` without a rename, and PR1 forbids renames per
-   * P10). Narrowing happens in PR3 alongside the composer-by-role split.
+   * inline rather than going through this composer. Surfaces in the
+   * Session Context block of the prompt for human readers; does not
+   * affect playbook selection (use `isHost` for that).
    */
   role?: string;
+  /**
+   * PR3 of the 2026-04-27 chat-decisioning-layer-redesign. When set,
+   * controls deal-room composer selection: `true` loads
+   * `dealroom-host-composer.md`, anything else (false / undefined)
+   * loads `dealroom-guest-composer.md`.
+   *
+   * Threaded down from `/api/negotiate/message` where `isHost` is
+   * derived from auth (`session.user.id === negotiationSession.hostId`).
+   * Deal-room callers MUST pass this; non-deal-room callers may omit.
+   */
+  isHost?: boolean;
   /** Guest-negotiated values already locked in this session. Injected as
    *  [LOCKED] GROUND TRUTH blocks so Envoy doesn't re-negotiate them. */
   negotiatedActivity?: string | null;
@@ -143,11 +149,15 @@ function composeSystemPromptInner(options: ComposeOptions): string {
   // Layer 1: Core Persona
   sections.push(voicePlaybook());
 
-  // Layer 2: Negotiation Intelligence
-  sections.push(negotiationPlaybook());
-
-  // Layer 3: Domain Expertise
-  const domainPlaybook = options.domain === "calendar" ? dealroomGuestComposer() : null;
+  // Layer 2: Domain + Role Composer (PR3 — chat-decisioning-layer-redesign)
+  // Selection by `isHost`: host-in-deal-room → dealroom-host-composer.md;
+  // anything else → dealroom-guest-composer.md (which now contains the
+  // negotiation guidance previously in negotiation.md, merged in PR3).
+  // RFP domain (future) gets its own branch when added.
+  let domainPlaybook: string | null = null;
+  if (options.domain === "calendar") {
+    domainPlaybook = options.isHost ? dealroomHostComposer() : dealroomGuestComposer();
+  }
   if (domainPlaybook) {
     sections.push(domainPlaybook);
   }
@@ -1060,8 +1070,8 @@ export function getPlaybookInfo(): Record<string, { loaded: boolean; length: num
   const entries: Array<[string, string]> = [
     ["groundTruth", groundTruthPlaybook()],
     ["persona", voicePlaybook()],
-    ["negotiation", negotiationPlaybook()],
-    ["calendar", dealroomGuestComposer()],
+    ["dealroomGuest", dealroomGuestComposer()],
+    ["dealroomHost", dealroomHostComposer()],
   ];
   return Object.fromEntries(
     entries.map(([name, content]) => [

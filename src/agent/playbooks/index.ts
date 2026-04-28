@@ -50,14 +50,20 @@ export function calendarRuleComposer(): string {
 export function dealroomGuestComposer(): string {
   return load("src/agent/playbooks/composers/dealroom-guest-composer.md");
 }
-// dealroomHostComposer() added in PR3.
-
-// ── Negotiation (separate until PR3 merges it into dealroomGuestComposer) ──
-export function negotiationPlaybook(): string {
-  return load("src/agent/playbooks/negotiation.md");
+export function dealroomHostComposer(): string {
+  return load("src/agent/playbooks/composers/dealroom-host-composer.md");
 }
 
-// ── Negotiator (deal-room, separate tree — administrator.md deleted in PR3) ─
+// negotiation.md deleted in PR3 — content merged into dealroom-guest-composer.md
+// as the "## Negotiation Strategy" section. There is no longer a separate
+// negotiationPlaybook() loader. Call sites composed `negotiation + dealroom`;
+// they should now load the guest composer alone.
+
+// ── Multi-agent proposal synthesizer (separate feature — /api/negotiator/synthesize) ─
+// NOTE: this is NOT the deal-room negotiator. It's the system prompt for the
+// agent that compares competing AI-agent research outputs and emits a JSON
+// synthesis. Lives in `src/lib/negotiator/` for historical reasons (predates
+// the playbooks/ tree). Untouched by PR3 — see composers/MERGE-AUDIT.md.
 export function administratorPlaybook(): string {
   return load("src/lib/negotiator/playbooks/administrator.md");
 }
