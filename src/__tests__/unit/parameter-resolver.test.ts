@@ -60,6 +60,57 @@ describe("resolveParameters — format field", () => {
     expect(r.format.guestMustResolve).toBe(true);
     expect(r.guestMustResolve).toContain("format");
   });
+
+  // Reusable-link guest-picks proposal, decided 2026-04-28. When a host has
+  // BOTH locked rules.format AND opted into guestPicks.format on the same
+  // link, the resolver must emit a delegated-with-default envelope: the
+  // host's value carries through but the dimension is mutable. Without this
+  // branch the format toggle silently no-ops on the MCP wire (B2 from the
+  // 2026-04-28 review).
+  describe("delegated-with-default (rules.format + guestPicks.format)", () => {
+    it("rules.format=video + guestPicks.format=true → delegated, value preserved, system-default allow-list, preferred=video", () => {
+      const r = run({ format: "video", guestPicks: { format: true } });
+      expect(r.format.mutability).toBe("delegated");
+      expect(r.format.value).toBe("video");
+      expect(r.format.allowedValues).toEqual(["video", "phone", "in-person"]);
+      expect(r.format.preferred).toBe("video");
+      expect(r.format.guestMustResolve).toBe(false);
+      expect(r.guestMustResolve).not.toContain("format");
+    });
+
+    it("rules.format=video + guestPicks.format=['video','phone'] → delegated, allow-list narrowed", () => {
+      const r = run({ format: "video", guestPicks: { format: ["video", "phone"] } });
+      expect(r.format.mutability).toBe("delegated");
+      expect(r.format.value).toBe("video");
+      expect(r.format.allowedValues).toEqual(["video", "phone"]);
+      expect(r.format.preferred).toBe("video");
+      expect(r.format.guestMustResolve).toBe(false);
+    });
+
+    it("rules.format=in-person + per-slot filter drops in-person → value null but envelope still delegated", () => {
+      // Filter that disallows in-person at all hours, all days.
+      const compiledRules: CompiledRules = {
+        blockedWindows: [],
+        allowWindows: [],
+        buffers: [],
+        priorityBuckets: [],
+        ambiguities: [],
+        compiledAt: "2026-04-28T00:00:00Z",
+        formatFilters: [{ disallowFormats: ["in-person"] }],
+      };
+      const r = run(
+        { format: "in-person", guestPicks: { format: true } },
+        null,
+        { slotStart: new Date("2026-04-28T20:00:00Z"), compiledRules },
+      );
+      expect(r.format.mutability).toBe("delegated");
+      expect(r.format.value).toBeNull();
+      expect(r.format.allowedValues).toEqual(["video", "phone"]);
+      // preferred drops silently when the host's lean falls outside the
+      // narrowed allow-list (preferred ∈ allowedValues invariant).
+      expect(r.format.preferred).toBeUndefined();
+    });
+  });
 });
 
 describe("resolveParameters — formatFilters subtraction", () => {
@@ -195,6 +246,53 @@ describe("resolveParameters — duration field", () => {
     expect(r.duration.origin).toBe("system-default");
     expect(r.duration.mutability).toBe("host-filled");
     expect(r.duration.guestMustResolve).toBe(false);
+  });
+
+  // Reusable-link guest-picks proposal, decided 2026-04-28. Host-set
+  // rules.duration + guestPicks.duration must produce a
+  // delegated-with-default envelope so the host's default holds when the
+  // guest doesn't engage, but the dimension is signaled as mutable. Without
+  // this branch a primary or Office Hours link with the toggle on would
+  // flip from {value: 30, mutability: "locked"} to {value: null,
+  // mutability: "open"} on the MCP wire (B1 from the 2026-04-28 review).
+  describe("delegated-with-default (rules.duration + guestPicks.duration)", () => {
+    it("rules.duration=30 + guestPicks.duration=true → delegated, value preserved, no allowedValues (open within static cap)", () => {
+      const r = run({ duration: 30, guestPicks: { duration: true } });
+      expect(r.duration.mutability).toBe("delegated");
+      expect(r.duration.value).toBe(30);
+      expect(r.duration.allowedValues).toBeUndefined();
+      expect(r.duration.guestMustResolve).toBe(false);
+      expect(r.guestMustResolve).not.toContain("duration");
+    });
+
+    it("rules.duration=30 + guestPicks.duration=[30,60,90] → delegated with allow-list, value=30", () => {
+      const r = run({ duration: 30, guestPicks: { duration: [30, 60, 90] } });
+      expect(r.duration.mutability).toBe("delegated");
+      expect(r.duration.value).toBe(30);
+      expect(r.duration.allowedValues).toEqual([30, 60, 90]);
+      expect(r.duration.guestMustResolve).toBe(false);
+    });
+
+    it("rules.duration=45 + guestPicks.duration=[30,60] (host default not in allow-list) → value null but envelope still delegated", () => {
+      // Edge case: data inconsistency where the host-set duration isn't in
+      // the allow-list. The resolver surfaces value: null so callers don't
+      // ship a default that contradicts the allow-list.
+      const r = run({ duration: 45, guestPicks: { duration: [30, 60] } });
+      expect(r.duration.mutability).toBe("delegated");
+      expect(r.duration.value).toBeNull();
+      expect(r.duration.allowedValues).toEqual([30, 60]);
+    });
+
+    it("rules.duration=30 + guestPicks.duration=true + suggestions surface", () => {
+      const r = run({
+        duration: 30,
+        guestPicks: { duration: true },
+        guestGuidance: { suggestions: { durations: [60, 90] } },
+      });
+      expect(r.duration.mutability).toBe("delegated");
+      expect(r.duration.value).toBe(30);
+      expect(r.duration.suggestions).toEqual([60, 90]);
+    });
   });
 });
 
