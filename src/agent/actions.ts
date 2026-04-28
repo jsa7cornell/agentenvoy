@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
 import type { AvailabilityPreference } from "@/lib/availability-rules";
-import { normalizeLinkRules } from "@/lib/scoring";
+import { normalizeLinkParameters } from "@/lib/scoring";
 import {
   deriveLegacy,
   hasMaterialNarrowingChange,
@@ -187,7 +187,7 @@ async function executeAction(
 
 // --- Authorization helper ---
 
-async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; title: string | null; linkId: string; calendarEventId: string | null; archived: boolean; guestEmail: string | null; guestName: string | null; link: { id: string; type: string; inviteeName: string | null; topic: string | null; rules: unknown } } }> {
+async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; title: string | null; linkId: string; calendarEventId: string | null; archived: boolean; guestEmail: string | null; guestName: string | null; link: { id: string; type: string; inviteeName: string | null; topic: string | null; parameters: unknown } } }> {
   if (!sessionId || typeof sessionId !== "string") {
     return { success: false, message: "Missing or invalid sessionId" };
   }
@@ -209,7 +209,7 @@ async function getAuthorizedSession(sessionId: unknown, userId: string): Promise
           type: true,
           inviteeName: true,
           topic: true,
-          rules: true,
+          parameters: true,
         },
       },
     },
@@ -239,7 +239,7 @@ async function getAuthorizedSession(sessionId: unknown, userId: string): Promise
  * host"` or overwriting `statusLabel` on a never-sent draft is misleading —
  * there's nobody to propose to. Detect this and let handlers soften their
  * behavior (no status flip, no statusLabel clobber) while still mirroring the
- * change to `link.rules` so a future guest sees the right offer.
+ * change to `link.parameters` so a future guest sees the right offer.
  *
  * Signal: no guest-role messages exist AND the session has no guestEmail/
  * guestName captured AND status is still in a mutable pre-agreed state.
@@ -293,7 +293,7 @@ async function resolveSessionId(
 }
 
 /**
- * Patch link.rules with a partial change — ONLY for contextual links
+ * Patch link.parameters with a partial change — ONLY for contextual links
  * (one link = one session, so the update is intent-aligned). For primary
  * links (one link, many sessions) we skip the write so a dashboard tweak
  * for one guest doesn't retroactively change every future guest's
@@ -301,17 +301,17 @@ async function resolveSessionId(
  *
  * Historical bug (pre-2026-04-18): update_format / update_location /
  * update_time handlers only mutated NegotiationSession.* fields, but the
- * greeting template + confirm route read from `link.rules.*` FIRST. The
+ * greeting template + confirm route read from `link.parameters.*` FIRST. The
  * result: dashboard chat said "Updated format to in-person" and the deal
  * room kept showing the original video format. This helper exists to
  * keep the two fields in lockstep going forward.
  */
 async function patchLinkRulesForContextual(
-  link: { id: string; type: string; rules: unknown },
+  link: { id: string; type: string; parameters: unknown },
   changes: Record<string, unknown>,
 ): Promise<void> {
   if (link.type !== "contextual") return;
-  const existing = (link.rules as Record<string, unknown>) || {};
+  const existing = (link.parameters as Record<string, unknown>) || {};
   const next: Record<string, unknown> = { ...existing };
   for (const [k, v] of Object.entries(changes)) {
     if (v === null || v === undefined) delete next[k];
@@ -319,7 +319,7 @@ async function patchLinkRulesForContextual(
   }
   await prisma.negotiationLink.update({
     where: { id: link.id },
-    data: { rules: next as Parameters<typeof prisma.negotiationLink.update>[0]["data"]["rules"] },
+    data: { parameters: next as Parameters<typeof prisma.negotiationLink.update>[0]["data"]["parameters"] },
   });
 }
 
@@ -497,7 +497,7 @@ async function handleUpdateFormat(
   }
 
   // Dual-write: session.format for parity with the existing session row,
-  // AND link.rules.format (for contextual links) so the greeting template
+  // AND link.parameters.format (for contextual links) so the greeting template
   // and confirm route actually see the change. See patchLinkRulesForContextual
   // for the historical bug this fixes.
   await prisma.negotiationSession.update({
@@ -565,7 +565,7 @@ async function handleUpdateTime(
   }
 
   // Duration-only edit on a non-confirmed session: no re-propose, just mirror
-  // the duration through link.rules + post a system message. Leave status alone.
+  // the duration through link.parameters + post a system message. Leave status alone.
   if (!parsed && duration !== undefined) {
     await prisma.negotiationSession.update({
       where: { id: session.id },
@@ -589,7 +589,7 @@ async function handleUpdateTime(
 
   // Pre-engagement guard: if no guest has engaged yet, do NOT flip the session
   // into `proposed` with a "Time change proposed by host" label — there's no
-  // one to propose to. Mirror the intent into link.rules (dateRange + duration)
+  // one to propose to. Mirror the intent into link.parameters (dateRange + duration)
   // so the first guest to land sees the right offer, and tell the LLM to stop
   // synthesizing specific times from window-shaped requests.
   if (await isPreEngagement(session)) {
@@ -618,14 +618,14 @@ async function handleUpdateTime(
     where: { id: session.id },
     data: updateData as Parameters<typeof prisma.negotiationSession.update>[0]["data"],
   });
-  // Mirror duration into link.rules.duration for contextual links so the
+  // Mirror duration into link.parameters.duration for contextual links so the
   // greeting template + confirm card reflect it. Same reason as format /
-  // location — link.rules wins the precedence chain.
+  // location — link.parameters wins the precedence chain.
   if (duration !== undefined) {
     await patchLinkRulesForContextual(session.link, { duration });
   }
 
-  // Expand link.rules.dateRange to include the proposed date if it falls
+  // Expand link.parameters.dateRange to include the proposed date if it falls
   // outside the current window. Without this, proposing Wed Apr 22 on a link
   // whose offer window is "Mon Apr 20" leaves the guest's slot picker stuck
   // showing Monday — the proposed slot isn't even offerable. Observed
@@ -639,7 +639,7 @@ async function handleUpdateTime(
       timeZone: hostTz,
     });
     const proposedDate = dateFmt.format(parsed as Date); // YYYY-MM-DD
-    const existingRules = (session.link.rules as Record<string, unknown>) || {};
+    const existingRules = (session.link.parameters as Record<string, unknown>) || {};
     const existingRange = (existingRules.dateRange as { start?: string; end?: string } | undefined) || undefined;
     if (existingRange && (existingRange.start || existingRange.end)) {
       const nextRange: { start?: string; end?: string } = { ...existingRange };
@@ -701,15 +701,15 @@ async function handleUpdateLocation(
   }
 
   // Dual-write: statusLabel for the host-facing dashboard and a system
-  // message for the thread history, AND link.rules.location for contextual
+  // message for the thread history, AND link.parameters.location for contextual
   // links so the confirm card + GCal event actually use the new location.
   // Previously this only wrote statusLabel + a system message, leaving
-  // link.rules.location untouched — the confirm route reads link.rules.location
+  // link.parameters.location untouched — the confirm route reads link.parameters.location
   // and so silently ignored the update.
   //
   // Pre-engagement: skip the statusLabel clobber — "Location updated to X" on
   // a never-engaged draft is misleading and overrides the draft-state label.
-  // Still mirror to link.rules + post the system note so the offer is correct.
+  // Still mirror to link.parameters + post the system note so the offer is correct.
   const preEngagement = await isPreEngagement(session);
   if (!preEngagement) {
     await prisma.negotiationSession.update({
@@ -830,7 +830,7 @@ async function handleCreateLink(
   }
   const urgency = (params.urgency as string) || null;
   // Meeting location for in-person (or phone/video where host wants to pin
-  // a specific address/URL). Flows into link.rules.location so the deal-
+  // a specific address/URL). Flows into link.parameters.location so the deal-
   // room greeting can reference it and the confirm step uses it as the
   // GCal event location.
   const rawLocation = params.location;
@@ -942,7 +942,7 @@ async function handleCreateLink(
   const startTime = isDateModeLink ? (rawPreferredTimeStart ?? null) : undefined;
   // preferredTimeWindows — multi-window variant for "two separate spans on
   // the same day" cases (e.g. "12–2 PM OR 4:30–6 PM today"). Accepted at
-  // top-level; normalizeLinkRules validates HH:MM shape and sorts.
+  // top-level; normalizeLinkParameters validates HH:MM shape and sorts.
   const preferredTimeWindows = Array.isArray(params.preferredTimeWindows)
     ? (params.preferredTimeWindows as Array<{ start: string; end: string }>)
     : undefined;
@@ -1032,7 +1032,7 @@ async function handleCreateLink(
 
   // activityOptions — ordered list of activities the host is open to
   // (e.g. ["hike", "coffee", "phone call"]). First entry mirrors `activity`
-  // for backward compat. Stored in link.rules.activityOptions (JSON blob —
+  // for backward compat. Stored in link.parameters.activityOptions (JSON blob —
   // no migration). Envoy presents these to the guest as a menu; picking
   // from the menu always passes the downgrade-ladder check.
   let activityOptionsOut: string[] | undefined;
@@ -1070,7 +1070,7 @@ async function handleCreateLink(
     }
   }
 
-  const linkRulesPreIntent = normalizeLinkRules({
+  const linkRulesPreIntent = normalizeLinkParameters({
     ...rules,
     ...(effectiveFormat ? { format: effectiveFormat } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
@@ -1100,7 +1100,7 @@ async function handleCreateLink(
   // under-narrows — that's the motivating "anytime next two weeks" case
   // where `dateRange` is a bracket, not a narrowing.
   const validatedSteering = validateIntent(declaredSteering, linkRulesPreIntent, { linkCode: code });
-  const linkRules = normalizeLinkRules({
+  const linkRules = normalizeLinkParameters({
     ...linkRulesPreIntent,
     intent: { steering: validatedSteering },
   });
@@ -1136,7 +1136,7 @@ async function handleCreateLink(
       inviteeTimezone,
       topic,
       hostNote,
-      rules: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["rules"],
+      parameters: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["parameters"],
       ...(recurrenceForLink
         ? { recurrence: recurrenceForLink as unknown as Prisma.InputJsonValue }
         : {}),
@@ -1545,7 +1545,7 @@ async function handleExpandLink(
   }
 
   // Resolve link by code (preferred) or via session.linkId.
-  let link: { id: string; userId: string; rules: unknown; inviteeName: string | null; code: string | null } | null = null;
+  let link: { id: string; userId: string; parameters: unknown; inviteeName: string | null; code: string | null } | null = null;
   let resolvedSessionIdForLink: string | null = sessionId || null;
 
   // Exactly-one-recent-draft fallback — short-circuit resolution when the
@@ -1553,7 +1553,7 @@ async function handleExpandLink(
   if (inferredLinkId) {
     link = await prisma.negotiationLink.findUnique({
       where: { id: inferredLinkId },
-      select: { id: true, userId: true, rules: true, inviteeName: true, code: true },
+      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true },
     });
     if (link) {
       const latest = await prisma.negotiationSession.findFirst({
@@ -1566,7 +1566,7 @@ async function handleExpandLink(
   } else if (code) {
     link = await prisma.negotiationLink.findFirst({
       where: { code, userId },
-      select: { id: true, userId: true, rules: true, inviteeName: true, code: true },
+      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true },
     });
     // For "View it here" threading: find the most recent session on this link.
     if (link) {
@@ -1590,7 +1590,7 @@ async function handleExpandLink(
           where: { id: fallbackSessionId },
           select: {
             hostId: true,
-            link: { select: { id: true, userId: true, rules: true, inviteeName: true, code: true } },
+            link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true } },
           },
         });
         if (fallbackSession && fallbackSession.hostId === userId && fallbackSession.link) {
@@ -1606,7 +1606,7 @@ async function handleExpandLink(
       select: {
         hostId: true,
         linkId: true,
-        link: { select: { id: true, userId: true, rules: true, inviteeName: true, code: true } },
+        link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true } },
       },
     });
     if (!session) {
@@ -1628,21 +1628,21 @@ async function handleExpandLink(
   // Merge new rule fragments onto the existing rules, then normalize the
   // whole thing so day-name arrays and dateRange stay canonical even if the
   // host started from a mixed-shape row.
-  const existingRules = (link.rules as Record<string, unknown>) || {};
+  const existingRules = (link.parameters as Record<string, unknown>) || {};
   const patch: Record<string, unknown> = {};
   if (typeof params.isVip === "boolean") patch.isVip = params.isVip;
   if (typeof params.allowWeekends === "boolean") patch.allowWeekends = params.allowWeekends;
   if (params.preferredTimeStart !== undefined) patch.preferredTimeStart = params.preferredTimeStart;
   if (params.preferredTimeEnd !== undefined) patch.preferredTimeEnd = params.preferredTimeEnd;
   // Multi-window variant (2026-04-20). Pass `null` or `[]` to clear.
-  // normalizeLinkRules validates each entry's HH:MM shape.
+  // normalizeLinkParameters validates each entry's HH:MM shape.
   if (params.preferredTimeWindows !== undefined) {
     patch.preferredTimeWindows = params.preferredTimeWindows;
   }
   // preferredDays accepts either short-name strings ("Mon","Tue") OR a
   // numeric daysOfWeek array ([0..6], Sun=0). The LLM tends to reach for
   // `daysOfWeek` when it thinks in calendar terms — accept both and
-  // normalize into preferredDays downstream via normalizeLinkRules.
+  // normalize into preferredDays downstream via normalizeLinkParameters.
   if (params.preferredDays !== undefined) patch.preferredDays = params.preferredDays;
   else if (Array.isArray(params.daysOfWeek)) {
     const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -1655,7 +1655,7 @@ async function handleExpandLink(
 
   // V4 link-rule fields (2026-04-20): timing label + format/duration +
   // activity/activityIcon/location. All free-form; sanitized via
-  // normalizeLinkRules where it applies (duration must be positive int).
+  // normalizeLinkParameters where it applies (duration must be positive int).
   if (typeof params.timingLabel === "string") {
     const t = params.timingLabel.trim().slice(0, 80);
     patch.timingLabel = t || undefined;
@@ -1721,7 +1721,7 @@ async function handleExpandLink(
     };
   }
 
-  const mergedRulesPreIntent = normalizeLinkRules({ ...existingRules, ...patch });
+  const mergedRulesPreIntent = normalizeLinkParameters({ ...existingRules, ...patch });
 
   // §4.7 split rule — this handler is only reached from the agent action
   // path (LLM emitted `[ACTION]{update_link}`), so by definition the edit
@@ -1755,7 +1755,7 @@ async function handleExpandLink(
     nextSteering = validateIntent(deriveLegacy(mergedRulesPreIntent), mergedRulesPreIntent, { linkCode: link.code });
   }
 
-  const mergedRules = normalizeLinkRules({
+  const mergedRules = normalizeLinkParameters({
     ...mergedRulesPreIntent,
     intent: { steering: nextSteering },
   });
@@ -1763,7 +1763,7 @@ async function handleExpandLink(
   await prisma.negotiationLink.update({
     where: { id: link.id },
     data: {
-      rules: mergedRules as Parameters<typeof prisma.negotiationLink.update>[0]["data"]["rules"],
+      parameters: mergedRules as Parameters<typeof prisma.negotiationLink.update>[0]["data"]["parameters"],
       ...(inviteeNamesPatch !== undefined
         ? {
             inviteeNames: inviteeNamesPatch,
@@ -1841,7 +1841,7 @@ async function handleExpandLink(
   // location or activity (host edit is authoritative — R2/option-a from
   // proposal 2026-04-22_guest-activity-location-negotiation). Session-only
   // write so there's no dual-write trust issue; confirm route reads
-  // negotiatedLocation ?? link.rules.location, so the host's new value
+  // negotiatedLocation ?? link.parameters.location, so the host's new value
   // now wins.
   const negotiatedClearData: Record<string, null> = {};
   if (patch.location !== undefined) {
@@ -1900,7 +1900,7 @@ async function handleExpandLink(
   // proposal…" as the guest's very first impression is confusing and makes
   // them think something was replaced. Skip those; the first-visit
   // greeting path in session/route.ts will compute a fresh greeting
-  // reflecting the latest link.rules, so the update is already baked into
+  // reflecting the latest link.parameters, so the update is already baked into
   // what they see. Fixes 2026-04-21 bug where Ginger's guest view showed
   // only "John updated the proposal — duration now 2h" and no greeting.
   try {
@@ -1957,7 +1957,7 @@ async function handleExpandLink(
   return {
     success: true,
     message: `Updated ${name}'s link — ${changedParts.join(", ")}`,
-    data: { linkId: link.id, code: link.code, rules: mergedRules, sessionId: resolvedSessionIdForLink ?? undefined },
+    data: { linkId: link.id, code: link.code, parameters: mergedRules, sessionId: resolvedSessionIdForLink ?? undefined },
   };
 }
 
@@ -2595,7 +2595,7 @@ async function handleLockActivityLocation(
       id: true,
       hostId: true,
       status: true,
-      link: { select: { id: true, rules: true } },
+      link: { select: { id: true, parameters: true } },
     },
   });
 
@@ -2605,7 +2605,7 @@ async function handleLockActivityLocation(
     return { success: false, message: "Session is already confirmed — use update_location or update_format for post-confirm changes" };
   }
 
-  const linkRules = (session.link?.rules as Record<string, unknown> | null) ?? {};
+  const linkRules = (session.link?.parameters as Record<string, unknown> | null) ?? {};
   const hostActivity = typeof linkRules.activity === "string" ? linkRules.activity : null;
   const hostFormat = typeof linkRules.format === "string" ? linkRules.format : null;
   const activityOptions = Array.isArray(linkRules.activityOptions)

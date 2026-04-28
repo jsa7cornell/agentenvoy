@@ -37,7 +37,7 @@ export async function createLink(
   overrides: Partial<{
     userId: string;
     slug: string;
-    rules: Prisma.InputJsonValue;
+    parameters: Prisma.InputJsonValue;
   }> = {}
 ): Promise<NegotiationLink> {
   const userId = overrides.userId ?? (await createUser()).id;
@@ -48,7 +48,7 @@ export async function createLink(
       slug,
       type: "primary",
       mode: "single",
-      rules: overrides.rules ?? ({} as Prisma.InputJsonValue),
+      parameters: overrides.parameters ?? ({} as Prisma.InputJsonValue),
     },
   });
 }

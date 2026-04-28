@@ -52,7 +52,7 @@ export async function GET() {
       meetLink: true,
       host: { select: { id: true, name: true, email: true } },
       link: {
-        select: { slug: true, code: true, topic: true, rules: true },
+        select: { slug: true, code: true, topic: true, parameters: true },
       },
     },
     orderBy: { agreedTime: "desc" },
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
     ...(session.guestEmail ? [session.guestEmail] : []),
   ];
 
-  const linkRulesObj = (session.link.rules as Record<string, unknown> | null) || {};
+  const linkRulesObj = (session.link.parameters as Record<string, unknown> | null) || {};
   const linkLocation =
     typeof linkRulesObj.location === "string" && linkRulesObj.location.trim()
       ? linkRulesObj.location.trim()

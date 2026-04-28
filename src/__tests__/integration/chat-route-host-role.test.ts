@@ -214,7 +214,7 @@ describe("chat route — host-role plumbing (PR1 invariants)", () => {
         slug: `chat-${Math.random().toString(36).slice(2, 8)}`,
         type: "primary",
         mode: "single",
-        rules: {},
+        parameters: {},
         inviteeName: "Katie",
       },
     });

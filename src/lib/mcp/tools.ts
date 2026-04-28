@@ -23,7 +23,7 @@ import {
   getTier,
   filterByDuration,
   deriveTimingAnchor,
-  type LinkRules,
+  type LinkParameters,
   type UserPreferences,
   type CompiledRules,
   type ScoredSlot,
@@ -151,7 +151,7 @@ export async function handleGetMeetingParameters(
     ((hostPreferences?.explicit as Record<string, unknown> | undefined)
       ?.compiled as CompiledRules | undefined) ?? null;
 
-  const rules = (link.rules ?? {}) as LinkRules;
+  const rules = (link.parameters ?? {}) as LinkParameters;
   const slotStart = args.slotStart ? new Date(args.slotStart) : undefined;
 
   const parameters = resolveParameters({
@@ -224,7 +224,7 @@ export async function handleGetAvailability(
   }
 
   const { link } = auth;
-  const rules = (link.rules ?? {}) as LinkRules;
+  const rules = (link.parameters ?? {}) as LinkParameters;
 
   // Load the host's preferences for tz + structuredRules (office hours).
   const host = await prisma.user.findUnique({
@@ -556,7 +556,7 @@ export async function handlePostMessage(
 
   // Bootstrap a session on first contact so an external agent can open a
   // thread without a round-trip. Defaults come from link rules.
-  const rules = (link.rules ?? {}) as LinkRules;
+  const rules = (link.parameters ?? {}) as LinkParameters;
   const session = await resolveSession({
     linkId: link.id,
     hostId: link.userId,
@@ -643,7 +643,7 @@ export async function handleProposeParameters(
   }
 
   const { link } = auth;
-  const rules = (link.rules ?? {}) as LinkRules;
+  const rules = (link.parameters ?? {}) as LinkParameters;
 
   const session = await resolveSession({
     linkId: link.id,
@@ -797,7 +797,7 @@ export async function handleProposeLock(
   }
 
   const { link } = auth;
-  const rules = (link.rules ?? {}) as LinkRules;
+  const rules = (link.parameters ?? {}) as LinkParameters;
 
   // Resolve or bootstrap. For propose_lock, bootstrap is always on — the
   // whole point is to open-and-commit in a single call when possible.

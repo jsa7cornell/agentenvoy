@@ -958,7 +958,7 @@ export type OfferTier = "first-offer" | "stretch1" | "stretch2" | null;
  * window on a weekday? Used by isFirstOffer to promote off-hours slots the
  * host has personally authorized ("I said 6 AM is fine for this link").
  */
-function inExplicitWindow(slot: ScoredSlot, rules: LinkRules, tz: string): boolean {
+function inExplicitWindow(slot: ScoredSlot, rules: LinkParameters, tz: string): boolean {
   const windows = getTimeWindows(rules);
   if (windows.length === 0) return false;
   const { hour, minute } = getLocalParts(new Date(slot.start), tz);
@@ -985,7 +985,7 @@ function inExplicitWindow(slot: ScoredSlot, rules: LinkRules, tz: string): boole
  * without per-site conditionals. Introduced 2026-04-20.
  */
 export function getTimeWindows(
-  rules: LinkRules,
+  rules: LinkParameters,
 ): Array<{ start: string; end: string }> {
   if (Array.isArray(rules.preferredTimeWindows) && rules.preferredTimeWindows.length > 0) {
     return rules.preferredTimeWindows;
@@ -1018,7 +1018,7 @@ export function getTimeWindows(
  *   - The original slot score and blockCost are unchanged — only tier
  *     classification is affected.
  */
-export function getTier(slot: ScoredSlot, rules: LinkRules, tz: string): OfferTier {
+export function getTier(slot: ScoredSlot, rules: LinkParameters, tz: string): OfferTier {
   // Host-explicit slot overrides (-1 preferred, -2 exclusive) are always
   // first-offer regardless of tier logic.
   if (slot.score < 0) return "first-offer";
@@ -1059,13 +1059,13 @@ export function getTier(slot: ScoredSlot, rules: LinkRules, tz: string): OfferTi
 }
 
 /** Convenience wrappers used throughout the composer + session route. */
-export function isFirstOffer(slot: ScoredSlot, rules: LinkRules, tz: string): boolean {
+export function isFirstOffer(slot: ScoredSlot, rules: LinkParameters, tz: string): boolean {
   return getTier(slot, rules, tz) === "first-offer";
 }
-export function isStretch1(slot: ScoredSlot, rules: LinkRules, tz: string): boolean {
+export function isStretch1(slot: ScoredSlot, rules: LinkParameters, tz: string): boolean {
   return getTier(slot, rules, tz) === "stretch1";
 }
-export function isStretch2(slot: ScoredSlot, rules: LinkRules, tz: string): boolean {
+export function isStretch2(slot: ScoredSlot, rules: LinkParameters, tz: string): boolean {
   return getTier(slot, rules, tz) === "stretch2";
 }
 
@@ -1423,10 +1423,10 @@ export interface SlotOverride {
   label?: string;
 }
 
-export interface LinkRules {
+export interface LinkParameters {
   format?: string;
   conditionalRules?: Array<{ condition: string; rule: string }>;
-  /** Short day names: "Mon", "Tue", etc. `normalizeLinkRules()` coerces any input shape. */
+  /** Short day names: "Mon", "Tue", etc. `normalizeLinkParameters()` coerces any input shape. */
   preferredDays?: string[];
   /** Short day names: "Mon", "Tue", etc. */
   lastResort?: string[];
@@ -1546,7 +1546,7 @@ export interface LinkRules {
   };
   /**
    * Location string (venue / address / "Zoom") — copied from
-   * `params.location` into link.rules at create time. Used by the greeting
+   * `params.location` into link.parameters at create time. Used by the greeting
    * template for the Proposal bar.
    */
   location?: string;
@@ -1562,7 +1562,7 @@ export interface LinkRules {
    * Ordered list of host-offered activity options the guest can pick from.
    * First entry mirrors `activity` (backward compat). When present, Envoy
    * presents these as a menu and accepts any pick without a ladder check.
-   * Stored in link.rules JSON — no Prisma migration needed.
+   * Stored in link.parameters JSON — no Prisma migration needed.
    */
   activityOptions?: string[];
   /**
@@ -1613,11 +1613,11 @@ export function normalizeDayName(input: unknown): string | null {
 }
 
 /**
- * Normalize a LinkRules object for persistence. Coerces day-name arrays to
+ * Normalize a LinkParameters object for persistence. Coerces day-name arrays to
  * short form and drops a `dateRange` that is structurally malformed. Safe to
  * call on unknown input — unknown keys are preserved as-is.
  */
-export function normalizeLinkRules(
+export function normalizeLinkParameters(
   input: Record<string, unknown> | null | undefined
 ): Record<string, unknown> {
   if (!input || typeof input !== "object") return {};
@@ -1728,7 +1728,7 @@ export function normalizeLinkRules(
   const gp = input.guestPicks;
   if (gp && typeof gp === "object" && !Array.isArray(gp)) {
     const src = gp as Record<string, unknown>;
-    const cleaned: NonNullable<LinkRules["guestPicks"]> = {};
+    const cleaned: NonNullable<LinkParameters["guestPicks"]> = {};
     if (
       src.window &&
       typeof src.window === "object" &&
@@ -1771,7 +1771,7 @@ export function normalizeLinkRules(
   const gg = input.guestGuidance;
   if (gg && typeof gg === "object" && !Array.isArray(gg)) {
     const src = gg as Record<string, unknown>;
-    const cleaned: NonNullable<LinkRules["guestGuidance"]> = {};
+    const cleaned: NonNullable<LinkParameters["guestGuidance"]> = {};
     if (src.suggestions && typeof src.suggestions === "object" && !Array.isArray(src.suggestions)) {
       const s = src.suggestions as Record<string, unknown>;
       const suggestions: { locations?: string[]; durations?: number[] } = {};
@@ -1835,7 +1835,7 @@ export function normalizeLinkRules(
  */
 export function applyEventOverrides(
   baseSlots: ScoredSlot[],
-  rules: LinkRules,
+  rules: LinkParameters,
   tz: string
 ): ScoredSlot[] {
   let slots = [...baseSlots];

@@ -98,7 +98,7 @@ export interface GreetingInput {
   /** Number of invitees on this link (1 for single-invitee, 2+ for 1:many). */
   inviteeCount: number;
 
-  /** Sanitized link-rules blob (the `link.rules` JSON column). */
+  /** Sanitized link-rules blob (the `link.parameters` JSON column). */
   linkRules: Record<string, unknown>;
 
   /** True iff `link.type === "primary" || !!link.recurringWindowId`. */

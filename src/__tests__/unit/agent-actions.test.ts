@@ -704,9 +704,9 @@ describe("executeActions", () => {
 
     // Regression — 2026-04-18 Danboy case.
     // Dashboard said "Updated format to in-person"; deal room still showed
-    // video because link.rules.format beat session.format in the greeting
+    // video because link.parameters.format beat session.format in the greeting
     // template's precedence chain. Dual-write is the fix.
-    it("writes format to BOTH session.format AND link.rules for contextual links", async () => {
+    it("writes format to BOTH session.format AND link.parameters for contextual links", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
 
       const results = await executeActions(
@@ -735,7 +735,7 @@ describe("executeActions", () => {
       });
     });
 
-    it("does NOT write to link.rules for primary links (many sessions share the link)", async () => {
+    it("does NOT write to link.parameters for primary links (many sessions share the link)", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(
         makeSession({
           link: {
@@ -853,9 +853,9 @@ describe("executeActions", () => {
 
     // Regression — 2026-04-20, link wrv65w. Host proposing Wed Apr 22 on a
     // link whose offer window was "Mon Apr 20" flipped the session to
-    // proposed but left link.rules.dateRange=Mon Apr 20, so the guest's slot
+    // proposed but left link.parameters.dateRange=Mon Apr 20, so the guest's slot
     // picker never showed Wed. Widen the window to cover the proposed date.
-    it("expands link.rules.dateRange to include proposed date when outside window", async () => {
+    it("expands link.parameters.dateRange to include proposed date when outside window", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(
         makeSession({
           link: {
@@ -907,9 +907,9 @@ describe("executeActions", () => {
     });
 
     // Regression — 2026-04-18. Duration follows the same precedence rules as
-    // format/location; missing the link.rules mirror made "make it 45 min"
+    // format/location; missing the link.parameters mirror made "make it 45 min"
     // stick in the DB but not in the greeting or confirm card.
-    it("writes duration to link.rules for contextual links when provided", async () => {
+    it("writes duration to link.parameters for contextual links when provided", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
       mockPrisma.user.findUnique.mockResolvedValue({ preferences: {} });
 
@@ -955,8 +955,8 @@ describe("executeActions", () => {
 
     // Regression — 2026-04-20. Clobbering statusLabel to "Location updated to
     // X" on a never-engaged draft overrides the draft-state label and misleads
-    // the host. On pre-engagement, still mirror to link.rules + post the note.
-    it("on pre-engagement, mirrors to link.rules but does NOT clobber statusLabel", async () => {
+    // the host. On pre-engagement, still mirror to link.parameters + post the note.
+    it("on pre-engagement, mirrors to link.parameters but does NOT clobber statusLabel", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(
         makeSession({ guestEmail: null, guestName: null })
       );
@@ -968,7 +968,7 @@ describe("executeActions", () => {
       );
 
       expect(results[0].success).toBe(true);
-      // link.rules mirror still happens
+      // link.parameters mirror still happens
       expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
         where: { id: "link-1" },
         data: { rules: expect.objectContaining({ location: "Café Nero" }) },
@@ -992,8 +992,8 @@ describe("executeActions", () => {
     });
 
     // Regression — 2026-04-18. Same precedence-mismatch story as update_format.
-    // Confirm route reads link.rules.location; session-only write was invisible.
-    it("writes location to link.rules for contextual links", async () => {
+    // Confirm route reads link.parameters.location; session-only write was invisible.
+    it("writes location to link.parameters for contextual links", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
 
       const results = await executeActions(
@@ -1114,7 +1114,7 @@ describe("executeActions", () => {
       );
 
       const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
-      expect(call.data.rules).toMatchObject({ isVip: true, format: "video" });
+      expect(call.data.parameters).toMatchObject({ isVip: true, format: "video" });
     });
 
     it("migrates legacy priority strings to isVip on create", async () => {
@@ -1123,7 +1123,7 @@ describe("executeActions", () => {
       mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
 
       // Old-shape input still lands in params.rules.priority if the
-      // parser emits it. normalizeLinkRules should migrate to isVip.
+      // parser emits it. normalizeLinkParameters should migrate to isVip.
       await executeActions(
         [
           {
@@ -1138,8 +1138,8 @@ describe("executeActions", () => {
       );
 
       const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
-      expect(call.data.rules.isVip).toBe(true);
-      expect(call.data.rules.priority).toBeUndefined();
+      expect(call.data.parameters.isVip).toBe(true);
+      expect(call.data.parameters.priority).toBeUndefined();
     });
 
     it("does not set isVip when params.isVip is non-boolean garbage", async () => {
@@ -1159,7 +1159,7 @@ describe("executeActions", () => {
       );
 
       const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
-      expect(call.data.rules.isVip).toBeUndefined();
+      expect(call.data.parameters.isVip).toBeUndefined();
     });
 
     it("handles missing optional fields gracefully", async () => {
@@ -1316,7 +1316,7 @@ describe("executeActions", () => {
       expect(results[0].message.toLowerCase()).toContain("vip");
       // Merged rules should preserve existing fields AND have new isVip
       const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
-      expect(call.data.rules).toMatchObject({
+      expect(call.data.parameters).toMatchObject({
         format: "video",
         duration: 30,
         preferredDays: ["Mon", "Tue"],
@@ -1337,9 +1337,9 @@ describe("executeActions", () => {
       );
 
       const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
-      expect(call.data.rules.isVip).toBe(false);
+      expect(call.data.parameters.isVip).toBe(false);
       // Other fields preserved
-      expect(call.data.rules.preferredDays).toEqual(["Mon", "Tue"]);
+      expect(call.data.parameters.preferredDays).toEqual(["Mon", "Tue"]);
     });
 
     it("unlocks weekends with explicit allowWeekends", async () => {
@@ -1357,8 +1357,8 @@ describe("executeActions", () => {
       );
 
       const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
-      expect(call.data.rules.allowWeekends).toBe(true);
-      expect(call.data.rules.preferredTimeStart).toBe("06:00");
+      expect(call.data.parameters.allowWeekends).toBe(true);
+      expect(call.data.parameters.preferredTimeStart).toBe("06:00");
     });
 
     it("rejects when no identifying code or sessionId provided (and no recent drafts)", async () => {
@@ -1439,7 +1439,7 @@ describe("executeActions", () => {
 
       expect(results[0].success).toBe(true);
       const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
-      expect(call.data.rules).toMatchObject({ duration: 50 });
+      expect(call.data.parameters).toMatchObject({ duration: 50 });
     });
 
     it("rejects when no mutation fields provided", async () => {
@@ -1485,7 +1485,7 @@ describe("executeActions", () => {
   // sessions where the guest has already seen a greeting. For pre-engagement
   // sessions (host created+edited the link before any guest visit), no
   // follow-up — the guest's first visit will compute a fresh greeting
-  // reflecting the latest link.rules, so the update is already baked in.
+  // reflecting the latest link.parameters, so the update is already baked in.
 
   describe("update_link — post-edit follow-up message gating", () => {
     const linkBase = {

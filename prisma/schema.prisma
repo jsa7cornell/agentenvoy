@@ -281,7 +281,13 @@ model NegotiationLink {
   /// scoring/availability.
   hostNote        String?   @db.VarChar(280)
   topic           String?
-  rules           Json?     @default("{}")
+  /// Typed via Zod schema in `src/lib/link-parameters.ts` — the JSON shape
+  /// covers duration, format, VIP, gating, dayWindowOverrides, blockedDates,
+  /// activity, location, topic, etc. Use `parseLinkParameters(parameters)`
+  /// at every read site rather than ad-hoc casts. (Renamed from `rules` in
+  /// Phase 6 — CODEBASE-CLEANUP item 12 — to remove the false implication
+  /// that this is a recurring-window rule.)
+  parameters      Json?     @default("{}")
   /// The recurring window this link is bound to (formerly sourceRuleId, used
   /// only for office hours). Now generalized to any reusable variant: the
   /// session's offerable slots are filtered through the window. Null for

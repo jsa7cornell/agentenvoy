@@ -53,7 +53,7 @@ export interface SanitizedFlavor {
 
 /**
  * Sanitize a single short free-text field from the host — e.g.,
- * `link.rules.guestGuidance.tone`. Structured fields (string[] of suggestions)
+ * `link.parameters.guestGuidance.tone`. Structured fields (string[] of suggestions)
  * do NOT need this; they're rendered as chips, never interpolated into prompts.
  */
 export function sanitizeHostFlavor(raw: unknown): SanitizedFlavor {

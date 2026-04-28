@@ -140,7 +140,7 @@ async function seedSession(): Promise<{ sessionId: string; hostId: string; hostE
       slug: `dealroom-${Math.random().toString(36).slice(2, 8)}`,
       type: "primary",
       mode: "single",
-      rules: {},
+      parameters: {},
     },
   });
   const session = await prisma.negotiationSession.create({

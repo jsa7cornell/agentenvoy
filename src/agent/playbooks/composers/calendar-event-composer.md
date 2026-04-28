@@ -212,7 +212,7 @@ Available actions (all use `[ACTION]{"action":"...","params":{...}}[/ACTION]` �
 - update_format: Change format → {"action":"update_format","params":{"sessionId":"...","format":"video"}}
 - update_time: Propose new time or change duration → {"action":"update_time","params":{"sessionId":"...","dateTime":"...","timezone":"...","duration":50}}
   - Accepts dateTime, duration, or both. For duration-only edits ("change it to 50 min") pass just `{sessionId, duration}` — don't fabricate a dateTime.
-  - **Only use `dateTime` for a specific single-slot (re-)proposal.** The host must have actually named a concrete time ("propose Wed at 10 AM", "move it to Friday 2 PM"). If they said something window-shaped ("push it to Wednesday", "try later this week", "next week instead"), use `update_link` to shift the link's offer — don't synthesize a dateTime. The guest's slot picker reads `link.rules.dateRange`, so a widened window is what actually moves the visible offer.
+  - **Only use `dateTime` for a specific single-slot (re-)proposal.** The host must have actually named a concrete time ("propose Wed at 10 AM", "move it to Friday 2 PM"). If they said something window-shaped ("push it to Wednesday", "try later this week", "next week instead"), use `update_link` to shift the link's offer — don't synthesize a dateTime. The guest's slot picker reads `link.parameters.dateRange`, so a widened window is what actually moves the visible offer.
   - On pre-engagement sessions (no guest activity yet), dateTime-setting calls are rejected server-side. Use `update_link` there too.
   - Duration-only edits are always allowed (draft or engaged).
 - update_location: Change location → {"action":"update_location","params":{"sessionId":"...","location":"..."}}

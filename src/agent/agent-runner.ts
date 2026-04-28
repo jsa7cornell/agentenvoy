@@ -42,7 +42,7 @@ export interface AgentContext {
   negotiatedActivity?: string | null;
   negotiatedLocation?: string | null;
   negotiatedFormat?: string | null;
-  /** Host-offered activity menu (activityOptions from link.rules). */
+  /** Host-offered activity menu (activityOptions from link.parameters). */
   activityOptions?: string[] | null;
   /**
    * PR3 of the 2026-04-27 chat-decisioning-layer-redesign. When `true`,

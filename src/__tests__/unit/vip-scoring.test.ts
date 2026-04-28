@@ -4,10 +4,10 @@ import {
   isFirstOffer,
   isStretch1,
   isStretch2,
-  normalizeLinkRules,
+  normalizeLinkParameters,
   computeSchedule,
   type ScoredSlot,
-  type LinkRules,
+  type LinkParameters,
   type UserPreferences,
 } from "@/lib/scoring";
 import type { CalendarEvent } from "@/lib/calendar";
@@ -43,7 +43,7 @@ function slotOf(
 // ── getTier — core gating logic ─────────────────────────────────────────────
 
 describe("getTier — default non-VIP link", () => {
-  const rules: LinkRules = {};
+  const rules: LinkParameters = {};
 
   it("returns first-offer for bookable-band slots (score 0-1)", () => {
     expect(getTier(slotOf(0), rules, TZ)).toBe("first-offer");
@@ -64,7 +64,7 @@ describe("getTier — default non-VIP link", () => {
 });
 
 describe("getTier — VIP link without explicit expansion", () => {
-  const rules: LinkRules = { isVip: true };
+  const rules: LinkParameters = { isVip: true };
 
   it("first-offer for bookable-band slots (score 0-1), same as non-VIP", () => {
     expect(getTier(slotOf(0), rules, TZ)).toBe("first-offer");
@@ -113,8 +113,8 @@ describe("getTier — VIP with explicit preferredTimeStart", () => {
   // window and is promoted to first-offer. Without pre-auth it's stretch2.
 
   // 2099-06-15 14:00 UTC = 2099-06-15 07:00 PDT
-  const rulesNoAuth: LinkRules = { isVip: true };
-  const rulesWithAuth: LinkRules = { isVip: true, preferredTimeStart: "06:00" };
+  const rulesNoAuth: LinkParameters = { isVip: true };
+  const rulesWithAuth: LinkParameters = { isVip: true, preferredTimeStart: "06:00" };
   const offHoursSlot = slotOf(
     3,
     { kind: "off_hours", blockCost: "preference", firmness: "strong" },
@@ -140,7 +140,7 @@ describe("getTier — VIP with explicit preferredTimeStart", () => {
 });
 
 describe("getTier — VIP with allowWeekends", () => {
-  const rules: LinkRules = { isVip: true, allowWeekends: true };
+  const rules: LinkParameters = { isVip: true, allowWeekends: true };
 
   it("weekend daytime (score 3) promotes to first-offer", () => {
     const slot = slotOf(3, { kind: "weekend", blockCost: "preference", firmness: "strong" });
@@ -168,8 +168,8 @@ describe("getTier — host-explicit slot overrides", () => {
 // ── Convenience wrappers ────────────────────────────────────────────────────
 
 describe("isFirstOffer / isStretch1 / isStretch2 — classification helpers", () => {
-  const vip: LinkRules = { isVip: true };
-  const nonVip: LinkRules = {};
+  const vip: LinkParameters = { isVip: true };
+  const nonVip: LinkParameters = {};
 
   it("exactly one classifier returns true for any tiered slot", () => {
     const s1 = slotOf(1); // bookable band → first-offer
@@ -192,46 +192,46 @@ describe("isFirstOffer / isStretch1 / isStretch2 — classification helpers", ()
   });
 });
 
-// ── normalizeLinkRules — isVip + allowWeekends + legacy migration ──────────
+// ── normalizeLinkParameters — isVip + allowWeekends + legacy migration ──────────
 
-describe("normalizeLinkRules — VIP + legacy migration", () => {
+describe("normalizeLinkParameters — VIP + legacy migration", () => {
   it("accepts boolean isVip: true", () => {
-    expect(normalizeLinkRules({ isVip: true }).isVip).toBe(true);
+    expect(normalizeLinkParameters({ isVip: true }).isVip).toBe(true);
   });
 
   it("accepts boolean isVip: false", () => {
-    expect(normalizeLinkRules({ isVip: false }).isVip).toBe(false);
+    expect(normalizeLinkParameters({ isVip: false }).isVip).toBe(false);
   });
 
   it("rejects string isVip: 'true' (not a boolean)", () => {
-    expect(normalizeLinkRules({ isVip: "true" }).isVip).toBeUndefined();
+    expect(normalizeLinkParameters({ isVip: "true" }).isVip).toBeUndefined();
   });
 
   it("migrates legacy priority 'high' to isVip: true", () => {
-    const out = normalizeLinkRules({ priority: "high" });
+    const out = normalizeLinkParameters({ priority: "high" });
     expect(out.isVip).toBe(true);
     expect(out.priority).toBeUndefined();
   });
 
   it("migrates legacy priority 'vip' to isVip: true", () => {
-    const out = normalizeLinkRules({ priority: "vip" });
+    const out = normalizeLinkParameters({ priority: "vip" });
     expect(out.isVip).toBe(true);
     expect(out.priority).toBeUndefined();
   });
 
   it("drops legacy priority 'normal' without setting isVip", () => {
-    const out = normalizeLinkRules({ priority: "normal" });
+    const out = normalizeLinkParameters({ priority: "normal" });
     expect(out.isVip).toBeUndefined();
     expect(out.priority).toBeUndefined();
   });
 
   it("accepts allowWeekends as a boolean", () => {
-    expect(normalizeLinkRules({ allowWeekends: true }).allowWeekends).toBe(true);
-    expect(normalizeLinkRules({ allowWeekends: false }).allowWeekends).toBe(false);
+    expect(normalizeLinkParameters({ allowWeekends: true }).allowWeekends).toBe(true);
+    expect(normalizeLinkParameters({ allowWeekends: false }).allowWeekends).toBe(false);
   });
 
   it("rejects non-boolean allowWeekends", () => {
-    expect(normalizeLinkRules({ allowWeekends: "yes" }).allowWeekends).toBeUndefined();
+    expect(normalizeLinkParameters({ allowWeekends: "yes" }).allowWeekends).toBeUndefined();
   });
 });
 

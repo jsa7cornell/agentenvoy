@@ -28,7 +28,7 @@ interface ThreadCardProps {
   /** True when the link has been flagged as a VIP meeting. Renders a single
    *  purple VIP badge in the title row. No tier ladder — VIP is binary. */
   isVip?: boolean;
-  /** Activity icon emoji (e.g. "🚴", "🏄") from link.rules.activityIcon. When
+  /** Activity icon emoji (e.g. "🚴", "🏄") from link.parameters.activityIcon. When
    *  provided, prefixes the card header. Canonical set (per CODEBASE-CLEANUP
    *  §22): 🚴 bike · 🏄 surf · ☕ coffee · 🍽️ dinner · 💻 video · 📱 phone ·
    *  📍 in-person · 👤 1:1. Fallback when unset is 🕐 (clock). */

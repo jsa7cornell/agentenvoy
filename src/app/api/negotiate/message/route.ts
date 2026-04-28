@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { AgentContext, extractAvailabilitySummary } from "@/agent/agent-runner";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import type { CalendarContext } from "@/lib/calendar";
-import type { ScoredSlot, LinkRules } from "@/lib/scoring";
+import type { ScoredSlot, LinkParameters } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
 import { computeThreadStatus } from "@/lib/thread-status";
 import { getServerSession } from "next-auth";
@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
 
       // Apply link-level overrides (preferredDays, dateRange, slot overrides)
       // so the LLM sees the same filtered set as the widget and greeting.
-      const lr = (session.link.rules as LinkRules) || {};
+      const lr = (session.link.parameters as LinkParameters) || {};
       if (Object.keys(lr).length > 0) {
         const hostPrefs = (session.host.preferences as Record<string, unknown>) || {};
         const hostTz = (hostPrefs.explicit as Record<string, unknown>)?.timezone as string || schedule.timezone;
@@ -233,7 +233,7 @@ export async function POST(req: NextRequest) {
     // the host is presumed to speak in host tz, not viewer tz.
     guestMessage: messageRole === "guest" ? content : undefined,
     topic: session.link.topic || undefined,
-    rules: (session.link.rules as Record<string, unknown>) || {},
+    rules: (session.link.parameters as Record<string, unknown>) || {},
     calendarContext,
     scoredSlots,
     hostPersistentKnowledge: (session.host as { persistentKnowledge?: string }).persistentKnowledge,
@@ -247,8 +247,8 @@ export async function POST(req: NextRequest) {
     negotiatedLocation: (session as Record<string, unknown>).negotiatedLocation as string | null ?? null,
     negotiatedFormat: (session as Record<string, unknown>).negotiatedFormat as string | null ?? null,
     // Host-offered activity menu from link rules.
-    activityOptions: Array.isArray((session.link.rules as Record<string, unknown>)?.activityOptions)
-      ? (session.link.rules as Record<string, unknown>).activityOptions as string[]
+    activityOptions: Array.isArray((session.link.parameters as Record<string, unknown>)?.activityOptions)
+      ? (session.link.parameters as Record<string, unknown>).activityOptions as string[]
       : null,
     // PR3: select the deal-room host vs. guest composer in composer.ts.
     isHost,

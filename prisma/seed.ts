@@ -81,7 +81,7 @@ async function main() {
       inviteeEmail: "sarah@example.com",
       inviteeName: "Sarah Chen",
       topic: "Q2 Roadmap Review",
-      rules: {
+      parameters: {
         format: "phone",
         preferredDays: ["tuesday", "wednesday"],
       },
@@ -95,7 +95,7 @@ async function main() {
       inviteeEmail: "sarah@example.com",
       inviteeName: "Sarah Chen",
       topic: "Q2 Roadmap Review",
-      rules: {
+      parameters: {
         format: "phone",
         preferredDays: ["tuesday", "wednesday"],
       },

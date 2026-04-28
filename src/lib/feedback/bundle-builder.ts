@@ -264,7 +264,7 @@ async function loadRecentLinks(userId: string) {
     select: {
       code: true,
       slug: true,
-      rules: true,
+      parameters: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -275,7 +275,7 @@ async function loadRecentLinks(userId: string) {
       code: r.code,
       slug: r.slug ?? "",
       url: r.slug ? `/meet/${r.slug}/${r.code}` : `/meet/${r.code}`,
-      rulesJson: r.rules ?? null,
+      rulesJson: r.parameters ?? null,
       createdAt: r.createdAt.toISOString(),
       lastEditedAt: r.updatedAt.toISOString(),
     }));
