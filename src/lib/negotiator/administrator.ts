@@ -1,25 +1,5 @@
-import { readFileSync } from "fs";
-import { join } from "path";
 import type { AgentConfig, ResearchResult, Synthesis } from "./types";
-
-const PLAYBOOK_PATH = join(process.cwd(), "src", "lib", "negotiator", "playbooks", "administrator.md");
-
-function loadPlaybook(): string {
-  try {
-    return readFileSync(PLAYBOOK_PATH, "utf-8");
-  } catch {
-    // Fallback for Vercel where cwd differs
-    try {
-      return readFileSync(
-        join(__dirname, "..", "..", "lib", "negotiator", "playbooks", "administrator.md"),
-        "utf-8"
-      );
-    } catch {
-      console.error("Failed to load administrator playbook");
-      return "";
-    }
-  }
-}
+import { administratorPlaybook } from "../../agent/playbooks/index";
 
 interface ComposeOptions {
   question: string;
@@ -33,7 +13,7 @@ export function composeAdministratorPrompt(opts: ComposeOptions): string {
   const sections: string[] = [];
 
   // 1. Playbook
-  sections.push(loadPlaybook());
+  sections.push(administratorPlaybook());
 
   // 2. Scenario
   sections.push(`# Scenario\n\nQuestion: ${opts.question}`);

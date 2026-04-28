@@ -63,8 +63,9 @@ describe("classifyChatIntent — role plumbing", () => {
     expect(result.intent.kind).toBe("schedule");
     expect(generateObjectMock).toHaveBeenCalledTimes(1);
     const sentArgs = generateObjectMock.mock.calls[0][0] as { system: string };
-    // Default role = guest → guest playbook should be loaded.
-    expect(sentArgs.system).toContain("# Chat intent classifier");
+    // PR2: guest classifier (intent-classifier.md) deleted. Guest path now
+    // passes an empty system prompt — the LLM call still fires and the
+    // result is validated normally. Host playbook must not be loaded.
     expect(sentArgs.system).not.toContain("# Host chat intent classifier");
   });
 

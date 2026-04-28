@@ -6,9 +6,10 @@ import { join } from "path";
 // playbook drifts back toward two formats or reintroduces create_thread, the
 // silent-card-failure regression returns. This test fails loudly before that
 // ships.
-describe("channel.md playbook", () => {
+// PR2 rename: channel.md → composers/calendar-event-composer.md
+describe("calendar-event-composer.md playbook", () => {
   const playbook = readFileSync(
-    join(process.cwd(), "src", "agent", "playbooks", "channel.md"),
+    join(process.cwd(), "src", "agent", "playbooks", "composers", "calendar-event-composer.md"),
     "utf-8"
   );
 

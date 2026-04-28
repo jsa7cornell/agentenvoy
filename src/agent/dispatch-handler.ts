@@ -29,8 +29,7 @@ import {
   type ActionResult,
 } from "@/agent/actions";
 import { narrateFailures, narrateTimeout, narrateFinalizeError } from "@/agent/action-narration";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { loadPlaybook, voicePlaybook } from "./playbooks/index";
 
 /**
  * Detect the Office Hours **create** intent inside an LLM-emitted action.
@@ -136,32 +135,6 @@ export function projectProposal(action: ActionRequest): OfficeHoursProposalPaylo
   };
 }
 
-// Small cache so we load each playbook at most once per process.
-const playbookCache = new Map<string, string>();
-
-function loadPlaybook(relativePath: string): string {
-  const cached = playbookCache.get(relativePath);
-  if (cached !== undefined) return cached;
-  try {
-    const text = readFileSync(join(process.cwd(), relativePath), "utf-8");
-    playbookCache.set(relativePath, text);
-    return text;
-  } catch (e) {
-    console.error(`[dispatch-handler] Failed to load playbook ${relativePath}:`, e);
-    playbookCache.set(relativePath, "");
-    return "";
-  }
-}
-
-let personaPlaybookLoaded = "";
-try {
-  personaPlaybookLoaded = readFileSync(
-    join(process.cwd(), "src", "agent", "playbooks", "persona.md"),
-    "utf-8",
-  );
-} catch (e) {
-  console.error("[dispatch-handler] Failed to load persona.md:", e);
-}
 
 const ACTION_TIMEOUT_MS = 15_000;
 
@@ -214,7 +187,8 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
   } = args;
 
   const tierPlaybook = loadPlaybook(playbookRelativePath);
-  const systemBase = `${personaPlaybookLoaded ? personaPlaybookLoaded + "\n\n---\n\n" : ""}${tierPlaybook}`;
+  const personaText = voicePlaybook();
+  const systemBase = `${personaText ? personaText + "\n\n---\n\n" : ""}${tierPlaybook}`;
   const contextParts: string[] = [];
   contextParts.push(`User: ${userName || "User"}`);
   if (contextLines && contextLines.length > 0) {
