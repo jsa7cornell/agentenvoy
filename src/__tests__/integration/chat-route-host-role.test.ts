@@ -287,7 +287,7 @@ describe("chat route — host-role plumbing (PR1 invariants)", () => {
     // the classifier level and remove this heuristic.
     expect(dispatchArgs.tier).toBe("profile");
     expect(dispatchArgs.playbookRelativePath).toBe(
-      "src/agent/playbooks/profile.md",
+      "src/agent/playbooks/composers/profile-composer.md",
     );
   });
 
@@ -321,7 +321,7 @@ describe("chat route — host-role plumbing (PR1 invariants)", () => {
     // rule.md so the dispatch-handler loads availability-rule grammar.
     expect(dispatchArgs.tier).toBe("rule");
     expect(dispatchArgs.playbookRelativePath).toBe(
-      "src/agent/playbooks/rule.md",
+      "src/agent/playbooks/composers/calendar-rule-composer.md",
     );
   });
 });
