@@ -16,7 +16,7 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
+import { compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
 import { CopyLinkButton } from "./copy-link-button";
 
 export const dynamic = "force-dynamic";
@@ -95,7 +95,7 @@ export default async function MyLinksPage() {
   // ── Office hours links (from structured rules) ──────────────────────────
   const prefs = (user.preferences as Record<string, unknown> | null) || {};
   const explicit = (prefs.explicit as Record<string, unknown> | undefined) || {};
-  const rules = (explicit.structuredRules as AvailabilityRule[] | undefined) || [];
+  const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
   const officeHours = compileOfficeHoursLinks(rules);
 
   // ── Contextual links ────────────────────────────────────────────────────

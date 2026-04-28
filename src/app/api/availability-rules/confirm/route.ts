@@ -38,7 +38,7 @@ import { generateCode } from "@/lib/utils";
 import { invalidateSchedule } from "@/lib/calendar";
 import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
 import {
-  type AvailabilityRule,
+  type AvailabilityPreference,
   normalizeLinkName,
 } from "@/lib/availability-rules";
 import type { UserPreferences } from "@/lib/scoring";
@@ -208,7 +208,7 @@ export async function POST(req: NextRequest) {
   const explicit = { ...(prefs.explicit ?? {}) };
   const existingRules =
     ((explicit as Record<string, unknown>).structuredRules as
-      | AvailabilityRule[]
+      | AvailabilityPreference[]
       | undefined) ?? [];
   const generalLinkName =
     typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined;
@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
   const linkCode = generateCode(8);
   const nowIso = new Date().toISOString();
 
-  const rule: AvailabilityRule = {
+  const rule: AvailabilityPreference = {
     id: newRuleId,
     originalText: parsed.originalText.trim() || "(no description)",
     type: "recurring",

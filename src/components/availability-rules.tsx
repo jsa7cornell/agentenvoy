@@ -6,7 +6,7 @@ import {
   Plus, Check, X, Pencil, Trash2, Loader2, ToggleLeft, ToggleRight,
   Ban, Lock, Timer, CheckCircle2, Star, MapPin, Megaphone, Copy, UserX,
 } from "lucide-react";
-import type { AvailabilityRule } from "@/lib/availability-rules";
+import type { AvailabilityPreference } from "@/lib/availability-rules";
 import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
 
 // --- Types ---
@@ -40,7 +40,7 @@ interface PreferenceData {
   timezone: string;
   businessHoursStart: number;
   businessHoursEnd: number;
-  structuredRules: AvailabilityRule[];
+  structuredRules: AvailabilityPreference[];
   defaultLocation?: string;
   videoProvider?: string; // "google-meet" | "zoom"
   // Legacy fields (read-only, kept for backwards compat)
@@ -168,7 +168,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
 
   // --- Save (auto-save on rule changes) ---
 
-  async function saveRules(rules: AvailabilityRule[]) {
+  async function saveRules(rules: AvailabilityPreference[]) {
     if (!data) return;
     setIsSaving(true);
     try {
@@ -244,11 +244,11 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
       return;
     }
 
-    const rule: AvailabilityRule = {
+    const rule: AvailabilityPreference = {
       id: uuid(),
       originalText: pendingRule.originalText,
       type: pendingRule.type,
-      action: pendingRule.action as AvailabilityRule["action"],
+      action: pendingRule.action as AvailabilityPreference["action"],
       timeStart: pendingRule.timeStart,
       timeEnd: pendingRule.timeEnd,
       allDay: pendingRule.allDay,
@@ -283,7 +283,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
   function toggleRule(id: string) {
     if (!data) return;
     const newRules = data.structuredRules.map((r) =>
-      r.id === id ? { ...r, status: (r.status === "active" ? "paused" : "active") as AvailabilityRule["status"] } : r
+      r.id === id ? { ...r, status: (r.status === "active" ? "paused" : "active") as AvailabilityPreference["status"] } : r
     );
     saveRules(newRules);
   }
@@ -314,7 +314,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
         bufferMinutesAfter: editFields.bufferMinutesAfter ?? r.bufferMinutesAfter,
         locationLabel: editFields.locationLabel ?? r.locationLabel,
         type: editFields.type ?? r.type,
-      } as AvailabilityRule;
+      } as AvailabilityPreference;
     });
     setEditingRule(null);
     setEditFields({});
@@ -1148,7 +1148,7 @@ function RuleCard({
   onSaveEdit,
   onCancelEdit,
 }: {
-  rule: AvailabilityRule;
+  rule: AvailabilityPreference;
   expanded: boolean;
   editing: boolean;
   editFields: Partial<ParsedRule>;

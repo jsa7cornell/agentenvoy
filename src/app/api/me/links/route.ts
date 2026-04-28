@@ -18,7 +18,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { compileOfficeHoursLinks } from "@/lib/availability-rules";
-import type { AvailabilityRule } from "@/lib/availability-rules";
+import type { AvailabilityPreference } from "@/lib/availability-rules";
 
 type LinkEntry =
   | {
@@ -83,7 +83,7 @@ export async function GET() {
   // Office-hours links — compiled from structuredRules.
   const prefs = (user.preferences as Record<string, unknown> | null) || {};
   const explicit = (prefs.explicit as Record<string, unknown> | undefined) || {};
-  const rules = (explicit.structuredRules as AvailabilityRule[] | undefined) || [];
+  const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
   const officeHours = compileOfficeHoursLinks(rules);
   for (const oh of officeHours) {
     links.push({

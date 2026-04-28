@@ -10,7 +10,7 @@ import type { CompiledRules, BlockedWindow, AllowWindow, CompiledBuffer, Compile
 
 // --- Types ---
 
-export interface AvailabilityRule {
+export interface AvailabilityPreference {
   id: string;
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
@@ -74,7 +74,7 @@ export interface CompiledOfficeHoursLink {
  * 2026-04-23. Used for "My links" popover labels, uniqueness checks, and recall
  * matching. Trimmed; case preserved.
  */
-export function getOfficeHoursDisplayName(officeHours: NonNullable<AvailabilityRule["officeHours"]>): string {
+export function getOfficeHoursDisplayName(officeHours: NonNullable<AvailabilityPreference["officeHours"]>): string {
   const n = (officeHours.name ?? "").trim();
   if (n) return n;
   return (officeHours.title ?? "").trim() || "Office Hours";
@@ -93,7 +93,7 @@ export function normalizeLinkName(name: string): string {
  * An active rule is one with status "active" whose effectiveDate has started
  * and whose expiryDate has not passed. Picks highest priority.
  */
-export function getActiveLocationRule(rules: AvailabilityRule[] | undefined | null): AvailabilityRule | null {
+export function getActiveLocationRule(rules: AvailabilityPreference[] | undefined | null): AvailabilityPreference | null {
   if (!rules || rules.length === 0) return null;
   const today = new Date().toISOString().slice(0, 10);
   const candidates = rules
@@ -112,7 +112,7 @@ const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
  * Expire rules whose expiryDate has passed. Returns the updated list and
  * whether any changes were made.
  */
-export function expireRules(rules: AvailabilityRule[]): { rules: AvailabilityRule[]; changed: boolean } {
+export function expireRules(rules: AvailabilityPreference[]): { rules: AvailabilityPreference[]; changed: boolean } {
   const today = new Date().toISOString().slice(0, 10);
   let changed = false;
 
@@ -138,7 +138,7 @@ export function expireRules(rules: AvailabilityRule[]): { rules: AvailabilityRul
  *
  * Pure function — no LLM, no async, fully deterministic.
  */
-export function compileOfficeHoursLinks(rules: AvailabilityRule[]): CompiledOfficeHoursLink[] {
+export function compileOfficeHoursLinks(rules: AvailabilityPreference[]): CompiledOfficeHoursLink[] {
   const today = new Date().toISOString().slice(0, 10);
   const out: CompiledOfficeHoursLink[] = [];
 
@@ -174,7 +174,7 @@ export function compileOfficeHoursLinks(rules: AvailabilityRule[]): CompiledOffi
  * compileOfficeHoursLinks(). The scoring engine is global; office hours are per-link.
  */
 export function compileStructuredRules(
-  rules: AvailabilityRule[],
+  rules: AvailabilityPreference[],
   defaultBizStart: number = 9,
   defaultBizEnd: number = 18,
 ): CompiledRules {

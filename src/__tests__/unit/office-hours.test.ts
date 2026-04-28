@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { applyOfficeHoursWindow, generateOfficeHoursLinkCode } from "@/lib/office-hours";
-import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
+import { compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
 import type { ScoredSlot, SlotKind } from "@/lib/scoring";
 import type { CompiledOfficeHoursLink } from "@/lib/availability-rules";
 
@@ -308,7 +308,7 @@ describe("applyOfficeHoursWindow — expiry", () => {
 });
 
 describe("compileOfficeHoursLinks", () => {
-  function ruleOf(overrides: Partial<AvailabilityRule> = {}): AvailabilityRule {
+  function ruleOf(overrides: Partial<AvailabilityPreference> = {}): AvailabilityPreference {
     return {
       id: "r1",
       originalText: "office hours Tue 2-4pm",
@@ -353,7 +353,7 @@ describe("compileOfficeHoursLinks", () => {
   });
 
   it("skips non-office_hours rules", () => {
-    const blockRule: AvailabilityRule = {
+    const blockRule: AvailabilityPreference = {
       id: "b1",
       originalText: "no meetings before 10am",
       type: "recurring",

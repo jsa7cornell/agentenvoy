@@ -31,7 +31,7 @@ import {
 import { getOrComputeSchedule } from "@/lib/calendar";
 import {
   compileOfficeHoursLinks,
-  type AvailabilityRule,
+  type AvailabilityPreference,
 } from "@/lib/availability-rules";
 import {
   applyOfficeHoursWindow,
@@ -247,7 +247,7 @@ export async function handleGetAvailability(
   if (link.recurringWindowId) {
     const explicit = prefs.explicit as Record<string, unknown> | undefined;
     const allRules =
-      (explicit?.structuredRules as AvailabilityRule[] | undefined) ?? [];
+      (explicit?.structuredRules as AvailabilityPreference[] | undefined) ?? [];
     const compiledLinks = compileOfficeHoursLinks(allRules);
     const compiled = compiledLinks.find((l) => l.ruleId === link.recurringWindowId);
     if (compiled) {

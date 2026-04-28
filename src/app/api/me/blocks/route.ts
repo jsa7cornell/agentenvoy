@@ -23,11 +23,11 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { invalidateSchedule } from "@/lib/calendar";
 import { expireRules } from "@/lib/availability-rules";
-import type { AvailabilityRule } from "@/lib/availability-rules";
+import type { AvailabilityPreference } from "@/lib/availability-rules";
 import type { UserPreferences } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
 
-function selectBlocks(rules: AvailabilityRule[]): AvailabilityRule[] {
+function selectBlocks(rules: AvailabilityPreference[]): AvailabilityPreference[] {
   return rules.filter((r) => r.action === "block" && r.status !== "expired");
 }
 
@@ -46,8 +46,8 @@ export async function GET() {
   const prefs = (user.preferences as UserPreferences | null) ?? {};
   const explicit = prefs.explicit ?? {};
   const rules =
-    ((explicit as { structuredRules?: AvailabilityRule[] }).structuredRules ??
-      []) as AvailabilityRule[];
+    ((explicit as { structuredRules?: AvailabilityPreference[] }).structuredRules ??
+      []) as AvailabilityPreference[];
 
   // Apply expiry cleanup on read so stale rules don't linger in the UI.
   const { rules: cleaned } = expireRules(rules);
@@ -80,8 +80,8 @@ export async function DELETE(req: NextRequest) {
   const prefs = (user.preferences as UserPreferences | null) ?? {};
   const explicit = prefs.explicit ?? {};
   const rules =
-    ((explicit as { structuredRules?: AvailabilityRule[] }).structuredRules ??
-      []) as AvailabilityRule[];
+    ((explicit as { structuredRules?: AvailabilityPreference[] }).structuredRules ??
+      []) as AvailabilityPreference[];
 
   const target = rules.find((r) => r.id === body.ruleId);
   if (!target) {
