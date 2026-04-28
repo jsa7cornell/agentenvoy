@@ -1,7 +1,7 @@
 /**
  * Parameter-resolver table test — covers every envelope state in §2.3 plus
  * the 2026-04-20 addendum formatFilters consultation. Reviewer's N1 called
- * out that any new key added to `LinkRules.guestPicks` must get a resolver
+ * out that any new key added to `LinkParameters.guestPicks` must get a resolver
  * branch or agents silently miss it — the completeness block at the bottom
  * locks that in at CI.
  */
@@ -11,12 +11,12 @@ import {
   subtractFormatFilters,
   type FormatValue,
 } from "@/lib/mcp/parameter-resolver";
-import type { LinkRules, UserPreferences, CompiledRules } from "@/lib/scoring";
+import type { LinkParameters, UserPreferences, CompiledRules } from "@/lib/scoring";
 
 const TZ = "America/Los_Angeles";
 
 function run(
-  rules: LinkRules,
+  rules: LinkParameters,
   hostPreferences: UserPreferences | null = null,
   extra: { slotStart?: Date; compiledRules?: CompiledRules | null } = {}
 ) {
@@ -254,7 +254,7 @@ describe("resolveParameters — timezone + summary", () => {
 });
 
 describe("resolveParameters — guestPicks completeness (reviewer N1)", () => {
-  // If anyone adds a new key to LinkRules.guestPicks in scoring.ts without
+  // If anyone adds a new key to LinkParameters.guestPicks in scoring.ts without
   // updating parameter-resolver.ts, this test fails loudly at CI.
   it("every guestPicks key has a resolver branch", () => {
     const GUESTPICKS_KEYS_WITH_RESOLVER = new Set([
@@ -265,7 +265,7 @@ describe("resolveParameters — guestPicks completeness (reviewer N1)", () => {
       "format",
     ]);
     // Enumerate the keys TypeScript would allow on guestPicks.
-    const sample: NonNullable<LinkRules["guestPicks"]> = {
+    const sample: NonNullable<LinkParameters["guestPicks"]> = {
       window: { startHour: 9, endHour: 17 },
       date: true,
       duration: true,
@@ -279,7 +279,7 @@ describe("resolveParameters — guestPicks completeness (reviewer N1)", () => {
 });
 
 describe("resolveParameters — guestGuidance completeness (envelope-preferred 2026-04-20)", () => {
-  // Parallel guardrail to guestPicks: any new key on LinkRules.guestGuidance
+  // Parallel guardrail to guestPicks: any new key on LinkParameters.guestGuidance
   // must either be read by a resolver branch OR be explicitly exempt here
   // (e.g. `tone` is consumed by the greeting template, not the resolver).
   // Added with the `preferredFormat` field; future `guestGuidance.preferred*`
@@ -295,7 +295,7 @@ describe("resolveParameters — guestGuidance completeness (envelope-preferred 2
       "tone",            // consumed by greeting-template render, not resolver
     ]);
     // Sample enumerating the TS shape — fails to compile if a key is dropped.
-    const sample: NonNullable<LinkRules["guestGuidance"]> = {
+    const sample: NonNullable<LinkParameters["guestGuidance"]> = {
       suggestions: { locations: ["Blue Bottle"], durations: [30] },
       tone: "friendly",
       preferredFormat: "in-person",

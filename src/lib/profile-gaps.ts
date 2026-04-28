@@ -168,7 +168,7 @@ async function loadBehaviorSnapshot(userId: string): Promise<BehaviorSnapshot> {
   const [links, recentProposals] = await Promise.all([
     prisma.negotiationLink.findMany({
       where: { userId, createdAt: { gte: thirtyDaysAgo } },
-      select: { rules: true },
+      select: { parameters: true },
       take: 200,
     }),
     prisma.proposal.findMany({
@@ -186,7 +186,7 @@ async function loadBehaviorSnapshot(userId: string): Promise<BehaviorSnapshot> {
   // counts as one override. Tally per-value frequency.
   const durationCounts = new Map<number, number>();
   for (const link of links) {
-    const rules = (link.rules as Record<string, unknown> | null) ?? null;
+    const rules = (link.parameters as Record<string, unknown> | null) ?? null;
     const dur = rules && typeof rules.durationMinutes === "number" ? (rules.durationMinutes as number) : null;
     if (dur != null) {
       durationCounts.set(dur, (durationCounts.get(dur) ?? 0) + 1);

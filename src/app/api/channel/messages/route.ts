@@ -71,7 +71,7 @@ export async function GET() {
               slug: true,
               mode: true,
               type: true,
-              rules: true, // read by the client to extract priority (Layer 5)
+              parameters: true, // read by the client to extract priority (Layer 5)
             },
           },
           _count: {
@@ -115,7 +115,7 @@ export async function GET() {
   const enrichedMessages = messages.map((msg) => {
     if (!msg.thread) return msg;
 
-    const rules = (msg.thread.link?.rules as Record<string, unknown> | null) || null;
+    const rules = (msg.thread.link?.parameters as Record<string, unknown> | null) || null;
     // Binary isVip flag — anything truthy (including legacy priority strings
     // "high"|"vip") is treated as VIP for backward compat with rows written
     // before this refactor. Anything else is not VIP.

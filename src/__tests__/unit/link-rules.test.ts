@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   normalizeDayName,
-  normalizeLinkRules,
+  normalizeLinkParameters,
   applyEventOverrides,
   getTimeWindows,
   type ScoredSlot,
-  type LinkRules,
+  type LinkParameters,
 } from "@/lib/scoring";
 
 // ─── normalizeDayName ────────────────────────────────────────────────────────
@@ -41,18 +41,18 @@ describe("normalizeDayName", () => {
   });
 });
 
-// ─── normalizeLinkRules ──────────────────────────────────────────────────────
+// ─── normalizeLinkParameters ──────────────────────────────────────────────────────
 
-describe("normalizeLinkRules", () => {
+describe("normalizeLinkParameters", () => {
   it("coerces long day names to short form", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       preferredDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
     });
     expect(out.preferredDays).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri"]);
   });
 
   it("passes short day names through unchanged", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       preferredDays: ["Mon", "Tue"],
       lastResort: ["Fri"],
     });
@@ -61,21 +61,21 @@ describe("normalizeLinkRules", () => {
   });
 
   it("drops garbage day names", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       preferredDays: ["Monday", "Funday", "", null, "Tue"],
     });
     expect(out.preferredDays).toEqual(["Mon", "Tue"]);
   });
 
   it("de-dupes days", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       preferredDays: ["Mon", "Monday", "MON", "mon"],
     });
     expect(out.preferredDays).toEqual(["Mon"]);
   });
 
   it("preserves unknown keys unchanged", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       format: "video",
       duration: 30,
       notes: "hello",
@@ -84,69 +84,69 @@ describe("normalizeLinkRules", () => {
   });
 
   it("keeps valid dateRange", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       dateRange: { start: "2026-04-20", end: "2026-04-24" },
     });
     expect(out.dateRange).toEqual({ start: "2026-04-20", end: "2026-04-24" });
   });
 
   it("drops malformed dateRange", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       dateRange: { start: "tomorrow", end: "next week" },
     });
     expect(out.dateRange).toBeUndefined();
   });
 
   it("keeps dateRange with only one end", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       dateRange: { start: "2026-04-20" },
     });
     expect(out.dateRange).toEqual({ start: "2026-04-20" });
   });
 
   it("handles null/undefined/non-object input", () => {
-    expect(normalizeLinkRules(null)).toEqual({});
-    expect(normalizeLinkRules(undefined)).toEqual({});
+    expect(normalizeLinkParameters(null)).toEqual({});
+    expect(normalizeLinkParameters(undefined)).toEqual({});
   });
 
   // ─── guestGuidance.preferredFormat (envelope-preferred 2026-04-20) ─────────
 
   it("preserves guestGuidance.preferredFormat: 'video'", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       guestGuidance: { preferredFormat: "video" },
-    }) as LinkRules;
+    }) as LinkParameters;
     expect(out.guestGuidance?.preferredFormat).toBe("video");
   });
 
   it("preserves guestGuidance.preferredFormat: 'in-person'", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       guestGuidance: { preferredFormat: "in-person" },
-    }) as LinkRules;
+    }) as LinkParameters;
     expect(out.guestGuidance?.preferredFormat).toBe("in-person");
   });
 
   it("drops 'in_person' (underscore — common LLM typo, same treatment as guestPicks.format)", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       guestGuidance: { preferredFormat: "in_person" as unknown as "in-person" },
-    }) as LinkRules;
+    }) as LinkParameters;
     expect(out.guestGuidance?.preferredFormat).toBeUndefined();
   });
 
   it("drops bogus preferredFormat values", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       guestGuidance: { preferredFormat: "telepathy" as unknown as "video" },
-    }) as LinkRules;
+    }) as LinkParameters;
     expect(out.guestGuidance?.preferredFormat).toBeUndefined();
   });
 
   it("preferredFormat co-exists with other guestGuidance keys", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       guestGuidance: {
         suggestions: { locations: ["Ritual"], durations: [30] },
         tone: "friendly",
         preferredFormat: "video",
       },
-    }) as LinkRules;
+    }) as LinkParameters;
     expect(out.guestGuidance).toEqual({
       suggestions: { locations: ["Ritual"], durations: [30] },
       tone: "friendly",
@@ -191,7 +191,7 @@ describe("applyEventOverrides — preferredDays (soft boost, not filter)", () =>
   // handled by `allowWeekends`, not preferredDays.
 
   it("boosts listed short-name days to ★ tier and leaves others alone", () => {
-    const rules: LinkRules = { preferredDays: ["Mon", "Tue", "Wed", "Thu", "Fri"] };
+    const rules: LinkParameters = { preferredDays: ["Mon", "Tue", "Wed", "Thu", "Fri"] };
     const out = applyEventOverrides(base, rules, "America/Los_Angeles");
     expect(out).toHaveLength(4); // all kept — including saturday
     const byIso = new Map(out.map((s) => [s.start, s]));
@@ -202,7 +202,7 @@ describe("applyEventOverrides — preferredDays (soft boost, not filter)", () =>
   });
 
   it("tolerates long day names at read time (back-compat)", () => {
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       preferredDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
     };
     const out = applyEventOverrides(base, rules, "America/Los_Angeles");
@@ -212,7 +212,7 @@ describe("applyEventOverrides — preferredDays (soft boost, not filter)", () =>
   });
 
   it("tolerates mixed day name shapes", () => {
-    const rules: LinkRules = { preferredDays: ["Mon", "tuesday", "WED"] };
+    const rules: LinkParameters = { preferredDays: ["Mon", "tuesday", "WED"] };
     const out = applyEventOverrides(base, rules, "America/Los_Angeles");
     const byIso = new Map(out.map((s) => [s.start, s]));
     expect(byIso.get(monday9pdt)!.score).toBeLessThanOrEqual(-1);
@@ -226,7 +226,7 @@ describe("applyEventOverrides — preferredDays (soft boost, not filter)", () =>
     // at its conflict score even though Wed is preferred — day preference
     // can't paper over an actual calendar issue.
     const conflictedWed = slot(wednesday9pdt, 3);
-    const rules: LinkRules = { preferredDays: ["Wed"] };
+    const rules: LinkParameters = { preferredDays: ["Wed"] };
     const out = applyEventOverrides([conflictedWed], rules, "America/Los_Angeles");
     expect(out[0].score).toBe(3);
   });
@@ -237,7 +237,7 @@ describe("applyEventOverrides — preferredDays (soft boost, not filter)", () =>
     // were filtered out entirely and the guest could only book Wed.
     const wed = slot(wednesday9pdt);
     const thu = slot(thursday9pdt);
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       preferredDays: ["Wed"],
       dateRange: { start: "2026-04-22", end: "2026-04-25" },
     };
@@ -262,19 +262,19 @@ describe("applyEventOverrides — dateRange", () => {
   const base = [slot(apr19), slot(apr20), slot(apr22), slot(apr24), slot(apr25)];
 
   it("filters to inclusive [start, end] window in host tz", () => {
-    const rules: LinkRules = { dateRange: { start: "2026-04-20", end: "2026-04-24" } };
+    const rules: LinkParameters = { dateRange: { start: "2026-04-20", end: "2026-04-24" } };
     const out = applyEventOverrides(base, rules, "America/Los_Angeles");
     expect(out.map((s) => s.start)).toEqual([apr20, apr22, apr24]);
   });
 
   it("applies only start when end is omitted", () => {
-    const rules: LinkRules = { dateRange: { start: "2026-04-22" } };
+    const rules: LinkParameters = { dateRange: { start: "2026-04-22" } };
     const out = applyEventOverrides(base, rules, "America/Los_Angeles");
     expect(out.map((s) => s.start)).toEqual([apr22, apr24, apr25]);
   });
 
   it("applies only end when start is omitted", () => {
-    const rules: LinkRules = { dateRange: { end: "2026-04-20" } };
+    const rules: LinkParameters = { dateRange: { end: "2026-04-20" } };
     const out = applyEventOverrides(base, rules, "America/Los_Angeles");
     expect(out.map((s) => s.start)).toEqual([apr19, apr20]);
   });
@@ -286,7 +286,7 @@ describe("regression — eyajs5 preferredDays shape", () => {
   it("filter no longer nukes every slot when short names are persisted", () => {
     // This is the exact rules shape that caused Bryan's deal room to see
     // "no offerable times" after the greeting showed plenty.
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       format: "video",
       preferredDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
       dateRange: { start: "2026-04-20", end: "2026-04-24" },
@@ -305,7 +305,7 @@ describe("regression — eyajs5 preferredDays shape", () => {
 
 describe("preferredTimeWindows normalization", () => {
   it("keeps well-formed windows and sorts them by start", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       preferredTimeWindows: [
         { start: "16:30", end: "18:00" },
         { start: "12:00", end: "14:00" },
@@ -318,14 +318,14 @@ describe("preferredTimeWindows normalization", () => {
   });
 
   it("accepts 24:00 as an end-of-day sentinel", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       preferredTimeWindows: [{ start: "20:00", end: "24:00" }],
     });
     expect(out.preferredTimeWindows).toEqual([{ start: "20:00", end: "24:00" }]);
   });
 
   it("drops entries with bad shape, non-HH:MM strings, or start >= end", () => {
-    const out = normalizeLinkRules({
+    const out = normalizeLinkParameters({
       preferredTimeWindows: [
         { start: "12:00", end: "14:00" }, // good
         { start: "25:00", end: "26:00" }, // bad hour
@@ -340,10 +340,10 @@ describe("preferredTimeWindows normalization", () => {
   });
 
   it("drops the field entirely when the array is non-array or cleans to empty", () => {
-    expect(normalizeLinkRules({ preferredTimeWindows: "oops" }).preferredTimeWindows).toBeUndefined();
-    expect(normalizeLinkRules({ preferredTimeWindows: [] }).preferredTimeWindows).toBeUndefined();
+    expect(normalizeLinkParameters({ preferredTimeWindows: "oops" }).preferredTimeWindows).toBeUndefined();
+    expect(normalizeLinkParameters({ preferredTimeWindows: [] }).preferredTimeWindows).toBeUndefined();
     expect(
-      normalizeLinkRules({
+      normalizeLinkParameters({
         preferredTimeWindows: [{ start: "x", end: "y" }],
       }).preferredTimeWindows,
     ).toBeUndefined();
@@ -352,7 +352,7 @@ describe("preferredTimeWindows normalization", () => {
 
 describe("getTimeWindows precedence", () => {
   it("returns the multi-window array when present and non-empty", () => {
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       preferredTimeStart: "09:00",
       preferredTimeEnd: "17:00",
       preferredTimeWindows: [
@@ -401,7 +401,7 @@ describe("applyEventOverrides filters on multi-window", () => {
   it("keeps slots inside ANY window and drops the gap between them", () => {
     // All slots on Mon Apr 20, America/Los_Angeles (UTC-7 during PDT).
     // 12:00 PDT = 19:00 UTC, 15:00 PDT = 22:00 UTC, 17:00 PDT = 00:00 UTC (+1d)
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       preferredTimeWindows: [
         { start: "12:00", end: "14:00" },
         { start: "16:30", end: "18:00" },
@@ -451,7 +451,7 @@ describe("applyEventOverrides — explicit-window unlock", () => {
     // 2026-04-21T18:00Z = 11 AM PDT (daytime). For an evening case, use
     // 2026-04-22T02:00Z = 19:00 PDT on Tue, which is off-hours by default.
     const eveningSlot = offHoursSlot("2026-04-22T02:00:00.000Z", 3);
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       preferredTimeStart: "17:00",
       preferredTimeEnd: "20:00",
     };
@@ -463,7 +463,7 @@ describe("applyEventOverrides — explicit-window unlock", () => {
 
   it("promotes score-2 off-hours slot inside preferredTime window", () => {
     const eveningSlot = offHoursSlot("2026-04-22T02:00:00.000Z", 2);
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       preferredTimeStart: "17:00",
       preferredTimeEnd: "20:00",
     };
@@ -483,7 +483,7 @@ describe("applyEventOverrides — explicit-window unlock", () => {
       blockCost: "none",
       firmness: "weak",
     };
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       preferredTimeStart: "17:00",
       preferredTimeEnd: "20:00",
     };
@@ -507,7 +507,7 @@ describe("applyEventOverrides — explicit-window unlock", () => {
       blockCost: "preference",
       firmness: "strong",
     };
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       preferredTimeStart: "17:00",
       preferredTimeEnd: "20:00",
     };
@@ -529,7 +529,7 @@ describe("applyEventOverrides — explicit-window unlock", () => {
       blockCost: "preference",
       firmness: "strong",
     };
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       preferredTimeStart: "17:00",
       preferredTimeEnd: "20:00",
     };
@@ -547,7 +547,7 @@ describe("applyEventOverrides — explicit-window unlock", () => {
       offHoursSlot("2026-04-22T01:30:00.000Z", 3), // Tue 6:30 PM PDT
       offHoursSlot("2026-04-22T02:30:00.000Z", 3), // Tue 7:30 PM PDT
     ];
-    const rules: LinkRules = {
+    const rules: LinkParameters = {
       format: "phone",
       duration: 30,
       dateRange: { start: "2026-04-21", end: "2026-05-01" },

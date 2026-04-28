@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { parsePreferences } from "@/agent/agent-runner";
 import { authenticateRequest } from "@/lib/api-auth";
-import { normalizeLinkRules } from "@/lib/scoring";
+import { normalizeLinkParameters } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
 
 // POST /api/negotiate/create
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   }
 
   const code = generateCode();
-  const normalizedRules = normalizeLinkRules(parsedRules);
+  const normalizedRules = normalizeLinkParameters(parsedRules);
 
   // Host-declared guest TZ. Body wins over prompt-parsed. Validate via Intl —
   // reject invalid zones loudly so a client bug sending "EST" or "PDT" fails
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       inviteeName: inviteeName || parsedRules.inviteeName || null,
       inviteeTimezone: validatedInviteeTimezone,
       topic: topic || parsedRules.topic || null,
-      rules: normalizedRules as Prisma.InputJsonValue,
+      parameters: normalizedRules as Prisma.InputJsonValue,
     },
   });
 
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
       inviteeName: link.inviteeName,
       inviteeTimezone: link.inviteeTimezone,
       topic: link.topic,
-      rules: link.rules,
+      parameters: link.parameters,
     },
   });
 }

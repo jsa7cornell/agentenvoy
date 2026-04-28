@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getOrComputeSchedule } from "@/lib/calendar";
-import { applyEventOverrides, type LinkRules, type ScoredSlot } from "@/lib/scoring";
+import { applyEventOverrides, type LinkParameters, type ScoredSlot } from "@/lib/scoring";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserTimezone } from "@/lib/timezone";
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
   let hostId: string;
   let prefs: Record<string, unknown>;
-  let linkRules: LinkRules = {};
+  let linkRules: LinkParameters = {};
   let recurringWindowId: string | null = null;
   // guestId is set only when the session has a logged-in guest (bilateral path).
   // Anonymous guests stay null → bilateral compute is skipped and the response
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
         hostId: true,
         guestId: true,
         host: { select: { preferences: true } },
-        link: { select: { rules: true, recurringWindowId: true } },
+        link: { select: { parameters: true, recurringWindowId: true } },
       },
     });
     if (!session) {
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     hostId = session.hostId;
     guestId = session.guestId;
     prefs = (session.host.preferences as Record<string, unknown>) || {};
-    linkRules = (session.link?.rules as LinkRules) || {};
+    linkRules = (session.link?.parameters as LinkParameters) || {};
     recurringWindowId = session.link?.recurringWindowId ?? null;
     partialSessionId = sessionId;
   } else {

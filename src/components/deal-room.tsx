@@ -657,7 +657,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     const startMs = new Date(slot.start).getTime();
     const endMs = new Date(slot.end).getTime();
     const durationFromRange = Math.max(15, Math.round((endMs - startMs) / 60000));
-    // Prefer host-set meeting duration from link.rules (slotDuration); fall
+    // Prefer host-set meeting duration from link.parameters (slotDuration); fall
     // back to the chip's own range if the link didn't specify one.
     const duration = slotDuration && slotDuration > 0 ? slotDuration : durationFromRange;
     const format = linkFormat || "video";
@@ -1185,7 +1185,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // Canonical set per CODEBASE-CLEANUP §22 / SPEC-2.0 §3.6:
   //   🚴 bike · 🏄 surf · ☕ coffee · 🍽️ dinner · 💻 video · 📱 phone ·
   //   📍 in-person · 👤 1:1 · 🕐 fallback.
-  // The host-set `activityIcon` (from `link.rules.activityIcon`) takes
+  // The host-set `activityIcon` (from `link.parameters.activityIcon`) takes
   // precedence whenever it's available; this picker is the format/venue
   // derivation used when no host icon is set. Priority: venue keyword
   // (location) > format > fallback (empty — caller decides whether to use
@@ -1511,7 +1511,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           })()}
           {!eventDateTime && !eventFormat && (() => {
             // Pre-confirmation fallback: render the host's proposal fragments
-            // from link.rules so the guest sees what the meeting is ABOUT
+            // from link.parameters so the guest sees what the meeting is ABOUT
             // before a time is locked. Mirrors the greeting's prose-first
             // approach — show what's set, drop what isn't.
             const parts: string[] = [];

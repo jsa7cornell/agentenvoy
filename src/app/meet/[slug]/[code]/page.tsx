@@ -14,7 +14,7 @@ async function getLinkData(slug: string, code: string) {
       select: {
         topic: true,
         inviteeName: true,
-        rules: true,
+        parameters: true,
         mode: true,
         user: { select: { name: true } },
       },
@@ -34,7 +34,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const guestName = link?.inviteeName;
   const guestFirst = guestName ? guestName.split(" ")[0] : null;
   const topic = link?.topic;
-  const rules = (link?.rules as Record<string, unknown>) || {};
+  const rules = (link?.parameters as Record<string, unknown>) || {};
   const format = rules.format as string | undefined;
   // rules.duration is stored as raw minutes (number or numeric string).
   // Previously coerced straight into the description, which leaked raw

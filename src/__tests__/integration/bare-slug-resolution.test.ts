@@ -29,7 +29,7 @@ describe("ensureDefaultLinkForUser", () => {
     expect(link.userId).toBe(user.id);
     expect(link.slug).toBe("johnanderson");
     expect(link.code).toBeNull();
-    expect(link.rules).toEqual({});
+    expect(link.parameters).toEqual({});
   });
 
   it("is idempotent — second call returns the same row", async () => {
@@ -58,7 +58,7 @@ describe("ensureDefaultLinkForUser", () => {
         userId: user.id,
         slug: "hostctx",
         code: "ABCD1234",
-        rules: {},
+        parameters: {},
       },
     });
 
@@ -146,7 +146,7 @@ describe("resolveLink — vanity URL fallback", () => {
         userId: user.id,
         slug: "existinghost",
         code: null,
-        rules: { duration: 45 },
+        parameters: { duration: 45 },
       },
     });
 
@@ -154,7 +154,7 @@ describe("resolveLink — vanity URL fallback", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.link.id).toBe(existing.id);
-      expect(result.link.rules).toEqual({ duration: 45 });
+      expect(result.link.parameters).toEqual({ duration: 45 });
     }
   });
 

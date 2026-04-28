@@ -240,7 +240,7 @@ export function hasMaterialNarrowingChange(
 }
 
 /**
- * Read an already-stored intent blob off a `LinkRules` record and return
+ * Read an already-stored intent blob off a `LinkParameters` record and return
  * the resolved steering. Returns `null` if the rules don't carry an intent
  * field (caller falls back to `deriveLegacy`).
  */

@@ -26,12 +26,12 @@
  * removed from `allowedValues` rather than letting it 409 later at
  * `/api/negotiate/confirm` as `in_person_disallowed`.
  *
- * **Parameter-resolver and `normalizeLinkRules` alignment** (N1 from reviewer).
- * Any new key added to `LinkRules.guestPicks` or `LinkRules.guestGuidance`
+ * **Parameter-resolver and `normalizeLinkParameters` alignment** (N1 from reviewer).
+ * Any new key added to `LinkParameters.guestPicks` or `LinkParameters.guestGuidance`
  * must get a resolver branch here — or agents won't see it. A completeness
  * test (`src/__tests__/unit/parameter-resolver.test.ts`) enforces this at CI.
  */
-import type { LinkRules, UserPreferences, CompiledRules } from "@/lib/scoring";
+import type { LinkParameters, UserPreferences, CompiledRules } from "@/lib/scoring";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,7 +82,7 @@ export interface ResolvedParameters {
 }
 
 export interface ResolveInput {
-  rules: LinkRules;
+  rules: LinkParameters;
   hostPreferences: UserPreferences | null | undefined;
   /** Host's timezone, fed from `getUserTimezone()`. */
   hostTimezone: string;

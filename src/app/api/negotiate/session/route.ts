@@ -6,7 +6,7 @@ import { generateAgentResponse, AgentContext } from "@/agent/agent-runner";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";
-import type { ScoredSlot, LinkRules } from "@/lib/scoring";
+import type { ScoredSlot, LinkParameters } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
 import { compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
         code: childCode,
         topic: oh.title,
         recurringWindowId: officeHoursRule.id,
-        rules: {
+        parameters: {
           format: oh.format,
           duration: oh.durationMinutes,
         } as unknown as Prisma.InputJsonValue,
@@ -212,13 +212,13 @@ export async function POST(req: NextRequest) {
       topic: link.topic,
       inviteeName: link.inviteeName,
       inviteeNames: link.inviteeNames,
-      format: (link.rules as Record<string, unknown>)?.format ?? null,
-      duration: (link.rules as Record<string, unknown>)?.duration ?? null,
-      location: (link.rules as Record<string, unknown>)?.location ?? null,
-      activity: (link.rules as Record<string, unknown>)?.activity ?? null,
-      activityIcon: (link.rules as Record<string, unknown>)?.activityIcon ?? null,
-      timingLabel: (link.rules as Record<string, unknown>)?.timingLabel ?? null,
-      startTime: (link.rules as Record<string, unknown>)?.startTime ?? null,
+      format: (link.parameters as Record<string, unknown>)?.format ?? null,
+      duration: (link.parameters as Record<string, unknown>)?.duration ?? null,
+      location: (link.parameters as Record<string, unknown>)?.location ?? null,
+      activity: (link.parameters as Record<string, unknown>)?.activity ?? null,
+      activityIcon: (link.parameters as Record<string, unknown>)?.activityIcon ?? null,
+      timingLabel: (link.parameters as Record<string, unknown>)?.timingLabel ?? null,
+      startTime: (link.parameters as Record<string, unknown>)?.startTime ?? null,
     };
 
     // --- GROUP MODE: each visitor gets their own session ---
@@ -524,7 +524,7 @@ export async function POST(req: NextRequest) {
     if (!session) {
       // Shouldn't happen, but fall through to create
       const hostFirstName = (user.name || "Host").split(/\s+/)[0];
-      const lr = (link.rules as Record<string, unknown>) || {};
+      const lr = (link.parameters as Record<string, unknown>) || {};
       session = await prisma.negotiationSession.create({
         data: {
           linkId: link.id,
@@ -546,7 +546,7 @@ export async function POST(req: NextRequest) {
     }
   } else {
     const hostFirstName = (user.name || "Host").split(/\s+/)[0];
-    const lr = (link.rules as Record<string, unknown>) || {};
+    const lr = (link.parameters as Record<string, unknown>) || {};
     session = await prisma.negotiationSession.create({
       data: {
         linkId: link.id,
@@ -650,7 +650,7 @@ export async function POST(req: NextRequest) {
     guestEmail: link.inviteeEmail || undefined,
     guestTimezone: effectiveGuestTz,
     topic: link.topic || undefined,
-    rules: (link.rules as Record<string, unknown>) || {},
+    rules: (link.parameters as Record<string, unknown>) || {},
     calendarContext,
     hostPersistentKnowledge: user.persistentKnowledge,
     hostUpcomingSchedulePreferences: user.upcomingSchedulePreferences,
@@ -669,7 +669,7 @@ export async function POST(req: NextRequest) {
   // (first-visit capture) so we keep it in scope.
 
   // Resolve effective format/duration — link rules override user preferences.
-  const linkRules = (link.rules as Record<string, unknown>) || {};
+  const linkRules = (link.parameters as Record<string, unknown>) || {};
   const hostPrefs = (user.preferences as { explicit?: Record<string, unknown> } | null) || {};
   const hostExplicit = (hostPrefs.explicit as Record<string, unknown>) || {};
   const effectiveFormat =
@@ -690,7 +690,7 @@ export async function POST(req: NextRequest) {
   // and the LLM disagree about availability and the agent contradicts itself.
   let filteredSlots = applyEventOverrides(
     scheduleSlots,
-    linkRules as LinkRules,
+    linkRules as LinkParameters,
     hostTimezone
   );
 
@@ -1064,21 +1064,21 @@ export async function POST(req: NextRequest) {
       topic: link.topic,
       inviteeName: link.inviteeName,
       inviteeNames: link.inviteeNames,
-      format: (link.rules as Record<string, unknown>)?.format ?? null,
-      duration: (link.rules as Record<string, unknown>)?.duration ?? null,
-      location: (link.rules as Record<string, unknown>)?.location ?? null,
-      activity: (link.rules as Record<string, unknown>)?.activity ?? null,
-      activityIcon: (link.rules as Record<string, unknown>)?.activityIcon ?? null,
-      activityOptions: (link.rules as Record<string, unknown>)?.activityOptions ?? null,
-      guestPicks: (link.rules as Record<string, unknown>)?.guestPicks ?? null,
-      timingLabel: (link.rules as Record<string, unknown>)?.timingLabel ?? null,
-      startTime: (link.rules as Record<string, unknown>)?.startTime ?? null,
+      format: (link.parameters as Record<string, unknown>)?.format ?? null,
+      duration: (link.parameters as Record<string, unknown>)?.duration ?? null,
+      location: (link.parameters as Record<string, unknown>)?.location ?? null,
+      activity: (link.parameters as Record<string, unknown>)?.activity ?? null,
+      activityIcon: (link.parameters as Record<string, unknown>)?.activityIcon ?? null,
+      activityOptions: (link.parameters as Record<string, unknown>)?.activityOptions ?? null,
+      guestPicks: (link.parameters as Record<string, unknown>)?.guestPicks ?? null,
+      timingLabel: (link.parameters as Record<string, unknown>)?.timingLabel ?? null,
+      startTime: (link.parameters as Record<string, unknown>)?.startTime ?? null,
       // Intent.steering is the host-classified steering tier (open / soft /
       // narrow / exclusive) from PR #58. Stage 2 `deriveMode()` reads this to
       // decide offer-mode eligibility for single-slot exclusive links. Pre-
       // PR-58 links have no intent blob — client falls through to slot-count
       // / same-day rules (N7 fold of deal-room-widget-state-machine).
-      intent: ((link.rules as Record<string, unknown>)?.intent as Record<string, unknown> | null) ?? null,
+      intent: ((link.parameters as Record<string, unknown>)?.intent as Record<string, unknown> | null) ?? null,
     },
     isHost,
     isGuest,

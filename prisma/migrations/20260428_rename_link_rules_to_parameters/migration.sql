@@ -1,0 +1,11 @@
+-- Rename NegotiationLink.rules -> parameters.
+-- Phase 6 of the v2 refactor (CODEBASE-CLEANUP item 12). The JSON column
+-- always held link "parameters" (duration, format, VIP, dayWindowOverrides,
+-- gating, etc.); the old `rules` name implied a recurring-window rule and
+-- predates the Office Hours generalization.
+--
+-- Semantics-preserving — no data loss. Use RENAME COLUMN (not DROP+ADD)
+-- so existing JSON payloads carry over verbatim. Application reads now go
+-- through `parseLinkParameters(parameters)` (Zod-typed; .passthrough()
+-- preserves any future fields).
+ALTER TABLE "NegotiationLink" RENAME COLUMN "rules" TO "parameters";

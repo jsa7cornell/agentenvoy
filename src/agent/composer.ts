@@ -483,7 +483,7 @@ function buildSessionContext(options: ComposeOptions): string {
 
   // Scored slots → pre-formatted offerable blocks (preferred: prevents hallucination)
   if (options.scoredSlots && options.scoredSlots.length > 0 && options.calendarContext) {
-    const linkRules = options.rules as LinkRules | undefined;
+    const linkRules = options.rules as LinkParameters | undefined;
     parts.push(formatOfferableSlots(
       options.scoredSlots,
       options.calendarContext.timezone,
@@ -635,7 +635,7 @@ export function formatCalendarContext(ctx: CalendarContext): string {
 
 // --- Computed Schedule Format (compact, scored) ---
 
-import type { ScoredSlot, LinkRules } from "@/lib/scoring";
+import type { ScoredSlot, LinkParameters } from "@/lib/scoring";
 import { getTier, applyEventOverrides, filterByDuration } from "@/lib/scoring";
 
 /**
@@ -647,7 +647,7 @@ export function formatComputedSchedule(
   slots: ScoredSlot[],
   tz: string,
   canWrite: boolean,
-  linkRules?: LinkRules,
+  linkRules?: LinkParameters,
   opts?: { weekConvention?: "iso" | "sun_start" }
 ): string {
   const tzLabel = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
@@ -782,7 +782,7 @@ export function formatOfferableSlots(
   slots: ScoredSlot[],
   tz: string,
   canWrite: boolean,
-  linkRules?: LinkRules
+  linkRules?: LinkParameters
 ): string {
   const tzLabel = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
     .formatToParts(new Date())

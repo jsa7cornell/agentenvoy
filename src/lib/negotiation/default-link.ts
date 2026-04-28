@@ -58,7 +58,7 @@ export async function ensureDefaultLinkForUser(
       userId,
       slug: user.meetSlug,
       code: null,
-      rules: {},
+      parameters: {},
       topic: null,
     },
   });

@@ -3,7 +3,7 @@
 > **Source of truth for the MCP surface's correctness-critical details.**
 > Supplements the parent [2026-04-18 · MCP two-Envoy handshake](../../../../proposals/2026-04-18_mcp-two-envoy-handshake_reviewed-2026-04-18.md) proposal.
 > Decided 2026-04-19 via [2026-04-18_mcp-spec-draft_reviewed-2026-04-19_decided-2026-04-19.md](../../../../proposals/2026-04-18_mcp-spec-draft_reviewed-2026-04-19_decided-2026-04-19.md).
-> With the 2026-04-20 addendum folding in `91fa4e8` (`no_in_person` rule, `host_update` metadata kind, `activity`/`activityIcon` on `link.rules`).
+> With the 2026-04-20 addendum folding in `91fa4e8` (`no_in_person` rule, `host_update` metadata kind, `activity`/`activityIcon` on `link.parameters`).
 
 This file is intentionally short — it's a pointer to the decision record plus the invariants that the code in this module enforces. Future edits happen here via normal code review.
 
