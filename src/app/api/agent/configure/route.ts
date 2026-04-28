@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { parsePreferences } from "@/agent/administrator";
+import { parsePreferences } from "@/agent/agent-runner";
 import { authenticateRequest } from "@/lib/api-auth";
 
 // POST /api/agent/configure

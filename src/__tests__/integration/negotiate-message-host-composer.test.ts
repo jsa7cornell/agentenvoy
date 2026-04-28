@@ -57,9 +57,9 @@ vi.mock("@/lib/prisma", async () => {
 // will toTextStreamResponse(). We intentionally do NOT exercise onFinish —
 // action parsing and DB writes are tested elsewhere.
 const streamAgentResponseMock = vi.fn();
-vi.mock("@/agent/administrator", async () => {
-  const actual = await vi.importActual<typeof import("@/agent/administrator")>(
-    "@/agent/administrator",
+vi.mock("@/agent/agent-runner", async () => {
+  const actual = await vi.importActual<typeof import("@/agent/agent-runner")>(
+    "@/agent/agent-runner",
   );
   return {
     ...actual,
@@ -90,7 +90,7 @@ import { POST } from "@/app/api/negotiate/message/route";
 import { getServerSession } from "next-auth";
 import { prisma } from "./helpers/db";
 import { composeSystemPrompt } from "@/agent/composer";
-import type { AgentContext } from "@/agent/administrator";
+import type { AgentContext } from "@/agent/agent-runner";
 
 // Signature substrings used to detect which composer was loaded. These
 // strings are unique to one composer file at the time of writing — if a

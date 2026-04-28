@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
-import { parsePreferences } from "@/agent/administrator";
+import { parsePreferences } from "@/agent/agent-runner";
 import { authenticateRequest } from "@/lib/api-auth";
 import { normalizeLinkRules } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";

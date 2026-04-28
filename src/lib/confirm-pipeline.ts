@@ -31,7 +31,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createCalendarEvent, deleteCalendarEvent, getOrComputeSchedule, invalidateSchedule } from "@/lib/calendar";
 import { HOST_WRITE_SCOPE } from "@/lib/oauth/required-scopes";
-import { extractLearnings } from "@/agent/administrator";
+import { extractLearnings } from "@/agent/agent-runner";
 import { getUserTimezone } from "@/lib/timezone";
 import { applyEventOverrides, filterByDuration, type LinkRules } from "@/lib/scoring";
 import { dispatch } from "@/lib/side-effects/dispatcher";
