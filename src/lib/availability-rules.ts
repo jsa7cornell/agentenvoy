@@ -43,6 +43,18 @@ export interface AvailabilityPreference {
     durationMinutes: number;
     linkSlug: string;       // denormalized copy of user.meetSlug for fast URL construction
     linkCode: string;       // generated unique code — the /meet/{slug}/{code} identifier
+    /**
+     * Host opt-in: per-rule "let guests change format / duration" toggles.
+     * Both default to absent/false — guests cannot change anything unless the host
+     * flips a toggle. Read at session-creation time and merged into
+     * link.parameters.guestPicks (defensive: only writes when the field is absent,
+     * so an explicit allow-list set elsewhere is never clobbered). Reusable-link
+     * guest-picks proposal, decided 2026-04-28.
+     */
+    guestPicks?: {
+      format?: boolean;
+      duration?: boolean;
+    };
   };
   status: "active" | "paused" | "expired";
   priority: number;       // 1-5

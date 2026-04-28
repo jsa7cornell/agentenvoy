@@ -62,6 +62,12 @@ export interface ReusableLinkRow {
     effectiveDate?: string;
     expiryDate?: string;
     originalText: string;
+    /** Per-rule guest-flexibility opt-in. Both default false. Reusable-link
+     *  guest-picks proposal, decided 2026-04-28. */
+    guestPicks?: {
+      format?: boolean;
+      duration?: boolean;
+    };
   };
 }
 

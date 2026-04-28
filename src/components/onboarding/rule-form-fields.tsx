@@ -38,6 +38,13 @@ export interface OfficeHoursProposal {
   effectiveDate?: string;
   /** ISO date — optional end. Empty string / undefined = no end. */
   expiryDate?: string;
+  /** Per-rule guest-flexibility toggles. Both default false: guests can't
+   *  change the meeting unless the host opts in. Reusable-link guest-picks
+   *  proposal, decided 2026-04-28. */
+  guestPicks?: {
+    format?: boolean;
+    duration?: boolean;
+  };
 }
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -207,6 +214,49 @@ export function RuleFormFields({ value, onChange, disabled }: RuleFormFieldsProp
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Guest flexibility — two toggles, default off. Reusable-link guest-picks
+          proposal, decided 2026-04-28. Hidden when `disabled` matches the rest
+          of the form's disabled state. */}
+      <div className="grid grid-cols-[60px_1fr] items-start gap-2 pt-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-foreground/50 mt-1">
+          Guests
+        </span>
+        <div className="flex flex-col gap-1.5">
+          <label className="flex items-center gap-2 cursor-pointer text-[11.5px] text-foreground/85">
+            <input
+              type="checkbox"
+              className="rounded border-black/20 dark:border-white/20 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-0 h-3.5 w-3.5"
+              checked={!!value.guestPicks?.format}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  guestPicks: { ...value.guestPicks, format: e.target.checked },
+                })
+              }
+              disabled={disabled}
+            />
+            Let guests change format
+            <span className="text-foreground/40 text-[10.5px]">(phone / video / in-person)</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer text-[11.5px] text-foreground/85">
+            <input
+              type="checkbox"
+              className="rounded border-black/20 dark:border-white/20 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-0 h-3.5 w-3.5"
+              checked={!!value.guestPicks?.duration}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  guestPicks: { ...value.guestPicks, duration: e.target.checked },
+                })
+              }
+              disabled={disabled}
+            />
+            Let guests change duration
+            <span className="text-foreground/40 text-[10.5px]">(longer or shorter slot)</span>
+          </label>
+        </div>
       </div>
 
       {/* When — day chips */}

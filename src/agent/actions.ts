@@ -23,6 +23,10 @@ import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
 import { parseRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { UserPreferences } from "@/lib/scoring";
 import { parseLinkParameters } from "@/lib/link-parameters";
+import {
+  GUEST_PICKS_DURATION_MIN_MINUTES,
+  GUEST_PICKS_DURATION_MAX_MINUTES,
+} from "@/lib/mcp/parameter-resolver";
 
 // --- Helpers ---
 
@@ -181,6 +185,8 @@ async function executeAction(
       return handleSaveGuestInfo(action.params, userId, context?.sessionId);
     case "lock_activity_location":
       return handleLockActivityLocation(action.params, userId, context?.sessionId);
+    case "lock_session_duration":
+      return handleLockSessionDuration(action.params, userId, context?.sessionId);
     default:
       return { success: false, message: `Unknown action: ${action.action}` };
   }
@@ -1381,6 +1387,11 @@ async function handleUpdateMeetingSettings(
     select: { preferences: true },
   });
   let prefs: UserPreferences = (user?.preferences as UserPreferences | null) ?? {};
+  // Capture pre-edit value so we can detect a real change for the
+  // clear-on-edit invariant below. Reusable-link guest-picks proposal,
+  // decided 2026-04-28.
+  const prevDefaultDuration =
+    prefs.defaultDuration ?? prefs.explicit?.defaultDuration ?? null;
 
   const changed: string[] = [];
   if (phone !== undefined) {
@@ -1406,6 +1417,24 @@ async function handleUpdateMeetingSettings(
       preferences: prefs as unknown as Prisma.InputJsonValue,
     },
   });
+
+  // Clear-on-edit invariant for primary-link defaults: when the host changes
+  // `defaultDuration`, every active primary-link session that locked a guest-
+  // proposed value resets so the host's new default wins. Mirrors the
+  // contextual-link path in handleUpdateLinkRules and the Office Hours path
+  // in availability-rules/edit/route.ts. Only runs when the value actually
+  // changed (not on no-op writes). Reusable-link guest-picks proposal,
+  // decided 2026-04-28.
+  if (defaultDuration !== undefined && (defaultDuration || 30) !== prevDefaultDuration) {
+    await prisma.negotiationSession.updateMany({
+      where: {
+        link: { userId, type: "primary" },
+        status: { in: ["active", "pending"] },
+        negotiatedDuration: { not: null },
+      },
+      data: { negotiatedDuration: null },
+    });
+  }
 
   invalidateBehaviorSnapshot(userId);
 
@@ -1851,6 +1880,16 @@ async function handleExpandLink(
   }
   if (patch.activity !== undefined) {
     negotiatedClearData.negotiatedActivity = null;
+    negotiatedClearData.negotiatedFormat = null;
+  }
+  // Reusable-link guest-picks proposal, decided 2026-04-28: extend the
+  // host-edit-clears-guest-lock invariant to duration. When the host edits
+  // link duration, any active session that locked a guest-proposed value
+  // resets so the host's new value wins at confirm time.
+  if (patch.duration !== undefined) {
+    negotiatedClearData.negotiatedDuration = null;
+  }
+  if (patch.format !== undefined) {
     negotiatedClearData.negotiatedFormat = null;
   }
   if (Object.keys(negotiatedClearData).length > 0) {
@@ -2674,6 +2713,150 @@ async function handleLockActivityLocation(
       negotiatedLocation: proposedLocation,
       negotiatedFormat: proposedFormat,
       lockedBy: "guest",
+    },
+  };
+}
+
+/**
+ * `lock_session_duration` — guest-initiated meeting-duration negotiation.
+ *
+ * Mirrors `handleLockActivityLocation` for the duration dimension. Validates
+ * the proposed duration against the host's `guestPicks.duration` opt-in
+ * (boolean = static cap [15, 240]; number array = allow-list match), writes
+ * `negotiatedDuration` and `negotiatedLockedBy: "guest"`, and emits a
+ * system-bot diff message to the thread.
+ *
+ * Read at slot-search and confirm time as
+ *   session.negotiatedDuration ?? link.parameters.duration
+ * Cleared by handleUpdateLinkRules / availability-rules edit / primary-link
+ * defaults change when the host edits the parent link's duration.
+ *
+ * The MCP-equivalent path is `propose_lock.overrides.duration` — both end at
+ * `session.negotiatedDuration`. Keep them aligned: changes to validation
+ * here should mirror to the MCP override validation path.
+ *
+ * Returns `data.refetchSlots: true` on success so the deal-room re-fetches
+ * `/api/negotiate/slots` — duration is the only dimension where guest
+ * negotiation invalidates the slot pre-compute (slots that fit 30 min may
+ * not fit 60), unlike activity / location / format where the slot universe
+ * is unchanged.
+ *
+ * Reusable-link guest-picks proposal, decided 2026-04-28.
+ */
+async function handleLockSessionDuration(
+  params: Record<string, unknown>,
+  userId: string,
+  sessionId?: string
+): Promise<ActionResult> {
+  const resolvedSessionId = (params.sessionId as string) || sessionId;
+  if (!resolvedSessionId) {
+    return { success: false, message: "Missing sessionId for lock_session_duration" };
+  }
+
+  const durationMinutes = typeof params.durationMinutes === "number"
+    ? params.durationMinutes
+    : typeof params.duration === "number"
+      ? params.duration
+      : null;
+  if (durationMinutes === null || !Number.isFinite(durationMinutes) || !Number.isInteger(durationMinutes)) {
+    return { success: false, message: "lock_session_duration requires integer durationMinutes" };
+  }
+
+  const session = await prisma.negotiationSession.findUnique({
+    where: { id: resolvedSessionId },
+    select: {
+      id: true,
+      hostId: true,
+      status: true,
+      link: { select: { id: true, parameters: true } },
+    },
+  });
+
+  if (!session) return { success: false, message: `Session not found: ${resolvedSessionId}` };
+  if (session.hostId !== userId) return { success: false, message: "Not authorized for this session" };
+  if (session.status === "agreed") {
+    return { success: false, message: "Session is already confirmed — duration cannot be re-negotiated post-confirm" };
+  }
+
+  const linkRules = parseLinkParameters(session.link?.parameters);
+  const guestPicksDuration = linkRules.guestPicks?.duration;
+
+  // Defense in depth: composer should already have refused if guestPicks.duration
+  // is not set, but enforce here too. The host hasn't opted in → refuse.
+  if (guestPicksDuration === undefined || guestPicksDuration === false) {
+    return {
+      success: false,
+      message:
+        "This link doesn't allow guests to change duration. Refuse the proposal in chat without acknowledging the change.",
+    };
+  }
+
+  // Allow-list form: duration must be in the host's explicit list.
+  if (Array.isArray(guestPicksDuration)) {
+    if (!guestPicksDuration.includes(durationMinutes)) {
+      return {
+        success: false,
+        message: `Duration ${durationMinutes} is not in the host's allowed list (${guestPicksDuration.join(", ")}). Refuse with: "${session.link?.parameters ? "" : ""}John offers ${guestPicksDuration.join(", ")} — pick one of those."`,
+      };
+    }
+  } else {
+    // Boolean true → static cap.
+    if (durationMinutes < GUEST_PICKS_DURATION_MIN_MINUTES) {
+      return {
+        success: false,
+        message: `Duration ${durationMinutes} is below the minimum of ${GUEST_PICKS_DURATION_MIN_MINUTES} minutes. Refuse with: "${GUEST_PICKS_DURATION_MIN_MINUTES} minutes is the shortest I can lock in."`,
+      };
+    }
+    if (durationMinutes > GUEST_PICKS_DURATION_MAX_MINUTES) {
+      const maxHours = GUEST_PICKS_DURATION_MAX_MINUTES / 60;
+      return {
+        success: false,
+        message: `Duration ${durationMinutes} exceeds the maximum of ${GUEST_PICKS_DURATION_MAX_MINUTES} minutes. Refuse with: "${durationMinutes} minutes is more than I can lock in — most I can do is ${maxHours} hours."`,
+      };
+    }
+  }
+
+  const hostDuration = typeof linkRules.duration === "number" ? linkRules.duration : null;
+
+  // Idempotent: if the proposed value matches the current locked value or the
+  // host's default with no prior lock, no-op gracefully (success, but no
+  // state change and no system-bot message).
+  if (durationMinutes === hostDuration) {
+    return {
+      success: true,
+      message: `Duration ${durationMinutes} matches the host's default — no change needed.`,
+      data: { refetchSlots: false },
+    };
+  }
+
+  await prisma.negotiationSession.update({
+    where: { id: resolvedSessionId },
+    data: {
+      negotiatedDuration: durationMinutes,
+      negotiatedLockedBy: "guest",
+    },
+  });
+
+  // System-bot diff message — visible to both host and guest.
+  const hostDurationLabel = hostDuration ? `, default was ${hostDuration} min` : "";
+  await prisma.message.create({
+    data: {
+      sessionId: resolvedSessionId,
+      role: "system",
+      content: `✓ Duration set to ${durationMinutes} minutes (set by guest${hostDurationLabel})`,
+      metadata: { kind: "session_duration_lock", lockedBy: "guest", durationMinutes } as Prisma.InputJsonValue,
+    },
+  });
+
+  return {
+    success: true,
+    message: `Locked: ${durationMinutes} min`,
+    data: {
+      negotiatedDuration: durationMinutes,
+      lockedBy: "guest",
+      // Signal to the deal-room UI that slot pre-compute is invalid for the
+      // new duration — refetch /api/negotiate/slots before showing the picker.
+      refetchSlots: true,
     },
   };
 }

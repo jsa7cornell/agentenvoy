@@ -40,6 +40,12 @@ export async function GET(req: NextRequest) {
   // falls back to today's host-only shape.
   let guestId: string | null = null;
   let partialSessionId: string | null = null;
+  // Guest-locked duration override (lock_session_duration action). When
+  // present, supersedes linkRules.duration at filter time AND collapses
+  // minDuration (a successful lock means the guest has explicitly chosen
+  // a longer block; dangling shorter alternatives would confuse the picker).
+  // Reusable-link guest-picks proposal, decided 2026-04-28.
+  let negotiatedDuration: number | null = null;
 
   if (selfMode) {
     const authSession = await getServerSession(authOptions);
@@ -61,6 +67,11 @@ export async function GET(req: NextRequest) {
       select: {
         hostId: true,
         guestId: true,
+        // negotiatedDuration: guest-locked duration override. When set,
+        // takes precedence over linkRules.duration at slot-search time
+        // and overrides minDuration (the lock collapses the short-window
+        // path — see proposal §3.6, decided 2026-04-28).
+        negotiatedDuration: true,
         host: { select: { preferences: true } },
         link: { select: { parameters: true, recurringWindowId: true } },
       },
@@ -74,6 +85,7 @@ export async function GET(req: NextRequest) {
     linkRules = parseLinkParameters(session.link?.parameters);
     recurringWindowId = session.link?.recurringWindowId ?? null;
     partialSessionId = sessionId;
+    negotiatedDuration = session.negotiatedDuration ?? null;
   } else {
     return NextResponse.json(
       { error: "Missing sessionId or self param" },
@@ -278,8 +290,14 @@ export async function GET(req: NextRequest) {
       // only walks through offerable slots — a 3:30 PM start for a 3-hour meeting
       // is correctly rejected if 4:00–6:00 PM slots aren't also offered.
       if (!selfMode) {
-        const duration = (linkRules as Record<string, unknown>).duration as number | undefined;
-        const minDuration = (linkRules as Record<string, unknown>).minDuration as number | undefined;
+        const linkDuration = (linkRules as Record<string, unknown>).duration as number | undefined;
+        // Guest's lock_session_duration overrides linkRules.duration.
+        // When negotiatedDuration is set, both `duration` AND `minDuration`
+        // collapse to the negotiated value — the guest has chosen a longer
+        // block, so dangling short-window slots that fit only the original
+        // minDuration would mislead the picker.
+        const duration = negotiatedDuration ?? linkDuration;
+        const minDuration = negotiatedDuration ?? ((linkRules as Record<string, unknown>).minDuration as number | undefined);
         if (duration && duration > 30) {
           const { filterByDuration } = await import("@/lib/scoring");
           slots = filterByDuration(slots, duration, minDuration);
@@ -404,9 +422,15 @@ export async function GET(req: NextRequest) {
   }
 
   const isVipLink = !selfMode && !!(linkRules as Record<string, unknown>).isVip;
-  // Pass duration metadata to widget so it can render short-slot tooltips
-  const duration = (!selfMode && (linkRules as Record<string, unknown>).duration as number | undefined) || undefined;
-  const minDuration = (!selfMode && (linkRules as Record<string, unknown>).minDuration as number | undefined) || undefined;
+  // Pass duration metadata to widget so it can render short-slot tooltips.
+  // Guest-locked duration (negotiatedDuration) supersedes the link default
+  // and collapses minDuration so the widget's short-slot affordances stop
+  // appearing post-lock.
+  const linkDurationMeta = (!selfMode && (linkRules as Record<string, unknown>).duration as number | undefined) || undefined;
+  const duration = negotiatedDuration ?? linkDurationMeta;
+  const minDuration = negotiatedDuration
+    ? negotiatedDuration
+    : ((!selfMode && (linkRules as Record<string, unknown>).minDuration as number | undefined) || undefined);
 
   // Partial-attendance picker data: invitee list + per-slot RSVPs. Returned
   // only when the link has opted in so legacy single/group widgets stay lean.

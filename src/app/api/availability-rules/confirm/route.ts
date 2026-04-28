@@ -54,6 +54,12 @@ interface OfficeHoursProposalBody {
   timeEnd: string;
   effectiveDate?: string;
   expiryDate?: string;
+  /** Per-rule guest-flexibility opt-in. Both default false. Reusable-link
+   *  guest-picks proposal, decided 2026-04-28. */
+  guestPicks?: {
+    format?: boolean;
+    duration?: boolean;
+  };
 }
 
 const VALID_FORMATS: ReadonlyArray<OfficeHoursProposalBody["format"]> = [
@@ -106,6 +112,16 @@ function parseProposal(raw: unknown): OfficeHoursProposalBody | { error: string 
   if (p.expiryDate !== undefined && p.expiryDate !== "" && !isValidISODate(p.expiryDate)) {
     return { error: "expiryDate must be YYYY-MM-DD" };
   }
+  // guestPicks: optional, both fields default false. Defensive parsing —
+  // accept only booleans, ignore unknown shapes silently.
+  const rawGuestPicks = p.guestPicks as Record<string, unknown> | undefined;
+  const parsedGuestPicks =
+    rawGuestPicks && typeof rawGuestPicks === "object"
+      ? {
+          ...(typeof rawGuestPicks.format === "boolean" ? { format: rawGuestPicks.format } : {}),
+          ...(typeof rawGuestPicks.duration === "boolean" ? { duration: rawGuestPicks.duration } : {}),
+        }
+      : undefined;
   return {
     originalText: p.originalText,
     title: p.title.trim(),
@@ -117,6 +133,9 @@ function parseProposal(raw: unknown): OfficeHoursProposalBody | { error: string 
     effectiveDate:
       typeof p.effectiveDate === "string" && p.effectiveDate ? p.effectiveDate : undefined,
     expiryDate: typeof p.expiryDate === "string" && p.expiryDate ? p.expiryDate : undefined,
+    ...(parsedGuestPicks && (parsedGuestPicks.format !== undefined || parsedGuestPicks.duration !== undefined)
+      ? { guestPicks: parsedGuestPicks }
+      : {}),
   };
 }
 
@@ -253,6 +272,7 @@ export async function POST(req: NextRequest) {
       durationMinutes: parsed.durationMinutes,
       linkSlug: user.meetSlug,
       linkCode,
+      ...(parsed.guestPicks ? { guestPicks: parsed.guestPicks } : {}),
     },
     status: "active",
     priority: 3,

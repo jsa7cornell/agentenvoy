@@ -169,6 +169,16 @@ export interface UserPreferences {
      *  popover. Default "General". Participates in per-host uniqueness with
      *  officeHours[*].name. Added 2026-04-23 (reusable-links proposal). */
     generalLinkName?: string;
+    /** Host opt-in: "let guests change format / duration" toggles for the
+     *  primary (general) link. Both default to absent/false — guests cannot
+     *  change anything unless the host flips a toggle. Read at session-creation
+     *  time and merged into link.parameters.guestPicks (defensive: only writes
+     *  when the field is absent, so existing allow-lists are not clobbered).
+     *  Reusable-link guest-picks proposal, decided 2026-04-28. */
+    primaryLinkGuestPicks?: {
+      format?: boolean;
+      duration?: boolean;
+    };
     /** UI theme preference. "auto" computes light/dark from the user's
      *  timezone (light 05:00–20:00, dark otherwise). Defaults to "dark"
      *  when absent for existing rows. Persists cross-device. */
