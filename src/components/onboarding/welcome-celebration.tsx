@@ -38,6 +38,10 @@ interface WelcomeCelebrationProps {
   meetSlug: string | null;
   /** Fires when the host taps "Back to chat" — caller dismisses the flow. */
   onDismiss: () => void;
+  /** §1n item 4: tap a follow-up chip ("learn more" / "create a meeting").
+   *  Caller should dismiss the flow AND auto-submit the seed as a chat turn
+   *  (same code path as typing + enter). Omit to suppress the chips. */
+  onPostFlowSeed?: (seed: string) => void;
 }
 
 const SPARKLES: Array<{ top: string; left: string; delay: string; color: string }> = [
@@ -51,6 +55,7 @@ export function WelcomeCelebration({
   firstName,
   meetSlug,
   onDismiss,
+  onPostFlowSeed,
 }: WelcomeCelebrationProps) {
   const [copied, setCopied] = useState(false);
   const meetUrl = meetSlug ? `agentenvoy.ai/meet/${meetSlug}` : null;
@@ -158,6 +163,35 @@ export function WelcomeCelebration({
       >
         → Back to chat
       </button>
+
+      {/* §1n item 4 follow-up chips — give the host a clear next move
+          instead of dumping them into a blank chat. */}
+      {onPostFlowSeed && (
+        <div className="celebration-sub relative z-[2] flex flex-wrap justify-center gap-2 mt-0.5">
+          <button
+            type="button"
+            onClick={() =>
+              onPostFlowSeed(
+                "Tell me what you can do — show me your most useful features like office hours, group events, and specialty invite links.",
+              )
+            }
+            className="text-[11px] px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-primary transition"
+          >
+            Learn more
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onPostFlowSeed(
+                "Help me coordinate a meeting — let's find a time and set up an invite.",
+              )
+            }
+            className="text-[11px] px-3 py-1.5 rounded-full bg-purple-600 hover:bg-purple-500 text-white font-medium transition"
+          >
+            Create a meeting
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -64,6 +64,11 @@ function parseBuffer(v: unknown): NumOrUndef {
   return allowed.includes(v) ? v : undefined;
 }
 
+type FormatValue = "video" | "phone" | "in-person";
+function parseDefaultFormat(v: unknown): FormatValue | undefined {
+  return v === "video" || v === "phone" || v === "in-person" ? v : undefined;
+}
+
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
@@ -226,6 +231,8 @@ export async function POST(req: NextRequest) {
 
   const dur = body.defaultDuration !== undefined ? parseDuration(body.defaultDuration) : undefined;
   const buf = body.bufferMinutes !== undefined ? parseBuffer(body.bufferMinutes) : undefined;
+  const fmt =
+    body.defaultFormat !== undefined ? parseDefaultFormat(body.defaultFormat) : undefined;
 
   if (
     bhs === undefined &&
@@ -233,7 +240,8 @@ export async function POST(req: NextRequest) {
     bhsMin === undefined &&
     bheMin === undefined &&
     dur === undefined &&
-    buf === undefined
+    buf === undefined &&
+    fmt === undefined
   ) {
     return NextResponse.json(
       { error: "No recognized fields in payload" },
@@ -262,6 +270,7 @@ export async function POST(req: NextRequest) {
     ...(bheMin !== undefined ? { businessHoursEndMinutes: bheMin } : {}),
     ...(dur !== undefined ? { defaultDuration: dur } : {}),
     ...(buf !== undefined ? { bufferMinutes: buf } : {}),
+    ...(fmt !== undefined ? { defaultFormat: fmt } : {}),
   };
   const nextPrefs: UserPreferences = { ...prefs, explicit: nextExplicit };
 
