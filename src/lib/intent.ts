@@ -281,28 +281,41 @@ export const CHAT_INTENT_VALUES = [
 ] as const;
 
 /**
- * Host-side chat intents (Phase 5 PR 3, CODEBASE-CLEANUP §10).
+ * Host-side chat intents (per 2026-04-27 chat-decisioning-layer-redesign
+ * proposal, §2.2/§2.3 — closed enum protected by PLAYBOOK Rule 19d).
  *
  * Emitted by the role-aware classifier when the dashboard chat composer
- * receives a host message. Ships ahead of PR 4 (role-aware classifier) and
- * PR 5 (composer convergence) so downstream consumers can switch on the
- * full union without further enum churn.
- *
- * Today (PR 3) the classifier schema in `intent-classifier.ts` is still
- * constrained to `CHAT_INTENT_VALUES` (guest-only) — PR 4 will introduce
- * a role-aware schema variant. Values added here are forward-only.
+ * receives a host message. The 7-value enum splits the legacy `schedule`
+ * intent into three event-shaped variants so the matcher stops guessing
+ * between create-vs-modify-vs-cancel via the marco template (the root
+ * cause of Bugs #4 and #5 in the 2026-04-27 cascade).
  *
  *   - `edit_preference`  — host wants to update Preferences (working hours,
  *                          default duration, default format, etc.).
- *   - `create_link`      — host wants to create a reusable / one-off link.
+ *   - `create_link`      — host wants to create a NEW reusable / one-off link.
+ *                          Creation verbs: "make/create/set up/book/schedule/
+ *                          grab/find time/I need a link".
+ *   - `modify_link`      — host wants to change an EXISTING link/session.
+ *                          Modification verbs: "change/move/shift/reschedule/
+ *                          update the [existing X]".
+ *   - `cancel_link`      — host wants to remove an EXISTING link/session.
+ *                          Cancellation verbs: "cancel/remove/drop/delete the
+ *                          [existing X]".
  *   - `query_calendar`   — host wants to know what's on their calendar.
  *   - `query_event`      — host wants details on a specific upcoming event.
  *   - `chat`             — neutral host chitchat / catch-all routed back to
  *                          the composer for free-form response.
+ *
+ * Per §2.3 R1 verification: when create-vs-modify is ambiguous (single
+ * existing match for the named guest), the classifier defaults to
+ * `create_link`. `handleCreateLink` is reversible-without-side-effects
+ * pre-confirm (DB rows only, no email/calendar/notification).
  */
 export const HOST_CHAT_INTENT_VALUES = [
   "edit_preference",
   "create_link",
+  "modify_link",
+  "cancel_link",
   "query_calendar",
   "query_event",
   "chat",

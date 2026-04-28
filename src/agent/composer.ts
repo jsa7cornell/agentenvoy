@@ -88,6 +88,19 @@ export interface ComposeOptions {
     status: string;
     statedAvailability?: string;
   }>;
+  /**
+   * Agent role this composer is serving. Today: `AgentRole`
+   * (`"coordinator" | "administrator"`) from the deal-room negotiator
+   * pipeline — the dashboard chat route assembles its system prompt
+   * inline rather than going through this composer.
+   *
+   * Per the 2026-04-27 chat-decisioning-layer-redesign §2.4, PR3 of that
+   * proposal introduces a `"host" | "guest"` role parameter when the
+   * dealroom composer split lands. PR1 leaves the field as `string`
+   * (the existing AgentRole values would not narrow cleanly to
+   * `"host" | "guest"` without a rename, and PR1 forbids renames per
+   * P10). Narrowing happens in PR3 alongside the composer-by-role split.
+   */
   role?: string;
   /** Guest-negotiated values already locked in this session. Injected as
    *  [LOCKED] GROUND TRUTH blocks so Envoy doesn't re-negotiate them. */
