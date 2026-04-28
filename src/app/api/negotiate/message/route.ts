@@ -115,15 +115,21 @@ export async function POST(req: NextRequest) {
   // Host messages in the deal room are instructions TO Envoy (e.g., "book it for friday at 9").
   // Envoy should always respond — the host is directing the negotiation.
 
-  // Build and sanitize conversation history
-  // Prefix host messages so Envoy knows who is speaking (host vs guest)
+  // Build and sanitize conversation history.
+  //
+  // PR3 of the 2026-04-27 chat-decisioning-layer-redesign: dropped the
+  // legacy `[HOST]:` prefix injection. Audience is now selected by the
+  // `isHost` flag threading down to composer.ts, which loads the
+  // role-aware composer (`dealroom-host-composer.md` vs. `dealroom-guest-
+  // composer.md`). The composer no longer sniffs a textual prefix from
+  // history — role is passed explicitly per proposal §2.6.
   const rawHistory = session.messages.map((m) => ({
     role: m.role,
-    content: m.role === "host" ? `[HOST]: ${m.content}` : m.content,
+    content: m.content,
   }));
   rawHistory.push({
     role: messageRole,
-    content: isHost ? `[HOST]: ${content}` : content,
+    content,
   });
   const { messages: history, warnings } = sanitizeHistory(rawHistory, [
     "administrator",
@@ -244,6 +250,8 @@ export async function POST(req: NextRequest) {
     activityOptions: Array.isArray((session.link.rules as Record<string, unknown>)?.activityOptions)
       ? (session.link.rules as Record<string, unknown>).activityOptions as string[]
       : null,
+    // PR3: select the deal-room host vs. guest composer in composer.ts.
+    isHost,
   };
 
   console.log(`[negotiate/message] start | session=${sessionId} | role=${messageRole} | slots=${scoredSlots.length} | history=${history.length}`);

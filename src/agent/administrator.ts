@@ -44,6 +44,14 @@ export interface AgentContext {
   negotiatedFormat?: string | null;
   /** Host-offered activity menu (activityOptions from link.rules). */
   activityOptions?: string[] | null;
+  /**
+   * PR3 of the 2026-04-27 chat-decisioning-layer-redesign. When `true`,
+   * the speaker for this turn is the deal-room HOST (not the guest), and
+   * the composer loads `dealroom-host-composer.md`. False / undefined →
+   * guest path. Threaded from `/api/negotiate/message` where it's derived
+   * from auth (session.user.id === negotiationSession.hostId).
+   */
+  isHost?: boolean;
 }
 
 function getDomain(context: AgentContext): DomainType {
@@ -77,6 +85,7 @@ function buildComposeOptions(context: AgentContext) {
     negotiatedLocation: context.negotiatedLocation,
     negotiatedFormat: context.negotiatedFormat,
     activityOptions: context.activityOptions,
+    isHost: context.isHost,
   };
 }
 
