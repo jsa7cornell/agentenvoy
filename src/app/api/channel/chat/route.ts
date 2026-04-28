@@ -915,7 +915,7 @@ export async function POST(req: NextRequest) {
             const generalLinkName =
               typeof explicitPrefs.generalLinkName === "string" && explicitPrefs.generalLinkName.trim()
                 ? explicitPrefs.generalLinkName
-                : "General";
+                : "Primary link";
             const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
             const lines: string[] = [];
             if (safeUser.meetSlug) {

@@ -23,7 +23,7 @@
  * window-backed reusable variant.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export type ReusableLinkKind = "primary" | "office_hours";
 
@@ -80,12 +80,33 @@ interface EventLinksCardProps {
 
 export function EventLinksCard({ row, onEdit }: EventLinksCardProps) {
   const [copied, setCopied] = useState(false);
+  const [canNativeShare, setCanNativeShare] = useState(false);
+
+  useEffect(() => {
+    setCanNativeShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
+  }, []);
 
   function copy() {
     if (typeof navigator === "undefined" || !navigator.clipboard) return;
     navigator.clipboard.writeText(row.url);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function share() {
+    if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
+      copy();
+      return;
+    }
+    try {
+      await navigator.share({
+        title: row.name,
+        text: `Book time with me — ${row.name}`,
+        url: row.url,
+      });
+    } catch {
+      // AbortError = user dismissed the sheet; nothing to do.
+    }
   }
 
   const isPrimary = row.kind === "primary";
@@ -134,6 +155,17 @@ export function EventLinksCard({ row, onEdit }: EventLinksCardProps) {
         <span className="text-[11px] font-mono text-secondary truncate flex-1 min-w-0">
           {row.url.replace(/^https?:\/\//, "")}
         </span>
+        {isPrimary && canNativeShare && (
+          <button
+            type="button"
+            onClick={share}
+            className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-accent/15 hover:bg-accent/25 text-accent transition flex-shrink-0"
+            data-testid={`mobile-event-links-share-${row.kind}`}
+            aria-label={`Share ${row.name}`}
+          >
+            Share
+          </button>
+        )}
         <button
           type="button"
           onClick={copy}

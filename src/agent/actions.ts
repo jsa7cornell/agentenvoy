@@ -2340,7 +2340,7 @@ function buildOfficeHoursUrl(slug: string, code: string): string {
 
 /**
  * Collect normalized reusable-link names for a host — all active office-hours
- * rules plus the generalLinkName (defaulting to "General"). Used for the
+ * rules plus the generalLinkName (defaulting to "Primary link"). Used for the
  * per-host uniqueness guard. Optional `exceptRuleId` excludes one rule from
  * the check (so renaming a rule doesn't collide with its own prior name).
  */
@@ -2364,7 +2364,7 @@ function collectNormalizedLinkNames(
   if (includeGeneral) {
     out.add(
       normalizeNameForGuard(
-        generalLinkName && generalLinkName.trim() ? generalLinkName : "General",
+        generalLinkName && generalLinkName.trim() ? generalLinkName : "Primary link",
       ),
     );
   }

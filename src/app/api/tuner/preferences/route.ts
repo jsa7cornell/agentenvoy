@@ -95,7 +95,7 @@ export async function GET() {
     structuredRules: cleanedRules,
     videoProvider: readProfileField(prefs as UserPreferences, "videoProvider") || "google-meet",
     meetSlug: user.meetSlug,
-    generalLinkName: typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : "General",
+    generalLinkName: typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : "Primary link",
   });
 }
 

@@ -241,7 +241,7 @@ export async function POST(req: NextRequest) {
   }
   taken.add(
     normalizeLinkName(
-      generalLinkName && generalLinkName.trim() ? generalLinkName : "General",
+      generalLinkName && generalLinkName.trim() ? generalLinkName : "Primary link",
     ),
   );
   if (taken.has(normalizeLinkName(parsed.title))) {

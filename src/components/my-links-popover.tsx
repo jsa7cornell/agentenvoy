@@ -45,7 +45,7 @@ export function MyLinksPopover() {
         out.push({
           key: "general",
           kind: "general",
-          name: (data.generalLinkName as string) || "General",
+          name: (data.generalLinkName as string) || "Primary link",
           url: `${origin}/meet/${slug}`,
         });
         const structured = (data.structuredRules as AvailabilityPreference[]) ?? [];
@@ -93,7 +93,7 @@ export function MyLinksPopover() {
 
   function editName(row: LinkRow) {
     const text = row.kind === "general"
-      ? `Rename my General link to `
+      ? `Rename my Primary link to `
       : `Rename my "${row.name}" link to `;
     setOpen(false);
     if (pathname !== "/dashboard" && pathname !== "/dashboard/") {
@@ -115,7 +115,7 @@ export function MyLinksPopover() {
 
   return (
     <div className="relative" ref={rootRef}>
-      {/* Desktop trigger — pill showing General name */}
+      {/* Desktop trigger — pill showing Primary link name */}
       <button
         ref={btnRef}
         onClick={() => setOpen((o) => !o)}

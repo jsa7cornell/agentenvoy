@@ -76,6 +76,12 @@ const TOOLS: Tool[] = [
     description: "Self-hosted product-event stream (ProductEvent). Funnel counts + last 200 rows with range/name filters. Reads are audited.",
     tag: "analytics",
   },
+  {
+    href: "/admin/share-test",
+    label: "Share-sheet test",
+    description: "Playground for the mobile Web Share API + fallbacks (clipboard, SMS/mailto/WhatsApp/Telegram deep links, QR). Open on a phone to see the OS share sheet.",
+    tag: "experiment",
+  },
 ];
 
 const TAG_COLORS: Record<string, string> = {
@@ -85,6 +91,7 @@ const TAG_COLORS: Record<string, string> = {
   audit: "bg-rose-500/10 text-rose-400 border-rose-500/30",
   feedback: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
   analytics: "bg-cyan-500/10 text-cyan-400 border-cyan-500/30",
+  experiment: "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/30",
 };
 
 export default async function AdminPage() {
