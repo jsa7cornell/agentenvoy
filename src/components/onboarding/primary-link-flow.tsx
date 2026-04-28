@@ -50,7 +50,21 @@ type Turn =
   | { role: "envoy"; content: React.ReactNode }
   | { role: "user"; content: string };
 
-type Step = "intro" | "hours" | "duration" | "buffer" | "theme" | "format" | "done";
+type Step = "intro" | "hours" | "duration" | "buffer" | "theme" | "format" | "guest_flex" | "done";
+
+/**
+ * Guest-flexibility options. Reusable-link guest-picks proposal,
+ * decided 2026-04-28. Maps directly to `primaryLinkGuestPicks: { format, duration }`.
+ * Default-selected option is "1" (locked) — matches the per-link default
+ * everywhere else.
+ */
+type GuestFlexValue = "locked" | "format" | "duration" | "both";
+const GUEST_FLEX_OPTIONS: { number: number; label: string; value: GuestFlexValue }[] = [
+  { number: 1, label: "Just what I posted — no changes", value: "locked" },
+  { number: 2, label: "Format flexibility — phone, video, or in-person are all OK", value: "format" },
+  { number: 3, label: "Duration flexibility — longer or shorter slots are OK", value: "duration" },
+  { number: 4, label: "Both — format and duration are open", value: "both" },
+];
 
 type ThemeMode = "light" | "dark" | "auto";
 type FormatValue = "video" | "phone" | "in-person";
@@ -300,8 +314,56 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
   function handleFormat(value: string, label: string) {
     if (value !== "video" && value !== "phone" && value !== "in-person") return;
     const patch = { defaultFormat: value as FormatValue };
-    const finalAnswers = { ...answers, ...patch };
-    setAnswers(finalAnswers);
+    setAnswers((a) => ({ ...a, ...patch }));
+    setTurns((t) => [
+      ...t,
+      { role: "user", content: label },
+      {
+        role: "envoy",
+        content: (
+          <>
+            One last thing — by default, can guests <strong>adjust the format or duration</strong> of meetings you post? You can change this per link later.
+          </>
+        ),
+      },
+    ]);
+    setStep("guest_flex");
+    void persist(patch);
+  }
+
+  /**
+   * Persist the host's guest-flexibility pick to
+   * `preferences.explicit.primaryLinkGuestPicks`. Reusable-link guest-picks
+   * proposal, decided 2026-04-28.
+   */
+  async function persistGuestFlex(picks: { format: boolean; duration: boolean }) {
+    setSaving(true);
+    try {
+      await fetch("/api/me/primary-link-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guestPicks: picks }),
+      });
+    } catch {
+      // Non-fatal — host can flip the toggles later in /dashboard/my-links.
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleGuestFlex(value: string, label: string) {
+    if (
+      value !== "locked" &&
+      value !== "format" &&
+      value !== "duration" &&
+      value !== "both"
+    )
+      return;
+    const picks = {
+      format: value === "format" || value === "both",
+      duration: value === "duration" || value === "both",
+    };
+    const finalAnswers = answers;
     setTurns((t) => [
       ...t,
       { role: "user", content: label },
@@ -334,13 +396,16 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
             {finalAnswers.bufferMinutes
               ? `, and keep a ${finalAnswers.bufferMinutes}-minute buffer between them`
               : ""}
+            {picks.format || picks.duration
+              ? `, and guests can ${picks.format && picks.duration ? "adjust format or duration" : picks.format ? "pick a different format" : "ask for a longer or shorter slot"}`
+              : ""}
             . You can tweak any of this later — just tell me in chat.
           </>
         ),
       },
     ]);
     setStep("done");
-    void persist(patch);
+    void persistGuestFlex(picks);
   }
 
   const activeOptions =
@@ -354,7 +419,9 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
             ? THEME_OPTIONS
             : step === "format"
               ? FORMAT_OPTIONS
-              : null;
+              : step === "guest_flex"
+                ? GUEST_FLEX_OPTIONS
+                : null;
 
   const onSelect =
     step === "hours"
@@ -367,6 +434,8 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
             ? handleTheme
             : step === "format"
               ? handleFormat
+              : step === "guest_flex"
+                ? handleGuestFlex
               : () => {};
 
   // Legacy copy handler — kept for the fallback link card below the

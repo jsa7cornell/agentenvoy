@@ -107,6 +107,16 @@ export interface ResolveInput {
 
 const SYSTEM_DEFAULT_FORMATS: FormatValue[] = ["video", "phone", "in-person"];
 const SYSTEM_DEFAULT_DURATION_MINUTES = 30;
+
+/**
+ * Static cap for guest-proposed durations under `guestPicks.duration: true`.
+ * Enforced by the `lock_session_duration` action handler, not the resolver
+ * (the envelope omits `allowedValues` for the open boolean form so the chat
+ * composer can present the cap dynamically as refusal copy). Reusable-link
+ * guest-picks proposal, decided 2026-04-28.
+ */
+export const GUEST_PICKS_DURATION_MIN_MINUTES = 15;
+export const GUEST_PICKS_DURATION_MAX_MINUTES = 240;
 const SHORT_DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 // ---------------------------------------------------------------------------
@@ -178,7 +188,43 @@ function resolveFormat(input: ResolveInput): ParameterEnvelope<FormatValue> {
     return subtractFormatFilters(formats, compiledRules.formatFilters, slotStart, hostTimezone);
   };
 
-  // 1. Host picked explicitly → locked (but narrow per formatFilters for
+  // v1: `preferred` is format-only; see proposal
+  // 2026-04-20_mcp-envelope-preferred-primitive. Computed once here, scoped
+  // by `preferred ∈ narrowed` so per-slot filter subtraction that removes
+  // the host's lean drops it silently rather than emitting a ghost hint.
+  const explicitPreferredCandidate = rules.guestGuidance?.preferredFormat;
+  const pickPreferred = (narrowed: FormatValue[]): FormatValue | undefined =>
+    explicitPreferredCandidate && narrowed.includes(explicitPreferredCandidate)
+      ? explicitPreferredCandidate
+      : undefined;
+
+  // 1. Host set rules.format AND opted into guestPicks.format → delegated-with-default.
+  //    The host's value holds if the guest doesn't engage; the dimension is
+  //    flagged as mutable so the chat composer / MCP guest agent may propose
+  //    a swap. `preferred` carries the host's lean (rules.format itself, or
+  //    guestGuidance.preferredFormat if explicitly different). Reusable-link
+  //    guest-picks proposal, decided 2026-04-28.
+  if (rules.format && (rules.guestPicks?.format === true || Array.isArray(rules.guestPicks?.format))) {
+    const raw = rules.format as FormatValue;
+    const allow: FormatValue[] = Array.isArray(rules.guestPicks.format)
+      ? (rules.guestPicks.format as FormatValue[])
+      : [...SYSTEM_DEFAULT_FORMATS];
+    const narrowed = narrow(allow);
+    const survived = narrowed.includes(raw);
+    // Prefer the explicit preferredFormat if set; otherwise fall back to rules.format
+    // when it survived narrowing. preferred ∈ allowedValues invariant enforced.
+    const preferred = pickPreferred(narrowed) ?? (survived ? raw : undefined);
+    return {
+      value: survived ? raw : null,
+      origin: "link-rule",
+      mutability: "delegated",
+      allowedValues: narrowed,
+      ...(preferred ? { preferred } : {}),
+      guestMustResolve: false,
+    };
+  }
+
+  // 2. Host picked explicitly → locked (but narrow per formatFilters for
   //    per-slot correctness: if the host locks "in-person" and the slot sits
   //    inside a no_in_person window, the lock is broken and we surface
   //    `value: null` so callers refuse before /confirm does).
@@ -195,17 +241,7 @@ function resolveFormat(input: ResolveInput): ParameterEnvelope<FormatValue> {
     };
   }
 
-  // v1: `preferred` is format-only; see proposal
-  // 2026-04-20_mcp-envelope-preferred-primitive. Computed once here, scoped
-  // by `preferred ∈ narrowed` so per-slot filter subtraction that removes
-  // the host's lean drops it silently rather than emitting a ghost hint.
-  const preferredCandidate = rules.guestGuidance?.preferredFormat;
-  const pickPreferred = (narrowed: FormatValue[]): FormatValue | undefined =>
-    preferredCandidate && narrowed.includes(preferredCandidate)
-      ? preferredCandidate
-      : undefined;
-
-  // 2. Guest picks — explicit allow-list.
+  // 3. Guest picks — explicit allow-list (host did NOT lock format).
   if (Array.isArray(rules.guestPicks?.format)) {
     const arr = rules.guestPicks.format as FormatValue[];
     const narrowed = narrow(arr);
@@ -220,7 +256,7 @@ function resolveFormat(input: ResolveInput): ParameterEnvelope<FormatValue> {
     };
   }
 
-  // 3. Guest picks — any system-default.
+  // 4. Guest picks — any system-default (host did NOT lock format).
   if (rules.guestPicks?.format === true) {
     const narrowed = narrow([...SYSTEM_DEFAULT_FORMATS]);
     const preferred = pickPreferred(narrowed);
@@ -234,7 +270,7 @@ function resolveFormat(input: ResolveInput): ParameterEnvelope<FormatValue> {
     };
   }
 
-  // 4. Pre-migration link: neither host nor guestPicks declared format.
+  // 5. Pre-migration link: neither host nor guestPicks declared format.
   //    `scripts/migrate-links-to-guest-picks-format.ts` will backfill these
   //    to `guestPicks.format: true`; until then, format is `required`.
   return {
@@ -248,13 +284,43 @@ function resolveFormat(input: ResolveInput): ParameterEnvelope<FormatValue> {
 
 function resolveDuration(input: ResolveInput): ParameterEnvelope<number> {
   const { rules, hostPreferences } = input;
+  const ruleDuration =
+    typeof rules.duration === "number" && rules.duration > 0 ? rules.duration : null;
+  const suggestions = rules.guestGuidance?.suggestions?.durations;
 
-  // 1. Guest picks duration — either boolean (open) or explicit list
-  //    (delegated). Takes priority over rules.duration if both are set:
-  //    the host declared "guest picks" intentionally.
+  // 1. Host set rules.duration AND opted into guestPicks.duration → delegated-with-default.
+  //    The host's value holds if the guest doesn't engage; the dimension is
+  //    flagged as mutable so the chat composer / MCP guest agent may propose
+  //    a different length. Reusable-link guest-picks proposal, decided 2026-04-28.
+  //    `preferred` is format-only in v1 (see envelope docblock); duration
+  //    expresses the host's lean directly via `value`.
+  if (ruleDuration !== null && Array.isArray(rules.guestPicks?.duration)) {
+    const list = rules.guestPicks.duration as number[];
+    return {
+      value: list.includes(ruleDuration) ? ruleDuration : null,
+      origin: "link-rule",
+      mutability: "delegated",
+      allowedValues: list,
+      ...(suggestions?.length ? { suggestions } : {}),
+      guestMustResolve: false,
+    };
+  }
+  if (ruleDuration !== null && rules.guestPicks?.duration === true) {
+    return {
+      value: ruleDuration,
+      origin: "link-rule",
+      mutability: "delegated",
+      // No allowedValues — open within static cap [GUEST_PICKS_DURATION_MIN_MINUTES,
+      // GUEST_PICKS_DURATION_MAX_MINUTES], enforced by the lock_session_duration
+      // action handler. Composer surfaces refusal copy on cap miss.
+      ...(suggestions?.length ? { suggestions } : {}),
+      guestMustResolve: false,
+    };
+  }
+
+  // 2. Guest-picks-only (host did NOT lock duration). Pre-existing semantics.
   if (Array.isArray(rules.guestPicks?.duration)) {
     const list = rules.guestPicks.duration as number[];
-    const suggestions = rules.guestGuidance?.suggestions?.durations;
     return {
       value: null,
       origin: "link-rule",
@@ -265,7 +331,6 @@ function resolveDuration(input: ResolveInput): ParameterEnvelope<number> {
     };
   }
   if (rules.guestPicks?.duration === true) {
-    const suggestions = rules.guestGuidance?.suggestions?.durations;
     return {
       value: null,
       origin: "link-rule",
@@ -275,17 +340,17 @@ function resolveDuration(input: ResolveInput): ParameterEnvelope<number> {
     };
   }
 
-  // 2. Host locked a duration.
-  if (typeof rules.duration === "number" && rules.duration > 0) {
+  // 3. Host locked a duration (no guestPicks override).
+  if (ruleDuration !== null) {
     return {
-      value: rules.duration,
+      value: ruleDuration,
       origin: "link-rule",
       mutability: "locked",
       guestMustResolve: false,
     };
   }
 
-  // 3. Host-profile default. UserPreferences has two paths (historical):
+  // 4. Host-profile default. UserPreferences has two paths (historical):
   //    top-level `defaultDuration` and `explicit.defaultDuration`.
   //    Precedence matches the rest of the codebase (agent/composer.ts:208).
   const profileDefault =
@@ -299,7 +364,7 @@ function resolveDuration(input: ResolveInput): ParameterEnvelope<number> {
     };
   }
 
-  // 4. System default (30 min).
+  // 5. System default (30 min).
   return {
     value: SYSTEM_DEFAULT_DURATION_MINUTES,
     origin: "system-default",

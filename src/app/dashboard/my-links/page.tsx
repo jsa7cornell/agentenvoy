@@ -18,6 +18,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
 import { CopyLinkButton } from "./copy-link-button";
+import { PrimaryLinkSettings } from "@/components/dashboard/primary-link-settings";
+import type { UserPreferences } from "@/lib/scoring";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -173,6 +175,15 @@ export default async function MyLinksPage() {
               row yet. First guest visit will create one.
             </p>
           )}
+
+          <PrimaryLinkSettings
+            initial={
+              ((user.preferences as UserPreferences | null)?.explicit
+                ?.primaryLinkGuestPicks as
+                | { format?: boolean; duration?: boolean }
+                | undefined) ?? null
+            }
+          />
         </section>
 
         {/* ── Office hours ─────────────────────────────────────────── */}

@@ -853,6 +853,34 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, calendarConnected]);
 
+  // After a `lock_session_duration` action lands, refetch the slot universe.
+  // Duration is the only dimension where guest negotiation invalidates the
+  // slot pre-compute (slots that fit 30 min may not fit 60), unlike
+  // activity / location / format. The action handler in actions.ts seeds a
+  // system-role message with `metadata.kind = "session_duration_lock"`
+  // whenever the lock succeeds; we watch for new ones here and re-query
+  // /api/negotiate/slots so the picker re-renders with the new duration's
+  // slot set. Reusable-link guest-picks proposal, decided 2026-04-28.
+  const processedDurationLocks = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!sessionId) return;
+    const newLocks = messages.filter((m) => {
+      const kind = (m.metadata as Record<string, unknown> | null | undefined)?.kind;
+      return kind === "session_duration_lock" && !processedDurationLocks.current.has(m.id);
+    });
+    if (newLocks.length === 0) return;
+    for (const m of newLocks) processedDurationLocks.current.add(m.id);
+    fetch(`/api/negotiate/slots?sessionId=${sessionId}${viewerTimezone ? `&tz=${encodeURIComponent(viewerTimezone)}` : ""}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);
+      })
+      .catch(() => {});
+    // viewerTimezone deliberately omitted from deps — same reasoning as the
+    // calendarConnected effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, sessionId]);
+
   // Initialize session on mount
   useEffect(() => {
     async function initSession() {

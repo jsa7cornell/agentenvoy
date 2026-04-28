@@ -197,6 +197,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                 effectiveDate: r.effectiveDate,
                 expiryDate: r.expiryDate,
                 originalText: r.originalText ?? "",
+                ...(oh.guestPicks ? { guestPicks: oh.guestPicks } : {}),
               },
             });
           }

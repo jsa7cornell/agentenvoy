@@ -188,6 +188,7 @@ export function EventLinksPageContent() {
                 effectiveDate: r.effectiveDate,
                 expiryDate: r.expiryDate,
                 originalText: r.originalText ?? "",
+                ...(oh.guestPicks ? { guestPicks: oh.guestPicks } : {}),
               },
             });
           }

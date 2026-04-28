@@ -39,6 +39,14 @@ interface OfficeHoursEditBody {
   timeEnd: string;
   effectiveDate?: string;
   expiryDate?: string;
+  /** Per-rule guest-flexibility opt-in. Both default false. Reusable-link
+   *  guest-picks proposal, decided 2026-04-28. Absent body field means
+   *  "preserve whatever the existing rule had" (handled at the merge below);
+   *  an explicit `guestPicks: { format: false, duration: false }` overwrites. */
+  guestPicks?: {
+    format?: boolean;
+    duration?: boolean;
+  };
 }
 
 const VALID_FORMATS: ReadonlyArray<OfficeHoursEditBody["format"]> = [
@@ -85,6 +93,14 @@ function parseEdit(raw: unknown): OfficeHoursEditBody | { error: string } {
   if (p.expiryDate !== undefined && p.expiryDate !== "" && !isValidISODate(p.expiryDate)) {
     return { error: "expiryDate must be YYYY-MM-DD" };
   }
+  const rawGuestPicks = p.guestPicks as Record<string, unknown> | undefined;
+  const parsedGuestPicks =
+    rawGuestPicks && typeof rawGuestPicks === "object"
+      ? {
+          ...(typeof rawGuestPicks.format === "boolean" ? { format: rawGuestPicks.format } : {}),
+          ...(typeof rawGuestPicks.duration === "boolean" ? { duration: rawGuestPicks.duration } : {}),
+        }
+      : undefined;
   return {
     title: p.title.trim(),
     format: p.format as OfficeHoursEditBody["format"],
@@ -95,6 +111,9 @@ function parseEdit(raw: unknown): OfficeHoursEditBody | { error: string } {
     effectiveDate:
       typeof p.effectiveDate === "string" && p.effectiveDate ? p.effectiveDate : undefined,
     expiryDate: typeof p.expiryDate === "string" && p.expiryDate ? p.expiryDate : undefined,
+    ...(parsedGuestPicks && (parsedGuestPicks.format !== undefined || parsedGuestPicks.duration !== undefined)
+      ? { guestPicks: parsedGuestPicks }
+      : {}),
   };
 }
 
@@ -165,6 +184,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Detect duration/format change BEFORE rewriting — the previous values are
+  // used by the clear-on-edit step below. Reusable-link guest-picks proposal,
+  // decided 2026-04-28.
+  const prevDuration = target.officeHours.durationMinutes;
+  const prevFormat = target.officeHours.format;
+  const durationChanged = parsed.durationMinutes !== prevDuration;
+  const formatChanged = parsed.format !== prevFormat;
+
   const nowIso = new Date().toISOString();
   const updated: AvailabilityPreference = {
     ...target,
@@ -177,6 +204,15 @@ export async function POST(req: NextRequest) {
       // Preserve immutable fields — linkSlug and linkCode are permanent.
       linkSlug: target.officeHours.linkSlug,
       linkCode: target.officeHours.linkCode,
+      // guestPicks: prefer the body's value (host explicitly toggled in the
+      // edit form); fall back to the existing rule's value when absent so an
+      // edit that doesn't touch the toggles preserves them. Reusable-link
+      // guest-picks proposal, 2026-04-28.
+      ...(parsed.guestPicks
+        ? { guestPicks: parsed.guestPicks }
+        : target.officeHours.guestPicks
+          ? { guestPicks: target.officeHours.guestPicks }
+          : {}),
       // Update editable fields.
       name: parsed.title,
       title: parsed.title,
@@ -193,6 +229,25 @@ export async function POST(req: NextRequest) {
     where: { id: userId },
     data: { preferences: nextPrefs as unknown as Prisma.InputJsonValue },
   });
+
+  // Clear-on-edit invariant: when the host changes duration or format on an
+  // Office Hours rule, any active guest session whose link traces back to
+  // this rule (via NegotiationLink.recurringWindowId) must reset its
+  // corresponding negotiated* override so the host's new value wins at slot-
+  // search and confirm time. Mirrors handleUpdateLinkRules' negotiatedClearData
+  // for contextual links. Reusable-link guest-picks proposal, decided 2026-04-28.
+  if (durationChanged || formatChanged) {
+    const negotiatedClearData: Record<string, null> = {};
+    if (durationChanged) negotiatedClearData.negotiatedDuration = null;
+    if (formatChanged) negotiatedClearData.negotiatedFormat = null;
+    await prisma.negotiationSession.updateMany({
+      where: {
+        link: { recurringWindowId: ruleId },
+        status: { in: ["active", "pending"] },
+      },
+      data: negotiatedClearData as Parameters<typeof prisma.negotiationSession.updateMany>[0]["data"],
+    });
+  }
 
   await invalidateSchedule(userId);
   invalidateBehaviorSnapshot(userId);

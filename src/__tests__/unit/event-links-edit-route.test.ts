@@ -23,6 +23,14 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    // Reusable-link guest-picks proposal (decided 2026-04-28) added a
+    // clear-on-edit step in the route — null `negotiatedDuration` /
+    // `negotiatedFormat` on active sessions when the host changes the rule's
+    // duration / format. Tests don't assert on this call directly; the mock
+    // just prevents `Cannot read properties of undefined (reading 'updateMany')`.
+    negotiationSession: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
   },
 }));
 

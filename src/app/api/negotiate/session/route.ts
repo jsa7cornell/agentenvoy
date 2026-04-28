@@ -158,6 +158,19 @@ export async function POST(req: NextRequest) {
     // public /meet/{slug}/{code}.
     const oh = officeHoursRule.officeHours!;
     const childCode = generateCode();
+    // Pipe host's per-rule guest-picks toggles (if opted in) into the child
+    // link's parameters.guestPicks. Defensive: only writes when the dimension
+    // isn't already set (would only matter if a future code path pre-populates
+    // — today the link is freshly minted so guestPicks is always absent here).
+    // Reusable-link guest-picks proposal, decided 2026-04-28.
+    const ohGuestPicks = oh.guestPicks;
+    const ohGuestPicksParam =
+      ohGuestPicks?.format || ohGuestPicks?.duration
+        ? {
+            ...(ohGuestPicks.format ? { format: true as const } : {}),
+            ...(ohGuestPicks.duration ? { duration: true as const } : {}),
+          }
+        : null;
     link = await prisma.negotiationLink.create({
       data: {
         userId: user.id,
@@ -169,6 +182,7 @@ export async function POST(req: NextRequest) {
         parameters: {
           format: oh.format,
           duration: oh.durationMinutes,
+          ...(ohGuestPicksParam ? { guestPicks: ohGuestPicksParam } : {}),
         } as unknown as Prisma.InputJsonValue,
       },
     });
@@ -460,12 +474,35 @@ export async function POST(req: NextRequest) {
     // mints don't benefit from rule mirroring anyway (no shared link,
     // no future guests on the same URL).
     const autoCode = generateCode();
+    // Pipe host's primary-link guest-picks toggles (if opted in) into the
+    // freshly minted link's parameters.guestPicks. Defensive: only writes
+    // dimensions the host has flipped on; preserves the absent default.
+    // Reusable-link guest-picks proposal, decided 2026-04-28.
+    const primaryPrefsRaw = (user.preferences as Record<string, unknown>) || {};
+    const primaryExplicit = (primaryPrefsRaw.explicit as Record<string, unknown>) || {};
+    const primaryGuestPicks = primaryExplicit.primaryLinkGuestPicks as
+      | { format?: boolean; duration?: boolean }
+      | undefined;
+    const primaryGuestPicksParam =
+      primaryGuestPicks?.format || primaryGuestPicks?.duration
+        ? {
+            ...(primaryGuestPicks.format ? { format: true as const } : {}),
+            ...(primaryGuestPicks.duration ? { duration: true as const } : {}),
+          }
+        : null;
     link = await prisma.negotiationLink.create({
       data: {
         userId: user.id,
         type: "primary",
         slug: user.meetSlug!,
         code: autoCode,
+        ...(primaryGuestPicksParam
+          ? {
+              parameters: {
+                guestPicks: primaryGuestPicksParam,
+              } as unknown as Prisma.InputJsonValue,
+            }
+          : {}),
       },
     });
   }
@@ -999,6 +1036,42 @@ export async function POST(req: NextRequest) {
       content: greeting,
     },
   });
+
+  // Suggest-alt follow-up message — fires for anonymous reusable links
+  // (primary or Office Hours) where the host has opted into guestPicks.
+  // Posted as a SEPARATE Envoy message after the greeting so the suggestion
+  // reads as its own conversational beat (visually following the picker UI
+  // in the deal-room render). Reusable-link guest-picks proposal,
+  // decided 2026-04-28. Removes the prior `suggestAltClause` greeting-string
+  // approach for anonymous links — that scaffolding still handles named-
+  // invitee contextual-link branches.
+  // `isAnonymousLink` is also computed inside the greeting-render block above
+  // (line ~929) but that's local-scope; recompute here for the seeded follow-up.
+  const isAnonymousForFollowUp = link.type === "primary" || !!link.recurringWindowId;
+  if (
+    isAnonymousForFollowUp &&
+    (linkRules.guestPicks?.format || linkRules.guestPicks?.duration)
+  ) {
+    const fmtSet = !!linkRules.guestPicks?.format;
+    const durSet = !!linkRules.guestPicks?.duration;
+    const followUp = (() => {
+      if (fmtSet && durSet) {
+        return "Also… if you prefer a different duration or format (eg phone or in person) we can do that — just let me know what is best for this meeting.";
+      }
+      if (fmtSet) {
+        return "Also… if you prefer a different format (eg phone or in person) we can do that — just let me know what is best for this meeting.";
+      }
+      return "Also… if you prefer a different duration we can do that — just let me know what is best for this meeting.";
+    })();
+    await prisma.message.create({
+      data: {
+        sessionId: session.id,
+        role: "administrator",
+        content: followUp,
+        metadata: { kind: "suggest_alt_followup" } as Prisma.InputJsonValue,
+      },
+    });
+  }
 
   // Bilateral guest-Envoy initial greeting — DISABLED 2026-04-23 per John.
   // Didn't add enough at the initial-greeting stage to justify the extra

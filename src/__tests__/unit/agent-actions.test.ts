@@ -1895,6 +1895,136 @@ describe("executeActions", () => {
       expect(results).toHaveLength(0);
     });
   });
+
+  // ── lock_session_duration ───────────────────────────────────────────────
+  // Reusable-link guest-picks proposal, decided 2026-04-28. Mirrors the
+  // shape of `lock_activity_location` from the 2026-04-22 proposal but
+  // applied to the duration dimension. Validates: static cap [15, 240],
+  // allow-list match when guestPicks.duration is an array, defense-in-depth
+  // refusal when guestPicks.duration is unset, idempotent no-op when the
+  // proposal matches the host's default, and the refetchSlots flag on
+  // success (the deal-room useEffect uses this to re-query the slot pre-
+  // compute since duration is the only dimension that prunes slots).
+  describe("lock_session_duration", () => {
+    function makeDurationSession(
+      linkParameters: Record<string, unknown> = { duration: 30, guestPicks: { duration: true } },
+    ) {
+      return {
+        id: "session-d1",
+        hostId: HOST_USER_ID,
+        status: "active",
+        link: { id: "link-d1", parameters: linkParameters },
+      };
+    }
+
+    it("refuses when guestPicks.duration is not set (defense in depth)", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeDurationSession({ duration: 30 }), // no guestPicks
+      );
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 60 } }],
+        HOST_USER_ID,
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toMatch(/doesn't allow guests to change duration/i);
+      expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
+      expect(mockPrisma.message.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses when value is below the static cap (< 15)", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeDurationSession());
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 10 } }],
+        HOST_USER_ID,
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toMatch(/below the minimum/i);
+      expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses when value exceeds the static cap (> 240)", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeDurationSession());
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 360 } }],
+        HOST_USER_ID,
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toMatch(/exceeds the maximum/i);
+      expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses when value is not in the allow-list", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeDurationSession({ duration: 30, guestPicks: { duration: [30, 60] } }),
+      );
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 45 } }],
+        HOST_USER_ID,
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toMatch(/not in the host's allowed list/i);
+      expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
+    });
+
+    it("happy path: writes negotiatedDuration, seeds system message, returns refetchSlots", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeDurationSession());
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 60 } }],
+        HOST_USER_ID,
+      );
+      expect(results[0].success).toBe(true);
+      expect(results[0].data?.refetchSlots).toBe(true);
+      expect(results[0].data?.negotiatedDuration).toBe(60);
+      expect(mockPrisma.negotiationSession.update).toHaveBeenCalledWith({
+        where: { id: "session-d1" },
+        data: { negotiatedDuration: 60, negotiatedLockedBy: "guest" },
+      });
+      // Verifies the system-bot diff message lands on the thread (Office
+      // Hours / primary host doesn't watch live, but reads the calendar
+      // invite + thread later — this is the audit trail).
+      const messageCall = mockPrisma.message.create.mock.calls[0][0];
+      expect(messageCall.data.role).toBe("system");
+      expect(messageCall.data.content).toContain("60 minutes");
+      expect(messageCall.data.content).toContain("set by guest");
+      expect((messageCall.data.metadata as { kind?: string }).kind).toBe("session_duration_lock");
+    });
+
+    it("idempotent no-op when proposed duration matches host default", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeDurationSession());
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 30 } }],
+        HOST_USER_ID,
+      );
+      expect(results[0].success).toBe(true);
+      expect(results[0].data?.refetchSlots).toBe(false);
+      // No state change — no DB writes, no system message.
+      expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
+      expect(mockPrisma.message.create).not.toHaveBeenCalled();
+    });
+
+    it("rejects non-integer duration", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeDurationSession());
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 60.5 } }],
+        HOST_USER_ID,
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toMatch(/integer durationMinutes/i);
+    });
+
+    it("refuses when session is already agreed (post-confirm)", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue({
+        ...makeDurationSession(),
+        status: "agreed",
+      });
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 60 } }],
+        HOST_USER_ID,
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toMatch(/already confirmed/i);
+    });
+  });
 });
 
 // ─── Integration: Parse → Execute Pipeline ──────────────────────────────────

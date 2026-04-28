@@ -65,6 +65,7 @@ export function EventLinksEditDialog({
       timeEnd: cfg.timeEnd,
       effectiveDate: cfg.effectiveDate,
       expiryDate: cfg.expiryDate,
+      ...(cfg.guestPicks ? { guestPicks: cfg.guestPicks } : {}),
     });
     setError(null);
   }, [row]);
@@ -88,6 +89,8 @@ export function EventLinksEditDialog({
             timeEnd: proposal.timeEnd,
             effectiveDate: proposal.effectiveDate,
             expiryDate: proposal.expiryDate,
+            // Reusable-link guest-picks proposal, decided 2026-04-28.
+            ...(proposal.guestPicks ? { guestPicks: proposal.guestPicks } : {}),
           },
         }),
       });
