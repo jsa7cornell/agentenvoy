@@ -50,7 +50,10 @@ type Turn =
   | { role: "envoy"; content: React.ReactNode }
   | { role: "user"; content: string };
 
-type Step = "intro" | "hours" | "duration" | "buffer" | "done";
+type Step = "intro" | "hours" | "duration" | "buffer" | "theme" | "format" | "done";
+
+type ThemeMode = "light" | "dark" | "auto";
+type FormatValue = "video" | "phone" | "in-person";
 
 interface Answers {
   // Minute-of-day bounds (canonical, 30-min aligned). See proposal
@@ -59,7 +62,22 @@ interface Answers {
   businessHoursEndMinutes?: number;
   defaultDuration?: number;
   bufferMinutes?: number;
+  // §1n item 4 — chained theme + format follow-ups after the buffer step.
+  themeMode?: ThemeMode;
+  defaultFormat?: FormatValue;
 }
+
+const THEME_OPTIONS: { number: number; label: string; value: ThemeMode }[] = [
+  { number: 1, label: "Light", value: "light" },
+  { number: 2, label: "Dark", value: "dark" },
+  { number: 3, label: "Auto (matches time of day)", value: "auto" },
+];
+
+const FORMAT_OPTIONS: { number: number; label: string; value: FormatValue }[] = [
+  { number: 1, label: "Video call", value: "video" },
+  { number: 2, label: "Phone call", value: "phone" },
+  { number: 3, label: "In-person", value: "in-person" },
+];
 
 /** Format a minute-of-day value for display. 510 → "8:30am", 540 → "9am". */
 function formatMinutes(m: number): string {
@@ -76,9 +94,13 @@ interface PrimaryLinkFlowProps {
    *  so the steady-state Home re-renders. Optional — older callers that
    *  don't pass it simply leave the flow rendered (legacy behaviour). */
   onDismiss?: () => void;
+  /** §1n item 4: post-flow chips on the celebration card. Caller should
+   *  dismiss the flow AND auto-submit the seed message (handleSend path).
+   *  When omitted, the celebration shows only "Back to chat". */
+  onPostFlowSeed?: (seed: string) => void;
 }
 
-export function PrimaryLinkFlow({ onDismiss }: PrimaryLinkFlowProps = {}) {
+export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowProps = {}) {
   const [meetSlug, setMeetSlug] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -227,6 +249,57 @@ export function PrimaryLinkFlow({ onDismiss }: PrimaryLinkFlowProps = {}) {
     const buf = parseInt(value, 10);
     if (!Number.isFinite(buf)) return;
     const patch = { bufferMinutes: buf };
+    setAnswers((a) => ({ ...a, ...patch }));
+    setTurns((t) => [
+      ...t,
+      { role: "user", content: label },
+      {
+        role: "envoy",
+        content: (
+          <>A few quick visual + meeting-default touch-ups. Theme?</>
+        ),
+      },
+    ]);
+    setStep("theme");
+    void persist(patch);
+  }
+
+  async function handleTheme(value: string, label: string) {
+    const themeMode = value as ThemeMode;
+    if (themeMode !== "light" && themeMode !== "dark" && themeMode !== "auto") return;
+    const patch = { themeMode };
+    setAnswers((a) => ({ ...a, ...patch }));
+    setTurns((t) => [
+      ...t,
+      { role: "user", content: label },
+      {
+        role: "envoy",
+        content: (
+          <>And how do you usually meet — video, phone, or in person?</>
+        ),
+      },
+    ]);
+    setStep("format");
+    // Theme persists to /api/me/ui-prefs (different endpoint than the
+    // scheduling defaults — the theme primitive is global and gets read by
+    // theme-preference-sync.tsx on every page mount).
+    setSaving(true);
+    try {
+      await fetch("/api/me/ui-prefs", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ themeMode }),
+      });
+    } catch {
+      // Non-fatal. User can change theme later via /dashboard/account.
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleFormat(value: string, label: string) {
+    if (value !== "video" && value !== "phone" && value !== "in-person") return;
+    const patch = { defaultFormat: value as FormatValue };
     const finalAnswers = { ...answers, ...patch };
     setAnswers(finalAnswers);
     setTurns((t) => [
@@ -257,7 +330,7 @@ export function PrimaryLinkFlow({ onDismiss }: PrimaryLinkFlowProps = {}) {
             </strong>
             , default to{" "}
             <strong>{finalAnswers.defaultDuration ?? 30}-minute</strong>{" "}
-            meetings
+            <strong>{finalAnswers.defaultFormat ?? "video"}</strong> meetings
             {finalAnswers.bufferMinutes
               ? `, and keep a ${finalAnswers.bufferMinutes}-minute buffer between them`
               : ""}
@@ -277,7 +350,11 @@ export function PrimaryLinkFlow({ onDismiss }: PrimaryLinkFlowProps = {}) {
         ? DURATION_OPTIONS
         : step === "buffer"
           ? BUFFER_OPTIONS
-          : null;
+          : step === "theme"
+            ? THEME_OPTIONS
+            : step === "format"
+              ? FORMAT_OPTIONS
+              : null;
 
   const onSelect =
     step === "hours"
@@ -286,7 +363,11 @@ export function PrimaryLinkFlow({ onDismiss }: PrimaryLinkFlowProps = {}) {
         ? handleDuration
         : step === "buffer"
           ? handleBuffer
-          : () => {};
+          : step === "theme"
+            ? handleTheme
+            : step === "format"
+              ? handleFormat
+              : () => {};
 
   // Legacy copy handler — kept for the fallback link card below the
   // celebration when no `onDismiss` is wired (older callers). New callers
@@ -384,6 +465,7 @@ export function PrimaryLinkFlow({ onDismiss }: PrimaryLinkFlowProps = {}) {
           firstName={firstNameOf(name)}
           meetSlug={meetSlug}
           onDismiss={onDismiss}
+          onPostFlowSeed={onPostFlowSeed}
         />
       )}
 

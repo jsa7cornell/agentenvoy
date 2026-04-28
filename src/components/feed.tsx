@@ -17,6 +17,7 @@ import { RuleConfirmCard } from "./onboarding/rule-confirm-card";
 import { RuleConfirmSheet } from "./onboarding/rule-confirm-sheet";
 import type { OfficeHoursProposal } from "./onboarding/rule-form-fields";
 import { SendFeedbackLink } from "./send-feedback";
+import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
 
 interface ChannelMsg {
@@ -130,6 +131,34 @@ function formatBizMinutes(m: number): string {
 function firstNameOf(name: string | null): string {
   if (!name) return "there";
   return name.split(/\s+/)[0];
+}
+
+/** Seed-prompt example chips for the first-run variant. WISHLIST §1n item 5
+ *  — gives the host concrete examples covering the four categories John named:
+ *  time guidance / format / length variants / activity-based. Each auto-submits
+ *  via item 6's chip-handler change. Curated subset of PROMPT-SEEDS.md;
+ *  rotation logic deferred (just shows a static set for now). */
+function SeedPromptChips({ onSeed }: { onSeed: (seed: string) => void }) {
+  const seeds = [
+    "Find time next week, mornings preferred",
+    "Set up a 60-min video call",
+    "A quick 15-min sync",
+    "Coffee Tuesday afternoon",
+  ];
+  return (
+    <div className="flex flex-wrap gap-2 px-1">
+      {seeds.map((s) => (
+        <button
+          key={s}
+          type="button"
+          onClick={() => onSeed(s)}
+          className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-secondary hover:text-primary transition"
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /** Three forward chips reused across all greeting variants. Same actions
@@ -263,6 +292,201 @@ function StandardLinkReadyCard({ url }: { url: string }) {
   );
 }
 
+interface ConnectedCalendar {
+  id: string;
+  name: string;
+  primary: boolean;
+  backgroundColor: string | null;
+}
+
+/**
+ * Calendar picker bubble — surfaces the user's connected Google calendars
+ * during onboarding (right after the calendar-connect step has implicitly
+ * happened via seed-everything). WISHLIST §1n item 1.
+ *
+ * Single-calendar hosts: skip silently. ≥2 calendars: render the list with a
+ * "Primary" badge on whichever calendar is at activeCalendarIds[0] (default:
+ * whatever Google flags as `primary: true`), plus a "Make primary" button on
+ * non-primary entries. Click reorders activeCalendarIds[] so the chosen
+ * calendar moves to position 0.
+ *
+ * Semantic: AgentEnvoy's "primary" = activeCalendarIds[0]. No separate column
+ * — reuse of the existing list ordering. Write-target consequences (which
+ * calendar receives the events.insert call) are not adjusted in this PR;
+ * write-target follows whatever the existing calendar.events.insert path
+ * resolves to. Promote to a separate proposal if explicit write-target
+ * control becomes a feature ask.
+ */
+function CalendarPickerBubble() {
+  const [calendars, setCalendars] = useState<ConnectedCalendar[] | null>(null);
+  const [primaryId, setPrimaryId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/connections/google-calendars")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.calendars) return;
+        const list = data.calendars as ConnectedCalendar[];
+        setCalendars(list);
+        // Default primary = Google-flagged primary, since at first paint we
+        // don't know whether the user has customized activeCalendarIds[0].
+        // Once they click "Make primary," local state takes over.
+        const googlePrimary = list.find((c) => c.primary);
+        setPrimaryId(googlePrimary?.id ?? list[0]?.id ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!calendars || calendars.length < 2) return null;
+
+  const handleMakePrimary = async (id: string) => {
+    if (busy || id === primaryId) return;
+    setBusy(true);
+    const previous = primaryId;
+    setPrimaryId(id); // optimistic
+    try {
+      // Reorder: chosen calendar first, then the rest in their original order.
+      const reordered = [
+        id,
+        ...calendars.filter((c) => c.id !== id).map((c) => c.id),
+      ];
+      const res = await fetch("/api/connections/calendar-filter", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeCalendarIds: reordered }),
+      });
+      if (!res.ok) setPrimaryId(previous); // revert
+    } catch {
+      setPrimaryId(previous);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
+        Envoy
+      </span>
+      <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+        <div className="mb-2">
+          You&rsquo;ve got {calendars.length} Google calendars connected.
+          I&rsquo;ll treat your primary as the source of truth — pick a
+          different one if you&rsquo;d like:
+        </div>
+        <ul className="space-y-1.5">
+          {calendars.map((cal) => {
+            const isPrimary = cal.id === primaryId;
+            return (
+              <li
+                key={cal.id}
+                className="flex items-center justify-between gap-3 text-[13px]"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  {cal.backgroundColor && (
+                    <span
+                      aria-hidden="true"
+                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: cal.backgroundColor }}
+                    />
+                  )}
+                  <span className="truncate">{cal.name}</span>
+                  {isPrimary && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-purple-400 flex-shrink-0">
+                      Primary
+                    </span>
+                  )}
+                </span>
+                {!isPrimary && (
+                  <button
+                    type="button"
+                    onClick={() => handleMakePrimary(cal.id)}
+                    disabled={busy}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition flex-shrink-0"
+                  >
+                    Make primary
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Guest-first welcome — user came in via someone else's link, signed up via the
+ * read-only guest-flow path, and now landed on their own Home for the first
+ * time. Adds a "Connect Google Calendar" CTA per WISHLIST §1n item 7 so they
+ * can upgrade their scope and start hosting meetings — the natural next step
+ * after the prior interaction acknowledgment.
+ */
+function GuestFirstVariant({
+  posture,
+  onSeed,
+}: {
+  posture: SeededPosture;
+  onSeed: (seed: string) => void;
+}) {
+  const ctx = posture.guestFirstContext;
+  const hostName = ctx?.hostName ?? "someone";
+  const dateLabel = ctx?.date
+    ? new Date(ctx.date).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      })
+    : null;
+  // mode: "first-connect" per §1n item 7 — full pitch + write-scope grant.
+  // The read-only Account from guest-flow gets upgraded to read+write on
+  // re-consent (Google scope union).
+  const connectFlow = useOAuthSignIn({
+    mode: "first-connect",
+    callbackUrl: "/dashboard",
+  });
+  return (
+    <div className="flex-1 flex flex-col justify-center py-6 gap-4">
+      <h1 className="text-xl sm:text-2xl font-semibold text-primary px-1">
+        👋 Welcome back, {firstNameOf(posture.name)}.
+      </h1>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
+          Envoy
+        </span>
+        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+          I see you joined {hostName}&rsquo;s meeting
+          {dateLabel ? ` on ${dateLabel}` : ""} — now you&rsquo;ve got
+          your own AgentEnvoy account. I can coordinate meetings on
+          your behalf the same way: share a link, your invitee chats
+          with me, I work out a time. Connect your Google Calendar to
+          get started, or jump into one of these:
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 px-1">
+        <button
+          type="button"
+          onClick={connectFlow.trigger}
+          className="text-xs px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition inline-flex items-center gap-1.5"
+        >
+          <span aria-hidden="true">🗓️</span>
+          Connect Google Calendar
+        </button>
+      </div>
+
+      <ForwardChips onSeed={onSeed} />
+      {connectFlow.modal}
+    </div>
+  );
+}
+
 function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
   const [posture, setPosture] = useState<SeededPosture | null>(null);
 
@@ -310,35 +534,8 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
   // landed on Home. Acknowledge the prior interaction; skip the
   // posture readback (they saw Envoy from the guest side already).
   if (posture.welcomeVariant === "guest-first") {
-    const ctx = posture.guestFirstContext;
-    const hostName = ctx?.hostName ?? "someone";
-    const dateLabel = ctx?.date
-      ? new Date(ctx.date).toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        })
-      : null;
     return (
-      <div className="flex-1 flex flex-col justify-center py-6 gap-4">
-        <h1 className="text-xl sm:text-2xl font-semibold text-primary px-1">
-          👋 Welcome back, {firstNameOf(posture.name)}.
-        </h1>
-
-        <div className="flex flex-col gap-1">
-          <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
-            Envoy
-          </span>
-          <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
-            I see you joined {hostName}&rsquo;s meeting
-            {dateLabel ? ` on ${dateLabel}` : ""} — now you&rsquo;ve got
-            your own AgentEnvoy account. I can coordinate meetings on
-            your behalf the same way: share a link, your invitee chats
-            with me, I work out a time. Want to set up your first one?
-          </div>
-        </div>
-
-        <ForwardChips onSeed={onSeed} />
-      </div>
+      <GuestFirstVariant posture={posture} onSeed={onSeed} />
     );
   }
 
@@ -367,6 +564,10 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
 
       <PostureBubble p={posture} />
 
+      {/* Calendar picker — only renders when the user has 2+ connected
+          calendars; otherwise silent. WISHLIST §1n item 1. */}
+      <CalendarPickerBubble />
+
       {/* Standalone link-card — pulled out of the posture bubble per the
           mockup so the link reads as its own "ready to share" affordance
           rather than a footnote. Only rendered for first-run (existing
@@ -381,14 +582,25 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
           Envoy
         </span>
         <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
-          Let&rsquo;s keep going. I can show you powerful features like
-          office hours and group events, or help you set specific
-          preferences for different kinds of meetings — or you can hand
-          me your first meeting and let&rsquo;s just go.
+          Now let&rsquo;s get going. I can show you powerful features like{" "}
+          <strong className="font-semibold">office hours</strong> and{" "}
+          <strong className="font-semibold">group events</strong>, or help you{" "}
+          <strong className="font-semibold">tailor your preferences</strong> for
+          different kinds of meetings — or you can hand me your first meeting
+          and let&rsquo;s just go.
         </div>
       </div>
 
       <ForwardChips onSeed={onSeed} />
+
+      {/* Seed-prompt examples — concrete starting points covering the four
+          categories (time / format / length / activity). WISHLIST §1n item 5. */}
+      <div className="flex flex-col gap-1.5">
+        <span className="text-muted text-[10px] font-semibold uppercase tracking-wide px-1">
+          Or jump in
+        </span>
+        <SeedPromptChips onSeed={onSeed} />
+      </div>
     </div>
   );
 }
@@ -1237,18 +1449,23 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                 setPrimaryLinkFlowActive(true);
                 return;
               }
-              setInput(seed);
-              textareaRef.current?.focus();
+              // §1n item 6: chips auto-SUBMIT (not just fill the composer).
+              // Same code path as user typing + hitting enter.
+              handleSend(seed);
             }}
           />
         )}
         {messages.length === 0 && !loading && isCalibrated && primaryLinkFlowActive && (
           <PrimaryLinkFlow
             onDismiss={() => setPrimaryLinkFlowActive(false)}
+            onPostFlowSeed={(seed) => {
+              setPrimaryLinkFlowActive(false);
+              handleSend(seed);
+            }}
           />
         )}
 
-        {messages.map((msg) => {
+        {messages.map((msg, i) => {
           // Thread card — skip archived
           if (msg.threadId && msg.thread) {
             if (msg.thread.archived) return null;
@@ -1417,6 +1634,12 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           const isUser = msg.role === "user";
           const meetLinkMatch = !isUser ? msg.content.match(/(https?:\/\/[^\s]+\/meet\/[^\s]+)/) : null;
           const reaction = isUser ? (msg.metadata?.reaction as string | undefined) : undefined;
+          // §1n item 2: suppress speaker label on consecutive same-speaker bubbles
+          // (modern messaging-app convention). Treat threads / system messages as
+          // structural breaks — the label always shows after one of those.
+          const prev = i > 0 ? messages[i - 1] : null;
+          const sameSpeakerAsPrev =
+            !!prev && !prev.threadId && prev.role === msg.role && (prev.role === "user" || prev.role === "envoy");
           return (
             <div key={msg.id} className={`relative max-w-[88%] ${isUser ? "self-end" : "self-start"}`}>
               <div
@@ -1426,13 +1649,15 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     : "bg-black/5 dark:bg-white/7 rounded-bl-sm"
                 }`}
               >
-                <div
-                  className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${
-                    isUser ? "text-white/60" : "text-purple-400"
-                  }`}
-                >
-                  {isUser ? "You" : "Envoy"}
-                </div>
+                {!sameSpeakerAsPrev && (
+                  <div
+                    className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${
+                      isUser ? "text-white/60" : "text-purple-400"
+                    }`}
+                  >
+                    {isUser ? "You" : "Envoy"}
+                  </div>
+                )}
                 <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
                 {meetLinkMatch && <MeetLinkCard url={meetLinkMatch[1]} />}
               </div>
