@@ -11,9 +11,6 @@ interface Props {
   mode: PreConsentMode;
   onConfirm: () => void;
   onCancel: () => void;
-  /** Login mode only: called when user clicks "Continue with Google" from the
-   *  sign-in view (uses prompt=select_account, no forced consent re-screen). */
-  onSignIn?: () => void;
 }
 
 /**
@@ -38,7 +35,7 @@ interface Props {
  *                     Pre-2026-04-26 the default was LoginBody, which read
  *                     like "we recognize you" to deleted users (PR #143).
  */
-export function PreConsentExplainer({ open, mode, onConfirm, onCancel, onSignIn }: Props) {
+export function PreConsentExplainer({ open, mode, onConfirm, onCancel }: Props) {
   // For `mode: "login"` we default to the pitch view. By the time this
   // modal opens, the cookie shortcut has already filtered out recognized
   // returning users — so visitors here are truly new or post-delete.
@@ -75,8 +72,8 @@ export function PreConsentExplainer({ open, mode, onConfirm, onCancel, onSignIn 
         className="w-full max-w-md bg-surface border border-secondary rounded-2xl shadow-2xl p-7 space-y-4"
         onClick={(e) => e.stopPropagation()}
       >
-        {showLoginView && onSignIn && (
-          <LoginBody onSignIn={onSignIn} onNewHere={() => setShowPitch(true)} onCancel={onCancel} />
+        {showLoginView && (
+          <LoginBody onSignIn={onConfirm} onNewHere={() => setShowPitch(true)} onCancel={onCancel} />
         )}
 
         {mode === "reconnect" && <ReconnectBody />}

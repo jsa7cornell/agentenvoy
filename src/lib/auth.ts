@@ -148,6 +148,29 @@ export const authOptions: NextAuthOptions = {
           console.error("[signIn] Failed to update Google account tokens:", e);
           // Don't block sign-in — stale tokens are better than no sign-in
         }
+
+        // Stamp the recognition cookie. Doing this on every sign-in (not just
+        // first signup) covers (a) new users post-PR #138 whose
+        // completeOnboarding path is bypassed by seed-everything, and
+        // (b) returning users on a fresh browser whose previous-browser cookie
+        // doesn't help them. The cookie is a UX hint only — it has zero
+        // authority over identity, which is established server-side by the
+        // OAuth round-trip itself. Both client and server scrub on account
+        // delete (delete/route.ts:165 + dashboard delete UI document.cookie
+        // reset). See SPEC §3.3.5 and proposals/2026-04-28_signin-recognition.
+        try {
+          cookies().set("ae_returning", "1", {
+            path: "/",
+            maxAge: 60 * 60 * 24 * 365,
+            sameSite: "lax",
+            secure: process.env.NODE_ENV === "production",
+            httpOnly: false,
+          });
+        } catch {
+          // cookies().set throws outside request scope. The signIn callback
+          // runs inside one for OAuth flows; defensive against a future
+          // NextAuth refactor that calls it from a non-request context.
+        }
       }
 
       // T3b: when a *front-door* host granted partial permissions (write scope
@@ -280,6 +303,25 @@ export const authOptions: NextAuthOptions = {
         await dispatchWelcomeEmailOnce(user.id);
       } catch (e) {
         console.error("[createUser] welcome email dispatch failed:", e);
+      }
+
+      // Insurance write of the recognition cookie alongside the primary
+      // write in the signIn callback above. Reviewer N1 (proposal 2026-04-28
+      // §9): cookies().set() from inside NextAuth's signIn callback is
+      // unverified for write-propagation in NextAuth v4 + Next.js 14 App
+      // Router. If the primary silently no-ops, this insurance covers new
+      // users via a different code path. Once §7.0 pre-flight confirms the
+      // primary works, this becomes redundant but harmless.
+      try {
+        cookies().set("ae_returning", "1", {
+          path: "/",
+          maxAge: 60 * 60 * 24 * 365,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          httpOnly: false,
+        });
+      } catch {
+        // cookies().set throws outside request scope; harmless if it does.
       }
     },
   },
