@@ -281,11 +281,47 @@ describe("chat route — host-role plumbing (PR1 invariants)", () => {
       { tier: string; playbookRelativePath: string },
     ];
     const dispatchArgs = firstCall[0];
-    // PR1 routes edit_preference through profile tier as a temporary
-    // measure (PR4 splits it into edit_profile / edit_rule).
+    // PR1 keyword-heuristic stopgap: profile-shaped utterances ("make my
+    // default 30 min" — no buffer/hours/days/am/pm/window/availability
+    // tokens) route through profile.md. PR4 will split edit_preference at
+    // the classifier level and remove this heuristic.
     expect(dispatchArgs.tier).toBe("profile");
     expect(dispatchArgs.playbookRelativePath).toBe(
       "src/agent/playbooks/profile.md",
+    );
+  });
+
+  test("T4b: edit_preference with rule-shape keyword routes through rule tier", async () => {
+    const user = await createUser({ email: "pref-rule@chat.test" });
+    vi.mocked(getServerSession).mockResolvedValue({
+      user: { email: user.email, name: user.name },
+    } as unknown as Awaited<ReturnType<typeof getServerSession>>);
+
+    classifyChatIntentMock.mockResolvedValueOnce({
+      intent: { kind: "edit_preference" },
+      latencyMs: 1,
+      retried: false,
+      rawKind: "edit_preference",
+      fabricationDetected: false,
+    });
+
+    const res = await POST(
+      makeRequest({
+        message: "set my buffer to 15 minutes between meetings",
+      }) as unknown as Parameters<typeof POST>[0],
+    );
+    await drainStream(res);
+
+    expect(runDispatchHandlerMock).toHaveBeenCalledTimes(1);
+    const firstCall = runDispatchHandlerMock.mock.calls[0] as unknown as [
+      { tier: string; playbookRelativePath: string },
+    ];
+    const dispatchArgs = firstCall[0];
+    // "buffer" + "minutes" — heuristic catches "buffer" and routes to
+    // rule.md so the dispatch-handler loads availability-rule grammar.
+    expect(dispatchArgs.tier).toBe("rule");
+    expect(dispatchArgs.playbookRelativePath).toBe(
+      "src/agent/playbooks/rule.md",
     );
   });
 });

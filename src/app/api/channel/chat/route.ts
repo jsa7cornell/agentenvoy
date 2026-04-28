@@ -527,16 +527,29 @@ export async function POST(req: NextRequest) {
           // values) but stay in place for `hintedIntent`-driven paths.
           // ------------------------------------------------------------
 
-          // edit_preference → temporary route through the profile
-          // dispatch-handler. TODO PR4: split edit_preference into
-          // edit_profile / edit_rule per Open Question 4 of the proposal;
-          // for PR1 we route everything through profile to keep the diff
-          // minimal while still loading a host-appropriate playbook.
+          // edit_preference → keyword-heuristic stopgap routing.
+          // TODO PR4: split edit_preference at the classifier level into
+          // edit_profile / edit_rule per Open Question 4 of the proposal,
+          // and remove this heuristic. For PR1 we route message-shape:
+          //   - rule-shaped ("buffer/hours/days/am/pm/window/availability")
+          //     → rule.md
+          //   - everything else → profile.md
+          // This keeps the diff minimal while loading a host-appropriate
+          // playbook for both message kinds.
           if (intent === "edit_preference") {
+            const lowerMessage = message.toLowerCase();
+            const isRuleShape =
+              /\b(buffer|hours?|days?|am|pm|window|availability)\b/.test(
+                lowerMessage,
+              );
+            const tier: "profile" | "rule" = isRuleShape ? "rule" : "profile";
+            const playbookRelativePath = isRuleShape
+              ? "src/agent/playbooks/rule.md"
+              : "src/agent/playbooks/profile.md";
             try {
               await runDispatchHandler({
-                tier: "profile",
-                playbookRelativePath: "src/agent/playbooks/profile.md",
+                tier,
+                playbookRelativePath,
                 userId: safeUser.id,
                 userName: user.name ?? null,
                 channelId: safeChannel.id,
@@ -550,7 +563,7 @@ export async function POST(req: NextRequest) {
               });
             } catch (e) {
               console.error(
-                `[channel/chat] dispatch-handler edit_preference failed:`,
+                `[channel/chat] dispatch-handler edit_preference failed (tier=${tier}):`,
                 e,
               );
             }
