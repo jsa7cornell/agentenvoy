@@ -115,44 +115,33 @@ jobs:
       - run: npx prisma db push --skip-generate
       - run: npm run test:integration
 
-  # PLAYBOOK Rule 19 (chat-decisioning-layer-redesign — 2026-04-27 PR1):
+  # PLAYBOOK Rule 19 (chat-decisioning-layer-redesign — 2026-04-27):
   # protects the architectural invariants that surfaced PR1's five prod bugs.
   #
-  #  - 19c (single composition point): the host & guest playbooks are loaded
-  #    via `readFileSync(join(process.cwd(), "src", "agent", "playbooks", ...)`
-  #    inside `src/agent/intent-classifier.ts`. Adding a parallel composition
-  #    site (a second readFileSync of an `intent-classifier-*.md` playbook
-  #    elsewhere, or a runtime concat of host + guest prose in a route file)
-  #    is what re-introduced classifier drift in earlier prototypes.
+  #  - 19c (single composition point): all .md playbook loads go through
+  #    src/agent/playbooks/index.ts. Direct readFileSync of .md files
+  #    outside that helper is a violation (PR2 migrated all 5 call sites).
   #  - 19f (explicit role plumbing): every call site of `classifyChatIntent`
   #    must pass an explicit `role` argument. The default-to-guest branch was
   #    the root cause of Bugs #1/#2/#3 — silent default loaded the wrong
   #    playbook and emitted guest-shaped values for host turns.
   #
   # Both checks are deliberately greppy (no AST tooling) so the failure mode
-  # is a clear CI line, not a mysterious type error. False-positive rate is
-  # capped by the narrow allowlist below.
+  # is a clear CI line, not a mysterious type error.
   playbook-rule-19:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Rule 19c — single playbook composition site
+      - name: Rule 19c — all .md loads go through playbooks/index.ts
         run: |
-          # Allowlist: the one file that legitimately reads playbook .md
-          # files for the classifier. Any other readFileSync of an
-          # intent-classifier playbook is a violation.
-          ALLOWED='src/agent/intent-classifier.ts'
-          OFFENDERS=$(grep -rEn \
-            "readFileSync\([^)]*intent-classifier-(host|guest)\.md" \
-            src \
-            --include='*.ts' --include='*.tsx' \
-            | grep -v "^${ALLOWED}:" || true)
-          if [ -n "$OFFENDERS" ]; then
-            echo "::error::Rule 19c violated — intent-classifier playbooks must be loaded only from ${ALLOWED}."
-            echo "$OFFENDERS"
+          HITS=$(grep -rn 'readFileSync.*\.md' src/ \
+            | grep -v 'src/agent/playbooks/index.ts' \
+            | grep -v '__tests__' || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Rule 19c violated — direct readFileSync(.md) outside playbooks/index.ts"
+            echo "$HITS"
             exit 1
           fi
-          echo "✓ Rule 19c — only ${ALLOWED} loads intent-classifier playbooks."
       - name: Rule 19f — explicit role on every classifyChatIntent call
         run: |
           # Find every call site of classifyChatIntent, then for each one

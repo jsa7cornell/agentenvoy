@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { schedulingPrecheck } from "@/lib/scheduling-precheck";
+import { schedulingPrecheck } from "@/agent/matcher";
 
 describe("scheduling-precheck integration — Jon-case end-to-end", () => {
   it("maps the proposal's verbatim Jon utterance with single existing active link to deterministic-create (R1 default-to-create)", () => {

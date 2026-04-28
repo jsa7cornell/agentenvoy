@@ -25,8 +25,6 @@ import {
   type ProgressCopyInterpolation,
 } from "@/agent/progress-copy";
 import { runWithStageRotation } from "@/agent/progress-rotation";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { classifyChatIntent } from "@/agent/intent-classifier";
 import { isEchoOfRecentEnvoy } from "@/lib/echo-detect";
 import { normalizeChatIntent, type ChatIntent, type ChatIntentBlock } from "@/lib/intent";
@@ -37,7 +35,8 @@ import {
   schedulingPrecheck,
   type PrecheckResult,
   type DeterministicCreateArgs,
-} from "@/lib/scheduling-precheck";
+} from "@/agent/matcher";
+import { voicePlaybook, calendarEventComposer, inquireComposer } from "@/agent/playbooks/index";
 
 function formatUpcomingEvents(events: CalendarEvent[], tz: string): string | null {
   const now = Date.now();
@@ -65,33 +64,19 @@ function formatUpcomingEvents(events: CalendarEvent[], tz: string): string | nul
   return `Upcoming calendar events (next 14 days — use these to resolve cancel/reschedule requests by name):\n${lines.join("\n")}`;
 }
 
-// Load playbooks once at module scope (same pattern as composer.ts)
-let personaPlaybook = "";
-let channelPlaybook = "";
-let inquirePlaybook = "";
-try {
-  personaPlaybook = readFileSync(join(process.cwd(), "src", "agent", "playbooks", "persona.md"), "utf-8");
-} catch (e) {
-  console.error("Failed to load persona.md for channel chat:", e);
+// Build system prompt bases via composition helper (PLAYBOOK Rule 19c).
+// Called at request time (lazy) so playbook load failures surface per-request
+// rather than killing module init.
+function buildChannelSystem(): string {
+  const persona = voicePlaybook();
+  const channel = calendarEventComposer();
+  return `${persona ? persona + "\n\n---\n\n" : ""}${channel}`;
 }
-try {
-  channelPlaybook = readFileSync(join(process.cwd(), "src", "agent", "playbooks", "channel.md"), "utf-8");
-} catch (e) {
-  console.error("Failed to load channel.md for channel chat:", e);
-  throw e;
+function buildInquireSystem(): string {
+  const persona = voicePlaybook();
+  const inquire = inquireComposer();
+  return `${persona ? persona + "\n\n---\n\n" : ""}${inquire}`;
 }
-try {
-  inquirePlaybook = readFileSync(join(process.cwd(), "src", "agent", "playbooks", "inquire.md"), "utf-8");
-} catch (e) {
-  console.error("Failed to load inquire.md for channel chat:", e);
-  // Inquire playbook is new; fall back cleanly if it's missing rather than
-  // crash the module. The dispatch layer treats an empty playbook as "no
-  // guidance" and the scheduling path continues to work.
-  inquirePlaybook = "";
-}
-
-const CHANNEL_SYSTEM = `${personaPlaybook ? personaPlaybook + "\n\n---\n\n" : ""}${channelPlaybook}`;
-const INQUIRE_SYSTEM = `${personaPlaybook ? personaPlaybook + "\n\n---\n\n" : ""}${inquirePlaybook}`;
 
 // Profile + rule tiers route through `runDispatchHandler` (Proposal 3,
 // decided 2026-04-21). Each tier loads a narrower playbook
@@ -431,8 +416,8 @@ export async function POST(req: NextRequest) {
           if (intent === "profile" || intent === "rule") {
             const playbookRelativePath =
               intent === "profile"
-                ? "src/agent/playbooks/profile.md"
-                : "src/agent/playbooks/rule.md";
+                ? "src/agent/playbooks/composers/profile-composer.md"
+                : "src/agent/playbooks/composers/calendar-rule-composer.md";
             let profileGapHints: string[] | undefined;
             if (intent === "profile") {
               try {
@@ -544,8 +529,8 @@ export async function POST(req: NextRequest) {
               );
             const tier: "profile" | "rule" = isRuleShape ? "rule" : "profile";
             const playbookRelativePath = isRuleShape
-              ? "src/agent/playbooks/rule.md"
-              : "src/agent/playbooks/profile.md";
+              ? "src/agent/playbooks/composers/calendar-rule-composer.md"
+              : "src/agent/playbooks/composers/profile-composer.md";
             try {
               await runDispatchHandler({
                 tier,
@@ -1031,7 +1016,7 @@ export async function POST(req: NextRequest) {
           // Inquire tier uses a narrower readonly playbook. §2.5 — runtime
           // playbook selection per dispatched tier. Proposal 3 will extend
           // this pattern (update_profile + rule handlers).
-          const systemBase = isInquireTier ? INQUIRE_SYSTEM : CHANNEL_SYSTEM;
+          const systemBase = isInquireTier ? buildInquireSystem() : buildChannelSystem();
           const precheckHintBlock = precheckCreateHint
             ? "\n\n" + precheckCreateHint
             : "";

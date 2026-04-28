@@ -1,5 +1,3 @@
-import { readFileSync } from "fs";
-import { join } from "path";
 import type { CalendarContext, CalendarEvent } from "@/lib/calendar";
 import { getUserTimezone } from "@/lib/timezone";
 import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
@@ -10,27 +8,13 @@ import { readProfileField } from "@/lib/profile-fields";
 import type { UserPreferences } from "@/lib/scoring";
 import { recordSpanSync } from "@/lib/langfuse";
 
-// --- Playbook cache (read once per cold start) ---
-
-const PLAYBOOK_DIR = join(process.cwd(), "src", "agent", "playbooks");
-
-function loadPlaybook(filename: string): string {
-  try {
-    return readFileSync(join(PLAYBOOK_DIR, filename), "utf-8");
-  } catch (e) {
-    console.error(`Failed to load playbook: ${filename}`, e);
-    return "";
-  }
-}
-
-const playbooks: Record<string, string> = {
-  groundTruth: loadPlaybook("ground-truth.md"),
-  globalTaste: loadPlaybook("global-taste.md"),
-  persona: loadPlaybook("persona.md"),
-  negotiation: loadPlaybook("negotiation.md"),
-  calendar: loadPlaybook("calendar.md"),
-  // rfp: loadPlaybook("rfp.md"),  // uncomment when RFP playbook exists
-};
+// --- Playbook loaders (via composition helper — PLAYBOOK Rule 19c) ---
+import {
+  groundTruthPlaybook,
+  voicePlaybook,
+  negotiationPlaybook,
+  dealroomGuestComposer,
+} from "./playbooks/index";
 
 // --- Model configuration per domain ---
 
@@ -148,23 +132,22 @@ function composeSystemPromptInner(options: ComposeOptions): string {
   const sections: string[] = [];
 
   // Layer 0: Ground Truth Protocol (loaded FIRST — deterministic data rules)
-  if (playbooks.groundTruth) {
-    sections.push(playbooks.groundTruth);
+  const groundTruth = groundTruthPlaybook();
+  if (groundTruth) {
+    sections.push(groundTruth);
   }
 
   // Layer 0b: Global Taste (platform defaults)
-  if (playbooks.globalTaste) {
-    sections.push(playbooks.globalTaste);
-  }
+  // global-taste.md deleted in PR2 (empty placeholder — no content to inject)
 
   // Layer 1: Core Persona
-  sections.push(playbooks.persona);
+  sections.push(voicePlaybook());
 
   // Layer 2: Negotiation Intelligence
-  sections.push(playbooks.negotiation);
+  sections.push(negotiationPlaybook());
 
   // Layer 3: Domain Expertise
-  const domainPlaybook = playbooks[options.domain];
+  const domainPlaybook = options.domain === "calendar" ? dealroomGuestComposer() : null;
   if (domainPlaybook) {
     sections.push(domainPlaybook);
   }
@@ -1074,8 +1057,14 @@ export function getUtcOffsetString(tz: string): string {
 // --- Playbook metadata (for evals and debugging) ---
 
 export function getPlaybookInfo(): Record<string, { loaded: boolean; length: number }> {
+  const entries: Array<[string, string]> = [
+    ["groundTruth", groundTruthPlaybook()],
+    ["persona", voicePlaybook()],
+    ["negotiation", negotiationPlaybook()],
+    ["calendar", dealroomGuestComposer()],
+  ];
   return Object.fromEntries(
-    Object.entries(playbooks).map(([name, content]) => [
+    entries.map(([name, content]) => [
       name,
       { loaded: content.length > 0, length: content.length },
     ])

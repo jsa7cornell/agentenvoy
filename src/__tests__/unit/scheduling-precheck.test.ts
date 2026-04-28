@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import {
   schedulingPrecheck,
   type PrecheckInput,
-} from "@/lib/scheduling-precheck";
+} from "@/agent/matcher";
 
 function baseInput(overrides: Partial<PrecheckInput> = {}): PrecheckInput {
   return {

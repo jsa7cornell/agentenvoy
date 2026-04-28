@@ -12,8 +12,6 @@
  */
 import { generateObject } from "ai";
 import { z } from "zod";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { envoyModel } from "@/lib/model";
 import {
   CHAT_INTENT_VALUES,
@@ -29,25 +27,7 @@ import {
   type HostChatIntent,
 } from "@/lib/intent";
 import { recordSpan } from "@/lib/langfuse";
-
-let guestClassifierPlaybook = "";
-let hostClassifierPlaybook = "";
-try {
-  guestClassifierPlaybook = readFileSync(
-    join(process.cwd(), "src", "agent", "playbooks", "intent-classifier.md"),
-    "utf-8",
-  );
-} catch (e) {
-  console.error("Failed to load intent-classifier.md (guest):", e);
-}
-try {
-  hostClassifierPlaybook = readFileSync(
-    join(process.cwd(), "src", "agent", "playbooks", "intent-classifier-host.md"),
-    "utf-8",
-  );
-} catch (e) {
-  console.error("Failed to load intent-classifier-host.md (host):", e);
-}
+import { hostClassifierPlaybook as loadHostClassifierPlaybook } from "./playbooks/index";
 
 const CLASSIFIER_MODEL = "claude-haiku-4-5-20251001";
 const CLASSIFIER_MAX_TOKENS = 256;
@@ -164,7 +144,7 @@ async function callClassifier(
   ctx: ClassifyContext,
   role: "host" | "guest",
 ): Promise<{ block: ChatIntentBlock; rawKind: string | null; rawClarifier: string | null }> {
-  const playbook = role === "host" ? hostClassifierPlaybook : guestClassifierPlaybook;
+  const playbook = role === "host" ? loadHostClassifierPlaybook() : "";
   const schema = role === "host" ? hostChatIntentSchema : guestChatIntentSchema;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CLASSIFIER_TIMEOUT_MS);
