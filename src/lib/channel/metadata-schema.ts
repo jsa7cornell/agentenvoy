@@ -42,6 +42,20 @@ export const DelegateSpeakerSchema = z.object({
   name: z.string().optional(),
 });
 
+/**
+ * Marco-pending follow-up state. Persisted on the *next* envoy
+ * `ChannelMessage.metadata` after a multi-match-disambiguate fires
+ * (per the 2026-04-27 chat-decisioning-layer-redesign §11.3 P5 / §11.4 Q2).
+ *
+ * Single-shot: cleared after the host's next turn is consumed (or on any
+ * unparseable reply). Host-only — explicitly NOT in `GUEST_METADATA_ALLOWLIST`.
+ */
+export const MarcoPendingSchema = z.object({
+  matchedLinkIds: z.array(z.string()),
+  originatingIntent: z.enum(["create_link", "modify_link", "cancel_link"]),
+});
+export type MarcoPending = z.infer<typeof MarcoPendingSchema>;
+
 export const ChannelMessageMetadataSchema = z
   .object({
     kind: z.string().optional(),
@@ -54,6 +68,7 @@ export const ChannelMessageMetadataSchema = z
     actions: z.array(ActionCallSchema).optional(),
     actionResults: z.array(ActionResultRecordSchema).optional(),
     promptContext: PromptContextSchema.optional(),
+    marcoPending: MarcoPendingSchema.nullable().optional(),
   })
   .passthrough();
 export type ChannelMessageMetadata = z.infer<typeof ChannelMessageMetadataSchema>;

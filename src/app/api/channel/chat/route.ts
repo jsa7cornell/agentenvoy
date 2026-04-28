@@ -12,7 +12,10 @@ import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions
 import type { ActionRequest, ActionResult } from "@/agent/actions";
 import { narrateFailures, narrateTimeout, narrateFinalizeError } from "@/agent/action-narration";
 import { sanitizeHistory } from "@/lib/conversation";
-import { mergeChannelMetadata } from "@/lib/channel/metadata-schema";
+import {
+  mergeChannelMetadata,
+  parseChannelMessageMetadata,
+} from "@/lib/channel/metadata-schema";
 import type { ChannelMessageMetadata } from "@/lib/channel/metadata-schema";
 import { needsActionEmissionRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
 import {
@@ -32,7 +35,6 @@ import { computeProfileGaps } from "@/lib/profile-gaps";
 import type { CalendarEvent } from "@/lib/calendar";
 import {
   schedulingPrecheck,
-  escapeRegex,
   type PrecheckResult,
   type DeterministicCreateArgs,
 } from "@/lib/scheduling-precheck";
@@ -261,6 +263,79 @@ export async function POST(req: NextRequest) {
             data: { channelId: safeChannel.id, role: "user", content: message },
           });
 
+          // ------------------------------------------------------------
+          // Marco-pending replay (single-shot). Per the 2026-04-27
+          // chat-decisioning-layer-redesign §11.4 Q2, when the previous
+          // envoy turn fired a multi-match disambiguation, the *next*
+          // host turn is parsed against the matched link IDs BEFORE
+          // classification. Resolves Bug #5 ("new one" loop): the host
+          // reply collapses straight to a deterministic action and we
+          // clear the flag so it cannot replay forever.
+          //
+          // The flag is read off the most-recent envoy message's
+          // `metadata.marcoPending`; persistence happens later in this
+          // function when we write the disambiguation reply itself
+          // (search for `MARCO_PENDING_PERSIST_SITE`).
+          // ------------------------------------------------------------
+          const lastEnvoyForMarco = await prisma.channelMessage.findFirst({
+            where: { channelId: safeChannel.id, role: "envoy" },
+            orderBy: { createdAt: "desc" },
+            select: { id: true, metadata: true },
+          });
+          const marcoPendingState = (() => {
+            if (!lastEnvoyForMarco?.metadata) return null;
+            const parsed = parseChannelMessageMetadata(lastEnvoyForMarco.metadata);
+            return parsed.marcoPending ?? null;
+          })();
+          let marcoReplayResolved: {
+            kind: "create_link" | "modify_link" | "cancel_link";
+            linkCode: string | null;
+          } | null = null;
+          if (marcoPendingState) {
+            // Try to resolve the host's reply against the matched IDs.
+            // Heuristic: explicit linkCode mention, or position words
+            // ("first", "second", "the bike one", etc.) — keep narrow;
+            // unparseable replies fall through to the classifier and the
+            // flag is cleared regardless (single-shot).
+            const lower = message.toLowerCase();
+            const matched = marcoPendingState.matchedLinkIds.find((id) =>
+              lower.includes(id.toLowerCase()),
+            );
+            // Direct match on a link code → resolve to the originating intent.
+            if (matched) {
+              marcoReplayResolved = {
+                kind: marcoPendingState.originatingIntent,
+                linkCode: matched,
+              };
+            } else if (
+              /\b(new|another|fresh|different|new one|create|make a (new|second))\b/.test(
+                lower,
+              )
+            ) {
+              // "new one" / "create another" → defaults to create_link
+              // regardless of what originated the marco. Resolves Bug #5.
+              marcoReplayResolved = { kind: "create_link", linkCode: null };
+            }
+            // Clear the flag from the prior envoy row so it cannot replay,
+            // even if marcoReplayResolved is null (unparseable → fall
+            // through to classifier on this turn).
+            try {
+              await prisma.channelMessage.update({
+                where: { id: lastEnvoyForMarco!.id },
+                data: {
+                  metadata: mergeChannelMetadata(lastEnvoyForMarco!.metadata, {
+                    marcoPending: null,
+                  }) as Prisma.InputJsonValue,
+                },
+              });
+            } catch (e) {
+              console.warn(
+                `[channel/chat] failed to clear marcoPending flag for user ${safeUser.id}:`,
+                e,
+              );
+            }
+          }
+
           // Run classifier in parallel with the user-message persist
           // unless a quick-reply hint is present (then bypass entirely).
           let intentBlock: ChatIntentBlock;
@@ -269,7 +344,10 @@ export async function POST(req: NextRequest) {
           let rawClassifierKind: string | null = null;
           let fabricationDetected = false;
           let echoFlag = false;
-          if (hintedIntent) {
+          if (marcoReplayResolved) {
+            // Skip classifier entirely; trust the marco-pending reply.
+            intentBlock = { kind: marcoReplayResolved.kind };
+          } else if (hintedIntent) {
             intentBlock = { kind: hintedIntent };
           } else {
             // Build a lightweight context snapshot for the classifier —
@@ -307,11 +385,20 @@ export async function POST(req: NextRequest) {
             const echoResult = isEchoOfRecentEnvoy(message, recentEnvoyContents);
             echoFlag = echoResult.isEcho;
 
-            const classified = await classifyChatIntent(message, {
-              activeSessionsSummary: activeSessionsSummary || undefined,
-              priorEnvoyTurn: recentEnvoyContents[0] ?? undefined,
-              echoFlag,
-            });
+            // role: "host" is load-bearing — without it the classifier
+            // defaults to "guest", loads the wrong playbook, and emits guest
+            // intents (the root cause of Bugs #1, #2, #3 in the 2026-04-27
+            // chat-decisioning-layer-redesign). PLAYBOOK Rule 19f makes
+            // this argument mandatory via CI grep.
+            const classified = await classifyChatIntent(
+              message,
+              {
+                activeSessionsSummary: activeSessionsSummary || undefined,
+                priorEnvoyTurn: recentEnvoyContents[0] ?? undefined,
+                echoFlag,
+              },
+              "host",
+            );
             intentBlock = classified.intent;
             classifierLatencyMs = classified.latencyMs;
             classifierRetried = classified.retried;
@@ -432,9 +519,76 @@ export async function POST(req: NextRequest) {
             return;
           }
 
+          // ------------------------------------------------------------
+          // Host-side dispatch (per 2026-04-27 chat-decisioning-layer-
+          // redesign §2.2/§2.4). The host classifier emits one of seven
+          // intents; the guest short-circuits above are no-ops for host
+          // messages (host enum has no profile/rule/chitchat/unclear
+          // values) but stay in place for `hintedIntent`-driven paths.
+          // ------------------------------------------------------------
+
+          // edit_preference → keyword-heuristic stopgap routing.
+          // TODO PR4: split edit_preference at the classifier level into
+          // edit_profile / edit_rule per Open Question 4 of the proposal,
+          // and remove this heuristic. For PR1 we route message-shape:
+          //   - rule-shaped ("buffer/hours/days/am/pm/window/availability")
+          //     → rule.md
+          //   - everything else → profile.md
+          // This keeps the diff minimal while loading a host-appropriate
+          // playbook for both message kinds.
+          if (intent === "edit_preference") {
+            const lowerMessage = message.toLowerCase();
+            const isRuleShape =
+              /\b(buffer|hours?|days?|am|pm|window|availability)\b/.test(
+                lowerMessage,
+              );
+            const tier: "profile" | "rule" = isRuleShape ? "rule" : "profile";
+            const playbookRelativePath = isRuleShape
+              ? "src/agent/playbooks/rule.md"
+              : "src/agent/playbooks/profile.md";
+            try {
+              await runDispatchHandler({
+                tier,
+                playbookRelativePath,
+                userId: safeUser.id,
+                userName: user.name ?? null,
+                channelId: safeChannel.id,
+                userMessage: message,
+                userMsgPersist,
+                controller,
+                encoder,
+                emitStatus: (stage) => {
+                  emitStatus(stage);
+                },
+              });
+            } catch (e) {
+              console.error(
+                `[channel/chat] dispatch-handler edit_preference failed (tier=${tier}):`,
+                e,
+              );
+            }
+            controller.close();
+            return;
+          }
+
+          // chat → skip precheck entirely; fall straight through to the
+          // composer with a free-form host system prompt. Bug #2
+          // ("change to light mode") classifies here.
+          //
+          // query_calendar / query_event → reuse the inquire pipeline
+          // (read-only, no [ACTION] blocks). Same pattern as today's
+          // legacy "inquire" intent — set the tier flag and continue.
+          //
+          // create_link / modify_link / cancel_link → run the precheck
+          // below, which may resolve to deterministic-create / -modify /
+          // -cancel or fire multi-match-disambiguate.
+
           // Schedule + inquire both need calendar context. Continue into
           // the existing load pipeline.
-          const isInquireTier = intent === "inquire";
+          const isInquireTier =
+            intent === "inquire" ||
+            intent === "query_calendar" ||
+            intent === "query_event";
 
           // ------------------------------------------------------------
           // Deterministic scheduling precheck (PR-δ, §9.3.3).
@@ -448,15 +602,25 @@ export async function POST(req: NextRequest) {
           // ------------------------------------------------------------
           let precheckResult: PrecheckResult | null = null;
           let precheckCreateHint: string | null = null;
-          // Tracks whether the marco-disambiguate branch has begun emitting
-          // to the client. Once true, a thrown exception below cannot be
-          // recovered by falling through to Sonnet (we'd double-stream onto
-          // a half-closed response) — so we re-throw and let the outer
-          // catch surface it as a user-visible error. Pre-commit failures
-          // (Prisma blips, precheck-compute bugs) degrade gracefully.
-          // Round-2 fix on PR #83 (2026-04-27).
+          // Tracks whether the multi-match-disambiguate branch has begun
+          // emitting to the client. Once true, a thrown exception below
+          // cannot be recovered by falling through to Sonnet (we'd
+          // double-stream onto a half-closed response) — so we re-throw
+          // and let the outer catch surface it as a user-visible error.
+          // Pre-commit failures (Prisma blips, precheck-compute bugs)
+          // degrade gracefully. Round-2 fix on PR #83 (2026-04-27).
           let precheckCommittedToClient = false;
-          if (intent === "schedule") {
+          // Per the 2026-04-27 chat-decisioning-layer-redesign §2.2/§2.3,
+          // the precheck fires for the three event-shaped host intents
+          // plus the legacy "schedule" (which the guest endpoint still
+          // emits). Intent values are passed through verbatim so the
+          // matcher can branch on create-vs-modify-vs-cancel.
+          const isEventIntent =
+            intent === "create_link" ||
+            intent === "modify_link" ||
+            intent === "cancel_link" ||
+            intent === "schedule";
+          if (isEventIntent) {
             try {
               const [precheckSessions, recentTurns] = await Promise.all([
                 prisma.negotiationSession.findMany({
@@ -482,7 +646,11 @@ export async function POST(req: NextRequest) {
                 status: s.status,
               }));
               precheckResult = schedulingPrecheck({
-                classifiedIntent: "schedule",
+                classifiedIntent: intent as
+                  | "create_link"
+                  | "modify_link"
+                  | "cancel_link"
+                  | "schedule",
                 userMessage: message,
                 activeSessions: mapped,
                 recentThreadTurns: recentTurns.slice().reverse(),
@@ -496,14 +664,13 @@ export async function POST(req: NextRequest) {
                   event: "scheduling_precheck",
                   userId: safeUser.id,
                   kind: precheckResult.kind,
+                  classifiedIntent: intent,
                   reason: precheckResult.reason,
                   echoFlag: false,
                   namedGuest:
                     precheckResult.kind === "deterministic-create"
                       ? precheckResult.args.inviteeName
-                      : precheckResult.kind === "marco-disambiguate"
-                        ? precheckResult.guest
-                        : null,
+                      : null,
                   topic:
                     precheckResult.kind === "deterministic-create"
                       ? precheckResult.args.topic
@@ -512,35 +679,55 @@ export async function POST(req: NextRequest) {
                     precheckResult.kind === "deterministic-create"
                       ? precheckResult.args.duration
                       : null,
+                  multiMatchCount:
+                    precheckResult.kind === "multi-match-disambiguate"
+                      ? precheckResult.matchedLinkIds.length
+                      : null,
+                  originatingIntent:
+                    precheckResult.kind === "multi-match-disambiguate"
+                      ? precheckResult.originatingIntent
+                      : null,
                 }),
               );
 
-              // Marco-disambiguate: skip Sonnet entirely, emit the clarifier
-              // question directly. Next user turn will arrive with a clear
-              // priorEnvoyTurn that the classifier can use.
-              if (precheckResult.kind === "marco-disambiguate") {
+              // multi-match-disambiguate: skip Sonnet entirely, emit the
+              // clarifier question directly. Persist `marcoPending` on the
+              // envoy row so the next host turn replays into a deterministic
+              // action (Bug #5 fix). MARCO_PENDING_PERSIST_SITE.
+              if (precheckResult.kind === "multi-match-disambiguate") {
                 await userMsgPersist;
-                const { guest, existingLinkCode } = precheckResult;
-                const topicHint = (() => {
-                  // Best-effort topic pull for the message — reuse the
-                  // existing-link's topic when available, else generic.
-                  const hit = precheckSessions.find(
-                    (s) =>
-                      s.link?.inviteeName &&
-                      guest &&
-                      s.link.inviteeName.toLowerCase() === guest.toLowerCase() &&
-                      s.link?.code === existingLinkCode,
-                  );
-                  return hit?.title
-                    ? hit.title.replace(new RegExp(`\\b${escapeRegex(guest)}\\b`, "gi"), "").replace(/\s*\+\s*/g, " ").trim().toLowerCase() || "meeting"
-                    : "meeting";
-                })();
-                const text = `I already have a ${guest} ${topicHint} link (${existingLinkCode}) — want a second one, or should I tweak that one?`;
+                const matchedSessions = precheckResult.matchedSessions;
+                const { originatingIntent, matchedLinkIds } = precheckResult;
+                const guestName = matchedSessions[0]?.guest ?? "that person";
+                const list = matchedSessions
+                  .map(
+                    (m) =>
+                      `- "${m.topic}" (${m.linkCode})`,
+                  )
+                  .join("\n");
+                const verb =
+                  originatingIntent === "modify_link"
+                    ? "change"
+                    : originatingIntent === "cancel_link"
+                      ? "cancel"
+                      : "create alongside";
+                const closer =
+                  originatingIntent === "create_link"
+                    ? "Or want a new one anyway?"
+                    : "Which one?";
+                const text =
+                  `I see ${matchedSessions.length} ${guestName} links — which one to ${verb}?\n${list}\n\n${closer}`;
                 await prisma.channelMessage.create({
                   data: {
                     channelId: safeChannel.id,
                     role: "envoy",
                     content: text,
+                    metadata: {
+                      marcoPending: {
+                        matchedLinkIds,
+                        originatingIntent,
+                      },
+                    } as Prisma.InputJsonValue,
                   },
                 });
                 precheckCommittedToClient = true;
@@ -562,6 +749,15 @@ export async function POST(req: NextRequest) {
               if (precheckResult.kind === "deterministic-create") {
                 precheckCreateHint = buildDeterministicCreateHint(precheckResult.args);
               }
+              // deterministic-modify / deterministic-cancel — for PR1 we
+              // fall through to Sonnet without an injected hint. The
+              // composer has full session/link context already; the
+              // matcher's job here was deciding "yes this is a real
+              // modify/cancel against a single existing link" (vs the
+              // multi-match case that fired marco above). PR3 may add
+              // a -modify / -cancel injected-hint path when the dealroom
+              // composer split lands and we want deterministic action
+              // emission for these too.
             } catch (precheckErr) {
               if (precheckCommittedToClient) {
                 throw precheckErr;
@@ -934,28 +1130,62 @@ export async function POST(req: NextRequest) {
                   `[channel/chat] inquire tier emitted ${parsed.length} action block(s); stripping. userId=${safeUser.id}`,
                 );
               }
-              // Silent-drift telemetry (Round-2 fix on PR #83, 2026-04-27).
-              // We injected a deterministic create_link hint, but Sonnet
-              // emerged with no create_link action — likely Sonnet chose to
-              // clarify instead. Per John's call: clarifying is acceptable
-              // (the precheck context naturally re-runs next turn with the
-              // host's reply). We only need the rate to be observable.
+              // Silent-drift telemetry (Round-2 fix on PR #83, 2026-04-27;
+              // extended for PR1 of the chat-decisioning-layer-redesign).
+              // The matcher has decided this turn is a deterministic
+              // create / modify / cancel against an existing entity, but
+              // Sonnet emerged with no matching action — likely Sonnet
+              // chose to clarify instead. Per §11.5 P5 the event keeps
+              // firing across the new intent split with the same name,
+              // and adds an `originatingIntent` field while keeping the
+              // old field shapes during the 7-day grace period.
               if (
-                precheckCreateHint &&
-                precheckResult?.kind === "deterministic-create"
+                precheckResult?.kind === "deterministic-create" ||
+                precheckResult?.kind === "deterministic-modify" ||
+                precheckResult?.kind === "deterministic-cancel"
               ) {
-                const emittedCreateLink = parsed.some(
-                  (a) => a.action === "create_link",
+                const expectedAction =
+                  precheckResult.kind === "deterministic-create"
+                    ? "create_link"
+                    : precheckResult.kind === "deterministic-modify"
+                      ? "update_link"
+                      : "cancel";
+                const emittedExpected = parsed.some(
+                  (a) => a.action === expectedAction,
                 );
-                if (!emittedCreateLink) {
+                if (!emittedExpected) {
+                  const originatingIntent =
+                    precheckResult.kind === "deterministic-create"
+                      ? "create_link"
+                      : precheckResult.kind === "deterministic-modify"
+                        ? "modify_link"
+                        : "cancel_link";
                   console.log(
                     JSON.stringify({
                       event: "precheck_silent_drift",
                       userId: safeUser.id,
-                      inviteeName: precheckResult.args.inviteeName,
-                      topic: precheckResult.args.topic,
-                      duration: precheckResult.args.duration,
-                      dateRangeKeyword: precheckResult.args.dateRangeKeyword,
+                      // New PR1 field — `originatingIntent` lets the
+                      // dashboard split create vs modify vs cancel rates.
+                      originatingIntent,
+                      // Old fields kept for 7-day grace per §11.5 P5;
+                      // only populated when the precheck was a create
+                      // (-modify / -cancel never carried these).
+                      inviteeName:
+                        precheckResult.kind === "deterministic-create"
+                          ? precheckResult.args.inviteeName
+                          : null,
+                      topic:
+                        precheckResult.kind === "deterministic-create"
+                          ? precheckResult.args.topic
+                          : null,
+                      duration:
+                        precheckResult.kind === "deterministic-create"
+                          ? precheckResult.args.duration
+                          : null,
+                      dateRangeKeyword:
+                        precheckResult.kind === "deterministic-create"
+                          ? precheckResult.args.dateRangeKeyword
+                          : null,
                       emittedActions: parsed.map((a) => a.action),
                       responseSample: text.slice(0, 200),
                     }),

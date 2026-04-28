@@ -97,10 +97,14 @@ describe("classifyChatIntent — role plumbing", () => {
     expect(sentArgs.system).not.toContain("# Chat intent classifier\n\nYou classify the host's turn-level intent into one of six tiers.");
   });
 
-  it("role:host accepts each of the 5 host intents and returns matching block", async () => {
+  it("role:host accepts each of the 7 host intents and returns matching block", async () => {
+    // PR1 (chat-decisioning-layer-redesign) split create_link → create_link /
+    // modify_link / cancel_link; the schema now has 7 closed values.
     const hostIntents = [
       "edit_preference",
       "create_link",
+      "modify_link",
+      "cancel_link",
       "query_calendar",
       "query_event",
       "chat",
@@ -112,6 +116,63 @@ describe("classifyChatIntent — role plumbing", () => {
       expect(result.intent).toEqual({ kind });
       expect(result.rawKind).toBe(kind);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // PR1 — modify_link / cancel_link discrimination (proposal §10 Bug #2/#3).
+  // The Haiku layer is the one that decides between create / modify / cancel
+  // based on the verb. Here we mock the Haiku response and verify the
+  // classifier returns the value verbatim — no silent reshaping.
+  // -------------------------------------------------------------------------
+
+  it("role:host returns modify_link verbatim when Haiku emits it", async () => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: { kind: "modify_link" },
+    });
+
+    const result = await classifyChatIntent(
+      "shift the bike ride to Friday",
+      {},
+      "host",
+    );
+
+    expect(result.intent).toEqual({ kind: "modify_link" });
+    expect(result.rawKind).toBe("modify_link");
+    expect(result.fabricationDetected).toBe(false);
+  });
+
+  it("role:host returns cancel_link verbatim when Haiku emits it", async () => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: { kind: "cancel_link" },
+    });
+
+    const result = await classifyChatIntent(
+      "cancel my Sarah link",
+      {},
+      "host",
+    );
+
+    expect(result.intent).toEqual({ kind: "cancel_link" });
+    expect(result.rawKind).toBe("cancel_link");
+    expect(result.fabricationDetected).toBe(false);
+  });
+
+  it("role:host returns chat for display-settings turns (Bug #2 — 'change to light mode')", async () => {
+    // Pre-PR1 the host classifier (operating on the guest schema) emitted
+    // `schedule` here because "change" looked schedule-shaped to a
+    // create-only enum. With the host-side enum + per-intent playbook, the
+    // composer instructs Haiku to emit `chat` for app-chrome requests.
+    generateObjectMock.mockResolvedValueOnce({ object: { kind: "chat" } });
+
+    const result = await classifyChatIntent(
+      "change to light mode",
+      {},
+      "host",
+    );
+
+    expect(result.intent.kind).toBe("chat");
+    expect(result.intent.clarifier).toBeUndefined();
+    expect(result.fabricationDetected).toBe(false);
   });
 
   it("role:host skips fabrication detection (no clarifier set when LLM returns chat)", async () => {

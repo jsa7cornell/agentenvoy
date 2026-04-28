@@ -27,7 +27,8 @@ export type PresetName =
   | "john-bob-quarterly"
   | "empty-new-host"
   | "host-with-named-links"
-  | "host-general-only";
+  | "host-general-only"
+  | "host-katie-bike-ride";
 
 export interface Fixture {
   host: string;
@@ -35,6 +36,14 @@ export interface Fixture {
   priorEnvoyTurn?: string;
   /** Short recap emitted in failure rows. */
   recap: string;
+  /**
+   * When true, the bench runner invokes `classifyChatIntent(msg, ctx, "host")`
+   * instead of the default guest path. Use for scenarios that probe the host
+   * intent enum (create_link / modify_link / cancel_link / edit_preference /
+   * query_calendar / query_event / chat) per the 2026-04-27
+   * chat-decisioning-layer-redesign PR1.
+   */
+  isHost?: boolean;
 }
 
 const PRESETS: Record<PresetName, Fixture> = {
@@ -80,6 +89,20 @@ const PRESETS: Record<PresetName, Fixture> = {
     activeSessionsSummary: "",
     priorEnvoyTurn: undefined,
     recap: "Host has only the default General link — no office-hours rules yet.",
+  },
+  // Bug #4 regression fixture (2026-04-27 chat-decisioning-layer-redesign).
+  // Pre-PR1: "2 hour bike ride with katie" with an active Katie link routed to
+  // marco-disambiguate. Post-PR1: single match under create_link defaults to
+  // deterministic-create (R1). Use with `classifyChatIntent(msg, ctx, "host")`.
+  "host-katie-bike-ride": {
+    host: "John Anderson",
+    activeSessionsSummary: [
+      "- John + Katie — guest: Katie — status: active — link: katielink — topic: catch up — note: Waiting for Katie",
+    ].join("\n"),
+    priorEnvoyTurn: undefined,
+    recap:
+      "John has a single active Katie catch-up session; a new 'bike ride with Katie' should classify as create_link (R1 default-to-create).",
+    isHost: true,
   },
 };
 

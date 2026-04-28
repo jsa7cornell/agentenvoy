@@ -3,20 +3,21 @@
  * PR-δ (proposal 2026-04-22 §9.3.3) inserts ahead of the Sonnet
  * scheduling pass.
  *
- * This suite covers the end-to-end decision shape the route handler
- * consumes — the Jon-case round-trip from a realistic activeSessions
- * snapshot + recent thread turns to the three PrecheckResult branches.
- * The route-level wiring (channel/chat/route.ts) is validated by
- * typecheck + unit tests; a full handler integration test would require
- * NextAuth/Prisma/Anthropic mocks that are out of scope for this PR.
+ * Updated 2026-04-27 for chat-decisioning-layer-redesign PR1 (§2.3 R1):
+ * single match defaults to `deterministic-create`; multi-match (>= 2) is the
+ * only trigger for `multi-match-disambiguate`. The legacy `"schedule"` intent
+ * is still accepted at the precheck boundary (guest call-site) and is
+ * handled identically to `create_link`.
  */
 
 import { describe, it, expect } from "vitest";
 import { schedulingPrecheck } from "@/lib/scheduling-precheck";
 
 describe("scheduling-precheck integration — Jon-case end-to-end", () => {
-  it("maps the proposal's verbatim Jon utterance with existing active link to marco-disambiguate", () => {
+  it("maps the proposal's verbatim Jon utterance with single existing active link to deterministic-create (R1 default-to-create)", () => {
     // Snapshot modeled on feedback report cmo9n0t5u (§1).
+    // Pre-PR1 this routed to marco-disambiguate; under R1 a single match
+    // defaults to a fresh create (handleCreateLink is reversible pre-confirm).
     const activeSessions = [
       {
         id: "cmo9jxs1w-session",
@@ -47,19 +48,19 @@ describe("scheduling-precheck integration — Jon-case end-to-end", () => {
       echoFlag: false,
     });
 
-    expect(result.kind).toBe("marco-disambiguate");
-    if (result.kind === "marco-disambiguate") {
-      expect(result.existingLinkCode).toBe("qx4bmg");
-      expect(result.guest).toBe("Jon");
+    expect(result.kind).toBe("deterministic-create");
+    if (result.kind === "deterministic-create") {
+      expect(result.args.inviteeName).toBe("Jon");
+      expect(result.args.topic).toBe("bike ride");
+      expect(result.args.duration).toBe(180);
     }
   });
 
-  it("routes to marco-disambiguate when the Jon link is 'agreed' (Round-2 fix)", () => {
-    // Per John's 2026-04-27 Round-2 call on PR #83: an "agreed" session for
-    // the same guest must route to marco-disambiguate so the host
-    // explicitly chooses (new link vs reuse) rather than silently spawning
-    // a duplicate. Reschedule-intent ("just move it") is a follow-up
-    // (WISHLIST §1p), not in PR #83 scope.
+  it("routes to deterministic-create when the Jon link is 'agreed' single-match (R1 default-to-create)", () => {
+    // Pre-PR1 (PR #83 Round-2) this routed to marco-disambiguate even for a
+    // single agreed-status match. After the chat-decisioning-layer-redesign,
+    // single-match defaults to create under R1; multi-match is the only
+    // marco trigger now.
     const activeSessions = [
       {
         id: "cmo9jxs1w-session",
@@ -77,10 +78,43 @@ describe("scheduling-precheck integration — Jon-case end-to-end", () => {
       echoFlag: false,
     });
 
-    expect(result.kind).toBe("marco-disambiguate");
-    if (result.kind === "marco-disambiguate") {
-      expect(result.existingLinkCode).toBe("qx4bmg");
-      expect(result.guest).toBe("Jon");
+    expect(result.kind).toBe("deterministic-create");
+    if (result.kind === "deterministic-create") {
+      expect(result.args.inviteeName).toBe("Jon");
+      expect(result.args.topic).toBe("bike ride");
+      expect(result.args.duration).toBe(180);
+    }
+  });
+
+  it("routes to multi-match-disambiguate when there are TWO active Jon links (>= 2 only)", () => {
+    const activeSessions = [
+      {
+        id: "sess_a",
+        title: "John + Jon (1:1)",
+        guestName: "Jon",
+        linkCode: "code_a",
+        status: "active",
+      },
+      {
+        id: "sess_b",
+        title: "John + Jon (bike ride)",
+        guestName: "Jon",
+        linkCode: "code_b",
+        status: "agreed",
+      },
+    ];
+    const result = schedulingPrecheck({
+      classifiedIntent: "schedule",
+      userMessage: "Set up a 3-hour bike ride with Jon for next week",
+      activeSessions,
+      recentThreadTurns: [],
+      echoFlag: false,
+    });
+
+    expect(result.kind).toBe("multi-match-disambiguate");
+    if (result.kind === "multi-match-disambiguate") {
+      expect(result.matchedLinkIds.sort()).toEqual(["code_a", "code_b"]);
+      expect(result.originatingIntent).toBe("create_link");
     }
   });
 
@@ -128,7 +162,9 @@ describe("scheduling-precheck integration — Jon-case end-to-end", () => {
       echoFlag: true,
     });
 
-    expect(result.kind).toBe("marco-disambiguate");
+    // Single match → deterministic-create under R1; reason still carries
+    // the echo suffix.
+    expect(result.kind).toBe("deterministic-create");
     expect(result.reason).toContain("echo of prior envoy detected");
   });
 });

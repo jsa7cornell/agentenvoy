@@ -26,7 +26,12 @@
 
 import { describe, it, expect } from "vitest";
 import { classifyChatIntent } from "@/agent/intent-classifier";
-import { CHAT_INTENT_VALUES, type ChatIntent } from "@/lib/intent";
+import {
+  CHAT_INTENT_VALUES,
+  HOST_CHAT_INTENT_VALUES,
+  type ChatIntent,
+  type HostChatIntent,
+} from "@/lib/intent";
 
 type Case = {
   message: string;
@@ -151,7 +156,9 @@ describe.skipIf(!hasGatewayKey)(
         // semantic misses from rate-limit fallbacks by including both.
         const results: Array<{ c: Case; actual: ChatIntent; retried: boolean }> = [];
         for (const c of CASES) {
-          const { intent, retried } = await classifyChatIntent(c.message);
+          // Explicit "guest" per PLAYBOOK Rule 19f — all classifyChatIntent
+          // call sites must pass role explicitly (CI grep enforces this).
+          const { intent, retried } = await classifyChatIntent(c.message, {}, "guest");
           results.push({ c, actual: intent.kind, retried });
           await new Promise((r) => setTimeout(r, 2000));
         }
@@ -228,6 +235,196 @@ describe("chat intent classification regression — suite smoke", () => {
       expect(typeof c.message).toBe("string");
       expect(c.message.length).toBeGreaterThan(0);
       expect(CHAT_INTENT_VALUES).toContain(c.expected);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Host-side classifier — chat-decisioning-layer-redesign PR1.
+//
+// Smaller corpus (10 cases — R6 waived per the PR1 plan) hitting each of
+// the 7 host intents with at least one example, plus the three create /
+// modify / cancel discriminators surfaced as the primary fix in the
+// proposal §10 prod-bug catalog.
+// ---------------------------------------------------------------------------
+
+type HostCase = {
+  message: string;
+  expected: HostChatIntent;
+  notes?: string;
+};
+
+const HOST_CASES: HostCase[] = [
+  // create_link (3) — including Bug #1 + Bug #4
+  {
+    message: "create office hours link - tuesdays from 9am-1pm",
+    expected: "create_link",
+    notes: "Bug #1 — was misclassified as schedule pre-PR1",
+  },
+  {
+    message: "2 hour bike ride with katie",
+    expected: "create_link",
+    notes: "Bug #4 — must default to create even with active Katie link",
+  },
+  {
+    message: "make a 30 min link for Sarah",
+    expected: "create_link",
+  },
+
+  // modify_link (2)
+  {
+    message: "shift the bike ride to Friday",
+    expected: "modify_link",
+    notes: "modification verb targeting existing thing",
+  },
+  {
+    message: "change the Sarah link to 45 min",
+    expected: "modify_link",
+  },
+
+  // cancel_link (1)
+  {
+    message: "cancel my Sarah link",
+    expected: "cancel_link",
+  },
+
+  // edit_preference (1)
+  {
+    message: "make my default 30 min",
+    expected: "edit_preference",
+  },
+
+  // query_calendar (1)
+  {
+    message: "what's on my calendar tomorrow?",
+    expected: "query_calendar",
+  },
+
+  // query_event (1)
+  {
+    message: "when is my Sarah call?",
+    expected: "query_event",
+  },
+
+  // chat (1) — Bug #2
+  {
+    message: "change to light mode",
+    expected: "chat",
+    notes: "Bug #2 — display-settings request must classify as chat, not modify_link",
+  },
+];
+
+describe.skipIf(!hasGatewayKey)(
+  "host chat intent classification (PR1 — chat-decisioning-layer-redesign)",
+  () => {
+    it("covers each of the 7 host intents at least once across 10 cases", () => {
+      expect(HOST_CASES.length).toBeGreaterThanOrEqual(10);
+      const seen = new Set(HOST_CASES.map((c) => c.expected));
+      for (const v of HOST_CHAT_INTENT_VALUES) {
+        expect(seen.has(v), `missing host intent: ${v}`).toBe(true);
+      }
+    });
+
+    it(
+      "classifies all host cases with ≥ 80% exact-match accuracy and zero create↔chat misses (Bug #2 invariant)",
+      async () => {
+        // Same throttle pattern as the guest suite — sequential + 2s gap.
+        const results: Array<{
+          c: HostCase;
+          actual: HostChatIntent | string;
+          retried: boolean;
+        }> = [];
+        for (const c of HOST_CASES) {
+          const { intent, retried } = await classifyChatIntent(
+            c.message,
+            {},
+            "host",
+          );
+          results.push({ c, actual: intent.kind, retried });
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+
+        const failures: Array<{
+          message: string;
+          expected: HostChatIntent;
+          actual: string;
+          retried: boolean;
+          notes?: string;
+        }> = [];
+        let correct = 0;
+        let retriedCount = 0;
+        const createChatMisses: typeof failures = [];
+
+        for (const { c, actual, retried } of results) {
+          if (retried) retriedCount++;
+          if (actual === c.expected) correct++;
+          else
+            failures.push({
+              message: c.message,
+              expected: c.expected,
+              actual,
+              retried,
+              notes: c.notes,
+            });
+
+          // Bug #2 invariant: a `chat` turn must NEVER classify as a
+          // create/modify/cancel — those would route into the precheck
+          // and potentially modify state for an app-chrome request.
+          const isCreateChatMiss =
+            (c.expected === "chat" &&
+              (actual === "create_link" ||
+                actual === "modify_link" ||
+                actual === "cancel_link")) ||
+            (c.expected === "create_link" && actual === "chat");
+          if (isCreateChatMiss) {
+            createChatMisses.push({
+              message: c.message,
+              expected: c.expected,
+              actual,
+              retried,
+              notes: c.notes,
+            });
+          }
+        }
+
+        const accuracy = correct / HOST_CASES.length;
+        const report = [
+          `accuracy=${(accuracy * 100).toFixed(1)}% (${correct}/${HOST_CASES.length})`,
+          `createChatMisses=${createChatMisses.length}`,
+          `retriedCount=${retriedCount}`,
+          failures.length
+            ? `failures:\n${failures
+                .map(
+                  (f) =>
+                    `  - "${f.message}" expected=${f.expected} actual=${f.actual}${f.retried ? " [retried]" : ""}${f.notes ? ` (${f.notes})` : ""}`,
+                )
+                .join("\n")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        expect(
+          createChatMisses,
+          `Bug #2 invariant violated\n${report}`,
+        ).toHaveLength(0);
+        expect(
+          accuracy,
+          `host accuracy below 80% threshold\n${report}`,
+        ).toBeGreaterThanOrEqual(0.8);
+      },
+      120_000,
+    );
+  },
+);
+
+// Always-on smoke for the host corpus shape.
+describe("host chat intent classification — suite smoke", () => {
+  it("HOST_CASES shape is well-formed and references known host intents", () => {
+    for (const c of HOST_CASES) {
+      expect(typeof c.message).toBe("string");
+      expect(c.message.length).toBeGreaterThan(0);
+      expect(HOST_CHAT_INTENT_VALUES).toContain(c.expected);
     }
   });
 });

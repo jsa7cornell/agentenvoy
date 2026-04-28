@@ -21,6 +21,11 @@ import {
   validateChatIntent,
   type ChatIntent,
   type ChatIntentBlock,
+  // Source of truth for the 7-value host intent enum (closed set per
+  // PLAYBOOK Rule 19d). `hostChatIntentSchema` below picks values up via
+  // `z.enum(HOST_CHAT_INTENT_VALUES)`, so adding a host intent in
+  // `lib/intent.ts` automatically extends the classifier surface — no
+  // edits needed here.
   type HostChatIntent,
 } from "@/lib/intent";
 import { recordSpan } from "@/lib/langfuse";
