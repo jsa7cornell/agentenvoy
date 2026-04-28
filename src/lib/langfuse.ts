@@ -12,7 +12,7 @@
  * Why this exists:
  *   Provides ad-hoc trace inspection during prompt iteration. NOT a
  *   replacement for the Promptfoo CI eval (that's regression-catching;
- *   this is interactive debugging). See refactor-package-2026-04-25/
+ *   this is interactive debugging). See archive/refactor-package-2026-04-25/
  *   CODEBASE-CLEANUP.md item 9 for the Promptfoo/Langfuse split rationale.
  *
  * Production-safety design:

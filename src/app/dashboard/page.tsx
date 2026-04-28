@@ -10,7 +10,7 @@ import { validateReturnTo } from "@/lib/onboarding/return-to";
 // narrower than calendar). At a 1440px desktop viewport the spec ratio
 // puts chat at ~654px; we round to 660 as the resizable default. Min/max
 // are unchanged so users who preferred the wider chat from v1 can still
-// drag back. See refactor-package-2026-04-25/mockups/desktop-v2.html
+// drag back. See mockups/desktop-v2.html
 // .home-body / .chat-pane.
 const CHAT_MIN = 400;
 const CHAT_MAX = 860;

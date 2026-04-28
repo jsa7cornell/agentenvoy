@@ -9,7 +9,7 @@
  *
  * Vocabulary: this component renders an **Office Hours** confirmation
  * (capitalized — feature name). The lowercase phrase "office hours" only
- * appears inside the override-semantics helper sentence per SPEC-2.0
+ * appears inside the override-semantics helper sentence per SPEC
  * §3.4.2 step 5, which describes the *behavior* in plain English.
  *
  * "Business hours" is a separate, unrelated concept (`businessHoursStart`
@@ -284,7 +284,7 @@ export function RuleFormFields({ value, onChange, disabled }: RuleFormFieldsProp
         </div>
       </div>
 
-      {/* Override-semantics helper text — preserved verbatim from SPEC-2.0
+      {/* Override-semantics helper text — preserved verbatim from SPEC
           §3.4.2 step 5. The lowercase "office hours" inside this sentence
           describes the *feature behavior* in plain English; surrounding
           product copy capitalizes Office Hours as the feature name. */}

@@ -64,7 +64,7 @@ interface ChannelMsg {
  * Home greeting — switches on a server-resolved welcome-variant
  * (`/api/me/scheduling-defaults` returns `welcomeVariant`).
  *
- * Variants (state matrix per SPEC-2.0 §3.3):
+ * Variants (state matrix per SPEC §3.3):
  *
  *   - "first-run"          — true new host. Full 3-bubble greeting with
  *                            seeded-posture readback + 3 forward chips.
