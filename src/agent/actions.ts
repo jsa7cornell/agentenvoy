@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
-import type { AvailabilityRule } from "@/lib/availability-rules";
+import type { AvailabilityPreference } from "@/lib/availability-rules";
 import { normalizeLinkRules } from "@/lib/scoring";
 import {
   deriveLegacy,
@@ -1278,7 +1278,7 @@ async function handleUpdateKnowledge(
     if (currentLocation !== undefined) {
       // Location is now stored as an availability rule with action: "location".
       // null clears the active location rule(s); object upserts a new one.
-      const existingRules = (newExplicit.structuredRules as AvailabilityRule[] | undefined) ?? [];
+      const existingRules = (newExplicit.structuredRules as AvailabilityPreference[] | undefined) ?? [];
       if (currentLocation === null) {
         // Remove any active location rules
         const filtered = existingRules.filter(
@@ -1292,7 +1292,7 @@ async function handleUpdateKnowledge(
             ? ({ ...r, status: "paused" as const })
             : r
         );
-        const newRule: AvailabilityRule = {
+        const newRule: AvailabilityPreference = {
           id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           originalText: currentLocation.until
             ? `Currently in ${currentLocation.label} until ${currentLocation.until}`
@@ -2282,7 +2282,7 @@ async function handleUpdateBusinessHours(
 /**
  * Add, update, or remove a structured availability rule. Rules live at
  * `preferences.explicit.structuredRules` — see src/lib/availability-rules.ts
- * for the AvailabilityRule shape and compileStructuredRules pathway.
+ * for the AvailabilityPreference shape and compileStructuredRules pathway.
  *
  * This handler does not recompile rules itself — that happens on the next
  * availability query via the normal scoring path. It does call
@@ -2309,7 +2309,7 @@ function normalizeNameForGuard(name: string): string {
 }
 
 function collectNormalizedLinkNames(
-  existing: AvailabilityRule[],
+  existing: AvailabilityPreference[],
   generalLinkName: string | undefined,
   opts: { exceptRuleId?: string; includeGeneral?: boolean } = {},
 ): Set<string> {
@@ -2342,7 +2342,7 @@ async function handleUpdateAvailabilityRule(
     | "rename_general"
     | undefined;
   const id = typeof params.id === "string" ? params.id : undefined;
-  const ruleInput = params.rule as Partial<AvailabilityRule> | undefined;
+  const ruleInput = params.rule as Partial<AvailabilityPreference> | undefined;
 
   if (
     operation !== "add" &&
@@ -2366,11 +2366,11 @@ async function handleUpdateAvailabilityRule(
   const prefs: UserPreferences = (user?.preferences as UserPreferences | null) ?? {};
   const explicit = { ...(prefs.explicit ?? {}) };
   const existing =
-    ((explicit as Record<string, unknown>).structuredRules as AvailabilityRule[] | undefined) ?? [];
+    ((explicit as Record<string, unknown>).structuredRules as AvailabilityPreference[] | undefined) ?? [];
   const currentGeneralName =
     typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined;
 
-  let nextRules: AvailabilityRule[] = existing;
+  let nextRules: AvailabilityPreference[] = existing;
   let summary: string;
   let linkUrl: string | undefined;
   let addedRuleId: string | undefined;
@@ -2401,13 +2401,13 @@ async function handleUpdateAvailabilityRule(
   } else if (operation === "add") {
     const newId = `rule_${generateCode(8)}`;
     const nowIso = new Date().toISOString();
-    const action = (ruleInput!.action as AvailabilityRule["action"]) ?? "block";
+    const action = (ruleInput!.action as AvailabilityPreference["action"]) ?? "block";
 
     // Office-hours-specific validation + population (R1, R4 folds).
-    let officeHours: AvailabilityRule["officeHours"] | undefined;
+    let officeHours: AvailabilityPreference["officeHours"] | undefined;
     if (action === "office_hours") {
       const ohInput =
-        (ruleInput!.officeHours as Partial<NonNullable<AvailabilityRule["officeHours"]>> | undefined) ??
+        (ruleInput!.officeHours as Partial<NonNullable<AvailabilityPreference["officeHours"]>> | undefined) ??
         {};
       const nameRaw = typeof ohInput.name === "string" ? ohInput.name.trim() : "";
       if (!nameRaw) {
@@ -2442,10 +2442,10 @@ async function handleUpdateAvailabilityRule(
       linkUrl = buildOfficeHoursUrl(user.meetSlug, linkCode);
     }
 
-    const rule: AvailabilityRule = {
+    const rule: AvailabilityPreference = {
       id: newId,
       originalText: String(ruleInput!.originalText ?? "").trim() || "(no description)",
-      type: (ruleInput!.type as AvailabilityRule["type"]) ?? "recurring",
+      type: (ruleInput!.type as AvailabilityPreference["type"]) ?? "recurring",
       action,
       timeStart: ruleInput!.timeStart,
       timeEnd: ruleInput!.timeEnd,
@@ -2496,11 +2496,11 @@ async function handleUpdateAvailabilityRule(
     const mergedOH = ruleInput!.officeHours
       ? { ...(prior.officeHours ?? {}), ...(ruleInput!.officeHours as object) }
       : prior.officeHours;
-    const merged: AvailabilityRule = {
+    const merged: AvailabilityPreference = {
       ...prior,
       ...ruleInput,
       id: prior.id,
-      officeHours: mergedOH as AvailabilityRule["officeHours"],
+      officeHours: mergedOH as AvailabilityPreference["officeHours"],
     };
     nextRules = [...existing];
     nextRules[idx] = merged;

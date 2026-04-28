@@ -8,7 +8,7 @@ import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";
 import type { ScoredSlot, LinkRules } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
-import { compileOfficeHoursLinks, type AvailabilityRule } from "@/lib/availability-rules";
+import { compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
 import { applyOfficeHoursWindow } from "@/lib/office-hours";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
@@ -122,11 +122,11 @@ export async function POST(req: NextRequest) {
   // this visitor. Each visit creates a new session (primary-link semantics).
   // Runs BEFORE the standard NegotiationLink lookup so office-hours codes
   // don't collide with contextual link codes.
-  let officeHoursRule: AvailabilityRule | null = null;
+  let officeHoursRule: AvailabilityPreference | null = null;
   if (code) {
     const prefsRaw = (user.preferences as Record<string, unknown>) || {};
     const explicit = (prefsRaw.explicit as Record<string, unknown>) || {};
-    const rules = (explicit.structuredRules as AvailabilityRule[] | undefined) || [];
+    const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
     const match = rules.find(
       (r) => r.action === "office_hours" && r.officeHours?.linkCode === code,
     );

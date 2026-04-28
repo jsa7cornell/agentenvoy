@@ -22,7 +22,7 @@ import {
   nextPhase,
   PhaseResult,
 } from "@/lib/onboarding-machine";
-import type { AvailabilityRule } from "@/lib/availability-rules";
+import type { AvailabilityPreference } from "@/lib/availability-rules";
 import { safeTimezone, getUserTimezone } from "@/lib/timezone";
 import { generateOnboardingCalendarRead } from "@/lib/calendar-read";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
@@ -49,7 +49,7 @@ interface UserPreferences {
     videoProvider?: string;
     zoomLink?: string;
     schedulingPosture?: string;
-    structuredRules?: AvailabilityRule[];
+    structuredRules?: AvailabilityPreference[];
     [key: string]: unknown;
   };
   [key: string]: unknown;
@@ -343,7 +343,7 @@ export async function POST(req: NextRequest) {
       const buffer = parseInt(response || "0", 10);
       if (buffer > 0) {
         const freshPrefs = await getFreshPrefs(user.id);
-        const bufferRule: AvailabilityRule = {
+        const bufferRule: AvailabilityPreference = {
           id: `rule_onboard_buffer_${Date.now()}`,
           originalText: `buffer ${buffer} min after all meetings`,
           type: "ongoing",
@@ -354,7 +354,7 @@ export async function POST(req: NextRequest) {
           priority: 3,
           createdAt: new Date().toISOString(),
         };
-        const existingRules = (freshPrefs.explicit.structuredRules as AvailabilityRule[]) ?? [];
+        const existingRules = (freshPrefs.explicit.structuredRules as AvailabilityPreference[]) ?? [];
         await updatePrefs(user.id, freshPrefs.prefs, freshPrefs.explicit, {
           structuredRules: [...existingRules, bufferRule],
         });

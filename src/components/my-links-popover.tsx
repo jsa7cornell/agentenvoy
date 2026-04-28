@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import type { AvailabilityRule } from "@/lib/availability-rules";
+import type { AvailabilityPreference } from "@/lib/availability-rules";
 import { getOfficeHoursDisplayName } from "@/lib/availability-rules";
 
 type LinkRow = {
@@ -48,7 +48,7 @@ export function MyLinksPopover() {
           name: (data.generalLinkName as string) || "General",
           url: `${origin}/meet/${slug}`,
         });
-        const structured = (data.structuredRules as AvailabilityRule[]) ?? [];
+        const structured = (data.structuredRules as AvailabilityPreference[]) ?? [];
         for (const r of structured) {
           if (r.action !== "office_hours" || r.status !== "active" || !r.officeHours) continue;
           const oh = r.officeHours;

@@ -26,7 +26,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { AvailabilityRule } from "@/lib/availability-rules";
+import type { AvailabilityPreference } from "@/lib/availability-rules";
 import { getOfficeHoursDisplayName } from "@/lib/availability-rules";
 import {
   classifySession,
@@ -99,7 +99,7 @@ function format12h(hhmm: string | undefined): string {
   return m === 0 ? `${h12}${suffix}` : `${h12}:${String(m).padStart(2, "0")}${suffix}`;
 }
 
-function buildOfficeHoursSub(rule: AvailabilityRule): string {
+function buildOfficeHoursSub(rule: AvailabilityPreference): string {
   const oh = rule.officeHours;
   if (!oh) return "Office Hours";
   const days = formatDayList(rule.daysOfWeek);
@@ -173,7 +173,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
             icon: "🔗",
           });
           const structured =
-            (data.structuredRules as AvailabilityRule[]) ?? [];
+            (data.structuredRules as AvailabilityPreference[]) ?? [];
           for (const r of structured) {
             if (r.action !== "office_hours" || r.status !== "active" || !r.officeHours) continue;
             const oh = r.officeHours;

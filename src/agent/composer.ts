@@ -1,6 +1,6 @@
 import type { CalendarContext, CalendarEvent } from "@/lib/calendar";
 import { getUserTimezone } from "@/lib/timezone";
-import { getActiveLocationRule, type AvailabilityRule } from "@/lib/availability-rules";
+import { getActiveLocationRule, type AvailabilityPreference } from "@/lib/availability-rules";
 import { computeWeekAnchors, computeWeekAnchorsHostSide, formatWeekAnchorsForPrompt } from "@/lib/week-anchors";
 import { formatDuration } from "@/lib/format-duration";
 import { parseGuestTimeReferences, renderParsedTime } from "@/lib/time-parse";
@@ -240,7 +240,7 @@ function formatPreferences(prefs: Record<string, unknown>, calHostLocation?: str
       if (windows.length > 0) items.push(`Blocked windows (do not schedule): ${windows.join("; ")}`);
     }
     // Location: both Google workingLocation and the active location rule are signals — pass both if they differ
-    const activeLocRule = getActiveLocationRule((explicit.structuredRules as AvailabilityRule[] | undefined) ?? []);
+    const activeLocRule = getActiveLocationRule((explicit.structuredRules as AvailabilityPreference[] | undefined) ?? []);
     const activePrefLocLabel = activeLocRule?.locationLabel;
     const activePrefLocUntil = activeLocRule?.expiryDate;
 
