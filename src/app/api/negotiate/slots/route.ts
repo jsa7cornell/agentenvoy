@@ -9,6 +9,7 @@ import { getActiveLocationRule, compileOfficeHoursLinks, type AvailabilityPrefer
 import { computeDensityHorizon } from "@/lib/availability-density";
 import { getSchedulingMode } from "@/lib/scheduling-mode";
 import { applyOfficeHoursWindow, type ConfirmedBooking } from "@/lib/office-hours";
+import { parseLinkParameters } from "@/lib/link-parameters";
 import {
   computeBilateralAvailability,
   type BilateralSlot,
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest) {
     hostId = session.hostId;
     guestId = session.guestId;
     prefs = (session.host.preferences as Record<string, unknown>) || {};
-    linkRules = (session.link?.parameters as LinkParameters) || {};
+    linkRules = parseLinkParameters(session.link?.parameters);
     recurringWindowId = session.link?.recurringWindowId ?? null;
     partialSessionId = sessionId;
   } else {

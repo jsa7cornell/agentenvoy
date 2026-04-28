@@ -46,6 +46,7 @@ import {
 } from "@/lib/intent";
 import { computeDensityHorizon } from "@/lib/availability-density";
 import { getSchedulingMode } from "@/lib/scheduling-mode";
+import { parseLinkParameters } from "@/lib/link-parameters";
 
 const GENERIC_TOPICS = new Set([
   "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
@@ -212,13 +213,13 @@ export async function POST(req: NextRequest) {
       topic: link.topic,
       inviteeName: link.inviteeName,
       inviteeNames: link.inviteeNames,
-      format: (link.parameters as Record<string, unknown>)?.format ?? null,
-      duration: (link.parameters as Record<string, unknown>)?.duration ?? null,
-      location: (link.parameters as Record<string, unknown>)?.location ?? null,
-      activity: (link.parameters as Record<string, unknown>)?.activity ?? null,
-      activityIcon: (link.parameters as Record<string, unknown>)?.activityIcon ?? null,
-      timingLabel: (link.parameters as Record<string, unknown>)?.timingLabel ?? null,
-      startTime: (link.parameters as Record<string, unknown>)?.startTime ?? null,
+      format: parseLinkParameters(link.parameters).format ?? null,
+      duration: parseLinkParameters(link.parameters).duration ?? null,
+      location: parseLinkParameters(link.parameters).location ?? null,
+      activity: parseLinkParameters(link.parameters).activity ?? null,
+      activityIcon: parseLinkParameters(link.parameters).activityIcon ?? null,
+      timingLabel: parseLinkParameters(link.parameters).timingLabel ?? null,
+      startTime: parseLinkParameters(link.parameters).startTime ?? null,
     };
 
     // --- GROUP MODE: each visitor gets their own session ---
@@ -524,7 +525,7 @@ export async function POST(req: NextRequest) {
     if (!session) {
       // Shouldn't happen, but fall through to create
       const hostFirstName = (user.name || "Host").split(/\s+/)[0];
-      const lr = (link.parameters as Record<string, unknown>) || {};
+      const lr = parseLinkParameters(link.parameters);
       session = await prisma.negotiationSession.create({
         data: {
           linkId: link.id,
@@ -546,7 +547,7 @@ export async function POST(req: NextRequest) {
     }
   } else {
     const hostFirstName = (user.name || "Host").split(/\s+/)[0];
-    const lr = (link.parameters as Record<string, unknown>) || {};
+    const lr = parseLinkParameters(link.parameters);
     session = await prisma.negotiationSession.create({
       data: {
         linkId: link.id,
@@ -650,7 +651,7 @@ export async function POST(req: NextRequest) {
     guestEmail: link.inviteeEmail || undefined,
     guestTimezone: effectiveGuestTz,
     topic: link.topic || undefined,
-    rules: (link.parameters as Record<string, unknown>) || {},
+    rules: parseLinkParameters(link.parameters),
     calendarContext,
     hostPersistentKnowledge: user.persistentKnowledge,
     hostUpcomingSchedulePreferences: user.upcomingSchedulePreferences,
@@ -669,7 +670,7 @@ export async function POST(req: NextRequest) {
   // (first-visit capture) so we keep it in scope.
 
   // Resolve effective format/duration — link rules override user preferences.
-  const linkRules = (link.parameters as Record<string, unknown>) || {};
+  const linkRules = parseLinkParameters(link.parameters);
   const hostPrefs = (user.preferences as { explicit?: Record<string, unknown> } | null) || {};
   const hostExplicit = (hostPrefs.explicit as Record<string, unknown>) || {};
   const effectiveFormat =
@@ -1064,21 +1065,21 @@ export async function POST(req: NextRequest) {
       topic: link.topic,
       inviteeName: link.inviteeName,
       inviteeNames: link.inviteeNames,
-      format: (link.parameters as Record<string, unknown>)?.format ?? null,
-      duration: (link.parameters as Record<string, unknown>)?.duration ?? null,
-      location: (link.parameters as Record<string, unknown>)?.location ?? null,
-      activity: (link.parameters as Record<string, unknown>)?.activity ?? null,
-      activityIcon: (link.parameters as Record<string, unknown>)?.activityIcon ?? null,
-      activityOptions: (link.parameters as Record<string, unknown>)?.activityOptions ?? null,
-      guestPicks: (link.parameters as Record<string, unknown>)?.guestPicks ?? null,
-      timingLabel: (link.parameters as Record<string, unknown>)?.timingLabel ?? null,
-      startTime: (link.parameters as Record<string, unknown>)?.startTime ?? null,
+      format: parseLinkParameters(link.parameters).format ?? null,
+      duration: parseLinkParameters(link.parameters).duration ?? null,
+      location: parseLinkParameters(link.parameters).location ?? null,
+      activity: parseLinkParameters(link.parameters).activity ?? null,
+      activityIcon: parseLinkParameters(link.parameters).activityIcon ?? null,
+      activityOptions: parseLinkParameters(link.parameters).activityOptions ?? null,
+      guestPicks: parseLinkParameters(link.parameters).guestPicks ?? null,
+      timingLabel: parseLinkParameters(link.parameters).timingLabel ?? null,
+      startTime: parseLinkParameters(link.parameters).startTime ?? null,
       // Intent.steering is the host-classified steering tier (open / soft /
       // narrow / exclusive) from PR #58. Stage 2 `deriveMode()` reads this to
       // decide offer-mode eligibility for single-slot exclusive links. Pre-
       // PR-58 links have no intent blob — client falls through to slot-count
       // / same-day rules (N7 fold of deal-room-widget-state-machine).
-      intent: ((link.parameters as Record<string, unknown>)?.intent as Record<string, unknown> | null) ?? null,
+      intent: (parseLinkParameters(link.parameters).intent as Record<string, unknown> | null) ?? null,
     },
     isHost,
     isGuest,

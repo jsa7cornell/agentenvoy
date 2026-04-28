@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { shortTimezoneLabel } from "@/lib/timezone";
 import { displayStatusLabel } from "@/lib/status-label";
 import { buildChannelMessagesWhere } from "./_where";
+import { parseLinkParameters } from "@/lib/link-parameters";
 
 // GET /api/channel/messages
 // Returns channel messages with thread snapshots for ThreadCard rendering
@@ -115,12 +116,14 @@ export async function GET() {
   const enrichedMessages = messages.map((msg) => {
     if (!msg.thread) return msg;
 
-    const rules = (msg.thread.link?.parameters as Record<string, unknown> | null) || null;
+    const rules = msg.thread.link?.parameters
+      ? parseLinkParameters(msg.thread.link.parameters)
+      : null;
     // Binary isVip flag — anything truthy (including legacy priority strings
     // "high"|"vip") is treated as VIP for backward compat with rows written
     // before this refactor. Anything else is not VIP.
     const rawVip = rules?.isVip;
-    const legacyPriority = rules?.priority;
+    const legacyPriority = (rules as Record<string, unknown> | null)?.priority;
     const isVip =
       rawVip === true ||
       legacyPriority === "high" ||

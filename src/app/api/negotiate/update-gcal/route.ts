@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { assertAgentEnvoyOwnedEvent, updateCalendarEvent, GcalOwnershipError } from "@/lib/calendar";
 import { logRouteError } from "@/lib/route-error";
+import { parseLinkParameters } from "@/lib/link-parameters";
 
 // POST /api/negotiate/update-gcal
 //
@@ -139,7 +140,7 @@ export async function POST(req: NextRequest) {
         select: { link: { select: { id: true, type: true, parameters: true } } },
       });
       if (sessionWithLink?.link.type === "contextual") {
-        const existing = (sessionWithLink.link.parameters as Record<string, unknown>) || {};
+        const existing = parseLinkParameters(sessionWithLink.link.parameters);
         await prisma.negotiationLink.update({
           where: { id: sessionWithLink.link.id },
           data: { parameters: { ...existing, format: proposed.format } },

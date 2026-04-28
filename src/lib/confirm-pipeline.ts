@@ -33,10 +33,11 @@ import { createCalendarEvent, deleteCalendarEvent, getOrComputeSchedule, invalid
 import { HOST_WRITE_SCOPE } from "@/lib/oauth/required-scopes";
 import { extractLearnings } from "@/agent/agent-runner";
 import { getUserTimezone } from "@/lib/timezone";
-import { applyEventOverrides, filterByDuration, type LinkParameters } from "@/lib/scoring";
+import { applyEventOverrides, filterByDuration } from "@/lib/scoring";
 import { dispatch } from "@/lib/side-effects/dispatcher";
 import { logRouteError } from "@/lib/route-error";
 import { buildGuestConfirmationEmail } from "@/lib/emails/guest-confirmation";
+import { parseLinkParameters } from "@/lib/link-parameters";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -319,7 +320,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   // CAS layer — don't fail-closed on a schedule lookup hiccup.
   if (session.status !== "agreed" && session.link?.mode !== "group") {
     try {
-      const linkRules = (session.link?.parameters as LinkParameters | null) ?? {};
+      const linkRules = parseLinkParameters(session.link?.parameters);
       const schedule = await getOrComputeSchedule(session.hostId);
       if (schedule.connected) {
         let offered = applyEventOverrides(schedule.slots, linkRules, hostTimezone);
@@ -443,11 +444,11 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   // confirm (surfaces as slot_no_longer_offered so the widget re-renders).
   // Non-eligible invitees get an excused_fallback email after the CAS lands.
   const partialAllowed =
-    ((session.link.parameters as Record<string, unknown> | null)?.partialAttendance as
+    (parseLinkParameters(session.link.parameters).partialAttendance as
       | string
       | undefined) === "allowed";
   const minAttendees =
-    ((session.link.parameters as Record<string, unknown> | null)?.minimumAttendees as
+    (parseLinkParameters(session.link.parameters).minimumAttendees as
       | number
       | undefined) ?? null;
   let eligibleInviteeIds: string[] | null = null;
@@ -551,7 +552,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
 
   const guestLabel = guestName || guestEmail || "guest";
   const hostLabel = session.host.name || "Host";
-  const linkRulesObj = (session.link?.parameters as Record<string, unknown> | null) || {};
+  const linkRulesObj = parseLinkParameters(session.link?.parameters);
   // negotiatedActivity (guest-locked) wins over link.parameters.activity for the event title.
   const effectiveActivity =
     ((session as Record<string, unknown>).negotiatedActivity as string | null | undefined) ??
