@@ -8,9 +8,6 @@ import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-stat
 import { formatDuration } from "@/lib/format-duration";
 import { QuickReplies } from "./onboarding/quick-replies";
 import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
-import { SchedulingStatusChip } from "./scheduling-status-chip";
-import { SchedulingLinksChipList } from "./scheduling-links-chip-list";
-import { SchedulingBlocksChip } from "./scheduling-blocks-chip";
 import { shortTimezoneLabel } from "@/lib/timezone";
 import { GcalUpdateCard } from "./gcal-update-card";
 import { RuleConfirmCard } from "./onboarding/rule-confirm-card";
@@ -107,6 +104,9 @@ interface SeededPosture {
   meetSlug: string | null;
   welcomeVariant: WelcomeVariant;
   guestFirstContext: { hostName: string | null; date: string } | null;
+  /** §1n followup (b): true iff the user's Google Account has calendar.events
+   *  write scope. Drives the guest-first "Connect/Grant write" CTA. */
+  hasCalendarWriteScope: boolean;
 }
 
 const VIDEO_PROVIDER_DISPLAY: Record<string, string> = {
@@ -302,13 +302,23 @@ interface ConnectedCalendar {
 /**
  * Calendar picker bubble — surfaces the user's connected Google calendars
  * during onboarding (right after the calendar-connect step has implicitly
- * happened via seed-everything). WISHLIST §1n item 1.
+ * happened via seed-everything). WISHLIST §1n item 1; rendered in both
+ * first-run and guest-first variants per the §1n followup (2026-04-28).
  *
  * Single-calendar hosts: skip silently. ≥2 calendars: render the list with a
  * "Primary" badge on whichever calendar is at activeCalendarIds[0] (default:
  * whatever Google flags as `primary: true`), plus a "Make primary" button on
  * non-primary entries. Click reorders activeCalendarIds[] so the chosen
  * calendar moves to position 0.
+ *
+ * Seed-resolution (§1n followup b/a, 2026-04-28): the seed default writes
+ * `activeCalendarIds: ["primary"]` — the literal string "primary" is Google's
+ * own canonical alias for the user's main calendar, but the manage-calendars
+ * dropdown enumerates IDs as actual email addresses, so the literal never
+ * matches. On first paint, if activeCalendarIds is empty or equal to the seed
+ * literal, we auto-resolve to the Google-flagged primary's actual ID and PUT
+ * to calendar-filter so downstream surfaces (Calendars dropdown, scoring) all
+ * see the same resolved ID.
  *
  * Semantic: AgentEnvoy's "primary" = activeCalendarIds[0]. No separate column
  * — reuse of the existing list ordering. Write-target consequences (which
@@ -324,17 +334,48 @@ function CalendarPickerBubble() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/connections/google-calendars")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled || !data?.calendars) return;
-        const list = data.calendars as ConnectedCalendar[];
+    Promise.all([
+      fetch("/api/connections/google-calendars").then((r) =>
+        r.ok ? r.json() : null,
+      ),
+      fetch("/api/agent/knowledge").then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(async ([calData, knowledgeData]) => {
+        if (cancelled || !calData?.calendars) return;
+        const list = calData.calendars as ConnectedCalendar[];
         setCalendars(list);
-        // Default primary = Google-flagged primary, since at first paint we
-        // don't know whether the user has customized activeCalendarIds[0].
-        // Once they click "Make primary," local state takes over.
         const googlePrimary = list.find((c) => c.primary);
-        setPrimaryId(googlePrimary?.id ?? list[0]?.id ?? null);
+        const fallbackId = googlePrimary?.id ?? list[0]?.id ?? null;
+        const stored = (knowledgeData?.activeCalendarIds as string[] | undefined) ?? [];
+
+        // Seed-resolution: if activeCalendarIds is empty (legacy nullish) or
+        // equals the seed literal `["primary"]`, write the resolved actual
+        // ID so downstream readers (Calendars dropdown, scoring) all see a
+        // real email. Idempotent — re-running while already resolved is a
+        // no-op semantic.
+        const needsResolution =
+          stored.length === 0 ||
+          (stored.length === 1 && stored[0] === "primary");
+
+        if (needsResolution && fallbackId && fallbackId !== "primary") {
+          try {
+            await fetch("/api/connections/calendar-filter", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ activeCalendarIds: [fallbackId] }),
+            });
+            setPrimaryId(fallbackId);
+          } catch {
+            setPrimaryId(fallbackId); // local state still right even if PUT fails
+          }
+          return;
+        }
+
+        // Already-resolved case: pick the first stored ID as primary, falling
+        // back to Google's flag if stored is somehow empty after the check.
+        const resolvedPrimary =
+          stored.find((id) => list.some((c) => c.id === id)) ?? fallbackId;
+        setPrimaryId(resolvedPrimary);
       })
       .catch(() => {});
     return () => {
@@ -424,9 +465,10 @@ function CalendarPickerBubble() {
 /**
  * Guest-first welcome — user came in via someone else's link, signed up via the
  * read-only guest-flow path, and now landed on their own Home for the first
- * time. Adds a "Connect Google Calendar" CTA per WISHLIST §1n item 7 so they
- * can upgrade their scope and start hosting meetings — the natural next step
- * after the prior interaction acknowledgment.
+ * time. WISHLIST §1n item 7 originally added an unconditional "Connect Google
+ * Calendar" CTA here; the followup (2026-04-28) gates it on actual OAuth scope
+ * — only show it when calendar.events write scope is missing. Users who
+ * already have full read+write don't need to be told to connect again.
  */
 function GuestFirstVariant({
   posture,
@@ -443,11 +485,15 @@ function GuestFirstVariant({
         day: "numeric",
       })
     : null;
-  // mode: "first-connect" per §1n item 7 — full pitch + write-scope grant.
-  // The read-only Account from guest-flow gets upgraded to read+write on
-  // re-consent (Google scope union).
+  const needsWriteScope = !posture.hasCalendarWriteScope;
+  // mode: "upgrade-scope" — user already has an Account from the guest-flow
+  // (read-only). To gain write, they need to re-consent with the new scope
+  // checkbox visible; "upgrade-scope" sends `prompt: "consent"` and renders
+  // the minimal `<UpgradeScopeBody>` modal copy. (Pre-followup this used
+  // mode: "first-connect" which read like "you're a brand-new visitor" to
+  // someone who already has an account.)
   const connectFlow = useOAuthSignIn({
-    mode: "first-connect",
+    mode: "upgrade-scope",
     callbackUrl: "/dashboard",
   });
   return (
@@ -465,24 +511,33 @@ function GuestFirstVariant({
           {dateLabel ? ` on ${dateLabel}` : ""} — now you&rsquo;ve got
           your own AgentEnvoy account. I can coordinate meetings on
           your behalf the same way: share a link, your invitee chats
-          with me, I work out a time. Connect your Google Calendar to
-          get started, or jump into one of these:
+          with me, I work out a time.
+          {needsWriteScope
+            ? " Grant calendar write access so I can put confirmed meetings on your calendar, or jump into one of these:"
+            : " Jump into one of these:"}
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 px-1">
-        <button
-          type="button"
-          onClick={connectFlow.trigger}
-          className="text-xs px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition inline-flex items-center gap-1.5"
-        >
-          <span aria-hidden="true">🗓️</span>
-          Connect Google Calendar
-        </button>
-      </div>
+      {needsWriteScope && (
+        <div className="flex flex-wrap gap-2 px-1">
+          <button
+            type="button"
+            onClick={connectFlow.trigger}
+            className="text-xs px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition inline-flex items-center gap-1.5"
+          >
+            <span aria-hidden="true">🗓️</span>
+            Grant calendar write access
+          </button>
+        </div>
+      )}
+
+      {/* §1n followup (a) 2026-04-28: render in guest-first too — these
+          users are post-calendar-connect just like first-run, so the
+          primary picker is just as relevant here. */}
+      <CalendarPickerBubble />
 
       <ForwardChips onSeed={onSeed} />
-      {connectFlow.modal}
+      {needsWriteScope && connectFlow.modal}
     </div>
   );
 }
@@ -506,6 +561,7 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
           meetSlug: data.meetSlug ?? null,
           welcomeVariant: (data.welcomeVariant as WelcomeVariant) ?? "first-run",
           guestFirstContext: data.guestFirstContext ?? null,
+          hasCalendarWriteScope: !!data.hasCalendarWriteScope,
         });
       })
       .catch(() => {});
@@ -1429,16 +1485,6 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           lands at the sidebar divider; inner wrapper re-centers the content. */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 pt-5 pb-16 flex flex-col gap-1.5">
-        {/* Scheduling status chip — read-only posture summary pinned at the
-            top of the feed for calibrated users. See proposal
-            `2026-04-23_primary-link-config-convergence` §3.2 pattern (a). */}
-        {isCalibrated && (
-          <div className="self-center mb-2 w-full flex flex-col items-center gap-2">
-            <SchedulingStatusChip />
-            <SchedulingLinksChipList />
-            <SchedulingBlocksChip />
-          </div>
-        )}
         {/* First-run welcome — only for calibrated users with no messages.
             When the user picks the 🔗 primary-link card, we swap the welcome
             cards out for the guided PrimaryLinkFlow in-place. */}

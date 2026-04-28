@@ -33,6 +33,7 @@ import { prisma } from "@/lib/prisma";
 import { invalidateSchedule } from "@/lib/calendar";
 import type { UserPreferences } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
+import { HOST_WRITE_SCOPE } from "@/lib/oauth/required-scopes";
 
 type NumOrUndef = number | undefined;
 
@@ -90,6 +91,7 @@ export async function GET() {
     hostedSessionCount,
     lastChannelMessage,
     recentGuestSession,
+    googleAccount,
   ] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
@@ -111,6 +113,15 @@ export async function GET() {
       where: { guestId: userId },
       orderBy: { createdAt: "desc" },
       select: { createdAt: true, host: { select: { name: true } } },
+    }),
+    // §1n followup item (b): the guest-first welcome's "Connect Google
+    // Calendar" CTA only makes sense when write scope is missing — a
+    // post-guest-flow user with full read+write doesn't need to be told
+    // to connect again. Pull `Account.scope` so the client can decide.
+    prisma.account.findFirst({
+      where: { userId, provider: "google" },
+      select: { scope: true },
+      orderBy: { id: "desc" },
     }),
   ]);
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -193,6 +204,11 @@ export async function GET() {
     // Welcome-variant dispatch + context (2026-04-26+).
     welcomeVariant,
     guestFirstContext,
+    // §1n followup (b) 2026-04-28: write-scope flag for the guest-first
+    // CTA. True iff the user's Google account has calendar.events scope
+    // granted; false (or null account) means we still need to ask.
+    hasCalendarWriteScope:
+      !!googleAccount?.scope && googleAccount.scope.includes(HOST_WRITE_SCOPE),
   });
 }
 
