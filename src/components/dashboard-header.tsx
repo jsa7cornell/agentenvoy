@@ -5,7 +5,6 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogoFull } from "./logo";
-import { MobileDashboardHeader } from "./mobile/mobile-dashboard-header";
 import { useOAuthSignIn, hasReturningCookie } from "./oauth/use-oauth-signin";
 import { onboardingCallbackUrl } from "@/lib/onboarding/return-to";
 
@@ -19,18 +18,14 @@ const BADGE_COUNTS_REVALIDATE_MS = 30_000;
  * Never build a bespoke header for a single page. Inline banners below the
  * header can vary freely, but the header itself is always this component.
  *
- * **Responsive split.** At and above the `md:` breakpoint the signed-in viewer
- * sees the v2 desktop chrome below — three-element layout (Logo+Home left |
- * Event Links tab center | Avatar+Preferences right). Below `md:` we render
- * `<MobileDashboardHeader>` instead — the v2 three-element topbar (avatar |
- * "Event Links" header pill | calendar icon). The anonymous branch is
- * unchanged in either mode. See `refactor-package-2026-04-25/SPEC-2.0.md`
+ * **Layout.** Single three-element layout at all breakpoints — Logo+Home left |
+ * Event Links tab center | Avatar+Preferences right. The anonymous branch shows
+ * logo + sign-in only. See `refactor-package-2026-04-25/SPEC-2.0.md`
  * §3.1 and `mockups/desktop-v2.html` for the visual contract.
  *
  * Cyan dot on the Event Links tab indicates one or more sessions are in
- * `awaiting_ack_self` state (same `/api/dashboard/badge-counts` aggregator
- * used by mobile, revalidating every 30s). Decorative — fetch failures render
- * nothing.
+ * `awaiting_ack_self` state. Backed by `/api/dashboard/badge-counts`,
+ * revalidating every 30s. Decorative — fetch failures render nothing.
  */
 export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: string } = {}) {
   const { data: session, status: sessionStatus } = useSession();
@@ -123,15 +118,12 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
 
   return (
     <>
-      {/* Mobile chrome (below `md:`) — three-element topbar. */}
-      <MobileDashboardHeader session={session!} />
-
-      {/* Desktop chrome (`md:` and up) — v2 three-element layout. */}
+      {/* Header — three-element layout (Logo+Home | Event Links | Avatar+Preferences). */}
       <header
-        className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0 hidden md:block"
+        className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0 block"
         data-testid="desktop-dashboard-header"
       >
-        <div className="grid grid-cols-[auto_1fr_auto] items-center px-6 py-3 gap-x-4">
+        <div className="grid grid-cols-[auto_1fr_auto] items-center px-4 sm:px-6 py-3 gap-x-3 sm:gap-x-4">
           {/* Logo + Home (left) — active state when on /dashboard. */}
           <Link
             href="/dashboard"
