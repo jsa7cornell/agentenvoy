@@ -7,16 +7,16 @@ import { DecisionInput } from "./decision-input";
 import { TranscriptExport } from "./transcript-export";
 import { SimpleMarkdown } from "./simple-markdown";
 import { NegotiatorLogo } from "./negotiator-logo";
-import { isOverBudget } from "@/lib/negotiator/token-budget";
-import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
-import { estimateCost } from "@/lib/negotiator/types";
+import { isOverBudget } from "@/lib/proposal-synthesizer/token-budget";
+import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/proposal-synthesizer/provider-colors";
+import { estimateCost } from "@/lib/proposal-synthesizer/types";
 import type {
   NegotiationConfig,
   ResearchResult,
   Synthesis,
   FinalResponse,
   UsageRow,
-} from "@/lib/negotiator/types";
+} from "@/lib/proposal-synthesizer/types";
 
 type RunPhase =
   | "idle"

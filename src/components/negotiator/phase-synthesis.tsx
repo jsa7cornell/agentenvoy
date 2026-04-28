@@ -1,6 +1,6 @@
 "use client";
 
-import type { Synthesis } from "@/lib/negotiator/types";
+import type { Synthesis } from "@/lib/proposal-synthesizer/types";
 
 interface PhaseSynthesisProps {
   synthesis: Synthesis;

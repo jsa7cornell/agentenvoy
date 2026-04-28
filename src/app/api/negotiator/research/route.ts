@@ -1,6 +1,6 @@
 import { streamText } from "ai";
-import { getModel } from "@/lib/negotiator/providers";
-import type { ModelProvider } from "@/lib/negotiator/types";
+import { getModel } from "@/lib/proposal-synthesizer/providers";
+import type { ModelProvider } from "@/lib/proposal-synthesizer/types";
 
 export const maxDuration = 120;
 

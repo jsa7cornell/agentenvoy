@@ -6,7 +6,7 @@
  * no provider keys needed in the app. Gateway auth uses AI_GATEWAY_API_KEY
  * (local dev) or OIDC (production on Vercel, automatic).
  *
- * The negotiator tool has its own provider system in lib/negotiator/providers.ts
+ * The negotiator tool has its own provider system in lib/proposal-synthesizer/providers.ts
  * which also routes through the gateway for server-side calls.
  */
 

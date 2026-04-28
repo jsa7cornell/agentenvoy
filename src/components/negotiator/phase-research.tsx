@@ -1,7 +1,7 @@
 "use client";
 
-import type { ResearchResult, ModelProvider } from "@/lib/negotiator/types";
-import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
+import type { ResearchResult, ModelProvider } from "@/lib/proposal-synthesizer/types";
+import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/proposal-synthesizer/provider-colors";
 
 interface PhaseResearchProps {
   results: ResearchResult[];

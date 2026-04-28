@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { estimateMultiModelCost } from "@/lib/negotiator/types";
+import { estimateMultiModelCost } from "@/lib/proposal-synthesizer/types";
 
 interface TranscriptExportProps {
   transcript: string;

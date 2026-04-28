@@ -1,6 +1,6 @@
 import { generateText } from "ai";
-import { getModel } from "@/lib/negotiator/providers";
-import type { AgentConfig, FinalResponse } from "@/lib/negotiator/types";
+import { getModel } from "@/lib/proposal-synthesizer/providers";
+import type { AgentConfig, FinalResponse } from "@/lib/proposal-synthesizer/types";
 
 export const maxDuration = 120; // longer timeout for multi-agent finalize
 

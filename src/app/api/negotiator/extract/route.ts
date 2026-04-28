@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { extractDocument } from "@/lib/negotiator/document-extract";
+import { extractDocument } from "@/lib/proposal-synthesizer/document-extract";
 
 export const maxDuration = 30;
 
