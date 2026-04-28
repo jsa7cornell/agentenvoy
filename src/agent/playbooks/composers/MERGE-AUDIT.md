@@ -12,15 +12,15 @@ Final state:
 - `dealroom-guest-composer.md` — 621 lines (no guidance dropped; some new structure added with `## Negotiation Strategy` heading)
 - `dealroom-host-composer.md` — 134 lines (NEW)
 - `negotiation.md` — DELETED in this PR
-- `src/lib/negotiator/playbooks/administrator.md` — **NOT** deleted (see "Spec deviation" below)
+- `src/lib/proposal-synthesizer/playbooks/administrator.md` — **NOT** deleted (see "Spec deviation" below)
 
-## Spec deviation: `src/lib/negotiator/playbooks/administrator.md` retained
+## Spec deviation: `src/lib/proposal-synthesizer/playbooks/administrator.md` retained
 
-The PR3 brief calls for `src/lib/negotiator/playbooks/administrator.md` to be merged into the deal-room composers and then deleted. **I did not delete it, and no content from that file landed in either composer.** Reason: the proposal's PR3 plan rests on a misidentification. That file is the system prompt for an entirely different feature — the multi-agent proposal synthesizer at `/api/negotiator/synthesize/route.ts`, which compares competing AI-agent research outputs and emits a JSON synthesis (see `src/lib/negotiator/administrator.ts:composeAdministratorPrompt`). It has nothing to do with deal-room negotiation. Its 85 lines are entirely about JSON output schemas, agent labeling rules, and "common ground vs. key differences" synthesis — none of which is meaningful to a guest or host in a calendar deal room.
+The PR3 brief calls for `src/lib/proposal-synthesizer/playbooks/administrator.md` to be merged into the deal-room composers and then deleted. **I did not delete it, and no content from that file landed in either composer.** Reason: the proposal's PR3 plan rests on a misidentification. That file is the system prompt for an entirely different feature — the multi-agent proposal synthesizer at `/api/negotiator/synthesize/route.ts`, which compares competing AI-agent research outputs and emits a JSON synthesis (see `src/lib/proposal-synthesizer/administrator.ts:composeAdministratorPrompt`). It has nothing to do with deal-room negotiation. Its 85 lines are entirely about JSON output schemas, agent labeling rules, and "common ground vs. key differences" synthesis — none of which is meaningful to a guest or host in a calendar deal room.
 
 The deal-room flow uses `src/agent/administrator.ts` (a same-named but different file) which calls `composeSystemPrompt` in `src/agent/composer.ts`, which in turn loads `dealroomGuestComposer()` and `negotiationPlaybook()`. The "host-relevant content from administrator.md" the proposal refers to is actually the "Host Messages in the Deal Room" section that lived inside `dealroom-guest-composer.md` (former `calendar.md`) all along.
 
-I extracted the host-relevant guidance from there, expanded it into a focused composer, and left `src/lib/negotiator/playbooks/administrator.md` and its `administratorPlaybook()` export intact. Deleting it would have broken `/api/negotiator/synthesize` with no compensating benefit. Flagging this here so the reviewer can confirm or override.
+I extracted the host-relevant guidance from there, expanded it into a focused composer, and left `src/lib/proposal-synthesizer/playbooks/administrator.md` and its `administratorPlaybook()` export intact. Deleting it would have broken `/api/negotiator/synthesize` with no compensating benefit. Flagging this here so the reviewer can confirm or override.
 
 If the reviewer (or John) intends for the proposal-synthesizer file to also be renamed/relocated as part of the playbooks/ cleanup, that's a separate, mechanical PR — it doesn't belong inside the deal-room composer split.
 

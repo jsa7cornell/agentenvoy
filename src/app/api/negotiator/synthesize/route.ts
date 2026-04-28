@@ -1,7 +1,7 @@
 import { generateText } from "ai";
-import { getModel } from "@/lib/negotiator/providers";
-import { composeAdministratorPrompt, parseSynthesis } from "@/lib/negotiator/administrator";
-import type { AgentConfig, ResearchResult } from "@/lib/negotiator/types";
+import { getModel } from "@/lib/proposal-synthesizer/providers";
+import { composeAdministratorPrompt, parseSynthesis } from "@/lib/proposal-synthesizer/administrator";
+import type { AgentConfig, ResearchResult } from "@/lib/proposal-synthesizer/types";
 
 export const maxDuration = 120;
 

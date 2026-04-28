@@ -6,7 +6,7 @@ import {
   PROVIDER_LABELS,
   MODEL_OPTIONS,
   formatEstCost,
-} from "@/lib/negotiator/types";
+} from "@/lib/proposal-synthesizer/types";
 
 interface AgentCardProps {
   agent: AgentConfig;

@@ -4,10 +4,10 @@ import { useState } from "react";
 import { v4 as uuid } from "uuid";
 import { AgentCard } from "./agent-card";
 import { UploadModal, type DocumentInfo } from "./upload-modal";
-import { BUDGET_STEPS, DEFAULT_TOKEN_BUDGET } from "@/lib/negotiator/token-budget";
-import type { AgentConfig, NegotiationConfig, ModelProvider } from "@/lib/negotiator/types";
-import { DEFAULT_MODEL, MODEL_OPTIONS, PROVIDER_LABELS, formatEstCost } from "@/lib/negotiator/types";
-import { getRandomScenario } from "@/lib/negotiator/scenarios";
+import { BUDGET_STEPS, DEFAULT_TOKEN_BUDGET } from "@/lib/proposal-synthesizer/token-budget";
+import type { AgentConfig, NegotiationConfig, ModelProvider } from "@/lib/proposal-synthesizer/types";
+import { DEFAULT_MODEL, MODEL_OPTIONS, PROVIDER_LABELS, formatEstCost } from "@/lib/proposal-synthesizer/types";
+import { getRandomScenario } from "@/lib/proposal-synthesizer/scenarios";
 
 const STARTER_CONTEXTS = [
   "Prioritize speed and pragmatism. Advocate for the simplest solution that ships fastest, even if it means cutting corners you can fix later.",

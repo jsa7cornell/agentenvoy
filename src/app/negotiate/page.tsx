@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { NegotiationConfigPanel } from "@/components/negotiator/negotiation-config";
 import { NegotiationRunner } from "@/components/negotiator/negotiation-runner";
-import type { NegotiationConfig } from "@/lib/negotiator/types";
+import type { NegotiationConfig } from "@/lib/proposal-synthesizer/types";
 
 export default function NegotiatePage() {
   const [config, setConfig] = useState<NegotiationConfig | null>(null);

@@ -4,14 +4,14 @@ import { PhaseSynthesis } from "@/components/negotiator/phase-synthesis";
 import { PhaseResearch } from "@/components/negotiator/phase-research";
 import { TranscriptExport } from "@/components/negotiator/transcript-export";
 import { SimpleMarkdown } from "@/components/negotiator/simple-markdown";
-import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/negotiator/provider-colors";
-import { generateTitle } from "@/lib/negotiator/generate-title";
+import { PROVIDER_COLORS, PROVIDER_DOT } from "@/lib/proposal-synthesizer/provider-colors";
+import { generateTitle } from "@/lib/proposal-synthesizer/generate-title";
 import type {
   ResearchResult,
   Synthesis,
   FinalResponse,
   UsageRow,
-} from "@/lib/negotiator/types";
+} from "@/lib/proposal-synthesizer/types";
 
 interface NegotiatorResultViewProps {
   question: string;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Synthesis } from "@/lib/negotiator/types";
+import type { Synthesis } from "@/lib/proposal-synthesizer/types";
 
 interface DecisionInputProps {
   synthesis: Synthesis;

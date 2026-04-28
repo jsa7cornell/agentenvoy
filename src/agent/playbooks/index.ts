@@ -103,12 +103,19 @@ export function dealroomHostComposer(): string {
 // negotiationPlaybook() loader.
 
 // ── Multi-agent proposal synthesizer (separate feature — /api/negotiator/synthesize) ─
-// NOTE: this is NOT the deal-room negotiator. See composers/MERGE-AUDIT.md.
+// NOTE: this is NOT the deal-room negotiator. It's the system prompt for the
+// agent that compares competing AI-agent research outputs and emits a JSON
+// synthesis. Lives in `src/lib/proposal-synthesizer/` for historical reasons
+// (predates the playbooks/ tree). Untouched by PR3 — see composers/MERGE-AUDIT.md.
+//
+// MUST keep the literal path inline per the file-tracing invariant (top of
+// file). Routing this through `loadPlaybook()` would re-introduce the prod
+// outage hotfixed in `498277b`.
 export function administratorPlaybook(): string {
   try {
-    return readFileSync(join(cwd, "src/lib/negotiator/playbooks/administrator.md"), "utf-8");
+    return readFileSync(join(cwd, "src/lib/proposal-synthesizer/playbooks/administrator.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load negotiator/playbooks/administrator.md: ${err}`);
+    throw new Error(`[playbooks/index] failed to load proposal-synthesizer/playbooks/administrator.md: ${err}`);
   }
 }
 
