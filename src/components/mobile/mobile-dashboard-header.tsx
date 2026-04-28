@@ -4,13 +4,13 @@
  * Mobile dashboard chrome — v2.
  *
  * Three-element topbar (avatar | "Event Links" header pill | calendar icon)
- * paired with two slide-style sheets:
+ * paired with three slide-style sheets:
  *
- * - Avatar (left) → slide-down Preferences drawer (this PR ships a thin shell).
- * - Header pill (center) → slide-up Event Links sheet (this PR ships a thin
- *   shell with the existing my-link list + an "Upcoming events" hand-off).
- * - Calendar icon (right) → routes to `/dashboard/availability`, the
- *   already-mobile-friendly Availability surface.
+ * - Avatar (left)        → slide-down Preferences drawer.
+ * - Header pill (center) → slide-up Event Links sheet.
+ * - Calendar icon (right) → slide-down Availability drawer (same chrome as
+ *   Preferences). The legacy `/dashboard/availability` route still exists for
+ *   direct URL access and renders the same `<AvailabilityPanel>` underneath.
  *
  * Lives only at the mobile breakpoint — `dashboard-header.tsx` decides which
  * branch to render based on `md:` so desktop chrome is untouched (Phase 2
@@ -27,11 +27,10 @@
  */
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import type { Session } from "next-auth";
 import { PreferencesDrawer } from "./preferences-drawer";
 import { EventLinksSheet } from "./event-links-sheet";
+import { AvailabilityDrawer } from "./availability-drawer";
 
 interface MobileDashboardHeaderProps {
   session: Session;
@@ -42,9 +41,8 @@ const BADGE_COUNTS_REVALIDATE_MS = 30_000;
 export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
+  const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [awaitingAck, setAwaitingAck] = useState(0);
-  const pathname = usePathname();
-  const onAvailability = pathname?.startsWith("/dashboard/availability") ?? false;
 
   // Fetch the cyan-dot count on mount and revalidate every 30s. Defensive: a
   // fetch failure keeps the previous value (initially 0 → no dot), since the
@@ -82,29 +80,30 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
 
   const hasAwaitingAck = awaitingAck > 0;
 
-  // Lock body scroll while either sheet is open. Mobile sheets cover the
+  // Lock body scroll while any sheet is open. Mobile sheets cover the
   // viewport; without this the underlying page scrolls when users drag on
   // the overlay.
   useEffect(() => {
-    if (!prefsOpen && !linksOpen) return;
+    if (!prefsOpen && !linksOpen && !availabilityOpen) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
     };
-  }, [prefsOpen, linksOpen]);
+  }, [prefsOpen, linksOpen, availabilityOpen]);
 
   // Close the open sheet on Escape — keyboard parity with the desktop popover.
   useEffect(() => {
-    if (!prefsOpen && !linksOpen) return;
+    if (!prefsOpen && !linksOpen && !availabilityOpen) return;
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       setPrefsOpen(false);
       setLinksOpen(false);
+      setAvailabilityOpen(false);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [prefsOpen, linksOpen]);
+  }, [prefsOpen, linksOpen, availabilityOpen]);
 
   const initial =
     session.user?.name?.charAt(0)?.toUpperCase() ||
@@ -194,48 +193,33 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
           </button>
         </div>
 
-        {/* Right slot — context-sensitive:
-            - On /dashboard chat: calendar icon → /dashboard/availability.
-            - On /dashboard/availability: close (×) → /dashboard so leaving
-              the surface feels like dismissing a panel rather than navigating. */}
+        {/* Right slot — calendar icon → slide-down Availability drawer. Same
+            chrome primitive as the Preferences drawer. */}
         <div className="justify-self-end">
-          <Link
-            href={onAvailability ? "/dashboard" : "/dashboard/availability"}
+          <button
+            type="button"
+            onClick={() => setAvailabilityOpen(true)}
             className="w-9 h-9 rounded-full bg-surface-secondary/60 border border-secondary flex items-center justify-center text-secondary hover:text-primary hover:border-accent/50 transition"
-            title={onAvailability ? "Close" : "Availability"}
-            aria-label={onAvailability ? "Close Availability" : "Go to Availability"}
-            data-testid={onAvailability ? "mobile-header-close-availability" : "mobile-header-availability"}
+            title="Availability"
+            aria-label="Open Availability"
+            aria-haspopup="dialog"
+            aria-expanded={availabilityOpen}
+            data-testid="mobile-header-availability"
           >
-            {onAvailability ? (
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            ) : (
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.8}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
-                />
-              </svg>
-            )}
-          </Link>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.8}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
+              />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -248,6 +232,10 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
     <EventLinksSheet
       open={linksOpen}
       onClose={() => setLinksOpen(false)}
+    />
+    <AvailabilityDrawer
+      open={availabilityOpen}
+      onClose={() => setAvailabilityOpen(false)}
     />
     </>
   );
