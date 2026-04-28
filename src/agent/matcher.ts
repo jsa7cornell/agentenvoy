@@ -381,7 +381,19 @@ export function schedulingPrecheck(input: PrecheckInput): PrecheckResult {
   // when marco fires. The previous "active or agreed → marco" branch is
   // dropped entirely (PLAYBOOK Rule 19e protects against re-introduction).
   if (intent === "create_link" || intent === "schedule") {
-    if (matchCount >= 2) {
+    // Explicit-create-another bypass: when the host's wording clearly says
+    // "I want a NEW link in addition to whatever exists" ("add another
+    // meeting with katie", "create a new one for katie", "second katie
+    // meeting"), skip multi-match disambiguation and go straight to
+    // deterministic-create. Symmetric with the marcoPending replay
+    // bypass in /api/channel/chat — the same keyword set short-circuits
+    // disambiguation in BOTH directions (before and after marco fires).
+    // Bug repro 2026-04-28: "add another meeting with katie" was wrongly
+    // marco-disambiguating against existing Katie links.
+    const explicitAnother = /\b(another|additional|second|new|fresh)\b/i.test(
+      input.userMessage,
+    );
+    if (matchCount >= 2 && !explicitAnother) {
       return {
         kind: "multi-match-disambiguate",
         matchedLinkIds: existingMatches
@@ -392,7 +404,7 @@ export function schedulingPrecheck(input: PrecheckInput): PrecheckResult {
         reason: `multi-match for ${named}: ${matchCount} active/agreed links${echoSuffix}`,
       };
     }
-    // 0 or 1 existing match → deterministic create. R1 default-to-create.
+    // 0, 1, or 2+ (with explicit-another) match → deterministic create.
     const topic = extractTopic(
       input.userMessage,
       named,
