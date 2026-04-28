@@ -44,25 +44,29 @@ interface Result {
 const RETURNING_COOKIE = "ae_returning";
 
 /**
- * Google's `prompt` parameter, chosen per mode.
+ * Google's `prompt` parameter, chosen per mode. Single source of truth —
+ * mode encodes intent, prompt follows.
  *
- *   "consent"        → re-show the consent screen, re-issue a refresh_token.
- *                      Used when we genuinely need a fresh grant: first
- *                      connect, reconnect (tokens expired), scope upgrade.
- *   "select_account" → let user pick an account; do NOT force consent, do
- *                      NOT re-issue a refresh_token. Used for returning
- *                      users signing in on a surface that already has their
- *                      consent.
+ * - `login`         → `select_account`. Cookie-state-independent: Google
+ *                     forces the consent screen on first-ever authorization
+ *                     for a (clientId, account, scope set) tuple regardless
+ *                     of `prompt`, so first-time users still see it; returning
+ *                     users skip it without minting a new refresh_token (the
+ *                     1i regression). The cookie controls the modal (UX hint),
+ *                     not Google's flow — keep them independent.
+ * - `first-connect` → `consent`. Defensive — Google forces consent on first
+ *                     grant anyway; this is belt-and-suspenders.
+ * - `upgrade-scope` → `consent`. Load-bearing — re-show scope checklist
+ *                     with the new unchecked box.
+ * - `reconnect`     → `consent`. Load-bearing — fresh refresh_token + re-auth.
  *
- * Forcing "consent" on every sign-in was bug 1i — it invalidated the
- * previous refresh_token on every login. The guard
- * `account.refresh_token ?? undefined` in the signIn callback makes
- * "select_account" safe (we don't overwrite an existing refresh_token with
- * undefined).
+ * Changing this mapping has cross-callsite consequences (refresh_token
+ * lifecycle, modal gating, T2 trust beat). Audit every callsite of
+ * `useOAuthSignIn` before editing. See proposal 2026-04-28 §3 Z1.B and
+ * 2026-04-21 §2.6 / §1.2 N7.
  */
-function promptForMode(mode: PreConsentMode, isReturning: boolean): string {
-  if (mode === "login" && isReturning) return "select_account";
-  return "consent";
+function promptForMode(mode: PreConsentMode): string {
+  return mode === "login" ? "select_account" : "consent";
 }
 
 export function hasReturningCookie(): boolean {
@@ -100,7 +104,6 @@ export function useOAuthSignIn({
   const [open, setOpen] = useState(false);
 
   const doSignIn = () => {
-    const isReturning = hasReturningCookie();
     // Tell the signIn server callback how this user entered, so it audits
     // the granted scopes against the right expected set. 5-min Max-Age so
     // a stale value can't poison a later sign-in. SameSite=Lax so it
@@ -108,13 +111,12 @@ export function useOAuthSignIn({
     if (typeof document !== "undefined") {
       document.cookie = `${ENTRY_POINT_COOKIE}=${entryPoint}; Path=/; Max-Age=300; SameSite=Lax`;
     }
-    const prompt = promptForMode(mode, isReturning);
     // NextAuth v4: 2nd arg is signIn options (callbackUrl, redirect…); the
     // 3rd arg is `authorizationParams`, forwarded to Google's authorize URL.
     signIn(
       "google",
       { callbackUrl },
-      { scope: scopeFor(entryPoint), prompt, access_type: "offline", ...signInParams },
+      { scope: scopeFor(entryPoint), prompt: promptForMode(mode), access_type: "offline", ...signInParams },
     );
   };
 
@@ -132,16 +134,8 @@ export function useOAuthSignIn({
     setOpen(false);
     doSignIn();
   };
-  // Login mode: sign-in view primary action — select_account, no forced consent.
-  const onSignIn = mode === "login" ? () => {
-    setOpen(false);
-    if (typeof document !== "undefined") {
-      document.cookie = `${ENTRY_POINT_COOKIE}=${entryPoint}; Path=/; Max-Age=300; SameSite=Lax`;
-    }
-    signIn("google", { callbackUrl }, { scope: scopeFor(entryPoint), prompt: "select_account", access_type: "offline", ...signInParams });
-  } : undefined;
   const modal = (
-    <PreConsentExplainer open={open} mode={mode} onConfirm={onConfirm} onCancel={onCancel} onSignIn={onSignIn} />
+    <PreConsentExplainer open={open} mode={mode} onConfirm={onConfirm} onCancel={onCancel} />
   );
   return { trigger, modal };
 }
