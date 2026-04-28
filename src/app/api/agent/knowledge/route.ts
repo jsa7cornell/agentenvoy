@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
-import { buildKnowledgePreview } from "@/agent/administrator";
+import { buildKnowledgePreview } from "@/agent/agent-runner";
 import { invalidateSchedule } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
 import type { UserPreferences } from "@/lib/scoring";

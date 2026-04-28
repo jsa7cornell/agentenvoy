@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import type { CalendarContext } from "@/lib/calendar";
-import { generateAgentResponse, AgentContext } from "@/agent/administrator";
+import { generateAgentResponse, AgentContext } from "@/agent/agent-runner";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";

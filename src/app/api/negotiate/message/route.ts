@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
-import { AgentContext, extractAvailabilitySummary } from "@/agent/administrator";
+import { AgentContext, extractAvailabilitySummary } from "@/agent/agent-runner";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import type { CalendarContext } from "@/lib/calendar";
 import type { ScoredSlot, LinkRules } from "@/lib/scoring";
@@ -256,7 +256,7 @@ export async function POST(req: NextRequest) {
 
   console.log(`[negotiate/message] start | session=${sessionId} | role=${messageRole} | slots=${scoredSlots.length} | history=${history.length}`);
 
-  const { streamAgentResponse } = await import("@/agent/administrator");
+  const { streamAgentResponse } = await import("@/agent/agent-runner");
   // Captured via onInvocation; used to snapshot the prompt that produced
   // this turn's response for feedback-pipeline debug reads.
   const promptSnapshotEnabled = process.env.PROMPT_SNAPSHOT_ENABLED !== "false";

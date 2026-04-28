@@ -74,7 +74,7 @@ vi.mock("@/lib/calendar", () => ({
 const mockGetOrComputeSchedule = vi.fn();
 
 vi.mock("@/lib/oauth/required-scopes", () => ({ HOST_WRITE_SCOPE: "cal-w" }));
-vi.mock("@/agent/administrator", () => ({
+vi.mock("@/agent/agent-runner", () => ({
   extractLearnings: vi.fn().mockResolvedValue({ persistent: "", situational: "" }),
 }));
 vi.mock("@/lib/timezone", () => ({
