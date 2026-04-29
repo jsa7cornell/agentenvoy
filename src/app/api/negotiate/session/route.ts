@@ -1141,6 +1141,11 @@ export async function POST(req: NextRequest) {
       topic: link.topic,
       inviteeName: link.inviteeName,
       inviteeNames: link.inviteeNames,
+      // Per-field "Edited just now" pill — proposal 2026-04-28 §3.C.
+      // Set by update_link when material fields change (see actions.ts
+      // diffMaterialFields). Surfaced verbatim to the EditedPill component.
+      lastMaterialEditAt: link.lastMaterialEditAt ? link.lastMaterialEditAt.toISOString() : null,
+      lastEditedFields: link.lastEditedFields ?? [],
       format: parseLinkParameters(link.parameters).format ?? null,
       duration: parseLinkParameters(link.parameters).duration ?? null,
       location: parseLinkParameters(link.parameters).location ?? null,

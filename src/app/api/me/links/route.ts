@@ -49,6 +49,12 @@ type LinkEntry =
       topic: string | null;
       expiresAt: string | null;
       createdAt: string;
+      // Per-field "Edited" pill metadata. Set by update_link when material
+      // fields change (proposal 2026-04-28 §3.C). Pill freshness check is
+      // client-side (5min window default); these fields are passed through
+      // verbatim.
+      lastMaterialEditAt: string | null;
+      lastEditedFields: string[];
     };
 
 export async function GET() {
@@ -115,6 +121,8 @@ export async function GET() {
       topic: true,
       expiresAt: true,
       createdAt: true,
+      lastMaterialEditAt: true,
+      lastEditedFields: true,
     },
     orderBy: { createdAt: "desc" },
     take: 30,
@@ -133,6 +141,8 @@ export async function GET() {
       topic: c.topic,
       expiresAt: c.expiresAt ? c.expiresAt.toISOString() : null,
       createdAt: c.createdAt.toISOString(),
+      lastMaterialEditAt: c.lastMaterialEditAt ? c.lastMaterialEditAt.toISOString() : null,
+      lastEditedFields: c.lastEditedFields ?? [],
     });
   }
 

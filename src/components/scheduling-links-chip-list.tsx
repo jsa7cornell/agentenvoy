@@ -23,6 +23,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { EditedPill } from "@/components/edited-pill";
 
 type LinkEntry =
   | {
@@ -53,6 +54,9 @@ type LinkEntry =
       topic: string | null;
       expiresAt: string | null;
       createdAt: string;
+      // Per-field "Edited" pill metadata — proposal 2026-04-28 §3.C.
+      lastMaterialEditAt: string | null;
+      lastEditedFields: string[];
     };
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -141,6 +145,12 @@ export function SchedulingLinksChipList() {
                 <span className="truncate text-muted tabular-nums">
                   {shortSubtitle(l)}
                 </span>
+                {l.kind === "contextual" && (
+                  <EditedPill
+                    lastMaterialEditAt={l.lastMaterialEditAt}
+                    lastEditedFields={l.lastEditedFields}
+                  />
+                )}
               </span>
               <span aria-hidden="true" className="text-muted/60">
                 {open ? "▴" : "▾"}

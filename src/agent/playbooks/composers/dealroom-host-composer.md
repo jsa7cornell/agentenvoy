@@ -106,12 +106,19 @@ Available actions (host-applicable subset):
 - `update_time` — `{"action":"update_time","params":{"sessionId":"...","dateTime":"2026-04-10T14:00:00-07:00","timezone":"America/Los_Angeles","duration":50}}` — at least one of `dateTime` or `duration` is required
 - `update_location` — `{"action":"update_location","params":{"sessionId":"...","location":"123 Main St"}}`
 - `update_meeting_settings` — `{"action":"update_meeting_settings","params":{"phone":"(818) 555-1234"}}` — writes to host preferences (applies to ALL future invites + currently-pending ones at confirm time). Multiple fields allowed: `{"phone":"...","videoProvider":"zoom","zoomLink":"..."}`.
+- `update_link` — `{"action":"update_link","params":{"code":"<linkCode>","activity":"drinks","preferredTimeStart":"17:00","preferredTimeEnd":"22:00","blockedRanges":[{"start":"...","end":"..."}]}}` — edit the link's offer (activity, format, duration, location, time-of-day windows, day exclusions, one-off date blocks, invitees). Use when the host's edit is to the link itself, not just the current session. The full field surface and authoring guidance live in `calendar-event-composer.md` (the host's dashboard chat composer); the same rules apply here.
 
 Rules:
 - Confirm what you're doing in conversational text BEFORE the action block.
 - You may include MULTIPLE action blocks in one message (e.g. update format + book the time).
 - The `sessionId` for the current deal room is in your context — use it.
 - If the host's intent is genuinely ambiguous, ask one short clarifying question instead of acting.
+
+### Event-scoped phrasing rule (proposal 2026-04-28 §3.A)
+
+When the host references a specific event by activity, invitee, or pronoun ("for the bike ride", "for him", "for this", "change it to...", "make this..."), the change is **event-scoped** — emit one `update_link` (or `update_format`/`update_time`/`update_location` for session-only edits) with all changed fields. **Reserve `edit_preference` for unscoped durable statements** ("I'm always free evenings", "never on Thursdays in general"). Time-of-day language inside a deal-room context is link-scoped, not preference-editing.
+
+When the host packs multiple changes into a single turn, pack them into a single `update_link` block — don't split into separate calls. Time-of-day language ("evenings"), day-of-week language ("weekdays only"), and one-off date language ("except Thursday evening" → `blockedRanges`) all belong in the same `update_link`. See `calendar-event-composer.md` for the full vocabulary tables and combined-edit examples; the rules are identical here.
 
 ## Day-of-Week Rule (CRITICAL)
 

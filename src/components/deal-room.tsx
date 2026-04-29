@@ -24,6 +24,7 @@ import { formatDuration } from "@/lib/format-duration";
 import { stripRendererOnlyBlocks } from "@/lib/message-render";
 import { mergePollResult, type LiveSyncMessage } from "@/lib/deal-room-live-sync";
 import { emojiForActivity } from "@/lib/activity-vocab";
+import { EditedPill } from "@/components/edited-pill";
 import { deriveMode, type DealRoomMode } from "@/lib/deal-room-mode";
 import {
   hasSeenPrimer,
@@ -132,6 +133,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     email: string | null;
   } | null>(null);
   const [topic, setTopic] = useState("");
+  // Per-field "Edited just now" pill — proposal 2026-04-28 §3.C.
+  // Server returns lastMaterialEditAt (ISO string or null) + lastEditedFields
+  // (string[] of canonical material field names, see material-fields.ts).
+  // EditedPill below computes freshness + humanizes the field list.
+  const [lastMaterialEditAt, setLastMaterialEditAt] = useState<string | null>(null);
+  const [lastEditedFields, setLastEditedFields] = useState<string[]>([]);
   const [linkFormat, setLinkFormat] = useState("");
   const [linkStartTime, setLinkStartTime] = useState<string | null>(null); // "HH:MM" for date-mode events
   const [linkLocation, setLinkLocation] = useState<string | null>(null);
@@ -940,6 +947,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           setViewerTimezoneState(data.viewerTimezone);
         }
         setTopic(data.link?.topic || "");
+        // Per-field "Edited" pill — read material-edit metadata.
+        {
+          const lastEdit = (data.link as Record<string, unknown> | undefined)?.lastMaterialEditAt;
+          setLastMaterialEditAt(typeof lastEdit === "string" ? lastEdit : null);
+          const fields = (data.link as Record<string, unknown> | undefined)?.lastEditedFields;
+          setLastEditedFields(
+            Array.isArray(fields) ? (fields as unknown[]).filter((f): f is string => typeof f === "string") : [],
+          );
+        }
         setLinkFormat(data.link?.format || "");
         setLinkStartTime(typeof (data.link as Record<string, unknown>)?.startTime === "string" ? (data.link as Record<string, unknown>).startTime as string : null);
         setLinkLocation(typeof data.link?.location === "string" && data.link.location.trim() ? data.link.location.trim() : null);
@@ -1525,6 +1541,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             sessionStatusLabel.trim().toLowerCase() !== statusConfig.label.toLowerCase() && (
               <span className="text-[10px] text-muted ml-2">{sessionStatusLabel}</span>
             )}
+          <EditedPill
+            lastMaterialEditAt={lastMaterialEditAt}
+            lastEditedFields={lastEditedFields}
+            className="ml-1"
+          />
         </div>
 
         {/* Participants row (group events) */}
