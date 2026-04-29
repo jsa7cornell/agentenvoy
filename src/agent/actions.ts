@@ -3008,8 +3008,13 @@ function isFormatDowngradeOrLateral(current: string, proposed: string): boolean 
  * Menu picks (activityOptions) always pass — the host pre-approved them.
  *
  * Emits a system-bot thread message for the diff trail.
+ *
+ * Exported so the MCP guest-side surface (`src/lib/mcp/tools.ts`) can share
+ * the same handler — keeps host- and guest-driven negotiation paths on a
+ * single code path. See `proposals/2026-04-22_guest-activity-location-
+ * negotiation_reviewed-2026-04-22.md` for the original design.
  */
-async function handleLockActivityLocation(
+export async function handleLockActivityLocation(
   params: Record<string, unknown>,
   userId: string,
   sessionId?: string

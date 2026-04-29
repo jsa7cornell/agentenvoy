@@ -782,3 +782,50 @@ describe("POST /api/mcp — cancel_meeting / reschedule_meeting", () => {
     expect(String(sc?.message)).toMatch(/not yet implemented/);
   });
 });
+
+describe("POST /api/mcp — lock_activity_location", () => {
+  it("rejects empty proposal (neither activity nor location) with validation_failed", async () => {
+    // Validation gate is enforced in the handler (not via .refine on the
+    // schema) so the SDK can extract a ZodRawShape via .shape. This test
+    // asserts the handler-level guard fires before auth — saves a Prisma
+    // round-trip on bad input.
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("lock_activity_location", { meetingUrl: "/meet/abc" })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as
+      | { ok: boolean; reason?: string; message?: string }
+      | undefined;
+    expect(sc?.ok).toBe(false);
+    expect(sc?.reason).toBe("validation_failed");
+    expect(String(sc?.message ?? "")).toMatch(/at least one/i);
+    // Auth boundary should NOT have been called — handler short-circuits.
+    expect(mockAuthorize).not.toHaveBeenCalled();
+  });
+
+  it("routes through the auth boundary when activity is provided", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ok: false,
+      error: "link_not_found",
+    });
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("lock_activity_location", {
+          meetingUrl: "/meet/does-not-exist",
+          activity: "coffee",
+        })
+      )
+    );
+    const rpc = await readJsonRpc(res);
+    const sc = rpc.result?.structuredContent as
+      | { ok: boolean; reason?: string }
+      | undefined;
+    expect(sc?.ok).toBe(false);
+    expect(sc?.reason).toBe("link_not_found");
+    expect(mockAuthorize).toHaveBeenCalledWith(
+      expect.objectContaining({ tool: "lock_activity_location" })
+    );
+  });
+});
