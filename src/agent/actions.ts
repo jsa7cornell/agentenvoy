@@ -19,6 +19,7 @@ import { sanitizeHostFlavor, sanitizeSuggestionList } from "@/lib/host-flavor-sa
 import { logCalibrationWrite } from "@/lib/calibration-audit";
 import { formatDuration } from "@/lib/format-duration";
 import { writeProfileField } from "@/lib/profile-fields";
+import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
 import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
 import { parseRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { UserPreferences } from "@/lib/scoring";
@@ -1272,7 +1273,7 @@ async function handleCreateLink(
     },
   });
 
-  const hostFirstName = hostName?.split(/\s+/)[0] || "Host";
+  const hostFirstName = resolveHostFirstName({ name: hostName });
   const { getInviteeDisplay, getWaitingLabel } = await import("@/lib/invitee-display");
   const inviteeDisplay = getInviteeDisplay({ inviteeNames, inviteeName });
   // topic is already null if it was generic (stripped at line 786 above).
@@ -2041,7 +2042,7 @@ async function handleExpandLink(
       where: { id: userId },
       select: { name: true },
     });
-    const hostFirstName = hostUser?.name?.split(/\s+/)[0] || "Host";
+    const hostFirstName = resolveHostFirstName(hostUser);
     const activityRaw = (mergedRules as Record<string, unknown>).activity;
     const activityLabel = typeof activityRaw === "string" && activityRaw.trim()
       ? activityRaw.charAt(0).toUpperCase() + activityRaw.slice(1)
@@ -2105,7 +2106,7 @@ async function handleExpandLink(
         where: { id: userId },
         select: { name: true },
       });
-      const hostFirstName = hostUser?.name?.split(/\s+/)[0] || "Host";
+      const hostFirstName = resolveHostFirstName(hostUser);
       const activityForTitle = typeof (mergedRules as Record<string, unknown>).activity === "string"
         ? ((mergedRules as Record<string, unknown>).activity as string)
         : null;
