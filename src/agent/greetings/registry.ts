@@ -79,6 +79,48 @@ export const GREETING_KEYS = [
 export type GreetingKey = (typeof GREETING_KEYS)[number];
 
 /**
+ * Canonical deferral-field nouns used in guest-facing greetings, follow-up
+ * messages, and event-card "(proposed)" indicators. Adding a new deferral
+ * dimension means adding it to this set AND wiring it through the four
+ * surfaces enumerated in §3.F of the 2026-04-29 link-handler-consolidation
+ * proposal.
+ *
+ * Order is intentional: the canonical sort applied by
+ * `formatDeferralFieldsList` so guest-facing copy is consistent across
+ * surfaces ("the length and location", not sometimes "the location and length").
+ */
+export const DEFERRAL_FIELD_NOUNS = ["location", "length", "day", "format"] as const;
+export type DeferralFieldNoun = (typeof DEFERRAL_FIELD_NOUNS)[number];
+
+/**
+ * Format a list of deferral-field nouns into a human-readable phrase used
+ * in the greeting opener ("...preferences in terms of {list}") and closing
+ * ("...any suggestions on {list}"). Returns null when no fields are
+ * deferred (caller falls back to non-deferral copy).
+ *
+ *   1 → "the location"
+ *   2 → "the length and location"
+ *   3 → "the day, length, and location"
+ *   4 → "the day, length, format, and location"
+ *
+ * "and" rather than "or" — the guest is being asked to weigh in on multiple
+ * aspects, not pick one. Differs from the host-side update-confirmation
+ * copy (actions.ts → "Feel free to suggest a length or location") which
+ * uses "or" for "you can pick this OR that" framing.
+ */
+export function formatDeferralFieldsList(
+  deferred: readonly DeferralFieldNoun[],
+): string | null {
+  if (deferred.length === 0) return null;
+  // Apply canonical order so the same set of fields renders identically
+  // regardless of input order.
+  const sorted = DEFERRAL_FIELD_NOUNS.filter((n) => deferred.includes(n));
+  if (sorted.length === 1) return `the ${sorted[0]}`;
+  if (sorted.length === 2) return `the ${sorted[0]} and ${sorted[1]}`;
+  return `the ${sorted.slice(0, -1).join(", ")}, and ${sorted[sorted.length - 1]}`;
+}
+
+/**
  * The full input bundle a registry render needs. Built once by the route
  * handler from link / session / user / scoring outputs and passed to
  * `selectGreeting(input).render(input)`.
@@ -137,6 +179,10 @@ export interface GreetingInput {
    * "Let me know where works for you[ — John suggested Central Park]." or null.
    * Pre-built so the registry renderer doesn't repeat the suggestion-format
    * logic inline. Fed into proposal/find-time branches only.
+   *
+   * **Suppressed when `deferralFieldsList` is non-null** — the new unified
+   * opener/closing format (2026-04-29) absorbs the same information at both
+   * ends of the greeting, so this standalone block becomes redundant.
    */
   guestPickHint: string | null;
 
@@ -146,8 +192,24 @@ export interface GreetingInput {
    *   - steering is narrow/exclusive, or
    *   - this is an office-hours link, or
    *   - neither format nor duration is set.
+   *
+   * **Suppressed when `deferralFieldsList` is non-null** for the same reason
+   * as `guestPickHint` above.
    */
   suggestAltClause: string | null;
+
+  /**
+   * Pre-formatted human-readable deferred-fields list — e.g. "the location",
+   * "the length and location", "the day, length, and location". Null when no
+   * fields are deferred.
+   *
+   * When non-null, the proposal/find-time templates inject it at TWO points:
+   * (1) opener — "...proposing X but wanted to check if you had preferences
+   * in terms of {list}." (2) closing — "Pick a time below and let us know
+   * any suggestions on {list}." Decided 2026-04-29 per John's feedback after
+   * observing Larry's greeting was silent on the deferred location.
+   */
+  deferralFieldsList: string | null;
 
   /**
    * Calendar-connect pitch ("…if you connect your calendar I can…"). Shown
@@ -340,21 +402,38 @@ const proposalTemplate: GreetingTemplate = {
     "(format / duration / activity / location).",
   match: (input) => !input.isAnonymousLink && hasProposalSubstance(input),
   render: (input) => {
-    const { greeteeName, hostFirstName, toneLine, guestPickHint, suggestAltClause, calendarPitch } = input;
+    const { greeteeName, hostFirstName, toneLine, guestPickHint, suggestAltClause, calendarPitch, deferralFieldsList } = input;
     const withClause = buildWithClause(input);
     const proposalPhrase = buildProposalPhrase(input);
-    const openerLine = `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${proposalPhrase}.`;
 
-    const closingBase = suggestAltClause
-      ? `Pick a time below, ${suggestAltClause}.`
-      : "Pick a time below.";
+    // Unified opener — when fields are deferred, append "but wanted to
+    // check if you had preferences in terms of {list}". Replaces the
+    // previously-split standalone `guestPickHint` block (2026-04-29 fold).
+    const openerLine = deferralFieldsList
+      ? `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${proposalPhrase} but wanted to check if you had preferences in terms of ${deferralFieldsList}.`
+      : `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${proposalPhrase}.`;
+
+    // Unified closing — when fields are deferred, append "and let us know
+    // any suggestions on {list}". Subsumes the legacy `suggestAltClause`
+    // for the deferral case.
+    let closingBase: string;
+    if (deferralFieldsList) {
+      closingBase = `Pick a time below and let us know any suggestions on ${deferralFieldsList}.`;
+    } else if (suggestAltClause) {
+      closingBase = `Pick a time below, ${suggestAltClause}.`;
+    } else {
+      closingBase = "Pick a time below.";
+    }
     const closingParts = [closingBase];
     if (calendarPitch) closingParts.push(calendarPitch);
     const closing = closingParts.join(" ");
 
     const blocks: string[] = [openerLine];
     if (toneLine) blocks.push(toneLine);
-    if (guestPickHint) blocks.push(guestPickHint);
+    // guestPickHint suppressed when deferralFieldsList is set — same info,
+    // already absorbed into opener + closing above. Legacy callers that
+    // don't yet populate deferralFieldsList still see the standalone block.
+    if (!deferralFieldsList && guestPickHint) blocks.push(guestPickHint);
     blocks.push(closing);
     return blocks.join("\n\n");
   },
@@ -376,20 +455,31 @@ const findTimeTemplate: GreetingTemplate = {
     "deferred format / duration / activity / location to the guest.",
   match: (input) => !input.isAnonymousLink && !hasProposalSubstance(input),
   render: (input) => {
-    const { greeteeName, hostFirstName, timingLabel, toneLine, guestPickHint, suggestAltClause, calendarPitch } = input;
+    const { greeteeName, hostFirstName, timingLabel, toneLine, guestPickHint, suggestAltClause, calendarPitch, deferralFieldsList } = input;
     const findTimeWithClause = buildFindTimeWithClause(input);
+
+    // Find-time greeting fires when no structural fields are set — the
+    // host has effectively deferred everything. The opener already says
+    // "asked me to find time", which inherently invites the guest to
+    // weigh in. Don't repeat "but wanted to check" here; just append the
+    // closing-side suggestion clause for clarity.
     const openerLine = `👋 ${greeteeName}! ${hostFirstName} asked me to find time${findTimeWithClause}${timingLabel ? ` ${timingLabel}` : ""}.`;
 
-    const closingBase = suggestAltClause
-      ? `Pick a time below, ${suggestAltClause}.`
-      : "Pick a time below.";
+    let closingBase: string;
+    if (deferralFieldsList) {
+      closingBase = `Pick a time below and let us know any suggestions on ${deferralFieldsList}.`;
+    } else if (suggestAltClause) {
+      closingBase = `Pick a time below, ${suggestAltClause}.`;
+    } else {
+      closingBase = "Pick a time below.";
+    }
     const closingParts = [closingBase];
     if (calendarPitch) closingParts.push(calendarPitch);
     const closing = closingParts.join(" ");
 
     const blocks: string[] = [openerLine];
     if (toneLine) blocks.push(toneLine);
-    if (guestPickHint) blocks.push(guestPickHint);
+    if (!deferralFieldsList && guestPickHint) blocks.push(guestPickHint);
     blocks.push(closing);
     return blocks.join("\n\n");
   },

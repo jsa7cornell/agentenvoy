@@ -27,7 +27,12 @@ import {
   formatLabel,
   computeCanonicalWeekLabel,
 } from "@/lib/greeting-template";
-import { selectGreeting, type GreetingInput } from "@/agent/greetings/registry";
+import {
+  selectGreeting,
+  formatDeferralFieldsList,
+  type GreetingInput,
+  type DeferralFieldNoun,
+} from "@/agent/greetings/registry";
 // formatAvailabilitySlotList / formatAvailabilityProse / formatStretchDays /
 // buildOpenWindowGreeting removed 2026-04-23 when the bulleted schedule body
 // and guestPicks open-window template were folded into the unified greeting
@@ -1003,6 +1008,35 @@ export async function POST(req: NextRequest) {
     const filteredTopicForRegistry =
       rawTopic && !isGenericTopic(rawTopic) ? rawTopic : null;
 
+    // Unified deferral-fields list — replaces the split guestPickHint /
+    // suggestAltClause patterns with one consistent shape across all four
+    // dimensions (location / duration / format / date). Decided 2026-04-29
+    // per John's feedback that Larry's greeting was silent on the deferred
+    // location ("set up an in-person meeting with Larry — he picks the
+    // spot" produced no "Let me know where works for you" line).
+    //
+    // Skipped for office-hours and directive (single-slot-lock) links
+    // since neither expects guest input on these dimensions.
+    const deferralFieldsList = ((): string | null => {
+      if (isDirective || isOfficeHoursLink) return null;
+      const deferred: DeferralFieldNoun[] = [];
+      if (guestPicks?.location === true) deferred.push("location");
+      if (
+        guestPicks?.duration === true ||
+        (Array.isArray(guestPicks?.duration) && guestPicks.duration.length > 0)
+      ) {
+        deferred.push("length");
+      }
+      if (guestPicks?.format === true || Array.isArray(guestPicks?.format)) {
+        deferred.push("format");
+      }
+      // Date deferral is intentionally NOT inserted — the calendar widget
+      // IS the day picker and it always renders, so saying "let us know
+      // suggestions on the day" reads as redundant. Mirrors the existing
+      // guestPickHint behavior (date-pick is suppressed there too).
+      return formatDeferralFieldsList(deferred);
+    })();
+
     // Build the registry input bundle. Mirrors the exact shape the previous
     // inlined branches read; the registry resolver picks the matching
     // template and renders.
@@ -1025,6 +1059,7 @@ export async function POST(req: NextRequest) {
       timingLabel,
       guestPickHint,
       suggestAltClause,
+      deferralFieldsList,
       calendarPitch,
       toneLine: guestGuidance?.tone ? guestGuidance.tone : null,
     };

@@ -1580,11 +1580,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           {eventFormat && (() => {
             const formatEmoji = getMeetingEmoji(eventFormat, null);
             const formatText = eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat;
-            // (proposed) suffix on deferred fields — proposal 2026-04-29
-            // feedback. The host's deferral state surfaces inline so the
-            // guest sees what's actually theirs to pick.
-            const formatSuffix = linkGuestPicksFormat ? " (proposed)" : "";
-            const durationSuffix = linkGuestPicksDuration ? " (proposed)" : "";
+            // ✏️ pencil suffix on deferred fields — proposal 2026-04-29
+            // feedback iter 2: replaced the "(proposed)" text suffix with
+            // a pencil icon. Map pin (📍) is reserved for actual location;
+            // pencil signals "editable / guest can suggest".
+            const formatSuffix = linkGuestPicksFormat ? " ✏️" : "";
+            const durationSuffix = linkGuestPicksDuration ? " ✏️" : "";
             return <span>{formatEmoji}{formatEmoji ? " " : ""}{formatText}{formatSuffix} &middot; {eventDuration} min{durationSuffix}</span>;
           })()}
           {eventDateTime && (() => {
@@ -1606,9 +1607,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (linkActivity) {
               parts.push(linkActivityIcon ? `${linkActivityIcon} ${linkActivity}` : linkActivity);
             }
-            if (slotDuration) parts.push(formatDuration(slotDuration) + (linkGuestPicksDuration ? " (proposed)" : ""));
-            if (linkTimingLabel) parts.push(linkTimingLabel + (linkGuestPicksDate ? " (proposed)" : ""));
-            if (linkLocation) parts.push(`📍 ${linkLocation}` + (linkGuestPicksLocation ? " (proposed)" : ""));
+            if (slotDuration) parts.push(formatDuration(slotDuration) + (linkGuestPicksDuration ? " ✏️" : ""));
+            if (linkTimingLabel) parts.push(linkTimingLabel + (linkGuestPicksDate ? " ✏️" : ""));
+            if (linkLocation) {
+              // Locked location → 📍 prefix. If also deferred (rare —
+              // host gave a hint but guest can change), append ✏️.
+              parts.push(`📍 ${linkLocation}` + (linkGuestPicksLocation ? " ✏️" : ""));
+            } else if (linkGuestPicksLocation) {
+              // No location set + deferred → guest will pick. Use ✏️
+              // alone (NOT 📍) to signal "editable" rather than "we have
+              // a location". Matches John's 2026-04-29 directive: "icon
+              // should be a pencil. the map pin is for location."
+              parts.push("✏️ Pick a location");
+            }
             if (parts.length === 0) return <span>Meeting details pending</span>;
             return <span>{parts.join(" · ")}</span>;
           })()}

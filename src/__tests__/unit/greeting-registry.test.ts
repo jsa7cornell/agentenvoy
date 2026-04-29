@@ -23,6 +23,7 @@ import { describe, it, expect } from "vitest";
 import {
   selectGreeting,
   GREETINGS,
+  formatDeferralFieldsList,
   type GreetingInput,
 } from "@/agent/greetings/registry";
 
@@ -52,6 +53,7 @@ function baseInput(overrides: Partial<GreetingInput> = {}): GreetingInput {
     timingLabel: null,
     guestPickHint: null,
     suggestAltClause: null,
+    deferralFieldsList: null,
     calendarPitch: null,
     toneLine: null,
     ...overrides,
@@ -290,6 +292,54 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
     );
   });
 
+  // ─── Deferral-fields list (2026-04-29 unified opener/closing) ────────────
+
+  it("Branch B-proposal: with deferralFieldsList, opener appends 'but wanted to check' and closing appends 'let us know any suggestions'", () => {
+    const input = baseInput({
+      greeteeName: "Larry",
+      effectiveFormat: "in-person",
+      durationForOpener: 60,
+      deferralFieldsList: "the location",
+      // guestPickHint and suggestAltClause are now suppressed when
+      // deferralFieldsList is set — they would render redundant info.
+      guestPickHint: "Let me know where works for you.",
+      suggestAltClause: null,
+    });
+    const out = GREETINGS.proposal.render(input);
+    expect(out).toBe(
+      [
+        "👋 Larry! I'm scheduling time with you and John. John is proposing a 1h in-person meeting but wanted to check if you had preferences in terms of the location.",
+        "Pick a time below and let us know any suggestions on the location.",
+      ].join("\n\n"),
+    );
+  });
+
+  it("Branch B-proposal: with two deferred fields, list joins with 'and' (canonical order)", () => {
+    const input = baseInput({
+      greeteeName: "Larry",
+      effectiveFormat: "in-person",
+      durationForOpener: 60,
+      deferralFieldsList: "the location and length",
+    });
+    const out = GREETINGS.proposal.render(input);
+    expect(out).toContain("preferences in terms of the location and length");
+    expect(out).toContain("any suggestions on the location and length");
+  });
+
+  it("Branch B-find-time: with deferralFieldsList, only the closing carries the 'let us know' suggestion (opener already invites)", () => {
+    const input = baseInput({
+      greeteeName: "Sarah",
+      // No structural fields → find-time branch fires.
+      deferralFieldsList: "the location",
+    });
+    const out = GREETINGS["find-time"].render(input);
+    expect(out).toContain("👋 Sarah! John asked me to find time");
+    expect(out).toContain("Pick a time below and let us know any suggestions on the location.");
+    // Opener should NOT carry the "but wanted to check" clause — find-time
+    // is itself an open invitation.
+    expect(out).not.toContain("but wanted to check");
+  });
+
   it("Branch B-proposal: bare format defaults to article + format", () => {
     const input = baseInput({
       greeteeName: "Sarah",
@@ -390,5 +440,45 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
         "Pick a time below. Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
       ].join("\n\n"),
     );
+  });
+});
+
+// ─── formatDeferralFieldsList helper (2026-04-29) ────────────────────────────
+
+describe("formatDeferralFieldsList — canonical-order grammar", () => {
+  it("returns null for empty input", () => {
+    expect(formatDeferralFieldsList([])).toBeNull();
+  });
+
+  it("formats one field with 'the' prefix", () => {
+    expect(formatDeferralFieldsList(["location"])).toBe("the location");
+    expect(formatDeferralFieldsList(["length"])).toBe("the length");
+  });
+
+  it("formats two fields with 'and' (canonical order: location → length → day → format)", () => {
+    expect(formatDeferralFieldsList(["location", "length"])).toBe(
+      "the location and length",
+    );
+    // Input order doesn't matter — canonical order applied.
+    expect(formatDeferralFieldsList(["length", "location"])).toBe(
+      "the location and length",
+    );
+  });
+
+  it("formats three fields with Oxford comma + 'and'", () => {
+    expect(formatDeferralFieldsList(["location", "length", "day"])).toBe(
+      "the location, length, and day",
+    );
+    // Canonical order applied regardless of input order.
+    expect(formatDeferralFieldsList(["format", "location", "length"])).toBe(
+      "the location, length, and format",
+    );
+  });
+
+  it("normalizes to canonical order regardless of input order", () => {
+    const a = formatDeferralFieldsList(["format", "day", "length", "location"]);
+    const b = formatDeferralFieldsList(["location", "length", "day", "format"]);
+    expect(a).toBe(b);
+    expect(a).toBe("the location, length, day, and format");
   });
 });
