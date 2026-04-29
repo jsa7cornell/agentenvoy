@@ -42,7 +42,12 @@ export async function GET() {
   }
 
   const prefs = (user.preferences as UserPreferences | null) ?? {};
-  const themeMode = (readProfileField(prefs, "themeMode") as ThemeMode | undefined) ?? "dark";
+  // Default for users without an explicit themeMode preference. Light is
+  // the v2 default (per John's 2026-04-29 direction); users who want dark
+  // or auto can set it explicitly via the theme-mode toggle in Account.
+  // Existing users who actively chose "dark" via the toggle have it stored
+  // explicitly and are unaffected by this fallback.
+  const themeMode = (readProfileField(prefs, "themeMode") as ThemeMode | undefined) ?? "light";
   const timezone = getUserTimezone(prefs as unknown as Record<string, unknown>);
   const seenThemeModeExplainer = Boolean(prefs.explicit?.seenThemeModeExplainer);
 

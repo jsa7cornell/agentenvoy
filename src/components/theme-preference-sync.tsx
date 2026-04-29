@@ -90,7 +90,7 @@ export function ThemePreferenceSync() {
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;
-        const mode = (data.themeMode ?? "dark") as ThemeMode;
+        const mode = (data.themeMode ?? "light") as ThemeMode;
         const tz = (data.timezone ?? "America/Los_Angeles") as string;
         modeRef.current = mode;
         tzRef.current = tz;
