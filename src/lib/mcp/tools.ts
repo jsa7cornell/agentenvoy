@@ -45,6 +45,7 @@ import {
 } from "@/lib/mcp/auth";
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
 import { confirmBooking } from "@/lib/confirm-pipeline";
+import { cancelSession } from "@/lib/cancel-pipeline";
 import { writeMcpCallLog } from "@/lib/mcp/call-log";
 import {
   MCP_TOOLS,
@@ -887,32 +888,136 @@ export async function handleProposeLock(
 }
 
 // ---------------------------------------------------------------------------
-// Handler: cancel_meeting  (blocked — pipeline extraction pending)
+// Handler: cancel_meeting
 // ---------------------------------------------------------------------------
 
 /**
- * Returns an explicit refusal until `cancel-pipeline.ts` lands (per the
- * parent proposal's extraction sequence). Kept discoverable so agents can
- * parse the tools/list response today and know this name reserves the slot.
+ * Cancel a confirmed meeting on behalf of an external agent.
+ *
+ * Thin wrapper over `cancelSession()` from `@/lib/cancel-pipeline`. The
+ * pipeline owns the cascade (Google delete, hold release, schedule cache
+ * invalidation, state flip, system-message timeline indicator); this handler
+ * layers the MCP-specific concerns (link auth, business gate, refusal-reason
+ * mapping).
+ *
+ * Business gate: matches `/api/negotiate/cancel/route.ts` — only `agreed`
+ * sessions can be cancelled. Sessions in `active`/`pending` states should be
+ * archived, not cancelled. Sessions already in `cancelled` are idempotent
+ * (return `ok: true, idempotent: true`).
+ *
+ * Initiator is recorded as `"agent"` so the deal-room timeline + statusLabel
+ * reflect the external-agent provenance. The `clientMeta.principal.name`, if
+ * provided, is used as the `initiatorName` so the timeline shows e.g.
+ * "Meeting cancelled by Amy" rather than "Meeting cancelled by host."
  */
 export async function handleCancelMeeting(
-  _args: z.infer<typeof cancelMeetingInput> // eslint-disable-line @typescript-eslint/no-unused-vars
+  args: z.infer<typeof cancelMeetingInput>
 ): Promise<CallToolResult> {
-  return asCallResult(
-    {
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "cancel_meeting",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+
+  const session = await resolveSession({
+    linkId: link.id,
+    hostId: link.userId,
+    sessionId: args.sessionId,
+  });
+  if (!session) {
+    return asCallResult({
+      ok: false,
+      reason: "session_not_found",
+      message: "No session found for this link.",
+    });
+  }
+
+  // Idempotency: already-cancelled sessions return ok:true, idempotent:true
+  // without re-running the cascade. Mirrors cancelSession()'s own no-op path.
+  if (session.status === "cancelled") {
+    return asCallResult({
+      ok: true,
+      sessionId: session.id,
+      status: "cancelled",
+      idempotent: true,
+    });
+  }
+
+  // Business gate (mirrors /api/negotiate/cancel): only confirmed meetings
+  // are cancellable via this surface. Active/pending sessions don't have a
+  // calendar event to delete; they should be archived instead. Terminal
+  // states other than "cancelled" (expired, rescheduled, escalated) are not
+  // cancellable.
+  if (session.status !== "agreed") {
+    return asCallResult({
+      ok: false,
+      reason:
+        session.status === "active" ? "session_not_agreed" : "session_terminal",
+      message:
+        session.status === "active"
+          ? "Only confirmed meetings can be cancelled."
+          : `Session is in terminal state '${session.status}' and cannot be cancelled.`,
+    });
+  }
+
+  const initiatorName =
+    args.clientMeta?.principal?.name ?? null;
+
+  const result = await cancelSession({
+    sessionId: session.id,
+    hostId: link.userId,
+    initiator: "agent",
+    initiatorName,
+    note: args.reason ?? null,
+    notifyAttendees: args.notifyHost ?? true,
+  });
+
+  if (!result.ok) {
+    // cancelSession() returns a string `error`; map common shapes back to
+    // the schema's refusal enum. "Session not found" is unlikely (we just
+    // resolved), "Unauthorized" can't happen (link.userId == session.hostId
+    // by resolveSession() construction), so the residual is a generic
+    // pipeline failure — surface as session_terminal.
+    return asCallResult({
       ok: false,
       reason: "session_terminal",
-      message:
-        "cancel_meeting is not yet implemented. Blocked on cancel-pipeline extraction (parent proposal §2).",
-    },
-    { isError: true }
-  );
+      message: result.error ?? "Cancel failed.",
+    });
+  }
+
+  return asCallResult({
+    ok: true,
+    sessionId: session.id,
+    status: "cancelled",
+    ...(result.changed === false ? { idempotent: true } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Handler: reschedule_meeting  (blocked — pipeline extraction pending)
+// Handler: reschedule_meeting  (stub — awaiting reschedule-pipeline.ts)
 // ---------------------------------------------------------------------------
 
+/**
+ * Stub. Returns a refusal until reschedule-pipeline.ts is extracted from
+ * `app/src/app/api/negotiate/reschedule/route.ts` (the human-path equivalent,
+ * 121 lines of inline logic). Cancel got the same treatment first; that
+ * pipeline extraction shipped (`@/lib/cancel-pipeline`) and the cancel
+ * handler now wires through cleanly. Reschedule is the symmetric follow-up,
+ * tracked on WISHLIST.
+ *
+ * Wire surface caveat: this returns `reason: "session_terminal"`, which is
+ * misleading for an unimplemented tool — agents reading the refusal would
+ * conclude "the session is closed, give up." The honest reason would be
+ * something like `tool_not_implemented`, but adding a refusal-enum value is
+ * a Rule 16 cross-contract change that deserves its own scoped fix and CI
+ * audit pass (advertise vs. implement parity). Tracked in WISHLIST under
+ * the same Agent Platform entry.
+ */
 export async function handleRescheduleMeeting(
   _args: z.infer<typeof rescheduleMeetingInput> // eslint-disable-line @typescript-eslint/no-unused-vars
 ): Promise<CallToolResult> {
@@ -921,7 +1026,7 @@ export async function handleRescheduleMeeting(
       ok: false,
       reason: "session_terminal",
       message:
-        "reschedule_meeting is not yet implemented. Blocked on reschedule-pipeline extraction (parent proposal §2).",
+        "reschedule_meeting is not yet implemented. Awaiting reschedule-pipeline.ts extraction from /api/negotiate/reschedule.",
     },
     { isError: true }
   );

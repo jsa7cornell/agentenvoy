@@ -726,21 +726,41 @@ describe("POST /api/mcp — propose_lock", () => {
   });
 });
 
-describe("POST /api/mcp — pipeline-blocked tools are discoverable", () => {
-  it("cancel_meeting returns isError:true blocked stub", async () => {
+describe("POST /api/mcp — cancel_meeting / reschedule_meeting", () => {
+  it("cancel_meeting routes through the auth boundary (no longer a stub)", async () => {
+    // cancel_meeting is now wired up (calls cancel-pipeline.ts). The route-
+    // handler test exercises the auth boundary only — link_not_found short-
+    // circuits before any pipeline work. Full happy-path + business-gate +
+    // idempotency tests live in the integration suite where a real DB is
+    // available; this unit test just asserts the handler is no longer a
+    // not-implemented stub and goes through authorization.
+    mockAuthorize.mockResolvedValueOnce({
+      ok: false,
+      error: "link_not_found",
+    });
     const res = await POST(
       makeRpcRequest(
-        jsonRpcCall("cancel_meeting", { meetingUrl: "/meet/abc" })
+        jsonRpcCall("cancel_meeting", { meetingUrl: "/meet/does-not-exist" })
       )
     );
     const rpc = await readJsonRpc(res);
-    expect(rpc.result?.isError).toBe(true);
-    const sc = rpc.result?.structuredContent;
+    const sc = rpc.result?.structuredContent as
+      | { ok: boolean; reason?: string; message?: string }
+      | undefined;
     expect(sc?.ok).toBe(false);
-    expect(String(sc?.message)).toMatch(/not yet implemented/);
+    expect(sc?.reason).toBe("link_not_found");
+    // Confirm the old "not yet implemented" message is gone — the handler
+    // is real now.
+    expect(String(sc?.message ?? "")).not.toMatch(/not yet implemented/);
+    expect(mockAuthorize).toHaveBeenCalledWith(
+      expect.objectContaining({ tool: "cancel_meeting" })
+    );
   });
 
-  it("reschedule_meeting returns isError:true blocked stub", async () => {
+  it("reschedule_meeting returns isError:true stub (awaiting reschedule-pipeline.ts)", async () => {
+    // Symmetric follow-up to the cancel-pipeline extraction. Stub stays in
+    // tools/list per the registration design (stable discovery surface) but
+    // returns a refusal until the pipeline is extracted.
     const res = await POST(
       makeRpcRequest(
         jsonRpcCall("reschedule_meeting", {
