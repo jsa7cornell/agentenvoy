@@ -218,6 +218,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // guest whose calendar is connected. When absent, no chips render and the
   // existing host-only availability widget carries the interaction load.
   const [bilateralByDay, setBilateralByDay] = useState<Record<string, TimeChipData[]> | null>(null);
+  // PR-B2 of bilateral+picker bundle: the canonical bilateral payload from
+  // PR-A1's slots-route migration. Detailed tab in the picker reads from
+  // this directly — single source of truth shared with Best matches.
+  const [bilateralPayload, setBilateralPayload] = useState<
+    import("@/lib/bilateral-availability").BilateralPayload | null
+  >(null);
   // T4: one-shot trigger for MatchPulse. Flips true on the render cycle
   // when bilateralByDay first becomes non-empty, then resets next tick.
   const [justMatched, setJustMatched] = useState(false);
@@ -427,6 +433,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (data.bilateralByDay && typeof data.bilateralByDay === "object") {
           setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
         }
+        if (data.bilateralPayload) {
+          setBilateralPayload(
+            data.bilateralPayload as import("@/lib/bilateral-availability").BilateralPayload,
+          );
+        }
         if (data.status === "calendar_disconnected") {
           setSlotFetchState({ kind: "calendar_disconnected" });
         } else if (data.status === "no_slots") {
@@ -473,6 +484,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);
         if (data?.bilateralByDay && typeof data.bilateralByDay === "object") {
           setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
+        }
+        if (data?.bilateralPayload) {
+          setBilateralPayload(
+            data.bilateralPayload as import("@/lib/bilateral-availability").BilateralPayload,
+          );
         }
       })
       .catch(() => {})
@@ -871,6 +887,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         .then((data) => {
           if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);
           if (data?.bilateralByDay) setBilateralByDay(data.bilateralByDay);
+          if (data?.bilateralPayload) setBilateralPayload(data.bilateralPayload);
         })
         .catch(() => {});
     }
@@ -2125,6 +2142,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             headerSlot={headerSlot}
             footerSlot={tzPicker}
             bilateralByDay={bilateralByDay}
+            bilateralPayload={bilateralPayload}
             hostFirstName={hostName ? resolveHostFirstName({ name: hostName }) : undefined}
             eventTitle={(() => {
               const hostFirst = hostName ? hostName.split(" ")[0] : "";
@@ -2907,6 +2925,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       if (data?.slotsByDay) setSlotsByDay(data.slotsByDay);
                       if (data?.bilateralByDay && typeof data.bilateralByDay === "object") {
                         setBilateralByDay(data.bilateralByDay as Record<string, TimeChipData[]>);
+                      }
+                      if (data?.bilateralPayload) {
+                        setBilateralPayload(
+                          data.bilateralPayload as import("@/lib/bilateral-availability").BilateralPayload,
+                        );
                       }
                     })
                     .catch(() => {});
