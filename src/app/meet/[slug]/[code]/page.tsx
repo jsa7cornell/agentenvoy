@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { DealRoom } from "@/components/deal-room";
+import { GuestLightTheme } from "@/components/guest-light-theme";
 import { formatDuration } from "@/lib/format-duration";
 import { parseLinkParameters } from "@/lib/link-parameters";
 
@@ -117,5 +118,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function ContextualMeetPage({ params }: Props) {
   const { slug, code } = await params;
-  return <DealRoom slug={slug} code={code} />;
+  return (
+    <>
+      <GuestLightTheme />
+      <DealRoom slug={slug} code={code} />
+    </>
+  );
 }
