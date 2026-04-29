@@ -123,6 +123,14 @@ export async function GET(req: NextRequest) {
   // calendar. Undefined in the response when there is no bilateral signal —
   // client falls back to the existing host-only widget.
   let bilateralByDay: Record<string, BilateralSlot[]> | undefined;
+  // PR-A1 of the bilateral+picker bundle: the canonical payload that the
+  // picker's Detailed tab will hydrate from. Both tabs (Best matches + Detailed)
+  // now read from the same source of truth — see `computeBilateralForSession`
+  // in `bilateral-availability.ts`. The legacy `bilateralByDay` shape is
+  // derived from this payload below for backward-compat with today's render.
+  let bilateralPayload: Awaited<
+    ReturnType<typeof import("@/lib/bilateral-availability").computeBilateralForSession>
+  > | undefined;
   // WISHLIST §1o PR-α: when the compute pipeline throws, the catch sets this
   // flag so the response shape becomes `{ slotsByDay: null, error:
   // "compute_failed", ... }` instead of the previous silent fall-through to
@@ -320,77 +328,85 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ── Bilateral compute. Two paths lead here:
+    // ── Bilateral compute (canonical, PR-A1 of bilateral+picker bundle).
     //
-    //   (1) Logged-in guest with their own Google Calendar connected → read
-    //       their scored schedule via getOrComputeSchedule(guestId).
-    //   (2) Anonymous guest who OAuth'd a read-only calendar connect from
-    //       the deal room (Slice 8) → the callback stashed a ScoredSlot[]
-    //       snapshot on a system message's metadata. Use that.
+    // Two flows merge here:
+    //   - Logged-in guest with their own Google Calendar → live `getOrComputeSchedule`.
+    //   - Anonymous guest who OAuth'd a read-only connect → snapshot on a
+    //     system message's metadata.
     //
-    // If neither path yields data, bilateralByDay stays undefined and the
-    // widget falls back to host-only rendering (today's behavior).
-    if (!selfMode) {
-      let guestSlots: ScoredSlot[] = [];
-      let guestAvailable = false;
+    // Both flows now hydrate from the same source: `computeBilateralForSession`
+    // in `bilateral-availability.ts`. Fast path for the logged-in guest still
+    // uses live schedule via the snapshot-less code path; the snapshot path
+    // is automatic when no guest user is set.
+    //
+    // Render shape: this route still returns `bilateralByDay` (legacy
+    // chip-list shape) for backward compat with today's picker. The new
+    // `bilateralPayload` is also returned — PR-B2's Detailed tab will
+    // consume that directly (matched + looseMutual + conflicts split).
+    if (!selfMode && sessionId) {
+      try {
+        const { computeBilateralForSession } = await import(
+          "@/lib/bilateral-availability"
+        );
+        bilateralPayload = await computeBilateralForSession(sessionId, {
+          // Picker's render path — the guest sees the Detailed tab on their
+          // own device. Sonnet's tool path passes `false` per Cut 2.
+          includeConflicts: true,
+        });
 
-      // Path 1: logged-in guest (live calendar).
-      if (guestId && guestId !== hostId) {
-        try {
-          const guestSchedule = await getOrComputeSchedule(guestId);
-          if (guestSchedule.connected) {
-            guestSlots = guestSchedule.slots;
-            guestAvailable = true;
-          }
-        } catch (e) {
-          console.log("Bilateral compute: guestId lookup failed", guestId, e);
-        }
-      }
-
-      // Path 2: anonymous-guest calendar snapshot on this session. Only
-      // consult if Path 1 didn't produce data — a logged-in guest's live
-      // calendar always trumps an older one-time snapshot.
-      if (!guestAvailable && sessionId) {
-        try {
-          const snapshotMsg = await prisma.message.findFirst({
-            where: {
-              sessionId,
-              role: "system",
-              metadata: { path: ["kind"], equals: "guest_calendar_snapshot" },
-            },
-            orderBy: { createdAt: "desc" },
-            select: { metadata: true },
-          });
-          const snapshot = snapshotMsg?.metadata as Record<string, unknown> | null | undefined;
-          const snapSlots = snapshot?.scoredSlots;
-          if (Array.isArray(snapSlots) && snapSlots.length > 0) {
-            guestSlots = snapSlots as ScoredSlot[];
-            guestAvailable = true;
-          }
-        } catch (e) {
-          console.log("Bilateral compute: snapshot lookup failed", sessionId, e);
-        }
-      }
-
-      if (guestAvailable) {
-        try {
-          const bilateralSlots = computeBilateralAvailability({
-            hostSlots: slots,
-            guestSlots,
-            guestScheduleAvailable: true,
-          });
-          if (bilateralSlots.length > 0) {
-            const grouped: Record<string, BilateralSlot[]> = {};
-            for (const bs of bilateralSlots) {
-              const dateKey = dateFmt.format(new Date(bs.start));
-              if (!grouped[dateKey]) grouped[dateKey] = [];
-              grouped[dateKey].push(bs);
+        // Logged-in guest fast path: when a live `getOrComputeSchedule`
+        // produces fresher data than the snapshot, prefer it for the legacy
+        // `bilateralByDay` derivation. The new `bilateralPayload` reflects
+        // the snapshot path; consumers reading the new payload accept that.
+        let liveBilateralSlots: BilateralSlot[] | null = null;
+        if (guestId && guestId !== hostId) {
+          try {
+            const guestSchedule = await getOrComputeSchedule(guestId);
+            if (guestSchedule.connected) {
+              liveBilateralSlots = computeBilateralAvailability({
+                hostSlots: slots,
+                guestSlots: guestSchedule.slots,
+                guestScheduleAvailable: true,
+              });
             }
-            bilateralByDay = grouped;
+          } catch (e) {
+            console.log("Bilateral compute: live guest schedule failed", guestId, e);
           }
-        } catch (e) {
-          console.log("Bilateral compute failed", e);
         }
+
+        // Derive legacy `bilateralByDay` shape. Prefer live data when present;
+        // otherwise reduce the canonical payload's `matched` + `looseMutual`
+        // arrays into BilateralSlot[] grouped by day-key.
+        if (liveBilateralSlots && liveBilateralSlots.length > 0) {
+          const grouped: Record<string, BilateralSlot[]> = {};
+          for (const bs of liveBilateralSlots) {
+            const dateKey = dateFmt.format(new Date(bs.start));
+            if (!grouped[dateKey]) grouped[dateKey] = [];
+            grouped[dateKey].push(bs);
+          }
+          bilateralByDay = grouped;
+        } else if (bilateralPayload?.available) {
+          const grouped: Record<string, BilateralSlot[]> = {};
+          for (const day of bilateralPayload.byDay) {
+            const dayKey = dateFmt.format(new Date(`${day.date}T12:00:00.000Z`));
+            const bucket: BilateralSlot[] = [];
+            for (const m of day.matched) {
+              bucket.push({ start: m.start, end: m.end, color: "both" });
+            }
+            for (const lm of day.looseMutual) {
+              bucket.push({ start: lm.start, end: lm.end, color: "one" });
+            }
+            if (bucket.length > 0) {
+              grouped[dayKey] = bucket.sort(
+                (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
+              );
+            }
+          }
+          if (Object.keys(grouped).length > 0) bilateralByDay = grouped;
+        }
+      } catch (e) {
+        console.log("Bilateral compute failed", e);
       }
     }
   } catch (e) {
@@ -490,6 +506,11 @@ export async function GET(req: NextRequest) {
     minDuration,
     isVip: isVipLink || undefined,
     bilateralByDay,
+    // Canonical bilateral payload (PR-A1). Optional in the response —
+    // present only when the session has a guest snapshot. PR-B2's Detailed
+    // tab consumes this directly; legacy clients that read `bilateralByDay`
+    // continue to work unchanged.
+    ...(bilateralPayload?.available ? { bilateralPayload } : {}),
     ...(isEmpty ? { status: "no_slots" as const } : {}),
   });
 }

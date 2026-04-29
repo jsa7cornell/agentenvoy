@@ -3,10 +3,14 @@ import { google } from "googleapis";
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
-import type { ScoredSlot } from "@/lib/scoring";
 import { dispatchGuestFlowWelcomeEmailOnce } from "@/lib/emails/guest-flow-welcome";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
 import { GUEST_REQUIRED, auditScopes } from "@/lib/oauth/required-scopes";
+import {
+  filterGuestEvents,
+  type GuestSnapshotEvent,
+  type GuestSnapshotBusy,
+} from "@/lib/guest-snapshot";
 
 // GET /api/auth/guest-calendar/callback?code=xxx&state=xxx
 //
@@ -233,81 +237,76 @@ export async function GET(req: NextRequest) {
   const scopeAudit = auditScopes(tokens.scope, GUEST_REQUIRED);
   const calendarReadDenied = !scopeAudit.satisfied;
 
-  // === Guest freebusy → bilateral slots (legacy, preserved) ===
+  // === Guest events.list → bilateral snapshot ===
+  //
+  // Upgraded from `freebusy.query()` per 2026-04-29 bilateral+picker bundle
+  // PR-A1. The richer payload carries event titles + visibility +
+  // transparency, which lets the picker's Detailed tab name conflicts
+  // ("Standup" instead of dim grey block). Privacy filtering happens
+  // deterministically in `filterGuestEvents` (visibility=private strips
+  // titles, transparency=transparent drops, declined attendance drops,
+  // cancelled drops).
   const calendar = google.calendar({ version: "v3", auth: oauth2Client });
   const now = new Date();
   const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-  // scoredSlots is what we pass into bilateral compute.
-  // humanSummary feeds the LLM's conversational context.
-  const scoredSlots: ScoredSlot[] = [];
+  let snapshotEvents: GuestSnapshotEvent[] = [];
+  let snapshotBusy: GuestSnapshotBusy[] = [];
   const humanLabels: string[] = [];
-  let freebusyFailed = false;
+  let fetchFailed = false;
 
   try {
     if (calendarReadDenied) {
       throw new Error("calendar.readonly scope not granted");
     }
-    const { data } = await calendar.freebusy.query({
-      requestBody: {
-        timeMin: now.toISOString(),
-        timeMax: twoWeeks.toISOString(),
-        items: [{ id: "primary" }],
-      },
+    const { data } = await calendar.events.list({
+      calendarId: "primary",
+      timeMin: now.toISOString(),
+      timeMax: twoWeeks.toISOString(),
+      singleEvents: true,
+      showDeleted: false,
+      maxResults: 2500,
+      orderBy: "startTime",
     });
 
-    const busySlots =
-      data.calendars?.primary?.busy?.map((b) => ({
-        start: new Date(b.start!),
-        end: new Date(b.end!),
-      })) ?? [];
+    const filtered = filterGuestEvents(data.items ?? []);
+    snapshotEvents = filtered.events;
+    snapshotBusy = filtered.busy;
 
-    // Walk the window in 30-min steps and emit EVERY non-busy slot as
-    // score=1. We don't pre-filter by hour — the prior implementation used
-    // `current.getHours()` which reads server-local (UTC on Vercel) time,
-    // so for a guest in PT the "9–18" window was 2 AM–11 AM PT, and real
-    // business-hours overlap was silently dropped. Business-hours
-    // restriction is the HOST's job, applied downstream via their scored
-    // schedule — the intersection naturally filters to when the host
-    // actually wants to meet.
-    //
-    // Cap is generous (14d × 48 half-hours = 672 possible) because busy
-    // slots reduce it naturally and the JSON footprint stays small.
-    const current = new Date(now);
-    current.setMinutes(Math.ceil(current.getMinutes() / 30) * 30, 0, 0);
-
-    while (current < twoWeeks && scoredSlots.length < 672) {
-      const slotEnd = new Date(current.getTime() + 30 * 60 * 1000);
-      const isBusy = busySlots.some(
-        (busy) => current < busy.end && slotEnd > busy.start,
+    // Build a short prose summary of the guest's first ~20 free half-hour
+    // labels for the [SYSTEM:...] message body. The bilateral compute path
+    // doesn't need this (it walks `busy` directly), but the message body
+    // is also surfaced verbatim in feedback bundles when debugging snapshot
+    // shape — keep it readable.
+    const cursor = new Date(now);
+    cursor.setMinutes(Math.ceil(cursor.getMinutes() / 30) * 30, 0, 0);
+    while (cursor < twoWeeks && humanLabels.length < 20) {
+      const slotEnd = new Date(cursor.getTime() + 30 * 60 * 1000);
+      const isBusy = snapshotBusy.some(
+        (b) =>
+          cursor < new Date(b.end) && slotEnd > new Date(b.start),
       );
       if (!isBusy) {
-        scoredSlots.push({
-          start: current.toISOString(),
-          end: slotEnd.toISOString(),
-          score: 1,
-          kind: "open",
-          reason: "guest free (read-only cal)",
-          confidence: "high",
-        });
-        if (humanLabels.length < 20) {
-          humanLabels.push(
-            `${current.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} ${current.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
-          );
-        }
+        humanLabels.push(
+          `${cursor.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} ${cursor.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+        );
       }
-      current.setMinutes(current.getMinutes() + 30);
+      cursor.setMinutes(cursor.getMinutes() + 30);
     }
   } catch (e) {
-    freebusyFailed = true;
-    console.error("Guest freebusy error:", e);
+    fetchFailed = true;
+    console.error("Guest events.list error:", e);
   }
 
-  const denied = calendarReadDenied || freebusyFailed;
+  const denied = calendarReadDenied || fetchFailed;
 
-  // One message carries both surfaces — text for LLM context, metadata for
-  // the slots endpoint's bilateral compute.
-  if (scoredSlots.length > 0) {
+  // Persist the snapshot. Shape per PR-A1:
+  //   { kind, busy[], events[], source, capturedAt, [guestUserId] }
+  // Note: `scoredSlots` is intentionally absent — Decision 1(c) of the
+  // bilateral+picker bundle removed it. The single legacy reader at
+  // `negotiate/slots/route.ts` is migrated to read this shape via
+  // `computeBilateralForSession` in the same atomic PR.
+  if (snapshotBusy.length > 0 || snapshotEvents.length > 0) {
     await prisma.message.create({
       data: {
         sessionId: state.sessionId,
@@ -315,7 +314,8 @@ export async function GET(req: NextRequest) {
         content: `[SYSTEM: The guest connected their Google Calendar (read-only). Their available slots over the next 2 weeks include: ${humanLabels.join(", ")}. Cross-reference with the host's availability to find mutual times.]`,
         metadata: {
           kind: "guest_calendar_snapshot",
-          scoredSlots,
+          busy: snapshotBusy,
+          events: snapshotEvents,
           source: "google_readonly",
           capturedAt: new Date().toISOString(),
           ...(signedInUserId ? { guestUserId: signedInUserId } : {}),

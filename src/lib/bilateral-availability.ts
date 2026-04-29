@@ -15,9 +15,21 @@
  *
  * The "ambiguous which side" property is essential — never expose which party
  * is the blocker. Orange chips imply "there's friction here" without naming it.
+ *
+ * `conflicts` (added 2026-04-29 bilateral+picker bundle, PR-A1) is a separate
+ * axis — it's the GUEST's own busy events, with optional titles where the
+ * guest's calendar permitted them. This is guest-self-data, render-layer-only
+ * by default. Sonnet's tool path passes `includeConflicts: false` so titles
+ * never enter the host-visible deal-room thread (Cut 2 privacy posture). The
+ * picker's render path passes `true` because the guest sees the titles on
+ * their own device.
  */
 
 import type { ScoredSlot } from "@/lib/scoring";
+import { prisma } from "@/lib/prisma";
+import { getOrComputeSchedule } from "@/lib/calendar";
+import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
+import { getUserTimezone } from "@/lib/timezone";
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
@@ -162,4 +174,403 @@ export function groupBilateralByDay(
     day,
     slots: slotsForDay,
   }));
+}
+
+// ─── Canonical compute path (PR-A1) ──────────────────────────────────────────
+//
+// `computeBilateralForSession` is the single source of truth for both
+// consumers (Sonnet's `get_matched_availability` tool, and the picker's
+// Best-matches + Detailed render). One type, one compute path; drift between
+// the two surfaces becomes a TS compile failure rather than a runtime bug.
+//
+// Defense-in-depth: `includeConflicts: true` is render-layer-only (guest's
+// own device). Any caller that persists output to a host-visible thread
+// (deal-room messages, greeting prose, dashboard chat, any future chat
+// surface) MUST pass `false`. Greeting prose, message handlers, and any chat
+// surface count as host-visible.
+
+/**
+ * A point-in-time tagged with its host-canonical and (when different) viewer
+ * label. Honors the 2026-04-21 dual-tz contract — host-tz is canonical.
+ */
+export interface BilateralTime {
+  /** ISO with offset, viewer-tz canonical for sorting / equality. */
+  start: string;
+  end: string;
+  /** Host-tz rendering, e.g. "9 AM PT". Always present. */
+  hostLabel: string;
+  /** Viewer-tz rendering, e.g. "12 PM ET". Present iff host-tz !== viewer-tz. */
+  viewerLabel?: string;
+}
+
+/**
+ * A guest's own busy event, surfaced only when `includeConflicts: true`.
+ * `title` is omitted for events the guest's calendar marked as private,
+ * declined, transparent, or all-day OOO without a descriptive label.
+ */
+export interface GuestConflict {
+  start: string;
+  end: string;
+  title?: string;
+}
+
+/**
+ * Per-day rollup of all bilateral primitives the guest's surface needs.
+ *
+ * - `matched`     — both calendars confirm; tappable as a definitive booking.
+ * - `looseMutual` — host-prefers / "schedule juggle" friction. The privacy
+ *                   semantic is "ambiguous which side" per the contract above.
+ * - `conflicts`   — guest's own events, render-layer-only. Empty when
+ *                   `includeConflicts: false`.
+ * - `hasHostHours` — true iff the host's offerable schedule covers any of
+ *                   this day. Used to render "outside John's working hours"
+ *                   for empty days without naming the side that's busy.
+ */
+export interface DayBilateral {
+  /** YYYY-MM-DD in viewer tz. */
+  date: string;
+  matched: BilateralTime[];
+  looseMutual: BilateralTime[];
+  conflicts: GuestConflict[];
+  hasHostHours: boolean;
+}
+
+/**
+ * Canonical bilateral payload — the type both consumers (Sonnet tool, picker
+ * render) import. Type changes break compile across both: drift becomes a
+ * CI failure rather than a runtime divergence.
+ */
+export interface BilateralPayload {
+  /** False when the session has no guest snapshot. Caller falls back to
+   *  current host-only behavior. Sonnet's playbook handles this without
+   *  surfacing plumbing language to the guest. */
+  available: boolean;
+  /** Host's first name for prose templating. Always present (resolves to
+   *  "Host" when no user record). Single source of truth — same util the
+   *  picker render uses, so chat and picker can never say different names. */
+  hostFirstName: string;
+  /** Concise prose like "Mon-Fri 9am-5pm" for "outside John's working hours"
+   *  fallback prose. Optional — derivation is opinionated and can ship in a
+   *  follow-up if the v1 placeholder doesn't read well. */
+  hostHours?: string;
+  byDay: DayBilateral[];
+}
+
+export interface ComputeBilateralForSessionOptions {
+  /** Window to compute over. Defaults to 14 days from now. */
+  dateRange?: { start: string; end: string };
+  /**
+   * Whether to populate `byDay[].conflicts`. Defaults to `false` — the safe
+   * setting for any call site that might persist output to a host-visible
+   * thread. Picker's render path passes `true`; Sonnet tool passes `false`.
+   */
+  includeConflicts?: boolean;
+}
+
+const HOST_HOURS_PLACEHOLDER = "flexible";
+
+/**
+ * Format a slot's start/end into host-canonical and (when different) viewer
+ * labels. Pure — pull this out into a separate helper if other call sites
+ * grow.
+ */
+export function formatBilateralTime(
+  startIso: string,
+  endIso: string,
+  hostTz: string,
+  viewerTz?: string,
+): BilateralTime {
+  const start = new Date(startIso);
+  const fmt = (tz: string) => {
+    const longTzName = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      timeZoneName: "short",
+    })
+      .formatToParts(start)
+      .find((p) => p.type === "timeZoneName")?.value;
+    const time = start.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: tz,
+    });
+    return longTzName ? `${time} ${longTzName}` : time;
+  };
+  const result: BilateralTime = {
+    start: startIso,
+    end: endIso,
+    hostLabel: fmt(hostTz),
+  };
+  if (viewerTz && viewerTz !== hostTz) {
+    result.viewerLabel = fmt(viewerTz);
+  }
+  return result;
+}
+
+interface SnapshotShape {
+  kind: "guest_calendar_snapshot";
+  // PR-A1 shape.
+  busy?: Array<{ start: string; end: string }>;
+  events?: GuestConflict[];
+  // Legacy field — present on snapshots written before PR-A1, absent after.
+  // When present, this code falls back to deriving busy intervals from it
+  // for backward compatibility with in-flight sessions. Read-only — no new
+  // writer emits this field.
+  scoredSlots?: ScoredSlot[];
+}
+
+/**
+ * Load the most recent `guest_calendar_snapshot` for a session. Returns null
+ * if the guest never connected (anonymous link) or if the snapshot can't be
+ * parsed.
+ */
+async function loadGuestSnapshot(sessionId: string): Promise<SnapshotShape | null> {
+  try {
+    const msg = await prisma.message.findFirst({
+      where: {
+        sessionId,
+        role: "system",
+        metadata: { path: ["kind"], equals: "guest_calendar_snapshot" },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { metadata: true },
+    });
+    if (!msg) return null;
+    const meta = msg.metadata as unknown;
+    if (typeof meta !== "object" || meta === null) return null;
+    return meta as SnapshotShape;
+  } catch (e) {
+    console.error("[bilateral] snapshot load failed", { sessionId, error: e });
+    return null;
+  }
+}
+
+/**
+ * Reconstruct guest scored slots from a snapshot. Prefers the new `busy`
+ * shape; falls back to legacy `scoredSlots` for in-flight sessions whose
+ * snapshot predates PR-A1.
+ *
+ * Output: 30-min `score: 1` slots for every non-busy half-hour in the
+ * window. Mirrors the legacy callback's emission so bilateral compute
+ * sees the same data shape regardless of snapshot vintage.
+ */
+function snapshotToGuestSlots(
+  snapshot: SnapshotShape,
+  windowStart: Date,
+  windowEnd: Date,
+): ScoredSlot[] {
+  // Legacy fallback.
+  if (snapshot.scoredSlots && Array.isArray(snapshot.scoredSlots)) {
+    return snapshot.scoredSlots;
+  }
+  const busy = snapshot.busy ?? [];
+  const busyDates = busy.map((b) => ({
+    start: new Date(b.start),
+    end: new Date(b.end),
+  }));
+  const slots: ScoredSlot[] = [];
+  const cursor = new Date(windowStart);
+  cursor.setMinutes(Math.ceil(cursor.getMinutes() / 30) * 30, 0, 0);
+  while (cursor < windowEnd && slots.length < 672) {
+    const slotEnd = new Date(cursor.getTime() + 30 * 60 * 1000);
+    const isBusy = busyDates.some((b) => cursor < b.end && slotEnd > b.start);
+    if (!isBusy) {
+      slots.push({
+        start: cursor.toISOString(),
+        end: slotEnd.toISOString(),
+        score: 1,
+        kind: "open",
+        reason: "guest free (snapshot)",
+        confidence: "high",
+      } as ScoredSlot);
+    }
+    cursor.setMinutes(cursor.getMinutes() + 30);
+  }
+  return slots;
+}
+
+/**
+ * Walk events from the snapshot and clip them into per-day GuestConflict
+ * lists. Events spanning multiple days are split at the day boundary in the
+ * caller's tz so each day's `conflicts` are self-contained.
+ */
+function eventsByDay(
+  events: GuestConflict[],
+  viewerTz: string,
+): Map<string, GuestConflict[]> {
+  const out = new Map<string, GuestConflict[]>();
+  const dateFmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: viewerTz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  for (const ev of events) {
+    const dateKey = dateFmt.format(new Date(ev.start));
+    const list = out.get(dateKey) ?? [];
+    list.push(ev);
+    out.set(dateKey, list);
+  }
+  return out;
+}
+
+/**
+ * The canonical compute path. Loads the session, joins the host's scored
+ * schedule with the guest's snapshot, and emits a `BilateralPayload` ready
+ * for either consumer.
+ *
+ * Returns `{ available: false }` for sessions without a guest snapshot —
+ * caller renders the host-only fallback. Never throws on user-facing
+ * errors; logs and degrades.
+ */
+export async function computeBilateralForSession(
+  sessionId: string,
+  options: ComputeBilateralForSessionOptions = {},
+): Promise<BilateralPayload> {
+  const includeConflicts = options.includeConflicts ?? false;
+
+  // Load session + host. We need hostId (for scored schedule), the host's
+  // user record (for hostFirstName + hostTz), and the viewer tz.
+  let session: {
+    hostId: string;
+    guestTimezone: string | null;
+    host: { name: string | null; preferences: unknown };
+  } | null = null;
+  try {
+    session = await prisma.negotiationSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        hostId: true,
+        guestTimezone: true,
+        host: {
+          select: { name: true, preferences: true },
+        },
+      },
+    });
+  } catch (e) {
+    console.error("[bilateral] session load failed", { sessionId, error: e });
+  }
+
+  if (!session) {
+    return {
+      available: false,
+      hostFirstName: "Host",
+      byDay: [],
+    };
+  }
+
+  const hostFirst = resolveHostFirstName(session.host);
+
+  // Resolve host tz via the canonical primitive. Falls through to default.
+  const hostTz = getUserTimezone(
+    session.host.preferences as Record<string, unknown> | null,
+  );
+  const viewerTz = session.guestTimezone ?? hostTz;
+
+  // Load snapshot. Absent → not available.
+  const snapshot = await loadGuestSnapshot(sessionId);
+  if (!snapshot) {
+    return {
+      available: false,
+      hostFirstName: hostFirst,
+      byDay: [],
+    };
+  }
+
+  // Window. Default 14 days.
+  const now = new Date();
+  const windowStart = options.dateRange
+    ? new Date(options.dateRange.start)
+    : now;
+  const windowEnd = options.dateRange
+    ? new Date(options.dateRange.end)
+    : new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+  // Host scored schedule.
+  let hostSlots: ScoredSlot[] = [];
+  try {
+    const schedule = await getOrComputeSchedule(session.hostId);
+    hostSlots = schedule.slots;
+  } catch (e) {
+    console.error("[bilateral] host schedule load failed", { sessionId, error: e });
+  }
+
+  // Guest scored slots from snapshot.
+  const guestSlots = snapshotToGuestSlots(snapshot, windowStart, windowEnd);
+
+  // Run the existing bilateral compute. Returns flat color-tagged slot list.
+  const colorSlots = computeBilateralAvailability({
+    hostSlots,
+    guestSlots,
+    guestScheduleAvailable: true,
+    now,
+  });
+
+  // Group by day in viewer tz, splitting matched vs looseMutual.
+  const dateFmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: viewerTz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const dayMap = new Map<string, DayBilateral>();
+  function ensureDay(dateKey: string): DayBilateral {
+    let day = dayMap.get(dateKey);
+    if (!day) {
+      day = {
+        date: dateKey,
+        matched: [],
+        looseMutual: [],
+        conflicts: [],
+        hasHostHours: false,
+      };
+      dayMap.set(dateKey, day);
+    }
+    return day;
+  }
+
+  // Seed `hasHostHours` per day from the host's bookable slots — even days
+  // without a matched/looseMutual entry need this so the chat copy can pick
+  // "outside John's working hours" vs "no overlap" without naming the side
+  // that's busy.
+  for (const hs of hostSlots) {
+    if (hs.score > 1) continue;
+    const dateKey = dateFmt.format(new Date(hs.start));
+    ensureDay(dateKey).hasHostHours = true;
+  }
+
+  for (const cs of colorSlots) {
+    const dateKey = dateFmt.format(new Date(cs.start));
+    const day = ensureDay(dateKey);
+    const time = formatBilateralTime(
+      cs.start,
+      cs.end,
+      hostTz,
+      viewerTz === hostTz ? undefined : viewerTz,
+    );
+    if (cs.color === "both") {
+      day.matched.push(time);
+    } else {
+      day.looseMutual.push(time);
+    }
+  }
+
+  if (includeConflicts && snapshot.events && snapshot.events.length > 0) {
+    const evByDay = eventsByDay(snapshot.events, viewerTz);
+    Array.from(evByDay.entries()).forEach(([dateKey, evs]) => {
+      ensureDay(dateKey).conflicts = evs;
+    });
+  }
+
+  // Return days sorted ascending so consumers don't re-sort.
+  const byDay = Array.from(dayMap.values()).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
+
+  return {
+    available: true,
+    hostFirstName: hostFirst,
+    hostHours: HOST_HOURS_PLACEHOLDER,
+    byDay,
+  };
 }
