@@ -3,6 +3,7 @@
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { useTheme } from "next-themes";
 import { LogoFull } from "@/components/logo";
 import { TryItChat } from "@/components/tryit-chat";
 import { useOAuthSignIn } from "@/components/oauth/use-oauth-signin";
@@ -41,12 +42,22 @@ function SectionLabel({ children, className = "" }: { children: React.ReactNode;
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { setTheme } = useTheme();
 
   useEffect(() => {
     if (status === "authenticated") {
       router.push(session?.user?.onboardingComplete ? "/dashboard" : "/dashboard");
     }
   }, [status, session, router]);
+
+  // Force light theme for the logged-out marketing home. Once the user signs
+  // in, ThemePreferenceSync hydrates the server-stored mode and overrides
+  // this. Logged-in users hit the redirect above before this fires.
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      setTheme("light");
+    }
+  }, [status, setTheme]);
 
   // `mode: "login"` serves both new and returning users. First-timers (no
   // `ae_returning` cookie) see the first-connect trust modal; returning users

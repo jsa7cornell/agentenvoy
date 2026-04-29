@@ -32,11 +32,6 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased h-dvh flex flex-col overflow-hidden`}
       >
         <Providers>
-          <div className="bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-700/40 px-4 py-1.5 text-center flex-shrink-0">
-            <span className="text-xs text-amber-700 dark:text-amber-300">
-              Prototype — email and other features still in development
-            </span>
-          </div>
           <div className="flex-1 min-h-0 flex flex-col overflow-auto">
             {children}
             <ConditionalFooter />
