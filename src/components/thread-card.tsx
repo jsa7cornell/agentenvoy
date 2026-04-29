@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { canNativeShare, shareInvite } from "@/lib/share-invite";
 
 interface Participant {
   name: string | null;
@@ -82,6 +83,10 @@ export default function ThreadCard({
 }: ThreadCardProps) {
   const style = STATUS_STYLES[statusColor] || STATUS_STYLES.gray;
   const [linkCopied, setLinkCopied] = useState(false);
+  const [shareSupported, setShareSupported] = useState(false);
+  useEffect(() => {
+    setShareSupported(canNativeShare());
+  }, []);
 
   // Display shaping for the status chip:
   //   - Confirmed meetings get a green check badge up top (in the header row)
@@ -104,6 +109,13 @@ export default function ThreadCard({
     navigator.clipboard.writeText(fullUrl);
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
+  }
+
+  function shareLink(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!meetPath) return;
+    const fullUrl = `${window.location.origin}${meetPath}`;
+    void shareInvite({ url: fullUrl, topic: title });
   }
 
   function handleArchive(e: React.MouseEvent) {
@@ -204,10 +216,10 @@ export default function ThreadCard({
 
       {/* Invite link */}
       {meetPath && (
-        <div className="px-4 pb-2">
+        <div className="px-4 pb-2 flex items-center gap-3">
           <button
             onClick={copyLink}
-            className="flex items-center gap-1.5 text-[11px] text-muted hover:text-purple-400 transition group"
+            className="flex items-center gap-1.5 text-[11px] text-muted hover:text-purple-400 transition group min-w-0"
           >
             <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.776a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.25 8.016" />
@@ -217,6 +229,15 @@ export default function ThreadCard({
               <span className="text-emerald-400 flex-shrink-0">Copied!</span>
             )}
           </button>
+          {shareSupported && (
+            <button
+              onClick={shareLink}
+              className="sm:hidden text-[11px] font-semibold uppercase tracking-wide text-purple-400 hover:text-purple-300 transition flex-shrink-0"
+              aria-label={`Share ${title}`}
+            >
+              Share
+            </button>
+          )}
         </div>
       )}
 
