@@ -322,6 +322,23 @@ export async function GET(req: NextRequest) {
         } as unknown as Prisma.InputJsonValue,
       },
     });
+
+    // Bridging Envoy turn — surfaces in the chat thread alongside the now-
+    // populated bilateral picker so the moment doesn't feel "the picker
+    // just appeared without comment." Deterministic server-side write,
+    // not an LLM call — keeps the post-OAuth UX consistent regardless of
+    // composer reachability or model variability. WISHLIST item from
+    // John's 2026-04-29 prod test. Uses role:"administrator" (the legacy
+    // wire literal for Envoy turns in the negotiation message stream;
+    // see negotiate/message/route.ts:332).
+    await prisma.message.create({
+      data: {
+        sessionId: state.sessionId,
+        role: "administrator",
+        content:
+          "Great! Your calendar is now linked so you can see matching availability in the picker above. Feel free to use that or ask me any questions like “what about Tuesday next week?”",
+      },
+    });
   }
 
   // Link the signed-in user to this session as the guest, so the deal room

@@ -169,6 +169,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [emailWarning, setEmailWarning] = useState<string | null>(null);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarDenied, setCalendarDenied] = useState(false);
+  /** Tracks the post-OAuth slot/bilateral refetch — toggled true while
+   *  the /api/negotiate/slots fetch is in flight so the picker surface
+   *  can show a "matching availability…" spinner instead of a blank gap.
+   *  Pure UI signal; no business logic depends on it. */
+  const [postConnectRefetching, setPostConnectRefetching] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -479,6 +484,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       return;
     }
     if (cc !== "true") return;
+    setPostConnectRefetching(true);
     fetch(`/api/negotiate/slots?sessionId=${sessionId}${viewerTimezone ? `&tz=${encodeURIComponent(viewerTimezone)}` : ""}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
@@ -494,6 +500,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       })
       .catch(() => {})
       .finally(() => {
+        setPostConnectRefetching(false);
         url.searchParams.delete("calendarConnected");
         window.history.replaceState({}, "", url.pathname + url.search);
       });
@@ -2019,6 +2026,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // here to avoid rendering two widgets. Host-view and confirmed-view keep
   // the picker as today.
   const renderPickerBubble = (keyPrefix: string) => {
+    // Post-OAuth slot/bilateral refetch in flight — show a "matching
+    // availability…" spinner so the user doesn't stare at a blank gap
+    // for 1-3 seconds while Google freebusy + scoring runs. Skips host
+    // view (hosts don't go through the OAuth round-trip here).
+    if (postConnectRefetching && !isHost && !confirmed) {
+      return (
+        <div
+          key={`${keyPrefix}-post-connect-loading`}
+          className="flex justify-start"
+        >
+          <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-sm text-emerald-200 leading-snug flex items-center gap-2.5">
+            <span
+              aria-hidden="true"
+              className="inline-block w-3 h-3 rounded-full border-2 border-emerald-300/40 border-t-emerald-300 animate-spin"
+            />
+            <span>Matching your availability…</span>
+          </div>
+        </div>
+      );
+    }
+
     // WISHLIST §1o PR-α: when the slot fetch resolved to one of the three
     // empty/error states, render an inline message between greeting and
     // composer instead of silently returning null. Guards skip host-view
