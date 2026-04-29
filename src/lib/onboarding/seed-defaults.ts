@@ -78,6 +78,16 @@ export function buildSeededExplicit(
     // what they DO prefer (Google doesn't expose that), so we leave the
     // default in place. Stored as-is for downstream consumers.
     if (g.prefersMeet !== undefined) seeded.prefersMeet = g.prefersMeet;
+    // primaryCalendarId — replace the literal "primary" alias with the
+    // actual enumerated calendar id (typically the user's email) so the
+    // UI's manage-calendars dropdown matches against the same id Google
+    // returns from calendarList.list(). When the calendarList fetch
+    // failed, primaryCalendarId is undefined and we keep the literal —
+    // scoring still works (Google resolves the alias server-side); only
+    // the UI badge is lost. See google-onboarding-seed.ts for rationale.
+    if (g.primaryCalendarId) {
+      seeded.activeCalendarIds = [g.primaryCalendarId];
+    }
   }
 
   return seeded;

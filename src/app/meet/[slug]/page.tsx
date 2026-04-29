@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { DealRoom } from "@/components/deal-room";
+import { GuestLightTheme } from "@/components/guest-light-theme";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -51,6 +52,7 @@ export default async function PrimaryMeetPage({ params }: Props) {
   const { slug } = await params;
   return (
     <>
+      <GuestLightTheme />
       <DealRoom slug={slug} />
       <AgentInstructions />
     </>

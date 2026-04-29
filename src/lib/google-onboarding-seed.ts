@@ -50,6 +50,15 @@ export interface GoogleOnboardingSeed {
    *  `videoProvider: "google_meet"` (our default) when true; absent
    *  signal otherwise. */
   prefersMeet?: boolean;
+  /** The Google Calendar API id of the user's primary calendar. Resolves
+   *  the literal alias "primary" to the actual calendar id (typically
+   *  the user's email address) so downstream filters in the UI — the
+   *  manage-calendars dropdown, scoring filters, the host's primary-link
+   *  flow — can match on the same enumerated id Google returns from
+   *  `calendarList.list()`. Without resolution, the seed default
+   *  `activeCalendarIds: ["primary"]` mismatches the email-keyed entries
+   *  the dropdown enumerates and no calendar reads as primary in the UI. */
+  primaryCalendarId?: string;
 }
 
 const ALLOWED_DURATIONS = [15, 30, 45, 60, 90];
@@ -146,6 +155,28 @@ export async function fetchGoogleOnboardingSeed(
     // "false" because Google doesn't expose what they DO prefer.
     const autoVideo = map.get("autoAddVideoCalls");
     if (autoVideo === "true") out.prefersMeet = true;
+
+    // primaryCalendarId — second round-trip to calendarList. Google's
+    // canonical alias "primary" is a valid id at the API level but doesn't
+    // match the email-keyed entries that calendarList.list() enumerates.
+    // The manage-calendars dropdown + scoring filters compare
+    // activeCalendarIds against those enumerated ids, so storing the
+    // literal "primary" produces zero matches and no calendar reads as
+    // primary in the UI. Resolving once at signup eliminates the literal-
+    // vs-enumerated drift everywhere downstream. Defensive: failure of
+    // this call returns the rest of the seed unchanged — the literal
+    // "primary" fallback in seed-defaults still works for scoring (Google
+    // resolves the alias server-side), the only loss is the UI badge.
+    try {
+      const calList = await calendar.calendarList.list();
+      const primary = (calList.data.items ?? []).find((c) => c.primary);
+      if (primary?.id) out.primaryCalendarId = primary.id;
+    } catch (innerErr) {
+      console.warn(
+        "[google-onboarding-seed] calendarList fetch failed; primaryCalendarId omitted:",
+        innerErr,
+      );
+    }
   } catch (e) {
     console.error("[google-onboarding-seed] fetch failed:", e);
     // Return whatever was populated before the failure (likely {}).
