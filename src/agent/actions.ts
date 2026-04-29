@@ -1176,16 +1176,24 @@ async function handleCreateLink(
   const rawSteering = normalizeSteering(intentParam ?? params.steering);
   const declaredSteering: Steering = rawSteering ?? "open";
 
-  // Physical-activity location guard: if no location was set and guestPicks
-  // doesn't already declare location, mark it as guest-picks so it's
-  // intentional rather than silently null.
-  if (isPhysicalActivity && !location) {
+  // In-person location guard: if format is in-person, no location was set,
+  // and guestPicks doesn't already declare location, mark it as guest-picks
+  // so it's intentional rather than silently null. Generalized 2026-04-29
+  // from the previous physical-activity-only guard — host can say
+  // "in-person meeting with Larry — he picks the spot" without naming a
+  // physical-activity token (bike ride / hike / coffee), and the deferral
+  // still needs to flow through to the guest greeting's `guestPickHint`.
+  // The previous guard required `isPhysicalActivity` (activity token
+  // present) so this case silently dropped the deferral and Larry's
+  // greeting was missing "Let me know where works for you."
+  const isInPerson = effectiveFormat === "in-person";
+  if (isInPerson && !location) {
     const existingGuestPicks = params.guestPicks as Record<string, unknown> | undefined;
     if (!existingGuestPicks?.location) {
       // Inject into the guestPicksOut that will be written to the link rules.
       guestPicksOut = { ...(guestPicksOut ?? {}), location: true };
       console.warn(
-        `[create_link] physical activity "${activity}" had no location — setting guestPicks.location=true`,
+        `[create_link] in-person link${activity ? ` "${activity}"` : ""} had no location — setting guestPicks.location=true`,
       );
     }
   }
