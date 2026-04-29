@@ -21,6 +21,7 @@
 
 import { useSession } from "next-auth/react";
 import { useTheme } from "next-themes";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 export type ThemeMode = "light" | "dark" | "auto";
@@ -63,15 +64,26 @@ function readCachedTheme(): "light" | "dark" | null {
 export function ThemePreferenceSync() {
   const { status } = useSession();
   const { setTheme } = useTheme();
+  const pathname = usePathname();
   const modeRef = useRef<ThemeMode | null>(null);
   const tzRef = useRef<string>("America/Los_Angeles");
   const lastAppliedRef = useRef<"light" | "dark" | null>(null);
   const seenExplainerRef = useRef<boolean>(true); // default true — don't show on SSR
   const [showExplainer, setShowExplainer] = useState<"light" | "dark" | null>(null);
 
+  // Skip on guest-facing surfaces. /meet/* is the deal-room — a guest-
+  // facing brand surface where <GuestLightTheme> owns the theme
+  // unconditionally (always light). If we let ThemePreferenceSync run
+  // here it'll race with GuestLightTheme: GuestLightTheme sets light on
+  // mount, then this fetch resolves and overrides with the user's stored
+  // mode (default "dark"), producing the "page goes dark right after
+  // OAuth" jank. See guest-light-theme.tsx for rationale.
+  const isGuestSurface = pathname?.startsWith("/meet/") ?? false;
+
   // Fetch preference once per authenticated session.
   useEffect(() => {
     if (status !== "authenticated") return;
+    if (isGuestSurface) return;
     let cancelled = false;
 
     fetch("/api/me/ui-prefs")
@@ -104,12 +116,13 @@ export function ThemePreferenceSync() {
     return () => {
       cancelled = true;
     };
-  }, [status, setTheme]);
+  }, [status, setTheme, isGuestSurface]);
 
   // Keep "auto" in sync with the wall clock. Recompute every minute and
   // on tab visibility changes (handles laptop-wake and long-idle tabs).
   useEffect(() => {
     if (status !== "authenticated") return;
+    if (isGuestSurface) return;
 
     const tick = () => {
       if (modeRef.current !== "auto") return;
@@ -135,7 +148,7 @@ export function ThemePreferenceSync() {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [status, setTheme]);
+  }, [status, setTheme, isGuestSurface]);
 
   const dismissExplainer = async () => {
     setShowExplainer(null);
