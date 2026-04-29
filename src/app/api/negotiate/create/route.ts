@@ -30,6 +30,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const googleAccount = await prisma.account.findFirst({
+    where: { userId, provider: "google" },
+    select: { scope: true },
+  });
+  const calendarConnected = googleAccount?.scope?.includes("calendar") ?? false;
+  if (!calendarConnected) {
+    return NextResponse.json(
+      {
+        error: "calendar_not_connected",
+        message:
+          "sorry- i'm unable to act on this because we first need to connect your calendar.   Click the link below to do this.  It's really quick and safe and easy.",
+        connectUrl: "/dashboard/account",
+      },
+      { status: 409 }
+    );
+  }
+
   // If a natural language prompt is provided, parse it into structured rules
   let parsedRules = rules || {};
   if (prompt && !rules) {
