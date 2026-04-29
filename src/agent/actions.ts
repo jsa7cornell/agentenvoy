@@ -2306,13 +2306,36 @@ async function handleExpandLink(
       // greetings are deliberately NOT recomputed (B5 precedent — see F.1);
       // this follow-up message is how the guest learns about a post-create
       // deferral flip. Render with guest-name-aware copy when we have one.
+      // Deferral copy is guest-facing, second-person, and combined into a
+      // single invitation rather than one ✓ per sub-key. Per John's 2026-
+      // 04-29 feedback: "instead of 'John updated the proposal — deferrals
+      // updated' lets keep it succinct and clear. 'Update: Feel free to
+      // suggest time/location'. or something even clearer than that."
+      // Result: "Feel free to suggest a {list}" where list is comma-joined
+      // noun phrases. Drops the "Update:" prefix since the inline ✓ style
+      // already signals it's a system update.
       if (changedAndDifferent("guestPicks") && patch.guestPicks && typeof patch.guestPicks === "object") {
         const gp = patch.guestPicks as Record<string, unknown>;
-        const guestFirst = link.inviteeName?.split(/\s+/)[0] || "Guest";
-        if (gp.location === true) followupParts.push(`${guestFirst} can pick the location`);
-        if (gp.date === true) followupParts.push(`${guestFirst} can pick the day`);
-        if (gp.format === true || Array.isArray(gp.format)) followupParts.push(`${guestFirst} can pick the format`);
-        if (gp.duration === true || Array.isArray(gp.duration)) followupParts.push(`${guestFirst} can pick the duration`);
+        const newlyDeferred: string[] = [];
+        if (gp.location === true) newlyDeferred.push("location");
+        if (gp.duration === true || Array.isArray(gp.duration)) newlyDeferred.push("length");
+        if (gp.date === true) newlyDeferred.push("day");
+        if (gp.format === true || Array.isArray(gp.format)) newlyDeferred.push("format");
+        if (newlyDeferred.length > 0) {
+          // Comma-join with Oxford "or" before the last item.
+          //   1 → "a location"
+          //   2 → "a length or location"
+          //   3 → "a day, length, or location"
+          let joined: string;
+          if (newlyDeferred.length === 1) {
+            joined = `a ${newlyDeferred[0]}`;
+          } else if (newlyDeferred.length === 2) {
+            joined = `a ${newlyDeferred[0]} or ${newlyDeferred[1]}`;
+          } else {
+            joined = `a ${newlyDeferred.slice(0, -1).join(", ")}, or ${newlyDeferred[newlyDeferred.length - 1]}`;
+          }
+          followupParts.push(`feel free to suggest ${joined}`);
+        }
       }
       if (changedAndDifferent("guestGuidance")) {
         followupParts.push("guidance updated");
