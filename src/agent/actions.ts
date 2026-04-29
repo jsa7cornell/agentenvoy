@@ -2152,6 +2152,17 @@ async function handleExpandLink(
       data: { duration: patch.duration as number },
     });
   }
+  // Same propagation for format — NegotiationSession.format is a snapshot set
+  // at session creation; without this write the dashboard thread card keeps
+  // showing the stale format ("Video · 2h" when the host just changed it to
+  // in-person). Live-fix from 2026-04-29 testing — Bug 1 in the post-deploy
+  // feedback batch.
+  if (patch.format !== undefined && typeof patch.format === "string") {
+    await prisma.negotiationSession.updateMany({
+      where: { linkId: link.id, status: { in: ["active", "pending"] } },
+      data: { format: patch.format as string },
+    });
+  }
 
   // Human-readable confirmation message.
   const changedParts: string[] = [];
@@ -2211,21 +2222,43 @@ async function handleExpandLink(
         where: { id: userId },
         select: { name: true },
       }))?.name?.split(/\s+/)[0] ?? "The host";
+      // Diff against existingRules — only mention fields whose VALUE actually
+      // changed. Composers sometimes re-assert unchanged fields when packing
+      // multiple edits into one update_link (e.g., re-emitting activity +
+      // duration alongside a time-window widening). Without this guard the
+      // follow-up reads "format now in-person; duration now 2h; activity now
+      // 'bike ride'; time window updated" even though only the time window
+      // actually moved — confusing for the guest. Live-fix from 2026-04-29
+      // testing — Bug 2a in the post-deploy feedback batch.
+      const existing = existingRules as Record<string, unknown>;
+      const changedAndDifferent = (field: string): boolean => {
+        if (patch[field] === undefined) return false;
+        const a = existing[field];
+        const b = patch[field];
+        try {
+          return JSON.stringify(a) !== JSON.stringify(b);
+        } catch {
+          return a !== b;
+        }
+      };
       const followupParts: string[] = [];
-      if (patch.preferredDays !== undefined && Array.isArray(patch.preferredDays)) {
+      if (changedAndDifferent("preferredDays") && Array.isArray(patch.preferredDays)) {
         const days = (patch.preferredDays as string[]).join(", ");
         followupParts.push(days ? `available days updated to ${days}` : "available days cleared");
       }
-      if (patch.dateRange !== undefined) followupParts.push("date range updated");
-      if (patch.timingLabel !== undefined && patch.timingLabel) {
+      if (changedAndDifferent("dateRange")) followupParts.push("date range updated");
+      if (changedAndDifferent("timingLabel") && patch.timingLabel) {
         followupParts.push(`timing now "${patch.timingLabel}"`);
       }
-      if (patch.format !== undefined) followupParts.push(`format now ${patch.format}`);
-      if (patch.duration !== undefined) followupParts.push(`duration now ${formatDuration(patch.duration as number)}`);
-      if (patch.activity !== undefined && patch.activity) followupParts.push(`activity now "${patch.activity}"`);
-      if (patch.location !== undefined && patch.location) followupParts.push(`location now ${patch.location}`);
-      if (patch.preferredTimeStart !== undefined || patch.preferredTimeEnd !== undefined) {
+      if (changedAndDifferent("format")) followupParts.push(`format now ${patch.format}`);
+      if (changedAndDifferent("duration")) followupParts.push(`duration now ${formatDuration(patch.duration as number)}`);
+      if (changedAndDifferent("activity") && patch.activity) followupParts.push(`activity now "${patch.activity}"`);
+      if (changedAndDifferent("location") && patch.location) followupParts.push(`location now ${patch.location}`);
+      if (changedAndDifferent("preferredTimeStart") || changedAndDifferent("preferredTimeEnd") || changedAndDifferent("preferredTimeWindows")) {
         followupParts.push("time window updated");
+      }
+      if (changedAndDifferent("blockedRanges")) {
+        followupParts.push("blocked time updated");
       }
       if (followupParts.length > 0) {
         const msg = `${hostFirstName} updated the proposal — ${followupParts.join("; ")}. Let me know if this changes anything on your side.`;
