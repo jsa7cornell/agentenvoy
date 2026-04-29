@@ -569,6 +569,14 @@ export const rescheduleMeetingOutput = z.discriminatedUnion("ok", [
       "session_not_agreed",
       "session_terminal",
       "slot_taken_during_handshake",
+      // Stub tools — advertised in tools/list, not yet wired to a real
+      // pipeline. Today: reschedule_meeting (proposal filed
+      // 2026-04-29_mcp-reschedule-meeting-patch-in-place.md). Discipline:
+      // any future stub MUST return this reason; do NOT reuse a state-
+      // specific reason like `session_terminal`. Agents reading the wire
+      // need to distinguish "this server doesn't support this yet" from
+      // "your session is closed."
+      "tool_not_implemented",
     ])
   ).extend({
     counterProposal: z.array(proposeLockCounterProposalSchema).optional(),

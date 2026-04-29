@@ -757,10 +757,15 @@ describe("POST /api/mcp — cancel_meeting / reschedule_meeting", () => {
     );
   });
 
-  it("reschedule_meeting returns isError:true stub (awaiting reschedule-pipeline.ts)", async () => {
-    // Symmetric follow-up to the cancel-pipeline extraction. Stub stays in
-    // tools/list per the registration design (stable discovery surface) but
-    // returns a refusal until the pipeline is extracted.
+  it("reschedule_meeting returns tool_not_implemented (awaiting patch-in-place implementation)", async () => {
+    // Stub-tool discipline: any tool advertised in tools/list but not yet
+    // wired to a real handler MUST return reason: "tool_not_implemented".
+    // Reschedule is the only stub today; proposal under review at
+    // proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md.
+    //
+    // This assertion is the audit. If a future tool gets stubbed, its
+    // handler must follow the same pattern; add a parallel test row here
+    // when that happens.
     const res = await POST(
       makeRpcRequest(
         jsonRpcCall("reschedule_meeting", {
@@ -773,6 +778,7 @@ describe("POST /api/mcp — cancel_meeting / reschedule_meeting", () => {
     expect(rpc.result?.isError).toBe(true);
     const sc = rpc.result?.structuredContent;
     expect(sc?.ok).toBe(false);
+    expect(sc?.reason).toBe("tool_not_implemented");
     expect(String(sc?.message)).toMatch(/not yet implemented/);
   });
 });

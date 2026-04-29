@@ -27,8 +27,8 @@ High-level map of what's built vs. what's still owed. "Agent platform" = the who
 | Tool: `propose_lock` | `tools.ts#handleProposeLock` | Atomic CAS on session status; refuses on non-accepted consent. |
 | Tool: `get_session_status` | `tools.ts#handleGetSessionStatus` | Polling endpoint; closed status union. |
 | Tool: `post_message` | `tools.ts#handlePostMessage` | External agent posts a chat turn into the event view. |
-| Tool: `cancel_meeting` | `tools.ts#handleCancelMeeting` | Delegate-initiated cancel. |
-| Tool: `reschedule_meeting` | `tools.ts#handleRescheduleMeeting` | Delegate-initiated reschedule; preserves `supersededByRescheduleId` chain. |
+| Tool: `cancel_meeting` | `tools.ts#handleCancelMeeting` | Delegate-initiated cancel. **Shipped 2026-04-29 (PR #192)** — wires through `cancel-pipeline.ts`. |
+| Tool: `reschedule_meeting` | `tools.ts#handleRescheduleMeeting` | **Stub (advertised, not implemented).** Proper patch-in-place implementation deserves a proposal — schema migration + `reschedule-pipeline.ts` extraction + iCalUID preservation. Proposal: [`proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md`](../../../../proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md), wishlist #42. |
 | `external_agent` role | `Message.role`, `identity-prefix.ts` | First-class role in the session model; prefixed at LLM history boundary (invariant 5). |
 | Consent-request flow | `consent-request.ts`, `ConsentRequest` model | Host approves/denies external-agent parameter proposals before lock (invariant 2). |
 | Rate limiting | `rate-limit.ts`, `MCPRateCounter` | UPSERT counter, atomic under READ COMMITTED (invariant 1). Per-link window. |
