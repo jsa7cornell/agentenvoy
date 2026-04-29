@@ -248,6 +248,19 @@ export async function POST(req: NextRequest) {
       data: negotiatedClearData as Parameters<typeof prisma.negotiationSession.updateMany>[0]["data"],
     });
   }
+  // Propagate the new duration to the denormalized NegotiationSession.duration
+  // snapshot so dashboard thread cards reflect the change immediately. Mirrors
+  // the parallel fix in handleUpdateLinkRules (commit 505d3c6) for the
+  // Office Hours edit surface — same gap, same fix.
+  if (durationChanged) {
+    await prisma.negotiationSession.updateMany({
+      where: {
+        link: { recurringWindowId: ruleId },
+        status: { in: ["active", "pending"] },
+      },
+      data: { duration: parsed.durationMinutes },
+    });
+  }
 
   await invalidateSchedule(userId);
   invalidateBehaviorSnapshot(userId);
