@@ -23,6 +23,7 @@ import { SendFeedbackLink } from "./send-feedback";
 import { formatDuration } from "@/lib/format-duration";
 import { stripRendererOnlyBlocks } from "@/lib/message-render";
 import { mergePollResult, type LiveSyncMessage } from "@/lib/deal-room-live-sync";
+import { emojiForActivity } from "@/lib/activity-vocab";
 import { deriveMode, type DealRoomMode } from "@/lib/deal-room-mode";
 import {
   hasSeenPrimer,
@@ -1222,17 +1223,25 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   }
 
   // --- Meeting emoji picker ---
-  // Canonical set per CODEBASE-CLEANUP §22 / SPEC §3.6:
-  //   🚴 bike · 🏄 surf · ☕ coffee · 🍽️ dinner · 💻 video · 📱 phone ·
-  //   📍 in-person · 👤 1:1 · 🕐 fallback.
-  // The host-set `activityIcon` (from `link.parameters.activityIcon`) takes
-  // precedence whenever it's available; this picker is the format/venue
-  // derivation used when no host icon is set. Priority: venue keyword
-  // (location) > format > fallback (empty — caller decides whether to use
-  // the 🕐 clock). Non-canonical emoji from older branches (🍸 / 🌳 / 🏋️
-  // / ✈️ / 🏨 / 🏢 / 🏠) were retired in PR-8 of the v2 refactor — the
-  // canonical 8 (+ fallback) cover the activity vocabulary the LLM emits.
-  function getMeetingEmoji(format: string | null | undefined, location: string | null | undefined): string {
+  // Priority: host-set `activityIcon` (handled by callers) > activity vocab
+  // lookup (`emojiForActivity` from canonical `app/src/lib/activity-vocab.ts`) >
+  // location keyword > format > empty fallback. Adding a new activity belongs
+  // in `activity-vocab.ts`; do not extend the venue-keyword regex chain below
+  // for activity matches — that's drift.
+  //
+  // Location-keyword fallback exists for cases where the host wrote a venue
+  // string but no `activity` field was set (e.g. "Blue Bottle on Mission")
+  // — keep it minimal; activity coverage belongs upstream.
+  function getMeetingEmoji(
+    format: string | null | undefined,
+    location: string | null | undefined,
+    activity?: string | null | undefined,
+  ): string {
+    // 1. Activity vocab — canonical source of truth.
+    const activityEmoji = emojiForActivity(activity ?? null);
+    if (activityEmoji) return activityEmoji;
+
+    // 2. Location-keyword fallback — only when activity didn't resolve.
     const loc = (location ?? "").toLowerCase();
     if (loc) {
       if (/\b(cafe|café|coffee|starbucks|blue bottle|philz|peets|peet's)\b/.test(loc)) return "☕";
@@ -1241,9 +1250,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       if (/\b(surf|surfing|beach|ocean)\b/.test(loc)) return "🏄";
       // Zoom / Meet / Teams URLs land here when location is the meet link
       if (/\b(zoom\.us|meet\.google|teams\.microsoft|webex)\b/.test(loc)) return "💻";
+      // Location provided but no keyword matched — use pin as the generic location icon
+      return "📍";
     }
-    // Location provided but no keyword matched — use pin as the generic location icon
-    if (loc) return "📍";
+
+    // 3. Format fallback.
     if (format === "phone") return "📱";
     if (format === "video") return "💻";
     if (format === "in-person") return "👤";
@@ -1504,7 +1515,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         <div className="flex items-center gap-2.5 mb-1.5">
           <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />
           {(() => {
-            const titleEmoji = linkActivityIcon || getMeetingEmoji(eventFormat || linkFormat, eventLocation || linkLocation) || "🕐";
+            const titleEmoji = linkActivityIcon || getMeetingEmoji(eventFormat || linkFormat, eventLocation || linkLocation, linkActivity) || "🕐";
             return <span className="flex-shrink-0 select-none text-sm" aria-hidden="true">{titleEmoji}</span>;
           })()}
           <span className="text-sm font-semibold text-primary truncate">{getEventTitle()}</span>

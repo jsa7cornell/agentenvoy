@@ -74,6 +74,27 @@ const timeWindowSchema = z.object({
 });
 
 /**
+ * One-off datetime ranges to subtract from offerable slots for THIS link.
+ *
+ * Decided in proposal 2026-04-28_event-edit-handler-and-composer (§3.5).
+ * Example use: host says "evenings work, except Thursday evening" — composer
+ * resolves "Thursday" to the specific date in the link's `dateRange` and
+ * emits a single `blockedRanges` entry with absolute ISO datetimes (host TZ
+ * with offset).
+ *
+ * NOT a recurring per-day-of-week pattern — that's a separate feature
+ * (extending `preferredTimeWindows` with per-day scoping if real usage
+ * demands it; out of scope for this proposal).
+ *
+ * The slot generation pipeline subtracts these in the same pass that
+ * subtracts calendar busy events (see scoring / slots route).
+ */
+const blockedRangeSchema = z.object({
+  start: z.string(), // ISO 8601 with offset, e.g. "2026-04-30T17:00:00-07:00"
+  end: z.string(),
+});
+
+/**
  * Zod schema mirroring `LinkParameters` in `scoring.ts`. `.passthrough()`
  * preserves unknown fields so forward-compat changes (e.g. wishlist `slotGrain`)
  * don't require a schema bump before the value is persisted.
@@ -87,6 +108,7 @@ export const linkParametersSchema = z
     preferredTimeStart: z.string().optional(),
     preferredTimeEnd: z.string().optional(),
     preferredTimeWindows: z.array(timeWindowSchema).optional(),
+    blockedRanges: z.array(blockedRangeSchema).max(10).optional(),
     dateRange: dateRangeSchema.optional(),
     slotOverrides: z.array(slotOverrideSchema).optional(),
     exclusiveSlots: z.boolean().optional(),

@@ -27,19 +27,128 @@ import {
   GUEST_PICKS_DURATION_MIN_MINUTES,
   GUEST_PICKS_DURATION_MAX_MINUTES,
 } from "@/lib/mcp/parameter-resolver";
+import { isGenericTopic, findActivity } from "@/lib/activity-vocab";
+import { MATERIAL_FIELDS, type MaterialField } from "@/lib/material-fields";
 
 // --- Helpers ---
+//
+// GENERIC_TOPICS / isGenericTopic moved to @/lib/activity-vocab in the
+// 2026-04-28 event-edit proposal (Q3 fold) so the canonical list has one
+// home. See proposals/2026-04-28_event-edit-unified-intent_*_decided-2026-04-28.md.
 
-/** Topics that are just filler — LLMs emit these when no real topic was given. */
-const GENERIC_TOPICS = new Set([
-  "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
-  "check in", "check-in", "checkin", "connect", "touch base",
-  "quick chat", "quick meeting", "quick sync", "discussion",
-  "call", "video call", "zoom", "zoom call", "video", "talk",
-]);
+/**
+ * Derive `topicSource` provenance at write time.
+ *  - null (no topic)              → null
+ *  - matches activity vocab       → "activity"   (vocab name OR alias)
+ *  - generic filler (filtered)    → null         (topic itself was nulled out)
+ *  - anything else                → "custom"     (host-given non-vocab phrase)
+ */
+function deriveTopicSource(topic: string | null): "activity" | "custom" | null {
+  if (!topic) return null;
+  if (findActivity(topic)) return "activity";
+  return "custom";
+}
 
-function isGenericTopic(topic: string): boolean {
-  return GENERIC_TOPICS.has(topic.trim().toLowerCase());
+/**
+ * Validate the `blockedRanges` patch payload from the LLM. Returns the
+ * sanitized array or throws via the returned error message.
+ *
+ * Rules:
+ *  - Array of `{start, end}` strings (ISO 8601). Length ≤ 10.
+ *  - `start < end` (chronologically) — otherwise reject.
+ *  - Both strings parse as valid Dates — otherwise reject.
+ *
+ * The LLM is responsible for resolving ambiguous date phrasing (e.g.
+ * "Thursday") against the link's `dateRange` BEFORE emitting the action;
+ * the handler here is purely structural validation.
+ */
+function validateBlockedRanges(
+  input: unknown,
+): { ok: true; ranges: Array<{ start: string; end: string }> } | { ok: false; reason: string } {
+  if (!Array.isArray(input)) return { ok: false, reason: "blockedRanges must be an array" };
+  if (input.length > 10) return { ok: false, reason: "blockedRanges may not exceed 10 entries" };
+  const ranges: Array<{ start: string; end: string }> = [];
+  for (const entry of input) {
+    if (!entry || typeof entry !== "object") {
+      return { ok: false, reason: "each blockedRanges entry must be an object" };
+    }
+    const e = entry as Record<string, unknown>;
+    if (typeof e.start !== "string" || typeof e.end !== "string") {
+      return { ok: false, reason: "blockedRanges entries need string start/end" };
+    }
+    const startMs = Date.parse(e.start);
+    const endMs = Date.parse(e.end);
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+      return { ok: false, reason: `blockedRanges has unparseable date: ${e.start} / ${e.end}` };
+    }
+    if (startMs >= endMs) {
+      return { ok: false, reason: `blockedRanges entry has start >= end: ${e.start} / ${e.end}` };
+    }
+    ranges.push({ start: e.start, end: e.end });
+  }
+  return { ok: true, ranges };
+}
+
+/**
+ * Compute the set of MaterialField names whose value changed between `prior`
+ * and `next`. Used by `update_link` to populate `lastMaterialEditAt` /
+ * `lastEditedFields` so the "Edited just now — activity, hours" pill renders
+ * with the right field labels.
+ *
+ * Comparison is shallow (===) on primitives; for objects/arrays it falls
+ * back to JSON.stringify. Order-sensitive — `["Mon","Tue"]` ≠ `["Tue","Mon"]`.
+ * That's fine: the LLM emits a normalized order via normalizeLinkParameters
+ * and the comparison is for "did anything change," not "are these
+ * semantically equivalent."
+ */
+function diffMaterialFields(
+  prior: Record<string, unknown>,
+  next: Record<string, unknown>,
+): MaterialField[] {
+  const changed: MaterialField[] = [];
+  for (const field of MATERIAL_FIELDS) {
+    const a = prior[field];
+    const b = next[field];
+    if (a === b) continue;
+    // Both primitive-ish; if structurally identical via JSON, skip.
+    try {
+      if (JSON.stringify(a) === JSON.stringify(b)) continue;
+    } catch {
+      // fall through — treat as changed
+    }
+    changed.push(field);
+  }
+  return changed;
+}
+
+/**
+ * Compute a session title from the inputs that contribute to it. Pure
+ * function — no DB. Mirrors the title shape that the existing invitee-swap
+ * branch wrote, lifted here so activity-only edits can rebuild titles too.
+ *
+ * `activity` is the lowercase vocab phrase (`"bike ride"`); the function
+ * capitalizes it for display. `format` is "phone" | "video" | "in-person"
+ * | null.
+ */
+function computeSessionTitle(opts: {
+  activity: string | null;
+  format: string | null;
+  inviteeDisplay: string | null;
+  firstNamesDisplay: string;
+  isGroup: boolean;
+  hostFirstName: string;
+}): string {
+  const { activity, format, inviteeDisplay, firstNamesDisplay, isGroup, hostFirstName } = opts;
+  const activityLabel = activity && activity.trim()
+    ? activity.charAt(0).toUpperCase() + activity.slice(1)
+    : null;
+  const formatPrefix = format === "phone" ? "Call" : format === "video" ? "VC" : null;
+  const prefix = activityLabel ?? formatPrefix;
+  if (isGroup) {
+    return prefix ? `${prefix} (${firstNamesDisplay})` : firstNamesDisplay || "Meeting";
+  }
+  if (!inviteeDisplay) return prefix ?? "Meeting";
+  return prefix ? `${prefix}: ${inviteeDisplay} + ${hostFirstName}` : `${inviteeDisplay} + ${hostFirstName}`;
 }
 
 // --- Types ---
@@ -812,6 +921,10 @@ async function handleCreateLink(
   // the host didn't specify a topic, which produces "about Meeting" in the greeting.
   const rawTopic = (params.topic as string) || null;
   const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
+  // Provenance for the title-rebuild rule on activity edits — see proposal
+  // §3.B.1. "activity" → topic was activity-derived; clear/rebuild on activity
+  // change. "custom" → host-set phrase like "Q3 review"; preserve.
+  const topicSource = deriveTopicSource(topic);
 
   // hostNote — host-supplied framing surfaced verbatim in greeting. Defense-in-
   // depth: reject newlines/control chars at the boundary, then route through
@@ -1142,6 +1255,7 @@ async function handleCreateLink(
       inviteeEmail,
       inviteeTimezone,
       topic,
+      topicSource,
       hostNote,
       parameters: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["parameters"],
       ...(recurrenceForLink
@@ -1474,7 +1588,13 @@ async function handleSaveGuestInfo(
   const linkUpdate: Record<string, unknown> = {};
   if (guestName) linkUpdate.inviteeName = guestName;
   if (guestEmail) linkUpdate.inviteeEmail = guestEmail;
-  if (topic) linkUpdate.topic = topic;
+  if (topic) {
+    linkUpdate.topic = topic;
+    // Explicit host override via save_guest_info → custom by definition. If
+    // the LLM happens to set topic to an activity word here, treating it as
+    // custom is still correct — the host meant for it to be the title.
+    linkUpdate.topicSource = "custom";
+  }
 
   await prisma.negotiationLink.update({
     where: { id: session.linkId },
@@ -1575,7 +1695,15 @@ async function handleExpandLink(
   }
 
   // Resolve link by code (preferred) or via session.linkId.
-  let link: { id: string; userId: string; parameters: unknown; inviteeName: string | null; code: string | null } | null = null;
+  let link: {
+    id: string;
+    userId: string;
+    parameters: unknown;
+    inviteeName: string | null;
+    code: string | null;
+    topic: string | null;
+    topicSource: string | null;
+  } | null = null;
   let resolvedSessionIdForLink: string | null = sessionId || null;
 
   // Exactly-one-recent-draft fallback — short-circuit resolution when the
@@ -1583,7 +1711,7 @@ async function handleExpandLink(
   if (inferredLinkId) {
     link = await prisma.negotiationLink.findUnique({
       where: { id: inferredLinkId },
-      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true },
+      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true },
     });
     if (link) {
       const latest = await prisma.negotiationSession.findFirst({
@@ -1596,7 +1724,7 @@ async function handleExpandLink(
   } else if (code) {
     link = await prisma.negotiationLink.findFirst({
       where: { code, userId },
-      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true },
+      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true },
     });
     // For "View it here" threading: find the most recent session on this link.
     if (link) {
@@ -1620,7 +1748,7 @@ async function handleExpandLink(
           where: { id: fallbackSessionId },
           select: {
             hostId: true,
-            link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true } },
+            link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true } },
           },
         });
         if (fallbackSession && fallbackSession.hostId === userId && fallbackSession.link) {
@@ -1636,7 +1764,7 @@ async function handleExpandLink(
       select: {
         hostId: true,
         linkId: true,
-        link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true } },
+        link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true } },
       },
     });
     if (!session) {
@@ -1668,6 +1796,21 @@ async function handleExpandLink(
   // normalizeLinkParameters validates each entry's HH:MM shape.
   if (params.preferredTimeWindows !== undefined) {
     patch.preferredTimeWindows = params.preferredTimeWindows;
+  }
+  // One-off blocked datetime ranges (2026-04-28 event-edit proposal §3.5).
+  // Subtractive against the slot grid the same way calendar busy events
+  // are. Validated structurally; LLM is responsible for resolving date
+  // language (e.g. "Thursday") to ISO datetimes via the link's dateRange.
+  if (params.blockedRanges !== undefined) {
+    if (params.blockedRanges === null || (Array.isArray(params.blockedRanges) && params.blockedRanges.length === 0)) {
+      patch.blockedRanges = []; // explicit clear
+    } else {
+      const result = validateBlockedRanges(params.blockedRanges);
+      if (!result.ok) {
+        return { success: false, message: `update_link rejected blockedRanges: ${result.reason}` };
+      }
+      patch.blockedRanges = result.ranges;
+    }
   }
   // preferredDays accepts either short-name strings ("Mon","Tue") OR a
   // numeric daysOfWeek array ([0..6], Sun=0). The LLM tends to reach for
@@ -1747,7 +1890,7 @@ async function handleExpandLink(
   if (patchKeysForGate.length === 0 && inviteeNamesPatch === undefined) {
     return {
       success: false,
-      message: "update_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredDays/daysOfWeek, lastResort, dateRange, timingLabel, format, duration, activity, activityIcon, location, inviteeNames)",
+      message: "update_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredTimeWindows, preferredDays/daysOfWeek, lastResort, dateRange, blockedRanges, timingLabel, format, duration, activity, activityIcon, location, inviteeNames)",
     };
   }
 
@@ -1790,6 +1933,50 @@ async function handleExpandLink(
     intent: { steering: nextSteering },
   });
 
+  // Topic-clearing on activity change (proposal §3.B.1, decided 2026-04-28).
+  // Provenance-driven, NOT text-matching. The topicSource column is the
+  // deterministic answer to "did the title include something that just
+  // changed?":
+  //   "activity" → topic was activity-derived; clear it so getEventTitle()
+  //                falls through to format/name templates with the new
+  //                activity surfacing via parameters.activity / activityIcon.
+  //   "custom"   → host-set phrase like "Q3 review"; preserve.
+  //   null       → no topic was ever set; nothing to do.
+  // Defense-in-depth: if topicSource is null but link.topic is set (legacy
+  // row missed by the migration backfill), fall back to findActivity() text
+  // match so the row gets cleaned up on first edit.
+  let topicClearUpdate: { topic: null; topicSource: null } | null = null;
+  if (patch.activity !== undefined && link.topic) {
+    const provenance = link.topicSource ?? (findActivity(link.topic) ? "activity" : "custom");
+    if (provenance === "activity") {
+      topicClearUpdate = { topic: null, topicSource: null };
+    }
+  }
+
+  // Material-edit tracking (proposal §3.C, decided 2026-04-28). Diff the
+  // pre/post rules — plus the inviteeNames column write, plus the topic
+  // clear-on-activity-change path — to compute which canonical material
+  // fields changed in this update. Powers the "Edited just now — activity,
+  // hours" pill via material-fields.ts humanizer.
+  const materialDiffPriorRules = existingRules as unknown as Record<string, unknown>;
+  const materialDiffNextRules = mergedRules as unknown as Record<string, unknown>;
+  const editedFields = diffMaterialFields(materialDiffPriorRules, materialDiffNextRules);
+  if (inviteeNamesPatch !== undefined) {
+    // inviteeNames lives on the link column, not in parameters; the diff
+    // function above only sees parameters fields. Add manually if changed.
+    const priorInvitees = link.inviteeName ? [link.inviteeName] : [];
+    if (JSON.stringify(priorInvitees) !== JSON.stringify(inviteeNamesPatch)) {
+      if (!editedFields.includes("inviteeNames")) editedFields.push("inviteeNames");
+    }
+  }
+  if (topicClearUpdate) {
+    if (!editedFields.includes("topic")) editedFields.push("topic");
+  }
+  const materialEditWrite =
+    editedFields.length > 0
+      ? { lastMaterialEditAt: new Date(), lastEditedFields: editedFields }
+      : {};
+
   await prisma.negotiationLink.update({
     where: { id: link.id },
     data: {
@@ -1800,6 +1987,8 @@ async function handleExpandLink(
             inviteeName: inviteeNamesPatch[0] ?? null,
           }
         : {}),
+      ...(topicClearUpdate ?? {}),
+      ...materialEditWrite,
     },
   });
 
@@ -1835,6 +2024,9 @@ async function handleExpandLink(
       inviteeName: inviteeNameSingular,
     });
 
+    const activityForTitle = typeof activityRaw === "string" ? activityRaw : null;
+    void activityLabel; // kept for back-compat with surrounding scope; computeSessionTitle handles it
+
     for (const s of activeSessionsForInvitees) {
       await prisma.sessionInvitee.deleteMany({ where: { sessionId: s.id } });
       if (inviteeNamesPatch.length > 0) {
@@ -1848,22 +2040,72 @@ async function handleExpandLink(
           })),
         });
       }
-      const fmt = typeof s.format === "string" ? s.format : null;
-      const formatPrefix = fmt === "phone" ? "Call" : fmt === "video" ? "VC" : null;
-      const prefix = activityLabel ?? formatPrefix;
-      const nextTitle = isGroupNow
-        ? prefix
-          ? `${prefix} (${firstNamesDisplay})`
-          : firstNamesDisplay || "Meeting"
-        : !inviteeDisplay
-        ? (prefix ?? "Meeting")
-        : prefix
-        ? `${prefix}: ${inviteeDisplay} + ${hostFirstName}`
-        : `${inviteeDisplay} + ${hostFirstName}`;
+      const nextTitle = computeSessionTitle({
+        activity: activityForTitle,
+        format: typeof s.format === "string" ? s.format : null,
+        inviteeDisplay,
+        firstNamesDisplay,
+        isGroup: isGroupNow,
+        hostFirstName,
+      });
       await prisma.negotiationSession.update({
         where: { id: s.id },
         data: { title: nextTitle },
       });
+    }
+  } else if (patch.activity !== undefined) {
+    // Activity-only refresh path (proposal §3.B.1, decided 2026-04-28).
+    // No invitee swap, but the activity changed — session titles need to
+    // pick up the new activity. Reuse computeSessionTitle with each
+    // session's existing invitee set rather than rebuilding SessionInvitee.
+    const activeSessions = await prisma.negotiationSession.findMany({
+      where: { linkId: link.id, status: { in: ["active", "pending"] } },
+      select: {
+        id: true,
+        format: true,
+        invitees: { select: { name: true }, orderBy: { id: "asc" } },
+      },
+    });
+    if (activeSessions.length > 0) {
+      const { getInviteeDisplay, getInviteeFirstNamesDisplay } = await import("@/lib/invitee-display");
+      const hostUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      const hostFirstName = hostUser?.name?.split(/\s+/)[0] || "Host";
+      const activityForTitle = typeof (mergedRules as Record<string, unknown>).activity === "string"
+        ? ((mergedRules as Record<string, unknown>).activity as string)
+        : null;
+      for (const s of activeSessions) {
+        const inviteeNames = s.invitees.map((i) => i.name).filter((n): n is string => !!n);
+        // Fall back to the link's inviteeName column if SessionInvitee rows
+        // are empty (legacy single-guest sessions seeded before group code).
+        const fallbackInvitees = inviteeNames.length === 0 && link.inviteeName
+          ? [link.inviteeName]
+          : inviteeNames;
+        const inviteeNameSingular = fallbackInvitees[0] ?? null;
+        const inviteeDisplay = getInviteeDisplay({
+          inviteeNames: fallbackInvitees,
+          inviteeName: inviteeNameSingular,
+        });
+        const firstNamesDisplay = getInviteeFirstNamesDisplay({
+          inviteeNames: fallbackInvitees,
+          inviteeName: inviteeNameSingular,
+        });
+        const isGroup = fallbackInvitees.length > 1;
+        const nextTitle = computeSessionTitle({
+          activity: activityForTitle,
+          format: typeof s.format === "string" ? s.format : null,
+          inviteeDisplay,
+          firstNamesDisplay,
+          isGroup,
+          hostFirstName,
+        });
+        await prisma.negotiationSession.update({
+          where: { id: s.id },
+          data: { title: nextTitle },
+        });
+      }
     }
   }
 

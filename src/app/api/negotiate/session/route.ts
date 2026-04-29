@@ -47,16 +47,10 @@ import {
 import { computeDensityHorizon } from "@/lib/availability-density";
 import { getSchedulingMode } from "@/lib/scheduling-mode";
 import { parseLinkParameters } from "@/lib/link-parameters";
+import { isGenericTopic } from "@/lib/activity-vocab";
 
-const GENERIC_TOPICS = new Set([
-  "meeting", "catch up", "catch-up", "catchup", "chat", "sync",
-  "check in", "check-in", "checkin", "connect", "touch base",
-  "quick chat", "quick meeting", "quick sync", "discussion",
-  "call", "quick call", "phone call", "video call",
-]);
-function isGenericTopic(topic: string): boolean {
-  return GENERIC_TOPICS.has(topic.trim().toLowerCase());
-}
+// GENERIC_TOPICS / isGenericTopic moved to @/lib/activity-vocab in the
+// 2026-04-28 event-edit proposal (Q3 fold) — single source of truth.
 
 /**
  * Pick the greeting from a session's messages. The greeting is the first

@@ -1458,6 +1458,16 @@ export interface LinkParameters {
    * need that, model the meeting as two links or fall back to hostNote.
    */
   preferredTimeWindows?: Array<{ start: string; end: string }>;
+  /**
+   * One-off datetime ranges to subtract from offerable slots for THIS link.
+   * ISO 8601 with offset (host-local TZ). Subtractive against the slot grid
+   * — any slot whose span overlaps any range is removed from offerings.
+   *
+   * Used for "evenings work, except Thursday evening"-style exclusions
+   * inside a bounded `dateRange`. NOT a recurring per-day-of-week pattern.
+   * See proposal 2026-04-28_event-edit-handler-and-composer §3.5.
+   */
+  blockedRanges?: Array<{ start: string; end: string }>;
   /** Inclusive date window in host's local calendar. "YYYY-MM-DD". */
   dateRange?: { start?: string; end?: string };
   slotOverrides?: SlotOverride[];
@@ -1716,6 +1726,33 @@ export function normalizeLinkParameters(
     delete out.preferredTimeWindows;
   }
 
+  // blockedRanges: one-off datetime exclusions (proposal 2026-04-28 §3.5).
+  // ISO 8601 with offset; start < end; cap at 10 entries (matches handler
+  // validation). Empty/malformed entries dropped; empty-after-cleanup
+  // deletes the field rather than storing [].
+  const br = (input as Record<string, unknown>).blockedRanges;
+  if (Array.isArray(br)) {
+    const cleaned = br
+      .filter((r): r is { start: string; end: string } => {
+        if (!r || typeof r !== "object") return false;
+        const s = (r as Record<string, unknown>).start;
+        const e = (r as Record<string, unknown>).end;
+        if (typeof s !== "string" || typeof e !== "string") return false;
+        const startMs = Date.parse(s);
+        const endMs = Date.parse(e);
+        return !Number.isNaN(startMs) && !Number.isNaN(endMs) && startMs < endMs;
+      })
+      .slice(0, 10)
+      .map((r) => ({ start: r.start, end: r.end }));
+    if (cleaned.length > 0) {
+      (out as Record<string, unknown>).blockedRanges = cleaned;
+    } else {
+      delete (out as Record<string, unknown>).blockedRanges;
+    }
+  } else if (br === null) {
+    delete (out as Record<string, unknown>).blockedRanges;
+  }
+
   // dateRange: keep only if it's an object with at least one valid ISO date.
   const dr = input.dateRange;
   if (dr && typeof dr === "object") {
@@ -1849,6 +1886,34 @@ export function applyEventOverrides(
   tz: string
 ): ScoredSlot[] {
   let slots = [...baseSlots];
+
+  // blockedRanges — one-off date+time exclusions for THIS link (proposal
+  // 2026-04-28 §3.5). Subtractive against the slot grid the same way
+  // calendar busy events are; drops any slot whose span overlaps any range.
+  // Stored as absolute ISO datetimes (host-local with offset) — the
+  // composer resolves "Thursday evening" against the link's dateRange and
+  // host TZ before emitting.
+  const blockedRanges = (rules as Record<string, unknown>).blockedRanges;
+  if (Array.isArray(blockedRanges) && blockedRanges.length > 0) {
+    const parsed = blockedRanges
+      .map((r) => {
+        const obj = r as Record<string, unknown>;
+        if (typeof obj.start !== "string" || typeof obj.end !== "string") return null;
+        const startMs = Date.parse(obj.start);
+        const endMs = Date.parse(obj.end);
+        if (Number.isNaN(startMs) || Number.isNaN(endMs) || startMs >= endMs) return null;
+        return { startMs, endMs };
+      })
+      .filter((r): r is { startMs: number; endMs: number } => r !== null);
+    if (parsed.length > 0) {
+      slots = slots.filter((slot) => {
+        const sStart = new Date(slot.start).getTime();
+        const sEnd = new Date(slot.end).getTime();
+        // Overlap iff sStart < blocked.end && sEnd > blocked.start
+        return !parsed.some((b) => sStart < b.endMs && sEnd > b.startMs);
+      });
+    }
+  }
 
   // Exclusive mode: score -2 in overrides, or legacy exclusiveSlots boolean
   const hasExclusive = rules.slotOverrides?.some((o) => o.score === -2);

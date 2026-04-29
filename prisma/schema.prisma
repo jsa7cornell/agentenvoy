@@ -281,6 +281,22 @@ model NegotiationLink {
   /// scoring/availability.
   hostNote        String?   @db.VarChar(280)
   topic           String?
+  /// Provenance of `topic` — drives the title-rebuild rule on activity edits.
+  /// "activity" → topic was activity-derived; clear and rebuild on activity
+  /// change. "custom" → host-set phrase like "Q3 review"; preserve. null →
+  /// no topic ever set (filtered as generic or never given). Set at every
+  /// write site that mutates `topic` via `deriveTopicSource()` in actions.ts.
+  /// See proposal 2026-04-28_event-edit-unified-intent_*_decided-2026-04-28.md.
+  topicSource     String?
+  /// Timestamp of the last material edit (activity/format/duration/location/
+  /// dates/hours/days/blocked time/invitees/topic). Powers the "Edited just
+  /// now — activity, hours" pill. Distinct from `updatedAt` — non-material
+  /// flips (lastResort, intent.steering recomputes) bump `updatedAt` only.
+  lastMaterialEditAt DateTime?
+  /// Names of material fields that changed in the last material edit. Used
+  /// to render the pill's per-field labels via `humanizeFieldList()` in
+  /// material-fields.ts. Empty array when no material edit has happened yet.
+  lastEditedFields   String[] @default([])
   /// Typed via Zod schema in `src/lib/link-parameters.ts` — the JSON shape
   /// covers duration, format, VIP, gating, dayWindowOverrides, blockedDates,
   /// activity, location, topic, etc. Use `parseLinkParameters(parameters)`

@@ -23,8 +23,29 @@
  */
 import { readFileSync } from "fs";
 import { join } from "path";
+import {
+  renderActivityVocabMarkdown,
+  renderNaturalWindowsMarkdown,
+} from "@/lib/activity-vocab";
 
 const cwd = process.cwd();
+
+/**
+ * Build-time substitution for canonical vocabulary.
+ *
+ * Replaces `{{ACTIVITY_VOCAB_TABLE}}` and `{{ACTIVITY_NATURAL_WINDOWS}}` in
+ * playbook .md files with markdown rendered from `app/src/lib/activity-vocab.ts`.
+ * Single source of truth — adding a new activity is a one-file change.
+ *
+ * Adding a new placeholder: extend this function. Adding a new playbook that
+ * needs substitution: route the readFileSync result through this function in
+ * the loader (see calendarEventComposer below as the canonical example).
+ */
+function applySubstitutions(markdown: string): string {
+  return markdown
+    .replace(/\{\{ACTIVITY_VOCAB_TABLE\}\}/g, renderActivityVocabMarkdown())
+    .replace(/\{\{ACTIVITY_NATURAL_WINDOWS\}\}/g, renderNaturalWindowsMarkdown());
+}
 
 // ── Fragments (shared building blocks) ────────────────────────────────────
 export function voicePlaybook(): string {
@@ -55,7 +76,12 @@ export function hostClassifierPlaybook(): string {
 // ── Composers (dashboard chat) ─────────────────────────────────────────────
 export function calendarEventComposer(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/playbooks/composers/calendar-event-composer.md"), "utf-8");
+    // Substitution applies the canonical activity vocabulary (vocab table,
+    // natural windows). The readFileSync call uses a literal string per the
+    // Vercel file-tracing invariant at the top of this file.
+    return applySubstitutions(
+      readFileSync(join(cwd, "src/agent/playbooks/composers/calendar-event-composer.md"), "utf-8"),
+    );
   } catch (err) {
     throw new Error(`[playbooks/index] failed to load composers/calendar-event-composer.md: ${err}`);
   }
