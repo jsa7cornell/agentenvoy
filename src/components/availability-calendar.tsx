@@ -688,7 +688,6 @@ function LocationNotice({
 // the tab; switching tabs preserves the day.
 
 const PICKER_TAB_STORAGE_KEY = "agentenvoy.picker.tab";
-const MOBILE_BREAKPOINT_PX = 640;
 
 function readStoredTab(): "best-matches" | "detailed" | null {
   if (typeof window === "undefined") return null;
@@ -710,11 +709,6 @@ function writeStoredTab(tab: "best-matches" | "detailed") {
   }
 }
 
-function isMobileViewport(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.innerWidth < MOBILE_BREAKPOINT_PX;
-}
-
 function PickerTabs({
   matchedCount,
   bestMatches,
@@ -724,16 +718,15 @@ function PickerTabs({
   bestMatches: React.ReactNode;
   detailed: React.ReactNode;
 }) {
-  // Tab state initialization — clamp mobile to "best-matches" on first
-  // load (when storage is unset). After first explicit toggle, persist
-  // the choice across loads on any viewport per Decision B6.
-  const [tab, setTab] = useState<"best-matches" | "detailed">(() => {
-    const stored = readStoredTab();
-    if (stored === null) {
-      return isMobileViewport() ? "best-matches" : "best-matches";
-    }
-    return stored;
-  });
+  // Tab state initialization per Decision B6:
+  //   - localStorage unset → default to "best-matches" (matches both the
+  //     desktop default and the mobile clamp; no separate viewport branch
+  //     needed since they agree on the unset case).
+  //   - First explicit user toggle writes the key; thereafter persists
+  //     across loads on any viewport.
+  const [tab, setTab] = useState<"best-matches" | "detailed">(
+    () => readStoredTab() ?? "best-matches",
+  );
 
   const onSelectTab = (next: "best-matches" | "detailed") => {
     setTab(next);
@@ -807,6 +800,7 @@ function DetailedTimeline({
   timezone,
   hostFirstName,
   onSelectSlot,
+  onSelectNextDay,
   slotsForDay,
 }: {
   payload: import("@/lib/bilateral-availability").BilateralPayload;
@@ -814,21 +808,57 @@ function DetailedTimeline({
   timezone: string;
   hostFirstName?: string;
   onSelectSlot?: (msg: string, slot: { start: string; end: string }) => void;
+  /** Caller-supplied "switch to next available day" jump for empty-state. */
+  onSelectNextDay?: (nextDateStr: string) => void;
   slotsForDay: Slot[];
 }) {
   const day = payload.byDay.find((d) => d.date === dateStr);
+
+  // Compute the "next available day" — first day after dateStr with at
+  // least one matched window. Surfaces in the empty-state CTAs below so
+  // the guest doesn't have to back out and re-scan the day strip.
+  const nextAvailable = (() => {
+    const candidates = payload.byDay
+      .filter((d) => d.date > dateStr && d.matched.length > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    return candidates[0];
+  })();
+  const renderNextDayLink = () => {
+    if (!nextAvailable || !onSelectNextDay) return null;
+    const label = new Date(nextAvailable.date + "T12:00:00").toLocaleDateString(
+      "en-US",
+      { weekday: "long", month: "short", day: "numeric" },
+    );
+    return (
+      <button
+        type="button"
+        onClick={() => onSelectNextDay(nextAvailable.date)}
+        className="text-[11px] text-emerald-400 hover:text-emerald-300 underline-offset-2 hover:underline transition pt-1 cursor-pointer"
+      >
+        Next available: {label} ({nextAvailable.matched.length} match
+        {nextAvailable.matched.length === 1 ? "" : "es"}) →
+      </button>
+    );
+  };
+
   if (!day) {
     return (
-      <p className="text-xs text-muted">
-        {hostFirstName || "Host"} has no availability this day.
-      </p>
+      <div className="space-y-1.5">
+        <p className="text-xs text-muted">
+          {hostFirstName || "Host"} has no availability this day.
+        </p>
+        {renderNextDayLink()}
+      </div>
     );
   }
   if (!day.hasHostHours) {
     return (
-      <p className="text-xs text-muted">
-        Outside {hostFirstName || "the host"}&apos;s working hours.
-      </p>
+      <div className="space-y-1.5">
+        <p className="text-xs text-muted">
+          Outside {hostFirstName || "the host"}&apos;s working hours.
+        </p>
+        {renderNextDayLink()}
+      </div>
     );
   }
 
@@ -880,16 +910,36 @@ function DetailedTimeline({
   // rows. De-dupe identical starts where matched + conflict somehow
   // coincide (shouldn't happen — bilateral compute filters busy from
   // matched — but defensive for legacy snapshots).
+  //
+  // Continuation-row treatment (PR-B3 polish): a long conflict (e.g.
+  // "Standup" 10–12) is one entry in `day.conflicts`; the picker may also
+  // know about the same hours via half-hour `slotsForDay` cells. To keep
+  // a long event from rendering as a single tall pill that disappears
+  // visually inside one row, we expand multi-half-hour conflicts into
+  // multiple rows — the first carrying the title, continuation rows
+  // blank — so the timeline shape mirrors the actual blocked duration.
   for (const c of day.conflicts) {
     if (matchedKeys.has(c.start)) continue; // matched wins
     if (looseKeys.has(c.start)) continue;   // loose-mutual wins (privacy posture)
-    rows.push({
-      start: c.start,
-      end: c.end,
-      state: "busy",
-      label: c.title ?? "Busy",
-      title: c.title,
-    });
+    const startMs = new Date(c.start).getTime();
+    const endMs = new Date(c.end).getTime();
+    const halfHourMs = 30 * 60 * 1000;
+    // Walk in half-hour increments; first iteration carries the title,
+    // continuation iterations get blank label (but rose fill).
+    let cursor = startMs;
+    let isFirst = true;
+    while (cursor < endMs) {
+      const cellEnd = Math.min(cursor + halfHourMs, endMs);
+      rows.push({
+        start: new Date(cursor).toISOString(),
+        end: new Date(cellEnd).toISOString(),
+        state: "busy",
+        label: isFirst ? c.title ?? "Busy" : "",
+        title: c.title,
+      });
+      cursor = cellEnd;
+      isFirst = false;
+    }
   }
 
   rows.sort((a, b) => a.start.localeCompare(b.start));
@@ -911,13 +961,18 @@ function DetailedTimeline({
         </span>
       </div>
       {rows.length === 0 && (
-        <p className="text-xs text-muted">
-          No times to show today — try a different day.
-        </p>
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted">
+            No times to show today.
+          </p>
+          {renderNextDayLink()}
+        </div>
       )}
-      {rows.map((row) => (
+      {rows.map((row, idx) => (
         <DetailedRow
-          key={`${row.state}-${row.start}`}
+          // Include idx so continuation rows of the same conflict (sharing
+          // start/state) get unique React keys.
+          key={`${row.state}-${row.start}-${idx}`}
           row={row}
           dateStr={dateStr}
           timezone={timezone}
@@ -957,6 +1012,10 @@ function DetailedRow({
     return (
       <div className={baseRowCls}>
         <div className={timeCls}>{time}</div>
+        {/* PR-B3 polish: button is visually 28px tall but hit-area extends
+            via vertical padding to ~44px so mobile taps land cleanly per
+            iOS HIG / Material guidelines. The visual chip stays compact;
+            the gutter absorbs the extra hit area. */}
         <button
           type="button"
           onClick={() =>
@@ -969,10 +1028,12 @@ function DetailedRow({
           }
           disabled={!onSelectSlot}
           aria-label={`${time}, both free, book`}
-          className="h-7 px-2.5 rounded-md text-left text-[11px] font-medium border border-emerald-400/60 bg-emerald-950/30 text-emerald-300 hover:border-emerald-300 transition cursor-pointer flex items-center justify-between"
+          className="relative -my-1.5 py-1.5 group"
         >
-          <span>{row.label}</span>
-          <span className="text-[10px] text-emerald-400/70">›</span>
+          <span className="block h-7 px-2.5 rounded-md text-left text-[11px] font-medium border border-emerald-400/60 bg-emerald-950/30 text-emerald-300 group-hover:border-emerald-300 transition cursor-pointer flex items-center justify-between">
+            <span>{row.label}</span>
+            <span className="text-[10px] text-emerald-400/70">›</span>
+          </span>
         </button>
       </div>
     );
@@ -993,14 +1054,20 @@ function DetailedRow({
     );
   }
 
-  // busy
+  // busy — continuation rows (label === "") render with rose fill but no
+  // text and no visual border-top so the band reads as a continuous block.
+  const isContinuation = row.label === "";
   return (
     <div className={baseRowCls}>
-      <div className={timeCls}>{time}</div>
+      <div className={timeCls}>{isContinuation ? "" : time}</div>
       <div
         role="listitem"
         aria-label={`${time}, you're busy${row.title ? `, ${row.title}` : ""}`}
-        className="h-7 px-2.5 rounded-md text-[11px] border border-rose-400/40 bg-rose-500/10 text-rose-300 flex items-center"
+        className={`h-7 px-2.5 rounded-md text-[11px] bg-rose-500/10 text-rose-300 flex items-center ${
+          isContinuation
+            ? "border-x border-b border-rose-400/40 rounded-t-none -mt-1"
+            : "border border-rose-400/40"
+        }`}
       >
         {row.label}
       </div>
@@ -1298,6 +1365,7 @@ export function WeekView({
                     timezone={timezone}
                     hostFirstName={hostFirstName}
                     onSelectSlot={onSelectSlot}
+                    onSelectNextDay={(next) => setSelectedDay(next)}
                     slotsForDay={slotsByDay[selectedDay] || []}
                   />
                 }
