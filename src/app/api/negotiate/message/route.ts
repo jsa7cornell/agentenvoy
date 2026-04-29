@@ -260,7 +260,24 @@ export async function POST(req: NextRequest) {
   // this turn's response for feedback-pipeline debug reads.
   const promptSnapshotEnabled = process.env.PROMPT_SNAPSHOT_ENABLED !== "false";
   let invocationInfo: { systemPrompt: string; modelId: string } | null = null;
+
+  // Tool registry — guest-side composer ONLY gets `get_matched_availability`.
+  // Host composer + greeting path stay tool-less per the bundled review's B2
+  // scoping decision (`proposals/2026-04-29_bilateral-and-picker-unified-execution-plan_decided-2026-04-29.md` §7).
+  // Cut 2 privacy gate is enforced inside the tool's execute closure —
+  // `includeConflicts: false` is hard-coded; titles never reach Sonnet.
+  let tools: import("@/agent/tools/registry").ToolRegistry | undefined;
+  if (!isHost) {
+    const { buildGetMatchedAvailabilityTool } = await import(
+      "@/agent/tools/get-matched-availability"
+    );
+    tools = {
+      get_matched_availability: buildGetMatchedAvailabilityTool(sessionId),
+    };
+  }
+
   const streamResult = await streamAgentResponse(context, {
+    tools,
     onInvocation(info) {
       invocationInfo = info;
     },
