@@ -1898,6 +1898,18 @@ async function handleExpandLink(
       data: negotiatedClearData as Parameters<typeof prisma.negotiationSession.updateMany>[0]["data"],
     });
   }
+  // Propagate the host's new duration to the denormalized NegotiationSession.duration
+  // column so the thread card in the dashboard feed reflects the change immediately.
+  // NegotiationSession.duration is a snapshot set at session creation; it doesn't
+  // auto-update when link.parameters.duration changes — this write keeps them in sync.
+  // Must be a separate updateMany (not folded into negotiatedClearData above) because
+  // negotiatedClearData is null-only; duration is a non-null Int.
+  if (patch.duration !== undefined) {
+    await prisma.negotiationSession.updateMany({
+      where: { linkId: link.id, status: { in: ["active", "pending"] } },
+      data: { duration: patch.duration as number },
+    });
+  }
 
   // Human-readable confirmation message.
   const changedParts: string[] = [];
