@@ -2258,10 +2258,12 @@ async function handleExpandLink(
       select: { id: true },
     });
     if (activeSessions.length > 0) {
-      const hostFirstName = (await prisma.user.findUnique({
-        where: { id: userId },
-        select: { name: true },
-      }))?.name?.split(/\s+/)[0] ?? "The host";
+      // hostFirstName previously prefixed the bubble follow-up ("John updated
+      // the proposal — …"). Removed when the follow-up switched to inline
+      // role:"system" messages that match the existing per-field ✓ style
+      // (commit ee4842d). Guest-name-aware deferral copy reads link.invitee
+      // Name directly. If we ever bring back a host-name prefix, restore the
+      // findUnique call here.
       // Diff against existingRules — only mention fields whose VALUE actually
       // changed. Composers sometimes re-assert unchanged fields when packing
       // multiple edits into one update_link (e.g., re-emitting activity +
@@ -2302,24 +2304,47 @@ async function handleExpandLink(
       }
       // Deferral changes (F.2 in proposal 2026-04-29). Active-session
       // greetings are deliberately NOT recomputed (B5 precedent — see F.1);
-      // this follow-up admin message is how the guest learns about a
-      // post-create deferral flip.
-      if (changedAndDifferent("guestPicks") || changedAndDifferent("guestGuidance")) {
-        followupParts.push("deferrals updated");
+      // this follow-up message is how the guest learns about a post-create
+      // deferral flip. Render with guest-name-aware copy when we have one.
+      if (changedAndDifferent("guestPicks") && patch.guestPicks && typeof patch.guestPicks === "object") {
+        const gp = patch.guestPicks as Record<string, unknown>;
+        const guestFirst = link.inviteeName?.split(/\s+/)[0] || "Guest";
+        if (gp.location === true) followupParts.push(`${guestFirst} can pick the location`);
+        if (gp.date === true) followupParts.push(`${guestFirst} can pick the day`);
+        if (gp.format === true || Array.isArray(gp.format)) followupParts.push(`${guestFirst} can pick the format`);
+        if (gp.duration === true || Array.isArray(gp.duration)) followupParts.push(`${guestFirst} can pick the duration`);
       }
+      if (changedAndDifferent("guestGuidance")) {
+        followupParts.push("guidance updated");
+      }
+      // Render each followup as its own role:"system" message with
+      // metadata.kind:"host_update" so the deal-room renders them as inline
+      // ✓ system-style lines (matches the existing update_format pattern at
+      // actions.ts:631 and the dashboard ✓ summary). No more "John updated
+      // the proposal — …. Let me know if this changes anything on your side"
+      // bubble — that pattern collided visually with the existing per-field
+      // ✓ messages and produced redundant noise. Live-fix from 2026-04-29
+      // testing — feedback batch following PR commit 083db9f.
       if (followupParts.length > 0) {
-        const msg = `${hostFirstName} updated the proposal — ${followupParts.join("; ")}. Let me know if this changes anything on your side.`;
+        const messages = followupParts.map((part) => {
+          // Capitalize first letter for display ("Hannah can pick…" / "Time
+          // window updated"), but preserve guest-name-aware lines as-is.
+          const content = part.charAt(0).toUpperCase() + part.slice(1);
+          return content;
+        });
         await Promise.all(
-          activeSessions.map((s) =>
-            prisma.message.create({
-              data: {
-                sessionId: s.id,
-                role: "administrator",
-                content: msg,
-                metadata: { kind: "host_update", field: "link_rules" } as Prisma.InputJsonValue,
-              },
-            })
-          )
+          activeSessions.flatMap((s) =>
+            messages.map((content) =>
+              prisma.message.create({
+                data: {
+                  sessionId: s.id,
+                  role: "system",
+                  content,
+                  metadata: { kind: "host_update", field: "link_rules" } as Prisma.InputJsonValue,
+                },
+              })
+            ),
+          ),
         );
       }
     }

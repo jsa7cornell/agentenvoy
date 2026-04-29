@@ -146,6 +146,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [linkActivityIcon, setLinkActivityIcon] = useState<string | null>(null);
   const [linkActivityOptions, setLinkActivityOptions] = useState<string[] | null>(null);
   const [linkGuestPicksLocation, setLinkGuestPicksLocation] = useState(false);
+  // Other guestPicks deferrals — drive "(proposed)" suffix on event card
+  // fields per 2026-04-29 feedback. Format/duration/date can each be deferred
+  // independently; the card surfaces each via a per-field suffix.
+  const [linkGuestPicksFormat, setLinkGuestPicksFormat] = useState(false);
+  const [linkGuestPicksDuration, setLinkGuestPicksDuration] = useState(false);
+  const [linkGuestPicksDate, setLinkGuestPicksDate] = useState(false);
   const [guestChatOpen, setGuestChatOpen] = useState(true);
   const [linkTimingLabel, setLinkTimingLabel] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -966,6 +972,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           setLinkActivityOptions(Array.isArray(opts) ? opts as string[] : null);
           const gp = (data.link as Record<string, unknown>)?.guestPicks as Record<string, unknown> | null | undefined;
           setLinkGuestPicksLocation(gp?.location === true);
+          // Format / duration deferrals can be `true` OR an array of allowed
+          // values — both shapes signal "guest picks". Date is boolean-only.
+          setLinkGuestPicksFormat(gp?.format === true || Array.isArray(gp?.format));
+          setLinkGuestPicksDuration(gp?.duration === true || Array.isArray(gp?.duration));
+          setLinkGuestPicksDate(gp?.date === true);
         }
         setLinkTimingLabel(typeof data.link?.timingLabel === "string" && data.link.timingLabel.trim() ? data.link.timingLabel.trim() : null);
         // Stage 2 state-machine input (N7 fold): surface intent.steering so
@@ -1569,7 +1580,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           {eventFormat && (() => {
             const formatEmoji = getMeetingEmoji(eventFormat, null);
             const formatText = eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat;
-            return <span>{formatEmoji}{formatEmoji ? " " : ""}{formatText} &middot; {eventDuration} min</span>;
+            // (proposed) suffix on deferred fields — proposal 2026-04-29
+            // feedback. The host's deferral state surfaces inline so the
+            // guest sees what's actually theirs to pick.
+            const formatSuffix = linkGuestPicksFormat ? " (proposed)" : "";
+            const durationSuffix = linkGuestPicksDuration ? " (proposed)" : "";
+            return <span>{formatEmoji}{formatEmoji ? " " : ""}{formatText}{formatSuffix} &middot; {eventDuration} min{durationSuffix}</span>;
           })()}
           {eventDateTime && (() => {
             const dt = new Date(eventDateTime);
@@ -1590,9 +1606,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (linkActivity) {
               parts.push(linkActivityIcon ? `${linkActivityIcon} ${linkActivity}` : linkActivity);
             }
-            if (slotDuration) parts.push(formatDuration(slotDuration));
-            if (linkTimingLabel) parts.push(linkTimingLabel);
-            if (linkLocation) parts.push(`📍 ${linkLocation}`);
+            if (slotDuration) parts.push(formatDuration(slotDuration) + (linkGuestPicksDuration ? " (proposed)" : ""));
+            if (linkTimingLabel) parts.push(linkTimingLabel + (linkGuestPicksDate ? " (proposed)" : ""));
+            if (linkLocation) parts.push(`📍 ${linkLocation}` + (linkGuestPicksLocation ? " (proposed)" : ""));
             if (parts.length === 0) return <span>Meeting details pending</span>;
             return <span>{parts.join(" · ")}</span>;
           })()}

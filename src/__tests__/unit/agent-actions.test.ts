@@ -1537,11 +1537,17 @@ describe("executeActions", () => {
         HOST_USER_ID,
       );
 
+      // Post-2026-04-29 (commit following 083db9f): the follow-up message
+      // changed from a single role:"administrator" bubble ("John updated the
+      // proposal — duration now 2h. Let me know if this changes anything")
+      // to one role:"system" message per change with metadata.kind:
+      // "host_update" — renders as inline ✓ in the deal-room transcript
+      // (matches the existing update_format / update_location pattern).
       const hostUpdateCalls = mockPrisma.message.create.mock.calls.filter(
         (call: unknown[]) => {
           const arg = call[0] as { data?: { role?: string; metadata?: { kind?: string } } };
           return (
-            arg?.data?.role === "administrator" &&
+            arg?.data?.role === "system" &&
             arg?.data?.metadata?.kind === "host_update"
           );
         },
@@ -1549,9 +1555,7 @@ describe("executeActions", () => {
       expect(hostUpdateCalls).toHaveLength(1);
       const call = hostUpdateCalls[0][0] as { data: { content: string; sessionId: string } };
       expect(call.data.sessionId).toBe("session-engaged-1");
-      expect(call.data.content).toContain("John");
-      expect(call.data.content).toContain("updated the proposal");
-      expect(call.data.content).toContain("duration now");
+      expect(call.data.content).toContain("uration now"); // "Duration now 2h" — capitalization-tolerant match
     });
 
     it("uses the message-exists filter in the findMany query", async () => {

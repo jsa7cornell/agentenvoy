@@ -148,6 +148,12 @@ export async function GET() {
       ? rules.activityIcon.trim()
       : null;
 
+    // Surface link.guestPicks so ThreadCard subtitle can render "(proposed)"
+    // suffix on deferred fields. Per 2026-04-29 feedback — when the host
+    // defers location/duration/format/date to the guest, the dashboard
+    // chip and deal-room event card show the proposed-but-not-locked state.
+    const guestPicks = (rules?.guestPicks as Record<string, unknown> | undefined) ?? null;
+
     const base = {
       ...msg,
       thread: {
@@ -158,6 +164,7 @@ export async function GET() {
         link: {
           ...msg.thread.link,
           activityIcon,
+          guestPicks,
         },
       },
     };

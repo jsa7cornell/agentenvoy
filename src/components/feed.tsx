@@ -1596,11 +1596,21 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                   statusLabel={status.label}
                   statusColor={status.color}
                   activityIcon={msg.thread.link.activityIcon || undefined}
-                  subtitle={[
-                    msg.thread.format === "phone" ? "Phone call" : msg.thread.format === "video" ? "Video" : msg.thread.format,
-                    msg.thread.duration ? formatDuration(msg.thread.duration) : null,
-                    isGroup ? `${guestParticipants.length} participant${guestParticipants.length !== 1 ? "s" : ""}` : null,
-                  ].filter(Boolean).join(" · ") || undefined}
+                  subtitle={(() => {
+                    // (proposed) suffix on deferred fields per 2026-04-29
+                    // feedback. The host's deferral state surfaces inline so
+                    // the host sees on the dashboard which fields are
+                    // proposed-but-the-guest-picks.
+                    const gp = (msg.thread.link as Record<string, unknown> | null | undefined)?.guestPicks as Record<string, unknown> | null | undefined;
+                    const formatDeferred = gp?.format === true || Array.isArray(gp?.format);
+                    const durationDeferred = gp?.duration === true || Array.isArray(gp?.duration);
+                    const formatLabel = msg.thread.format === "phone" ? "Phone call" : msg.thread.format === "video" ? "Video" : msg.thread.format;
+                    return [
+                      formatLabel ? `${formatLabel}${formatDeferred ? " (proposed)" : ""}` : null,
+                      msg.thread.duration ? `${formatDuration(msg.thread.duration)}${durationDeferred ? " (proposed)" : ""}` : null,
+                      isGroup ? `${guestParticipants.length} participant${guestParticipants.length !== 1 ? "s" : ""}` : null,
+                    ].filter(Boolean).join(" · ") || undefined;
+                  })()}
                   inviteeName={msg.thread.link.inviteeName || undefined}
                   inviteeEmail={msg.thread.link.inviteeEmail || undefined}
                   messageCount={msg.thread._count.messages}
