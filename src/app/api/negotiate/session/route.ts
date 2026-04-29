@@ -6,6 +6,7 @@ import { generateAgentResponse, AgentContext } from "@/agent/agent-runner";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { generateCode } from "@/lib/utils";
+import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
 import type { ScoredSlot, LinkParameters } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
 import { compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
@@ -560,7 +561,7 @@ export async function POST(req: NextRequest) {
     }
     if (!session) {
       // Shouldn't happen, but fall through to create
-      const hostFirstName = (user.name || "Host").split(/\s+/)[0];
+      const hostFirstName = resolveHostFirstName(user);
       const lr = parseLinkParameters(link.parameters);
       session = await prisma.negotiationSession.create({
         data: {
@@ -582,7 +583,7 @@ export async function POST(req: NextRequest) {
       });
     }
   } else {
-    const hostFirstName = (user.name || "Host").split(/\s+/)[0];
+    const hostFirstName = resolveHostFirstName(user);
     const lr = parseLinkParameters(link.parameters);
     session = await prisma.negotiationSession.create({
       data: {
@@ -816,8 +817,9 @@ export async function POST(req: NextRequest) {
     });
   } else {
     // Deterministic template greeting — no LLM, no hallucination risk.
-    const hostName = user.name || "the organizer";
-    const hostFirstName = hostName.split(/\s+/)[0] || hostName;
+    // Fallback to "the organizer" (not "Host") preserves greeting read when
+    // user.name is missing — this surface is user-facing prose, not a label.
+    const hostFirstName = user.name ? resolveHostFirstName(user) : "the organizer";
 
     const rawTopic = link.topic || null;
 

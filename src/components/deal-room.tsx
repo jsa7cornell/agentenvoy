@@ -24,6 +24,7 @@ import { formatDuration } from "@/lib/format-duration";
 import { stripRendererOnlyBlocks } from "@/lib/message-render";
 import { mergePollResult, type LiveSyncMessage } from "@/lib/deal-room-live-sync";
 import { emojiForActivity } from "@/lib/activity-vocab";
+import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
 import { EditedPill } from "@/components/edited-pill";
 import { deriveMode, type DealRoomMode } from "@/lib/deal-room-mode";
 import {
@@ -2010,7 +2011,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         <TimezonePicker
           sessionId={sessionId}
           hostTimezone={hostTimezone}
-          hostFirstName={(hostName || "").split(/\s+/)[0] || "the host"}
+          hostFirstName={hostName ? resolveHostFirstName({ name: hostName }) : "the host"}
           viewerTimezone={viewerTimezone}
           onTimezoneChange={(tz) => setViewerTimezoneState(tz)}
         />
@@ -2124,7 +2125,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             headerSlot={headerSlot}
             footerSlot={tzPicker}
             bilateralByDay={bilateralByDay}
-            hostFirstName={(hostName || "").split(/\s+/)[0] || undefined}
+            hostFirstName={hostName ? resolveHostFirstName({ name: hostName }) : undefined}
             eventTitle={(() => {
               const hostFirst = hostName ? hostName.split(" ")[0] : "";
               const inviteeFirst = inviteeName ? inviteeName.split(" ")[0] : "";

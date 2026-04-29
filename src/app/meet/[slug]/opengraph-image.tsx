@@ -10,6 +10,7 @@
 
 import { ImageResponse } from "next/og";
 import { prisma } from "@/lib/prisma";
+import { hostFirstName } from "@/lib/host-naming";
 
 export const runtime = "nodejs"; // needs prisma, not edge
 export const alt = "Schedule with AgentEnvoy";
@@ -30,7 +31,7 @@ export default async function OpengraphImage({ params }: Props) {
       select: { name: true },
     });
     if (user?.name) {
-      hostFirst = user.name.split(/\s+/)[0];
+      hostFirst = hostFirstName(user);
     }
   } catch {
     // Fall through to generic fallback — never 500 an OG image.
