@@ -693,7 +693,7 @@ function MeetLinkCard({ url, topic }: { url: string; topic?: string }) {
           onClick={() => {
             void shareInvite({ url, topic });
           }}
-          className="px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 text-xs font-medium rounded-md transition flex-shrink-0"
+          className="sm:hidden px-3 py-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 text-xs font-medium rounded-md transition flex-shrink-0"
         >
           Share
         </button>

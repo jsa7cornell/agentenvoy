@@ -153,7 +153,7 @@ export function EventLinksCard({ row, onEdit }: EventLinksCardProps) {
           <button
             type="button"
             onClick={share}
-            className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-accent/15 hover:bg-accent/25 text-accent transition flex-shrink-0"
+            className="sm:hidden text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-accent/15 hover:bg-accent/25 text-accent transition flex-shrink-0"
             data-testid={`mobile-event-links-share-${row.kind}`}
             aria-label={`Share ${row.name}`}
           >

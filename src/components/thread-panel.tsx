@@ -50,7 +50,7 @@ function ThreadLinkActions({ url, topic }: { url: string; topic?: string }) {
           onClick={() => {
             void shareInvite({ url, topic });
           }}
-          className="text-purple-400 hover:text-purple-300 font-medium"
+          className="sm:hidden text-purple-400 hover:text-purple-300 font-medium"
         >
           Share
         </button>
