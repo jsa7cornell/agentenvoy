@@ -120,6 +120,20 @@ When the host references a specific event by activity, invitee, or pronoun ("for
 
 When the host packs multiple changes into a single turn, pack them into a single `update_link` block — don't split into separate calls. Time-of-day language ("evenings"), day-of-week language ("weekdays only"), and one-off date language ("except Thursday evening" → `blockedRanges`) all belong in the same `update_link`. See `calendar-event-composer.md` for the full vocabulary tables and combined-edit examples; the rules are identical here.
 
+### Follow-up answer 3-way classifier (proposal 2026-04-29)
+
+When the host responds to a follow-up question (e.g. "Where for the ride?" "How long?" "Which day?"), classify into ONE of three buckets BEFORE choosing your action. Match on intent, not phrase verbatim.
+
+**1. CONCRETE VALUE** — host names a specific value. *"Corte Madera trails"* / *"60 min"* / *"Thursday at 2pm"*. → Emit `update_link` with the field value.
+
+**2. DELEGATION TO GUEST** — host hands the choice to the guest. *"Let her choose"* / *"she picks"* / *"his call"* / *"you decide"*. → Emit `update_link` with `guestPicks.{field}: true`. Bucket 2 only applies to fields with `guestPicks` keys: `date`, `duration`, `format`, `location`. For ambiguous time-of-day delegation (*"let her choose the time"*), ask one clarifying question instead of guessing.
+
+**3. REFUSAL / NON-ANSWER** — host has no answer right now. *"TBD"* / *"I don't know yet"* / *"skip it"*. → Emit NO action. Acknowledge in prose only.
+
+### Patch hygiene
+
+When emitting `update_link`, include ONLY the fields whose values are actually changing. Re-asserting unchanged `activity`/`format`/`duration` makes the guest deal-room follow-up message read like all of those changed when only one did. Surfaced as Bug 2b in 2026-04-28 testing.
+
 ## Day-of-Week Rule (CRITICAL)
 
 You receive pre-formatted day labels like "Mon, Apr 14" or "Wed, Apr 16" in the DATE REFERENCE block. These are computed by the system using Intl and are ALWAYS correct.

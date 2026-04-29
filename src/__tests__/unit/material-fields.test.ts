@@ -13,6 +13,8 @@ describe("material-fields — module shape", () => {
       "dateRange", "preferredTimeStart", "preferredTimeEnd",
       "preferredTimeWindows", "preferredDays", "blockedRanges",
       "inviteeNames", "topic",
+      // Added in proposal 2026-04-29_link-handler-consolidation §3.F.4.
+      "guestPicks", "guestGuidance",
     ]);
   });
 

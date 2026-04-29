@@ -27,6 +27,13 @@ export const MATERIAL_FIELDS = [
   "blockedRanges",
   "inviteeNames",
   "topic",
+  // Added in proposal 2026-04-29_link-handler-consolidation §3.F.4. Host
+  // edits that flip guest-deferrals (e.g. "let her choose" → guestPicks.
+  // location: true) are material — the "Edited" pill renders them, the
+  // follow-up message reaches the active session, and the link card surfaces
+  // the change to the host.
+  "guestPicks",
+  "guestGuidance",
 ] as const;
 
 export type MaterialField = typeof MATERIAL_FIELDS[number];
@@ -52,6 +59,10 @@ export const FIELD_LABEL: Record<MaterialField, string> = {
   blockedRanges: "blocked time",
   inviteeNames: "guests",
   topic: "title",
+  // Both deferral fields collapse to "deferrals" — host who flips multiple
+  // guestPicks sub-keys at once sees one pill label, not two.
+  guestPicks: "deferrals",
+  guestGuidance: "deferrals",
 };
 
 /** True if `field` is one of the canonical material fields. */

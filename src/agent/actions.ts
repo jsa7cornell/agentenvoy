@@ -1851,6 +1851,31 @@ async function handleExpandLink(
     patch.location = loc || undefined;
   }
 
+  // guestPicks / guestGuidance — the host can change deferrals after link
+  // creation ("actually let her choose the spot"). Accepted on `update_link`
+  // per proposal 2026-04-29 §3.B (link-handler-consolidation). Today's
+  // handler ignored these fields, which produced an empty-patch gate error
+  // when the host tried to flip a deferral.
+  //
+  // Merge semantics — PER-SUB-KEY, not whole-object replace. Patching
+  // `guestPicks: { location: true }` on a link with `guestPicks: { duration:
+  // [60,90] }` produces `{ duration: [60,90], location: true }` — the
+  // existing duration deferral is preserved. The handler resolves this
+  // against `existingRules.guestPicks` below in the merge step; here we
+  // just pass through the patch fragment.
+  if (params.guestPicks !== undefined && typeof params.guestPicks === "object" && params.guestPicks !== null && !Array.isArray(params.guestPicks)) {
+    const incoming = params.guestPicks as Record<string, unknown>;
+    const existingGuestPicks = (existingRules as Record<string, unknown>).guestPicks as Record<string, unknown> | undefined;
+    patch.guestPicks = { ...(existingGuestPicks ?? {}), ...incoming };
+  }
+  if (params.guestGuidance !== undefined && typeof params.guestGuidance === "object" && params.guestGuidance !== null && !Array.isArray(params.guestGuidance)) {
+    const incoming = params.guestGuidance as Record<string, unknown>;
+    const existingGuestGuidance = (existingRules as Record<string, unknown>).guestGuidance as Record<string, unknown> | undefined;
+    // Top-level merge; nested `suggestions` object replaces wholesale (rare
+    // edit pattern; if needed, the LLM emits the full `suggestions` block).
+    patch.guestGuidance = { ...(existingGuestGuidance ?? {}), ...incoming };
+  }
+
   // Invitee-set swap — a multi-invitee edit ("actually change it to Will and
   // Mingst") is an update, not a new link. Without this branch the LLM has
   // no way to swap invitees via update_link and reaches for create_link —
@@ -1890,7 +1915,7 @@ async function handleExpandLink(
   if (patchKeysForGate.length === 0 && inviteeNamesPatch === undefined) {
     return {
       success: false,
-      message: "update_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredTimeWindows, preferredDays/daysOfWeek, lastResort, dateRange, blockedRanges, timingLabel, format, duration, activity, activityIcon, location, inviteeNames)",
+      message: "update_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredTimeWindows, preferredDays/daysOfWeek, lastResort, dateRange, blockedRanges, timingLabel, format, duration, activity, activityIcon, location, inviteeNames, guestPicks, guestGuidance)",
     };
   }
 
@@ -2191,6 +2216,21 @@ async function handleExpandLink(
   if (inviteeNamesPatch !== undefined) {
     changedParts.push(`invitees: ${inviteeNamesPatch.join(", ") || "cleared"}`);
   }
+  // Deferral changes (F.3 in proposal 2026-04-29). Summarize which sub-keys
+  // flipped — "guestPicks: location-deferred" / "duration-deferred" — rather
+  // than dumping the JSON, so the host sees a readable confirmation.
+  if (patch.guestPicks !== undefined && typeof patch.guestPicks === "object" && patch.guestPicks !== null) {
+    const gp = patch.guestPicks as Record<string, unknown>;
+    const deferred: string[] = [];
+    if (gp.location === true) deferred.push("location-deferred");
+    if (gp.date === true) deferred.push("date-deferred");
+    if (gp.format === true || Array.isArray(gp.format)) deferred.push("format-deferred");
+    if (gp.duration === true || Array.isArray(gp.duration)) deferred.push("duration-deferred");
+    if (deferred.length > 0) changedParts.push(`guestPicks: ${deferred.join(", ")}`);
+  }
+  if (patch.guestGuidance !== undefined) {
+    changedParts.push(`guidance: updated`);
+  }
 
   // Post-edit follow-up: drop a short administrator message into every
   // active session on this link so the guest's deal-room shows what
@@ -2259,6 +2299,13 @@ async function handleExpandLink(
       }
       if (changedAndDifferent("blockedRanges")) {
         followupParts.push("blocked time updated");
+      }
+      // Deferral changes (F.2 in proposal 2026-04-29). Active-session
+      // greetings are deliberately NOT recomputed (B5 precedent — see F.1);
+      // this follow-up admin message is how the guest learns about a
+      // post-create deferral flip.
+      if (changedAndDifferent("guestPicks") || changedAndDifferent("guestGuidance")) {
+        followupParts.push("deferrals updated");
       }
       if (followupParts.length > 0) {
         const msg = `${hostFirstName} updated the proposal — ${followupParts.join("; ")}. Let me know if this changes anything on your side.`;
