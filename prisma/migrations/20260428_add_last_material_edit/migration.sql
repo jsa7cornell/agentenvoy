@@ -14,5 +14,5 @@
 -- fails on null so no pill renders for pre-migration rows.
 
 ALTER TABLE "NegotiationLink"
-  ADD COLUMN "lastMaterialEditAt" TIMESTAMP(3),
-  ADD COLUMN "lastEditedFields"   TEXT[] NOT NULL DEFAULT '{}';
+  ADD COLUMN IF NOT EXISTS "lastMaterialEditAt" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "lastEditedFields"   TEXT[] NOT NULL DEFAULT '{}';

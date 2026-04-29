@@ -25,12 +25,16 @@
 -- should change" — provenance makes that rule deterministic.
 
 ALTER TABLE "NegotiationLink"
-  ADD COLUMN "topicSource" TEXT;
+  ADD COLUMN IF NOT EXISTS "topicSource" TEXT;
 
 -- Backfill. The vocab/aliases below mirror app/src/lib/activity-vocab.ts as
 -- of 2026-04-28. If the vocab list grows after this migration ships, future
 -- rows go through the application write path (deriveTopicSource) and get the
 -- correct provenance — only this one-time backfill uses the static list.
+--
+-- WHERE-guarded so this statement is safe to re-run: only rows whose
+-- topicSource is still null get classified. If the column was added by an
+-- earlier db-push and rows already have values, those are left alone.
 UPDATE "NegotiationLink"
 SET "topicSource" = CASE
   WHEN "topic" IS NULL THEN NULL
@@ -54,4 +58,5 @@ SET "topicSource" = CASE
     'introduction', 'meet-and-greet'
   ) THEN 'activity'
   ELSE 'custom'
-END;
+END
+WHERE "topicSource" IS NULL;
