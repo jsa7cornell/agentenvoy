@@ -891,7 +891,7 @@ export async function POST(req: NextRequest) {
       : "meeting";
 
     const guestPicks = (linkRules as Record<string, unknown>).guestPicks as
-      | { window?: { startHour: number; endHour: number }; date?: boolean; duration?: boolean | number[]; location?: boolean }
+      | { window?: { startHour: number; endHour: number }; date?: boolean; duration?: boolean | number[]; location?: boolean; format?: boolean | string[] }
       | undefined;
     const guestGuidance = (linkRules as Record<string, unknown>).guestGuidance as
       | { suggestions?: { locations?: string[]; durations?: number[] }; tone?: string }
@@ -953,17 +953,26 @@ export async function POST(req: NextRequest) {
       ? "Also, if you connect your calendar I can automagically find the best fit for you! 🗓️"
       : null;
 
-    // Dimension-aware suggest-alt clause. Skipped for directive steering,
-    // office-hours links, and when neither format nor duration is set.
+    // Dimension-aware suggest-alt clause for the named-invitee greeting
+    // branches. Gated on guestPicks: only promise flexibility on dimensions
+    // where the host has explicitly opted guests in. Otherwise the composer
+    // refuses the change and the greeting becomes a broken promise — see the
+    // 2026-04-28 reusable-link guest-picks proposal (B5) and the screenshot
+    // regression where Envoy invited "suggest a different meeting length",
+    // accepted "45 mins", then refused with "I can't adjust that here."
+    // Anonymous reusable links use the separate seeded follow-up message
+    // below; this clause stays for the named-invitee contextual-link path.
     const suggestAltClause = ((): string | null => {
       if (isDirective || isOfficeHoursLink) return null;
-      const fmtSet = !!effectiveFormat;
-      const durSet = durationForOpener != null;
-      if (!fmtSet && !durSet) return null;
-      if (fmtSet && durSet)
-        return "and feel free to suggest a different format ☕📱🚴 or meeting length if that's better for you";
-      if (fmtSet)
-        return "and feel free to suggest a different format ☕📱🚴 if that's better for you";
+      const fmtPick = !!guestPicks?.format;
+      const durPick =
+        guestPicks?.duration === true ||
+        (Array.isArray(guestPicks?.duration) && guestPicks.duration.length > 0);
+      if (!fmtPick && !durPick) return null;
+      if (fmtPick && durPick)
+        return "and feel free to suggest a different format or meeting length if that's better for you";
+      if (fmtPick)
+        return "and feel free to suggest a different format if that's better for you";
       return "and feel free to suggest a different meeting length if that's better for you";
     })();
 

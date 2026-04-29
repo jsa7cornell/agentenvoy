@@ -275,7 +275,7 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
       guestPickHint:
         "Let me know where works for you — John suggested Sightglass.",
       suggestAltClause:
-        "and feel free to suggest a different format ☕📱🚴 or meeting length if that's better for you",
+        "and feel free to suggest a different format or meeting length if that's better for you",
       calendarPitch:
         "Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
     });
@@ -285,7 +285,7 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
         "👋 Sarah! I'm scheduling time with you and John. John is proposing a 30 min video call.",
         "Looking forward to it!",
         "Let me know where works for you — John suggested Sightglass.",
-        "Pick a time below, and feel free to suggest a different format ☕📱🚴 or meeting length if that's better for you. Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
+        "Pick a time below, and feel free to suggest a different format or meeting length if that's better for you. Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
       ].join("\n\n"),
     );
   });
