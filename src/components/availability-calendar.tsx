@@ -43,6 +43,10 @@ export interface AvailabilityCalendarProps {
   footerSlot?: React.ReactNode;
   /** Bilateral chips per day — drives "Both" badge + loose-mutual reveal count. */
   bilateralByDay?: Record<string, BilateralChip[]> | null;
+  /** Canonical bilateral payload from PR-A1 — feeds the Detailed tab's
+   *  stacked timeline render in PR-B2. Optional; absent for sessions with
+   *  no guest snapshot or for older clients. */
+  bilateralPayload?: import("@/lib/bilateral-availability").BilateralPayload | null;
   /** First name of the host — reveal link reads "+ N more windows {name} prefers but you're busy". */
   hostFirstName?: string;
   /** Host profile image URL for the "Both" badge (Google photo → <img>; null → initials circle). */
@@ -564,6 +568,335 @@ function LocationNotice({
   );
 }
 
+// ─── Tab strip + Detailed timeline (PR-B2) ────────────────────────────────
+//
+// Two-tab picker for chip-style 30-min meetings: "Best matches" (today's
+// chip+reveal render) and "Detailed" (stacked timeline). Tab persists in
+// localStorage globally per user; mobile clamps to Best matches on first
+// load only. Day and tab are independent axes — switching days preserves
+// the tab; switching tabs preserves the day.
+
+const PICKER_TAB_STORAGE_KEY = "agentenvoy.picker.tab";
+const MOBILE_BREAKPOINT_PX = 640;
+
+function readStoredTab(): "best-matches" | "detailed" | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PICKER_TAB_STORAGE_KEY);
+    if (raw === "best-matches" || raw === "detailed") return raw;
+  } catch {
+    // localStorage may be blocked in sandboxed iframes — fall through.
+  }
+  return null;
+}
+
+function writeStoredTab(tab: "best-matches" | "detailed") {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PICKER_TAB_STORAGE_KEY, tab);
+  } catch {
+    // ignore
+  }
+}
+
+function isMobileViewport(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.innerWidth < MOBILE_BREAKPOINT_PX;
+}
+
+function PickerTabs({
+  matchedCount,
+  bestMatches,
+  detailed,
+}: {
+  matchedCount: number;
+  bestMatches: React.ReactNode;
+  detailed: React.ReactNode;
+}) {
+  // Tab state initialization — clamp mobile to "best-matches" on first
+  // load (when storage is unset). After first explicit toggle, persist
+  // the choice across loads on any viewport per Decision B6.
+  const [tab, setTab] = useState<"best-matches" | "detailed">(() => {
+    const stored = readStoredTab();
+    if (stored === null) {
+      return isMobileViewport() ? "best-matches" : "best-matches";
+    }
+    return stored;
+  });
+
+  const onSelectTab = (next: "best-matches" | "detailed") => {
+    setTab(next);
+    writeStoredTab(next);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div
+        role="tablist"
+        aria-label="Picker view"
+        className="flex gap-1 p-0.5 rounded-md bg-surface-secondary border border-DEFAULT"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "best-matches"}
+          onClick={() => onSelectTab("best-matches")}
+          className={`flex-1 px-2 py-1 rounded text-[11px] font-medium transition ${
+            tab === "best-matches"
+              ? "bg-surface text-primary shadow-sm"
+              : "text-muted hover:text-primary"
+          }`}
+        >
+          Best matches
+          <span
+            className={`ml-1 inline-block px-1 rounded text-[9.5px] font-bold ${
+              tab === "best-matches"
+                ? "bg-emerald-500/20 text-emerald-400"
+                : "bg-surface-tertiary text-muted"
+            }`}
+          >
+            {matchedCount}
+          </span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "detailed"}
+          onClick={() => onSelectTab("detailed")}
+          className={`flex-1 px-2 py-1 rounded text-[11px] font-medium transition ${
+            tab === "detailed"
+              ? "bg-surface text-primary shadow-sm"
+              : "text-muted hover:text-primary"
+          }`}
+        >
+          Detailed
+        </button>
+      </div>
+      <div role="tabpanel">{tab === "best-matches" ? bestMatches : detailed}</div>
+    </div>
+  );
+}
+
+/**
+ * Stacked timeline render for the Detailed tab. One row per half-hour;
+ * three states (Both free / John open / You're busy) per the unified plan
+ * §1.1. Reads `bilateralPayload.byDay[].matched / looseMutual / conflicts`
+ * directly — single source of truth shared with the Best matches tab via
+ * `slotsForDay` matching.
+ *
+ * Slot-level commit (per F4 from the picker review): tapping a "Both free"
+ * row commits THAT half-hour's start, not the window's default-9:00.
+ *
+ * "John open" rows are non-interactive per F8 (no host conflict to surface;
+ * the visual is the entire signal).
+ */
+function DetailedTimeline({
+  payload,
+  dateStr,
+  timezone,
+  hostFirstName,
+  onSelectSlot,
+  slotsForDay,
+}: {
+  payload: import("@/lib/bilateral-availability").BilateralPayload;
+  dateStr: string;
+  timezone: string;
+  hostFirstName?: string;
+  onSelectSlot?: (msg: string, slot: { start: string; end: string }) => void;
+  slotsForDay: Slot[];
+}) {
+  const day = payload.byDay.find((d) => d.date === dateStr);
+  if (!day) {
+    return (
+      <p className="text-xs text-muted">
+        {hostFirstName || "Host"} has no availability this day.
+      </p>
+    );
+  }
+  if (!day.hasHostHours) {
+    return (
+      <p className="text-xs text-muted">
+        Outside {hostFirstName || "the host"}&apos;s working hours.
+      </p>
+    );
+  }
+
+  // Build a unified set of half-hour rows: union of (host-bookable slots,
+  // guest conflicts intersecting this day). Each row classified as one of:
+  //   - "match"     — appears in day.matched (tappable)
+  //   - "host"      — appears in day.looseMutual (read-only — host open)
+  //   - "busy"      — covered by a guest conflict (read-only; title shown)
+  //   - "off"       — outside host hours (rendered as muted spacer)
+  // Sort by start time ascending.
+  type Row = {
+    start: string;
+    end: string;
+    state: "match" | "host" | "busy";
+    label: string;
+    title?: string;
+    slot?: Slot;
+  };
+
+  const rows: Row[] = [];
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleTimeString("en-US", {
+      hour: "numeric", minute: "2-digit", timeZone: timezone,
+    });
+
+  const matchedKeys = new Set(day.matched.map((m) => m.start));
+  const looseKeys = new Set(day.looseMutual.map((l) => l.start));
+  const slotByStart = new Map(slotsForDay.map((s) => [s.start, s]));
+
+  for (const m of day.matched) {
+    rows.push({
+      start: m.start,
+      end: m.end,
+      state: "match",
+      label: `Book ${fmt(m.start)}`,
+      slot: slotByStart.get(m.start),
+    });
+  }
+  for (const l of day.looseMutual) {
+    rows.push({
+      start: l.start,
+      end: l.end,
+      state: "host",
+      label: `${hostFirstName || "Host"} open`,
+    });
+  }
+  // Conflicts: surface as busy rows. Some may overlap with looseMutual
+  // ranges — that's fine; the timeline shows both lanes through their own
+  // rows. De-dupe identical starts where matched + conflict somehow
+  // coincide (shouldn't happen — bilateral compute filters busy from
+  // matched — but defensive for legacy snapshots).
+  for (const c of day.conflicts) {
+    if (matchedKeys.has(c.start)) continue; // matched wins
+    if (looseKeys.has(c.start)) continue;   // loose-mutual wins (privacy posture)
+    rows.push({
+      start: c.start,
+      end: c.end,
+      state: "busy",
+      label: c.title ?? "Busy",
+      title: c.title,
+    });
+  }
+
+  rows.sort((a, b) => a.start.localeCompare(b.start));
+
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap gap-2 text-[10px] text-muted px-0.5 pb-1">
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-sm bg-emerald-500/30 border border-emerald-400/60" />
+          Both free
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-sm border border-dashed border-DEFAULT" />
+          {hostFirstName || "Host"} open
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-sm bg-rose-500/15 border border-rose-400/40" />
+          You&rsquo;re busy
+        </span>
+      </div>
+      {rows.length === 0 && (
+        <p className="text-xs text-muted">
+          No times to show today — try a different day.
+        </p>
+      )}
+      {rows.map((row) => (
+        <DetailedRow
+          key={`${row.state}-${row.start}`}
+          row={row}
+          dateStr={dateStr}
+          timezone={timezone}
+          onSelectSlot={onSelectSlot}
+        />
+      ))}
+    </div>
+  );
+}
+
+function DetailedRow({
+  row,
+  dateStr,
+  timezone,
+  onSelectSlot,
+}: {
+  row: {
+    start: string;
+    end: string;
+    state: "match" | "host" | "busy";
+    label: string;
+    title?: string;
+    slot?: Slot;
+  };
+  dateStr: string;
+  timezone: string;
+  onSelectSlot?: (msg: string, slot: { start: string; end: string }) => void;
+}) {
+  const time = new Date(row.start).toLocaleTimeString("en-US", {
+    hour: "numeric", minute: "2-digit", timeZone: timezone,
+  });
+  const baseRowCls =
+    "grid grid-cols-[42px_1fr] gap-2 items-center min-h-[28px]";
+  const timeCls = "text-[10px] text-muted text-right tabular-nums";
+
+  if (row.state === "match") {
+    return (
+      <div className={baseRowCls}>
+        <div className={timeCls}>{time}</div>
+        <button
+          type="button"
+          onClick={() =>
+            onSelectSlot?.(
+              row.slot
+                ? formatSlotMessage(row.slot, dateStr, timezone)
+                : `How about ${time}?`,
+              { start: row.start, end: row.end },
+            )
+          }
+          disabled={!onSelectSlot}
+          aria-label={`${time}, both free, book`}
+          className="h-7 px-2.5 rounded-md text-left text-[11px] font-medium border border-emerald-400/60 bg-emerald-950/30 text-emerald-300 hover:border-emerald-300 transition cursor-pointer flex items-center justify-between"
+        >
+          <span>{row.label}</span>
+          <span className="text-[10px] text-emerald-400/70">›</span>
+        </button>
+      </div>
+    );
+  }
+
+  if (row.state === "host") {
+    return (
+      <div className={baseRowCls}>
+        <div className={timeCls}>{time}</div>
+        <div
+          role="listitem"
+          aria-label={`${time}, host open, you're busy`}
+          className="h-7 px-2.5 rounded-md text-[11px] border border-dashed border-DEFAULT bg-transparent text-muted flex items-center"
+        >
+          {row.label}
+        </div>
+      </div>
+    );
+  }
+
+  // busy
+  return (
+    <div className={baseRowCls}>
+      <div className={timeCls}>{time}</div>
+      <div
+        role="listitem"
+        aria-label={`${time}, you're busy${row.title ? `, ${row.title}` : ""}`}
+        className="h-7 px-2.5 rounded-md text-[11px] border border-rose-400/40 bg-rose-500/10 text-rose-300 flex items-center"
+      >
+        {row.label}
+      </div>
+    </div>
+  );
+}
+
 function TimezoneLabel({ timezone, onClick }: { timezone: string; onClick?: () => void }) {
   const city = timezone.split("/").pop()?.replace(/_/g, " ") || timezone;
   const abbr = new Intl.DateTimeFormat("en-US", { timeZone: timezone, timeZoneName: "short" })
@@ -599,6 +932,7 @@ export function WeekView({
   headerSlot,
   footerSlot,
   bilateralByDay,
+  bilateralPayload,
   hostFirstName,
   hostImage,
   guestImage,
@@ -800,11 +1134,22 @@ export function WeekView({
         })}
       </div>
 
-      {/* Selected day — window cards */}
+      {/* Selected day — tab strip + content */}
       {selectedDay && (() => {
         const selectedWindows = windowsByDay[selectedDay] || [];
         const chipsForDay = bilateralByDay?.[selectedDay];
         const looseMutualCount = chipsForDay ? chipsForDay.filter((c) => c.color === "one").length : 0;
+        // Tab strip surfaces only when bilateral data is present AND the
+        // meeting is short (chip-style picker). Long-duration meetings use
+        // DragSlotPicker; Detailed tab there is future work per the unified
+        // plan §7.
+        const tabsAvailable =
+          !!bilateralPayload?.available && durationMinutes === 30;
+        // Per-day match count for the tab pill (Decision 4 / Placement B).
+        const dayPayload = bilateralPayload?.byDay.find(
+          (d) => d.date === selectedDay,
+        );
+        const matchedCount = dayPayload?.matched.length ?? 0;
         return (
           <div className="mt-2.5 space-y-1.5">
             <div className="text-[10px] font-medium text-muted">
@@ -815,21 +1160,54 @@ export function WeekView({
               })}
               , {formatDurationCompact(duration)} meeting
             </div>
-            <WindowCards
-              windows={selectedWindows}
-              chipsForDay={chipsForDay}
-              dateStr={selectedDay}
-              timezone={timezone}
-              onSelectSlot={onSelectSlot}
-              looseMutualCount={looseMutualCount}
-              hostFirstName={hostFirstName}
-              hostImage={hostImage}
-              guestImage={guestImage}
-              hostSource={hostInitialSource || hostFirstName || "Host"}
-              guestSource={guestInitialSource || "Guest"}
-              durationMinutes={durationMinutes}
-              slotsForDay={slotsByDay[selectedDay] || []}
-            />
+            {tabsAvailable ? (
+              <PickerTabs
+                matchedCount={matchedCount}
+                bestMatches={
+                  <WindowCards
+                    windows={selectedWindows}
+                    chipsForDay={chipsForDay}
+                    dateStr={selectedDay}
+                    timezone={timezone}
+                    onSelectSlot={onSelectSlot}
+                    looseMutualCount={looseMutualCount}
+                    hostFirstName={hostFirstName}
+                    hostImage={hostImage}
+                    guestImage={guestImage}
+                    hostSource={hostInitialSource || hostFirstName || "Host"}
+                    guestSource={guestInitialSource || "Guest"}
+                    durationMinutes={durationMinutes}
+                    slotsForDay={slotsByDay[selectedDay] || []}
+                  />
+                }
+                detailed={
+                  <DetailedTimeline
+                    payload={bilateralPayload!}
+                    dateStr={selectedDay}
+                    timezone={timezone}
+                    hostFirstName={hostFirstName}
+                    onSelectSlot={onSelectSlot}
+                    slotsForDay={slotsByDay[selectedDay] || []}
+                  />
+                }
+              />
+            ) : (
+              <WindowCards
+                windows={selectedWindows}
+                chipsForDay={chipsForDay}
+                dateStr={selectedDay}
+                timezone={timezone}
+                onSelectSlot={onSelectSlot}
+                looseMutualCount={looseMutualCount}
+                hostFirstName={hostFirstName}
+                hostImage={hostImage}
+                guestImage={guestImage}
+                hostSource={hostInitialSource || hostFirstName || "Host"}
+                guestSource={guestInitialSource || "Guest"}
+                durationMinutes={durationMinutes}
+                slotsForDay={slotsByDay[selectedDay] || []}
+              />
+            )}
           </div>
         );
       })()}
