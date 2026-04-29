@@ -101,9 +101,9 @@ export function DragSlotPicker({
     return out;
   }, [slotMins]);
 
-  // Pick the middle candidate as the default so the pill starts centered
-  // rather than jammed to the earliest slot.
-  const defaultMins = candidates[Math.floor(candidates.length / 2)] ?? 0;
+  // Start at the earliest available slot. Centering felt like a recommendation
+  // ("why that time?") and "soonest first" matches the calendar-tool norm.
+  const defaultMins = candidates[0] ?? 0;
 
   const [currentMins, setCurrentMins] = useState<number>(defaultMins);
 
@@ -258,12 +258,15 @@ export function DragSlotPicker({
             />
           ))}
 
-          {/* Draggable pill */}
+          {/* Draggable pill — green matches the availability bands so the
+              handle reads as "your live position inside the available window"
+              rather than a foreign object. Chevrons signal the drag axis
+              without language overhead (Concept B in the affordance mockup). */}
           <div
-            className={`absolute top-1 bottom-1 rounded-md z-[2] flex items-center justify-center
+            className={`absolute top-1 bottom-1 rounded-md z-[2] flex items-center justify-center gap-1.5
               ${confirmed
                 ? "cursor-default bg-emerald-500"
-                : "cursor-grab active:cursor-grabbing bg-blue-500 hover:bg-blue-400"
+                : "cursor-grab active:cursor-grabbing bg-green-500 hover:bg-green-400"
               }
               transition-colors shadow-md`}
             style={{
@@ -273,14 +276,16 @@ export function DragSlotPicker({
             onMouseDown={e => { e.preventDefault(); onDragStart(e.clientX); }}
             onTouchStart={e => { onDragStart(e.touches[0].clientX); }}
           >
+            <span className="text-white/85 text-xs leading-none pointer-events-none select-none">‹</span>
             <div className="flex gap-[3px] pointer-events-none">
-              {Array.from({ length: 6 }).map((_, i) => (
+              {Array.from({ length: 3 }).map((_, i) => (
                 <span
                   key={i}
                   className="w-[3px] h-[3px] rounded-full block bg-white/60"
                 />
               ))}
             </div>
+            <span className="text-white/85 text-xs leading-none pointer-events-none select-none">›</span>
           </div>
         </div>
 

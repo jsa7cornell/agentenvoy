@@ -93,6 +93,7 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
   const [session, setSession] = useState<ThreadSession | null>(null);
   const [loading, setLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function loadThread() {
@@ -113,7 +114,15 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
   }, [sessionId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = messagesScrollRef.current;
+    if (!el) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 120) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [session?.messages]);
 
   if (loading) {
@@ -193,7 +202,7 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-1.5">
+      <div ref={messagesScrollRef} className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-1.5">
         {session.messages.map((msg) => {
           const proposal = msg.role === "administrator" ? parseConfirmationProposal(msg.content) : null;
           const displayContent = msg.role === "administrator" ? stripProposalBlock(msg.content) : msg.content;

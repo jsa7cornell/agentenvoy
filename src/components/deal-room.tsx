@@ -167,6 +167,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isGroupEvent, setIsGroupEvent] = useState(false);
   const [participants, setParticipants] = useState<Array<{ name: string; status: string }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const prevStatusRef = useRef<string>("active");
 
   // Slots state for availability calendar sidebar
@@ -316,8 +317,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     () => new Set(),
   );
 
+  // Auto-scroll on new messages ONLY if the user is already pinned near the
+  // bottom. If they've scrolled up to read earlier messages, don't yank them
+  // back down — that's the "scroll hijack" anti-pattern.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = messagesScrollRef.current;
+    if (!el) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 120) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
 
   // Stage 3 V2 — cleanup primer keys on the terminal `confirmed` state.
@@ -2085,7 +2097,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   const chatContent = (
     <>
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-4">
+      <div ref={messagesScrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-4 space-y-4">
         {isLoading ? (
           <div className="flex justify-center py-12">
             <div className="flex gap-1">
