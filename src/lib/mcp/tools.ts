@@ -1003,20 +1003,25 @@ export async function handleCancelMeeting(
 // ---------------------------------------------------------------------------
 
 /**
- * Stub. Returns a refusal until reschedule-pipeline.ts is extracted from
- * `app/src/app/api/negotiate/reschedule/route.ts` (the human-path equivalent,
- * 121 lines of inline logic). Cancel got the same treatment first; that
- * pipeline extraction shipped (`@/lib/cancel-pipeline`) and the cancel
- * handler now wires through cleanly. Reschedule is the symmetric follow-up,
- * tracked on WISHLIST.
+ * Stub. Returns `tool_not_implemented` until the proper patch-in-place
+ * implementation lands. The HTTP route `/api/negotiate/reschedule` does
+ * cancel-and-rebook (two notifications, new iCalUID); the MCP wire's
+ * intended behavior per `app/src/lib/mcp/SPEC.md` §11.2 is in-place
+ * `calendar.events.patch` (one notification, preserved iCalUID, appends to
+ * `rescheduleHistory`). The semantic gap + schema additions
+ * (`supersededByRescheduleId`, `finalizesAt`, `rescheduleHistory`) make
+ * this proposal-required work.
  *
- * Wire surface caveat: this returns `reason: "session_terminal"`, which is
- * misleading for an unimplemented tool — agents reading the refusal would
- * conclude "the session is closed, give up." The honest reason would be
- * something like `tool_not_implemented`, but adding a refusal-enum value is
- * a Rule 16 cross-contract change that deserves its own scoped fix and CI
- * audit pass (advertise vs. implement parity). Tracked in WISHLIST under
- * the same Agent Platform entry.
+ * Proposal: `proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md`.
+ * Wishlist: #42 (Agent Platform).
+ *
+ * --- Stub discipline ---
+ * Any tool advertised in `MCP_TOOLS` but not yet wired to a real handler
+ * MUST return `reason: "tool_not_implemented"`. Do NOT reuse a state-specific
+ * reason like `session_terminal` — agents reading the wire must be able to
+ * distinguish "this server doesn't support this yet" from "your session is
+ * closed." See the `tool_not_implemented` enum value in
+ * `schemas.ts#rescheduleMeetingOutput` for the canonical comment.
  */
 export async function handleRescheduleMeeting(
   _args: z.infer<typeof rescheduleMeetingInput> // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -1024,9 +1029,9 @@ export async function handleRescheduleMeeting(
   return asCallResult(
     {
       ok: false,
-      reason: "session_terminal",
+      reason: "tool_not_implemented",
       message:
-        "reschedule_meeting is not yet implemented. Awaiting reschedule-pipeline.ts extraction from /api/negotiate/reschedule.",
+        "reschedule_meeting is not yet implemented. Proper patch-in-place implementation requires schema migration + reschedule-pipeline.ts; proposal under review at proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md.",
     },
     { isError: true }
   );
