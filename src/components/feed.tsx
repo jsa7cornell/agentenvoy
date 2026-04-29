@@ -201,6 +201,34 @@ function ForwardChips({ onSeed }: { onSeed: (seed: string) => void }) {
   );
 }
 
+/** Shared envoy-bubble shell used across the welcome surface. Extracted so
+ *  that bubbles in a same-speaker run (consecutive Envoy bubbles in
+ *  FirstRunWelcome / GuestFirstVariant) can suppress the "ENVOY" label on
+ *  all but the first — modern messaging-app convention, matches the
+ *  suppression we applied to chat history in §1n item 2. Pass
+ *  `showLabel={false}` for any bubble that follows another Envoy bubble
+ *  without an intervening user turn. */
+function EnvoyBubble({
+  showLabel = true,
+  children,
+}: {
+  showLabel?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      {showLabel && (
+        <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
+          Envoy
+        </span>
+      )}
+      <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 /** Bubble used in the first-run + returning-dormant variants — readback
  *  of the user's currently-seeded scheduling posture so they know what
  *  we're working with. Reusable so a "still right?" nudge for dormant
@@ -211,7 +239,7 @@ function ForwardChips({ onSeed }: { onSeed: (seed: string) => void }) {
  *  for first-run). It now renders as a sibling under the bubble in
  *  FirstRunWelcome — keeps the readback bubble focused on posture and lets
  *  the link card carry an indigo-ringed "ready to share" affordance. */
-function PostureBubble({ p }: { p: SeededPosture }) {
+function PostureBubble({ p, showLabel }: { p: SeededPosture; showLabel?: boolean }) {
   const bizRange = `${formatBizMinutes(p.businessHoursStartMinutes)}–${formatBizMinutes(p.businessHoursEndMinutes)}`;
   const tzLabel = p.timezone ? shortTimezoneLabel(p.timezone) : "";
   const provider =
@@ -219,11 +247,7 @@ function PostureBubble({ p }: { p: SeededPosture }) {
   const isFirstRun = p.welcomeVariant === "first-run";
 
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
-        Envoy
-      </span>
-      <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+    <EnvoyBubble showLabel={showLabel}>
         <div className="mb-2">
           {isFirstRun
             ? "I've already set you up using your Google Calendar:"
@@ -256,8 +280,7 @@ function PostureBubble({ p }: { p: SeededPosture }) {
         <div className="mt-2 text-[12px] text-muted">
           All customizable any time.
         </div>
-      </div>
-    </div>
+    </EnvoyBubble>
   );
 }
 
@@ -328,7 +351,7 @@ interface ConnectedCalendar {
  * resolves to. Promote to a separate proposal if explicit write-target
  * control becomes a feature ask.
  */
-function CalendarPickerBubble() {
+function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
   const [calendars, setCalendars] = useState<ConnectedCalendar[] | null>(null);
   const [primaryId, setPrimaryId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -411,15 +434,10 @@ function CalendarPickerBubble() {
   };
 
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
-        Envoy
-      </span>
-      <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
+    <EnvoyBubble showLabel={showLabel}>
         <div className="mb-2">
-          You&rsquo;ve got {calendars.length} Google calendars connected.
-          I&rsquo;ll treat your primary as the source of truth — pick a
-          different one if you&rsquo;d like:
+          You&rsquo;ve got {calendars.length} Google calendars — pick a
+          different primary if you&rsquo;d like:
         </div>
         <ul className="space-y-1.5">
           {calendars.map((cal) => {
@@ -458,8 +476,7 @@ function CalendarPickerBubble() {
             );
           })}
         </ul>
-      </div>
-    </div>
+    </EnvoyBubble>
   );
 }
 
@@ -478,14 +495,6 @@ function GuestFirstVariant({
   posture: SeededPosture;
   onSeed: (seed: string) => void;
 }) {
-  const ctx = posture.guestFirstContext;
-  const hostName = ctx?.hostName ?? "someone";
-  const dateLabel = ctx?.date
-    ? new Date(ctx.date).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      })
-    : null;
   const needsWriteScope = !posture.hasCalendarWriteScope;
   // mode: "upgrade-scope" — user already has an Account from the guest-flow
   // (read-only). To gain write, they need to re-consent with the new scope
@@ -497,29 +506,43 @@ function GuestFirstVariant({
     mode: "upgrade-scope",
     callbackUrl: "/dashboard",
   });
-  return (
-    <div className="flex-1 flex flex-col justify-center py-6 gap-4">
-      <h1 className="text-xl sm:text-2xl font-semibold text-primary px-1">
-        👋 Welcome back, {firstNameOf(posture.name)}.
-      </h1>
 
-      <div className="flex flex-col gap-1">
-        <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
-          Envoy
-        </span>
-        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
-          I see you joined {hostName}&rsquo;s meeting
-          {dateLabel ? ` on ${dateLabel}` : ""} — now you&rsquo;ve got
-          your own AgentEnvoy account. I can coordinate meetings on
-          your behalf the same way: share a link, your invitee chats
-          with me, I work out a time.
-          {needsWriteScope
-            ? " Grant calendar write access so I can put confirmed meetings on your calendar, or jump into one of these:"
-            : " Jump into one of these:"}
-        </div>
-      </div>
+  // Two distinct screens:
+  //
+  //   - needsWriteScope (gate): the user came in via the guest-flow with
+  //     read-only OAuth scope. We can't actually do scheduling on their
+  //     behalf without write access, so we GATE the experience here — show
+  //     a re-introduction + access-required framing, hide the forward
+  //     chips so they can't proceed without granting. Once they click
+  //     through, OAuth round-trip + redirect to /dashboard re-renders this
+  //     component with hasCalendarWriteScope=true → the post-grant screen.
+  //
+  //   - has write scope (post-grant): they've completed the upgrade. Now
+  //     they're effectively a fully-set-up host. Show them the seeded
+  //     posture, their Primary link, and forward chips so they can
+  //     actually use the product.
+  if (needsWriteScope) {
+    return (
+      <div className="flex-1 flex flex-col justify-center py-6 gap-4">
+        <h1 className="text-xl sm:text-2xl font-semibold text-primary px-1">
+          👋 Welcome back, {firstNameOf(posture.name)}.
+        </h1>
 
-      {needsWriteScope && (
+        <EnvoyBubble>
+          <div className="mb-2">
+            Great to re-meet you! I&rsquo;m Envoy. I run{" "}
+            <strong className="font-semibold">personalized</strong>{" "}
+            scheduling on your behalf so you don&rsquo;t have to chase
+            calendars. Share a link, your invitee chats with me, I work
+            out a time tailored to each guest.
+          </div>
+          <div>
+            First things first — I need you to connect your Google
+            Calendar so I can line up the best times to fit your
+            schedule.
+          </div>
+        </EnvoyBubble>
+
         <div className="flex flex-wrap gap-2 px-1">
           <button
             type="button"
@@ -527,18 +550,31 @@ function GuestFirstVariant({
             className="text-xs px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition inline-flex items-center gap-1.5"
           >
             <span aria-hidden="true">🗓️</span>
-            Grant calendar write access
+            Connect Google Calendar
           </button>
         </div>
-      )}
 
-      {/* §1n followup (a) 2026-04-28: render in guest-first too — these
-          users are post-calendar-connect just like first-run, so the
-          primary picker is just as relevant here. */}
-      <CalendarPickerBubble />
+        {connectFlow.modal}
+      </div>
+    );
+  }
+
+  // Post-grant — light welcome with one bubble and the forward chips.
+  // The user already saw Envoy from the guest side and just completed the
+  // calendar connect, so we don't reintroduce the brand or read back the
+  // posture; we let them choose between diving in vs. getting set up.
+  return (
+    <div className="flex-1 flex flex-col justify-center py-6 gap-4">
+      <h1 className="text-xl sm:text-2xl font-semibold text-primary px-1">
+        👋 Welcome back, {firstNameOf(posture.name)}.
+      </h1>
+
+      <EnvoyBubble>
+          Let&rsquo;s get started — we can dive right in to your first
+          meeting, or I can help you get up to speed and set up.
+      </EnvoyBubble>
 
       <ForwardChips onSeed={onSeed} />
-      {needsWriteScope && connectFlow.modal}
     </div>
   );
 }
@@ -605,25 +641,26 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
         🎉 Welcome to AgentEnvoy.
       </h1>
 
-      {/* Envoy intro bubble */}
-      <div className="flex flex-col gap-1">
-        <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
-          Envoy
-        </span>
-        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
-          👋 Hey {firstNameOf(posture.name)} — I&rsquo;m Envoy. I run{" "}
-          <em className="not-italic font-medium text-purple-300">personalized</em>{" "}
-          scheduling on your behalf so you don&rsquo;t have to chase
-          calendars. Share a link, your invitee chats with me, and I work
-          out a time tailored to each guest.
-        </div>
-      </div>
+      {/* Combined intro + posture readback — one bubble (one ENVOY label).
+          The seeded posture is the load-bearing info; the brand-pitch line
+          opens it but doesn't deserve its own labeled bubble. */}
+      <EnvoyBubble>
+          <div className="mb-2">
+            👋 Hey {firstNameOf(posture.name)} — I&rsquo;m Envoy. I run{" "}
+            <strong className="font-semibold">personalized</strong>{" "}
+            scheduling on your behalf so you don&rsquo;t have to chase
+            calendars. Share a link, your invitee chats with me, I work out
+            a time tailored to each guest.
+          </div>
+      </EnvoyBubble>
 
-      <PostureBubble p={posture} />
+      {/* Posture readback — same speaker, label suppressed. */}
+      <PostureBubble p={posture} showLabel={false} />
 
       {/* Calendar picker — only renders when the user has 2+ connected
-          calendars; otherwise silent. WISHLIST §1n item 1. */}
-      <CalendarPickerBubble />
+          calendars; otherwise silent. WISHLIST §1n item 1. Same speaker,
+          label suppressed. */}
+      <CalendarPickerBubble showLabel={false} />
 
       {/* Standalone link-card — pulled out of the posture bubble per the
           mockup so the link reads as its own "ready to share" affordance
@@ -633,20 +670,16 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
         <StandardLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
       )}
 
-      {/* Forward bubble */}
-      <div className="flex flex-col gap-1">
-        <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
-          Envoy
-        </span>
-        <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
-          Now let&rsquo;s get going. I can show you powerful features like{" "}
-          <strong className="font-semibold">office hours</strong> and{" "}
-          <strong className="font-semibold">group events</strong>, or help you{" "}
-          <strong className="font-semibold">tailor your preferences</strong> for
-          different kinds of meetings — or you can hand me your first meeting
-          and let&rsquo;s just go.
-        </div>
-      </div>
+      {/* Forward bubble — same speaker run, label suppressed. Shorter copy
+          than the previous "Now let's get going..." version; the chips
+          below speak for themselves. */}
+      <EnvoyBubble showLabel={false}>
+          You can ask about{" "}
+          <strong className="font-semibold">office hours</strong>,{" "}
+          <strong className="font-semibold">group events</strong>, or{" "}
+          <strong className="font-semibold">tailor your preferences</strong>{" "}
+          — or hand me your first meeting:
+      </EnvoyBubble>
 
       <ForwardChips onSeed={onSeed} />
 

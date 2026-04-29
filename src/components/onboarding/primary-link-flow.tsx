@@ -10,10 +10,14 @@
  * `onboarding-machine` phase flow: that machine gates on `!isCalibrated`,
  * and this flow runs for calibrated users too.
  *
- * Three questions — hours, default duration, buffer — each rendered as
- * an Envoy bubble with quick-reply buttons. Each answer POSTs to
- * `/api/me/scheduling-defaults` immediately so a partial completion
- * still leaves the user better-configured than before.
+ * Four questions — hours, default duration, default format,
+ * guest-flexibility — each rendered as an Envoy bubble with quick-reply
+ * buttons. Each answer POSTs to `/api/me/scheduling-defaults` (or the
+ * primary-link-settings endpoint for guest_flex) immediately so a partial
+ * completion still leaves the user better-configured than before.
+ *
+ * Buffer defaults to 0 silently (set on the duration POST) — not asked.
+ * Theme is asked separately, not part of this flow.
  */
 
 import { useEffect, useState } from "react";
@@ -39,18 +43,11 @@ const DURATION_OPTIONS = [
   { number: 4, label: "15 minutes (quick sync)", value: "15" },
 ];
 
-const BUFFER_OPTIONS = [
-  { number: 1, label: "No buffer", value: "0" },
-  { number: 2, label: "5 minutes", value: "5" },
-  { number: 3, label: "10 minutes", value: "10" },
-  { number: 4, label: "15 minutes", value: "15" },
-];
-
 type Turn =
   | { role: "envoy"; content: React.ReactNode }
   | { role: "user"; content: string };
 
-type Step = "intro" | "hours" | "duration" | "buffer" | "theme" | "format" | "guest_flex" | "done";
+type Step = "intro" | "hours" | "duration" | "format" | "guest_flex" | "done";
 
 /**
  * Guest-flexibility options. Reusable-link guest-picks proposal,
@@ -66,7 +63,6 @@ const GUEST_FLEX_OPTIONS: { number: number; label: string; value: GuestFlexValue
   { number: 4, label: "Both — format and duration are open", value: "both" },
 ];
 
-type ThemeMode = "light" | "dark" | "auto";
 type FormatValue = "video" | "phone" | "in-person";
 
 interface Answers {
@@ -75,17 +71,14 @@ interface Answers {
   businessHoursStartMinutes?: number;
   businessHoursEndMinutes?: number;
   defaultDuration?: number;
+  /** Defaults to 0 (no buffer). Buffer is set silently on the first persist
+   *  call rather than asked — most hosts don't have a strong preference and
+   *  zero-buffer is the right default for a Primary link. They can adjust
+   *  in chat or Settings later. (Theme moved out of this flow entirely —
+   *  it's asked separately, not part of the primary-link setup.) */
   bufferMinutes?: number;
-  // §1n item 4 — chained theme + format follow-ups after the buffer step.
-  themeMode?: ThemeMode;
   defaultFormat?: FormatValue;
 }
-
-const THEME_OPTIONS: { number: number; label: string; value: ThemeMode }[] = [
-  { number: 1, label: "Light", value: "light" },
-  { number: 2, label: "Dark", value: "dark" },
-  { number: 3, label: "Auto (matches time of day)", value: "auto" },
-];
 
 const FORMAT_OPTIONS: { number: number; label: string; value: FormatValue }[] = [
   { number: 1, label: "Video call", value: "video" },
@@ -128,7 +121,36 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
   const [showHoursFreetext, setShowHoursFreetext] = useState(false);
 
   // Fetch slug + current defaults on mount, then kick off the intro.
+  // Preview-mode short-circuit: skip the fetch entirely and seed turns
+  // from the preview props so John can iterate inline without auth.
   useEffect(() => {
+    const introTurns = (slug: string | null): Turn[] => [
+      {
+        role: "envoy",
+        content: (
+          <>
+            Great — let&rsquo;s set up your primary invite link.
+            {slug && (
+              <>
+                {" "}Your link is{" "}
+                <code className="text-purple-400">
+                  agentenvoy.ai/meet/{slug}
+                </code>
+                .
+              </>
+            )}{" "}
+            This is a link you can share over and over with standard
+            meeting preferences. Separately from this you&rsquo;ll be able
+            to create personalized meeting invites for anyone you want to
+            coordinate with.
+          </>
+        ),
+      },
+      {
+        role: "envoy",
+        content: <>What ordinary available hours should we offer up?</>,
+      },
+    ];
     let cancelled = false;
     fetch("/api/me/scheduling-defaults")
       .then((r) => (r.ok ? r.json() : null))
@@ -136,36 +158,7 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
         if (cancelled || !data) return;
         setMeetSlug(data.meetSlug ?? null);
         setName(data.name ?? null);
-        setTurns([
-          {
-            role: "envoy",
-            content: (
-              <>
-                Great — let&rsquo;s set up your primary invite link.
-                {data.meetSlug && (
-                  <>
-                    {" "}Your link is{" "}
-                    <code className="text-purple-400">
-                      agentenvoy.ai/meet/{data.meetSlug}
-                    </code>
-                    .
-                  </>
-                )}{" "}
-                Share it with anyone and they can book time with you.
-                I&rsquo;ll take care of the back-and-forth — I just need to
-                know a few things first.
-              </>
-            ),
-          },
-          {
-            role: "envoy",
-            content: (
-              <>
-                What would you like your ordinary available hours to be?
-              </>
-            ),
-          },
-        ]);
+        setTurns(introTurns(data.meetSlug ?? null));
         setStep("hours");
       })
       .catch(() => {});
@@ -200,7 +193,7 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
       { role: "user", content: userLabel },
       {
         role: "envoy",
-        content: <>Got it. What&rsquo;s your default meeting length?</>,
+        content: <>…and what&rsquo;s your default meeting length?</>,
       },
     ]);
     setStep("duration");
@@ -243,77 +236,10 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
   function handleDuration(value: string, label: string) {
     const dur = parseInt(value, 10);
     if (!Number.isFinite(dur)) return;
-    const patch = { defaultDuration: dur };
-    setAnswers((a) => ({ ...a, ...patch }));
-    setTurns((t) => [
-      ...t,
-      { role: "user", content: label },
-      {
-        role: "envoy",
-        content: (
-          <>Last one — do you want a buffer between meetings?</>
-        ),
-      },
-    ]);
-    setStep("buffer");
-    void persist(patch);
-  }
-
-  function handleBuffer(value: string, label: string) {
-    const buf = parseInt(value, 10);
-    if (!Number.isFinite(buf)) return;
-    const patch = { bufferMinutes: buf };
-    setAnswers((a) => ({ ...a, ...patch }));
-    setTurns((t) => [
-      ...t,
-      { role: "user", content: label },
-      {
-        role: "envoy",
-        content: (
-          <>A few quick visual + meeting-default touch-ups. Theme?</>
-        ),
-      },
-    ]);
-    setStep("theme");
-    void persist(patch);
-  }
-
-  async function handleTheme(value: string, label: string) {
-    const themeMode = value as ThemeMode;
-    if (themeMode !== "light" && themeMode !== "dark" && themeMode !== "auto") return;
-    const patch = { themeMode };
-    setAnswers((a) => ({ ...a, ...patch }));
-    setTurns((t) => [
-      ...t,
-      { role: "user", content: label },
-      {
-        role: "envoy",
-        content: (
-          <>And how do you usually meet — video, phone, or in person?</>
-        ),
-      },
-    ]);
-    setStep("format");
-    // Theme persists to /api/me/ui-prefs (different endpoint than the
-    // scheduling defaults — the theme primitive is global and gets read by
-    // theme-preference-sync.tsx on every page mount).
-    setSaving(true);
-    try {
-      await fetch("/api/me/ui-prefs", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ themeMode }),
-      });
-    } catch {
-      // Non-fatal. User can change theme later via /dashboard/account.
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleFormat(value: string, label: string) {
-    if (value !== "video" && value !== "phone" && value !== "in-person") return;
-    const patch = { defaultFormat: value as FormatValue };
+    // Buffer defaults to 0 silently — not asked. Persist alongside the
+    // duration so the user's preferences are coherent if they bail before
+    // completing the flow.
+    const patch = { defaultDuration: dur, bufferMinutes: 0 };
     setAnswers((a) => ({ ...a, ...patch }));
     setTurns((t) => [
       ...t,
@@ -322,7 +248,35 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
         role: "envoy",
         content: (
           <>
-            One last thing — by default, can guests <strong>adjust the format or duration</strong> of meetings you post? You can change this per link later.
+            What&rsquo;s your default meeting format — video, phone, or in
+            person?
+          </>
+        ),
+      },
+    ]);
+    setStep("format");
+    void persist(patch);
+  }
+
+  function handleFormat(value: string, label: string) {
+    if (value !== "video" && value !== "phone" && value !== "in-person") return;
+    const patch = { defaultFormat: value as FormatValue };
+    setAnswers((a) => ({ ...a, ...patch }));
+    // Build the "30m VC"-style shorthand for the next prompt off the
+    // answers we already have, so the question reads contextually.
+    const dur = answers.defaultDuration ?? 30;
+    const fmtShort =
+      value === "video" ? "VC" : value === "phone" ? "phone call" : "in-person";
+    setTurns((t) => [
+      ...t,
+      { role: "user", content: label },
+      {
+        role: "envoy",
+        content: (
+          <>
+            If a guest asks to adjust the format or duration from your
+            standard <strong>{dur}m {fmtShort}</strong>, how should I
+            handle it?
           </>
         ),
       },
@@ -413,30 +367,22 @@ export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowPr
       ? HOURS_OPTIONS
       : step === "duration"
         ? DURATION_OPTIONS
-        : step === "buffer"
-          ? BUFFER_OPTIONS
-          : step === "theme"
-            ? THEME_OPTIONS
-            : step === "format"
-              ? FORMAT_OPTIONS
-              : step === "guest_flex"
-                ? GUEST_FLEX_OPTIONS
-                : null;
+        : step === "format"
+          ? FORMAT_OPTIONS
+          : step === "guest_flex"
+            ? GUEST_FLEX_OPTIONS
+            : null;
 
   const onSelect =
     step === "hours"
       ? handleHours
       : step === "duration"
         ? handleDuration
-        : step === "buffer"
-          ? handleBuffer
-          : step === "theme"
-            ? handleTheme
-            : step === "format"
-              ? handleFormat
-              : step === "guest_flex"
-                ? handleGuestFlex
-              : () => {};
+        : step === "format"
+          ? handleFormat
+          : step === "guest_flex"
+            ? handleGuestFlex
+            : () => {};
 
   // Legacy copy handler — kept for the fallback link card below the
   // celebration when no `onDismiss` is wired (older callers). New callers
