@@ -356,10 +356,30 @@ function SlotChipRows({
     return <p className="text-xs text-muted">No available times</p>;
   }
 
-  const renderChip = (slot: Slot, key: number) => {
-    const isBoth = chipsForDay?.some(
-      (c) => c.color === "both" && c.start === slot.start,
-    );
+  // Bilateral split (PR-B1 of bilateral+picker bundle). When bilateral data
+  // is present, mutual chips render inline as the primary picks; host-only
+  // chips collapse into a tappable "+ N more times {host} has open (you're
+  // busy)" reveal. Without bilateral data (anonymous-guest path, no
+  // calendar connect yet), every host-bookable chip renders inline as
+  // before — there's no second class to split out.
+  const matchedSet = new Set(
+    chipsForDay?.filter((c) => c.color === "both").map((c) => c.start) ?? [],
+  );
+  const hasBilateral = chipsForDay !== undefined && chipsForDay.length > 0;
+
+  const splitChips = (chips: Slot[]) => {
+    if (!hasBilateral) return { primary: chips, hostOnly: [] as Slot[] };
+    return {
+      primary: chips.filter((s) => matchedSet.has(s.start)),
+      hostOnly: chips.filter((s) => !matchedSet.has(s.start)),
+    };
+  };
+
+  const am = splitChips(amSlots);
+  const pm = splitChips(pmSlots);
+  const hostOnlyTotal = am.hostOnly.length + pm.hostOnly.length;
+
+  const renderChip = (slot: Slot, key: string, variant: "matched" | "open" | "hostOnly") => {
     return (
       <button
         key={key}
@@ -371,35 +391,126 @@ function SlotChipRows({
         }
         disabled={!onSelectSlot}
         className={`
-          inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] leading-none border transition-all
-          ${isBoth
+          inline-flex items-center px-2 py-0.5 rounded-full text-[11px] leading-none border transition-all
+          ${variant === "matched"
             ? "border-emerald-400/60 bg-emerald-950/30 text-emerald-300 hover:border-emerald-300"
-            : "border-DEFAULT bg-surface-secondary text-primary hover:border-secondary hover:bg-surface"}
+            : variant === "hostOnly"
+              ? "border-dashed border-DEFAULT bg-transparent text-muted hover:border-secondary hover:text-primary"
+              : "border-DEFAULT bg-surface-secondary text-primary hover:border-secondary hover:bg-surface"}
           ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
         `}
       >
-        {isBoth && <span className="text-emerald-400 text-[10px]" aria-hidden="true">★</span>}
         <span className="py-1">{fmt(slot.start)}</span>
       </button>
     );
   };
 
-  const Lane = ({ label, slots }: { label: string; slots: Slot[] }) => (
+  const PrimaryLane = ({ label, slots }: { label: string; slots: Slot[] }) => (
     <div className="grid grid-cols-[56px_1fr] gap-2.5 items-start">
       <div className="text-[10px] uppercase tracking-wider text-muted font-medium pt-1.5">{label}</div>
       <div className="flex flex-wrap gap-1">
-        {slots.map((slot, si) => renderChip(slot, si))}
+        {slots.map((slot, si) =>
+          renderChip(slot, `pri-${label}-${si}`, hasBilateral ? "matched" : "open"),
+        )}
       </div>
     </div>
   );
 
+  const showHostOnlyReveal = hostOnlyTotal > 0;
+
   return (
     <div className="space-y-1.5">
-      {amSlots.length > 0 && <Lane label="Morning" slots={amSlots} />}
-      {pmSlots.length > 0 && <Lane label="Afternoon" slots={pmSlots} />}
-      {looseMutualCount > 0 && (
-        <div className="text-[11px] text-muted italic pt-0.5 pl-[66px]">
-          + {looseMutualCount} more {hostFirstName || "they"} prefer{hostFirstName ? "s" : ""} but you&rsquo;re busy
+      {am.primary.length > 0 && <PrimaryLane label="Morning" slots={am.primary} />}
+      {pm.primary.length > 0 && <PrimaryLane label="Afternoon" slots={pm.primary} />}
+      {hasBilateral && am.primary.length === 0 && pm.primary.length === 0 && (
+        <p className="text-xs text-muted pl-[66px]">
+          No matched times this day — see {hostFirstName || "the host"}&apos;s other open times below.
+        </p>
+      )}
+      {showHostOnlyReveal && <HostOnlyReveal
+        hostFirstName={hostFirstName}
+        amSlots={am.hostOnly}
+        pmSlots={pm.hostOnly}
+        renderChip={renderChip}
+        looseMutualCount={looseMutualCount}
+      />}
+    </div>
+  );
+}
+
+/**
+ * "+ N times {host} has open (you're busy)" reveal — collapsed by default.
+ * Pulls host-only chips out of the primary chip strip per Decision 1+2 of
+ * the bilateral+picker bundle (kill the visual collision between matched
+ * and host-only). Tapping a chip in the reveal commits the slot the same
+ * way the primary chips do — guests can override their conflict if they
+ * want; the data layer does not stop them.
+ *
+ * `looseMutualCount` is the bilateral compute path's tally of "host wants
+ * this, guest's calendar shows friction" — kept around for legacy callers
+ * that pass it but the count we actually display is the chip count we
+ * render below (host-bookable but not matched).
+ */
+function HostOnlyReveal({
+  hostFirstName,
+  amSlots,
+  pmSlots,
+  renderChip,
+  looseMutualCount,
+}: {
+  hostFirstName?: string;
+  amSlots: Slot[];
+  pmSlots: Slot[];
+  renderChip: (slot: Slot, key: string, variant: "matched" | "open" | "hostOnly") => React.ReactNode;
+  looseMutualCount: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  void looseMutualCount; // legacy prop; chip-count below is the user-visible truth
+  const total = amSlots.length + pmSlots.length;
+  if (total === 0) return null;
+
+  const label = `+ ${total} time${total === 1 ? "" : "s"} ${hostFirstName || "the host"} has open (you're busy)`;
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="text-[11px] text-muted hover:text-primary italic pt-0.5 pl-[66px] transition cursor-pointer text-left"
+      >
+        {label} ▾
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5 pt-0.5">
+      <div className="flex items-center gap-2 pl-[66px]">
+        <span className="text-[10px] uppercase tracking-wider text-muted font-medium">
+          {hostFirstName || "Host"} open · you&rsquo;re busy
+        </span>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="text-[10px] text-muted hover:text-primary"
+        >
+          hide
+        </button>
+      </div>
+      {amSlots.length > 0 && (
+        <div className="grid grid-cols-[56px_1fr] gap-2.5 items-start">
+          <div className="text-[10px] uppercase tracking-wider text-muted font-medium pt-1.5">Morning</div>
+          <div className="flex flex-wrap gap-1">
+            {amSlots.map((slot, si) => renderChip(slot, `ho-am-${si}`, "hostOnly"))}
+          </div>
+        </div>
+      )}
+      {pmSlots.length > 0 && (
+        <div className="grid grid-cols-[56px_1fr] gap-2.5 items-start">
+          <div className="text-[10px] uppercase tracking-wider text-muted font-medium pt-1.5">Afternoon</div>
+          <div className="flex flex-wrap gap-1">
+            {pmSlots.map((slot, si) => renderChip(slot, `ho-pm-${si}`, "hostOnly"))}
+          </div>
         </div>
       )}
     </div>
