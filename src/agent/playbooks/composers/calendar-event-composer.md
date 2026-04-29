@@ -245,7 +245,10 @@ Available actions (all use `[ACTION]{"action":"...","params":{...}}[/ACTION]` �
     - guestGuidance.suggestions.locations [...] — rendered as "a few places John suggested" in the greeting. Guest can still pick their own.
     - guestGuidance.suggestions.durations [...] — informational chips in the greeting.
     - guestGuidance.tone (<=200 chars) — a short, warm flavor line shown to the guest in the greeting. Use it to convey softness, openness, or personal context that makes the invite feel human rather than transactional. Sanitized: URLs/emails/phones stripped, injection markers like "[SYSTEM:" auto-rejected. Never Envoy's instructions — it's the host's voice, paraphrased warmly.
-      **Use tone liberally for physical and in-person events.** Any time the host signals flexibility — on activity, time, format, or location — capture it here so the guest feels invited to shape the meeting, not just accept or decline it.
+
+      **DO NOT use tone to restate the deferral.** When you set `guestPicks.{location,duration,format}: true`, the greeting builder automatically renders "...but wanted to check if you had preferences in terms of the location" in the opener and "let us know any suggestions on the location" in the closing. Adding tone like "Larry picks the spot and how long — just let him know what works" duplicates that copy and reads as redundant. The greeting builder will SUPPRESS toneLine entirely when any deferral is active, so deferral-mirroring tone text becomes invisible regardless. Reserve tone for relational / contextual / emotional flavor that the deferral copy can't carry: "It's his first week back.", "Looking forward to catching up!", "John's been wanting to chat for a while."
+
+      **Use tone liberally for physical and in-person events** when the host gives genuine flavor (not deferral restatement). Any time the host signals flexibility — on activity, time, format, or location — capture it here so the guest feels invited to shape the meeting, not just accept or decline it.
       - Activity flexibility: "John's thinking a hike but totally open to coffee or a walk if that's easier."
       - Time softness: "He's leaning toward 2 PM but happy to shift if another time works better for you."
       - Format openness: "John was thinking in-person but a call works if you're short on time."

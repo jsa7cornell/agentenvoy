@@ -326,6 +326,36 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
     expect(out).toContain("any suggestions on the location and length");
   });
 
+  it("Branch B-proposal: tone line is suppressed when deferralFieldsList is set", () => {
+    // Composers tend to populate guestGuidance.tone with deferral-mirroring
+    // text ("Larry picks the spot and how long — just let him know what
+    // works.") when the host's create_link expressed deferral. That
+    // duplicates the opener+closing copy. Tone is suppressed in deferral
+    // cases — live-fix from /meet/johnanderson/gmgf3k testing 2026-04-29.
+    const input = baseInput({
+      greeteeName: "Larry",
+      effectiveFormat: "in-person",
+      durationForOpener: 60,
+      deferralFieldsList: "the location",
+      toneLine: "Larry picks the spot and how long — just let him know what works.",
+    });
+    const out = GREETINGS.proposal.render(input);
+    expect(out).not.toContain("Larry picks the spot");
+    expect(out).not.toContain("just let him know");
+  });
+
+  it("Branch B-proposal: tone line still renders when no deferralFieldsList (legitimate flavor)", () => {
+    const input = baseInput({
+      greeteeName: "Sarah",
+      effectiveFormat: "video",
+      durationForOpener: 30,
+      deferralFieldsList: null,
+      toneLine: "It's been a while — looking forward to catching up!",
+    });
+    const out = GREETINGS.proposal.render(input);
+    expect(out).toContain("It's been a while — looking forward to catching up!");
+  });
+
   it("Branch B-find-time: with deferralFieldsList, only the closing carries the 'let us know' suggestion (opener already invites)", () => {
     const input = baseInput({
       greeteeName: "Sarah",

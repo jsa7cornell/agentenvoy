@@ -429,7 +429,15 @@ const proposalTemplate: GreetingTemplate = {
     const closing = closingParts.join(" ");
 
     const blocks: string[] = [openerLine];
-    if (toneLine) blocks.push(toneLine);
+    // Tone line suppressed when deferralFieldsList is set. Composers tend
+    // to populate `guestGuidance.tone` with deferral-mirroring text
+    // ("Larry picks the spot and how long — just let him know what works.")
+    // when the host's create_link message expressed deferral, which then
+    // duplicates the opener+closing copy. Skip in deferral cases; legitimate
+    // flavor tone (e.g. "It's his first week back.") still renders for
+    // non-deferral greetings. Live-fix from 2026-04-29 testing — Larry's
+    // greeting at /meet/johnanderson/gmgf3k.
+    if (toneLine && !deferralFieldsList) blocks.push(toneLine);
     // guestPickHint suppressed when deferralFieldsList is set — same info,
     // already absorbed into opener + closing above. Legacy callers that
     // don't yet populate deferralFieldsList still see the standalone block.
@@ -478,7 +486,8 @@ const findTimeTemplate: GreetingTemplate = {
     const closing = closingParts.join(" ");
 
     const blocks: string[] = [openerLine];
-    if (toneLine) blocks.push(toneLine);
+    // Same tone-line suppression as proposalTemplate — see above.
+    if (toneLine && !deferralFieldsList) blocks.push(toneLine);
     if (!deferralFieldsList && guestPickHint) blocks.push(guestPickHint);
     blocks.push(closing);
     return blocks.join("\n\n");
