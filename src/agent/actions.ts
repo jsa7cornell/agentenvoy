@@ -875,6 +875,23 @@ async function handleCreateLink(
     return { success: false, message: "No meet slug configured. Set up your profile first." };
   }
 
+  const googleAccount = await prisma.account.findFirst({
+    where: { userId, provider: "google" },
+    select: { scope: true },
+  });
+  const calendarConnected = googleAccount?.scope?.includes("calendar") ?? false;
+  if (!calendarConnected) {
+    return {
+      success: false,
+      message:
+        "sorry- i'm unable to act on this because we first need to connect your calendar.   Click the link below to do this.  It's really quick and safe and easy.",
+      data: {
+        error: "calendar_not_connected",
+        connectUrl: "/dashboard/account",
+      },
+    };
+  }
+
   const code = generateCode();
   // Accept inviteeNames[] (multi-guest) or legacy inviteeName (single string).
   // LLM should emit inviteeNames for new links; inviteeName is a shim for old prompts.
