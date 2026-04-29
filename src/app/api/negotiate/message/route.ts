@@ -264,11 +264,18 @@ export async function POST(req: NextRequest) {
     onInvocation(info) {
       invocationInfo = info;
     },
-    async onFinish({ text: responseText }) {
+    async onFinish({ text: responseText, toolInvocations }) {
       try {
         const responseLen = responseText?.length || 0;
         if (responseLen === 0) {
           console.warn(`[negotiate/message] empty response | session=${sessionId}`);
+        }
+        if (toolInvocations.length > 0) {
+          console.log(
+            `[negotiate/message] tool calls | session=${sessionId} | ${toolInvocations
+              .map((t) => `${t.name}${t.error ? "(err)" : ""}`)
+              .join(",")}`,
+          );
         }
 
         // Parse and execute [ACTION] blocks
@@ -321,6 +328,19 @@ export async function POST(req: NextRequest) {
             systemPrompt: invocationInfo.systemPrompt,
             modelId: invocationInfo.modelId,
           };
+        }
+        // Persist tool invocations alongside the assistant turn so feedback
+        // bundles can replay what the model called mid-turn. Empty when no
+        // tools were registered (PR-0a is plumbing only — first consumer
+        // is PR-A2's `get_matched_availability`).
+        if (toolInvocations.length > 0) {
+          additions.toolInvocations = toolInvocations.map((t) => ({
+            name: t.name,
+            input: t.input as Prisma.InputJsonValue,
+            ...(t.output !== undefined ? { output: t.output as Prisma.InputJsonValue } : {}),
+            ...(t.error ? { error: t.error } : {}),
+            ...(t.durationMs !== undefined ? { durationMs: t.durationMs } : {}),
+          }));
         }
         const adminMetadata = mergeChannelMetadata(null, additions);
         const hasMetadata = Object.keys(adminMetadata).length > 0;

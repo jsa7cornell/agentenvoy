@@ -56,6 +56,29 @@ export const MarcoPendingSchema = z.object({
 });
 export type MarcoPending = z.infer<typeof MarcoPendingSchema>;
 
+/**
+ * Tool invocation record — what tool the model called mid-turn, with
+ * what input, and what came back. Populated when the agent runner has
+ * tools registered and the model fires one. Empty for the no-tools
+ * path (default for greeting + most current callers).
+ *
+ * Background: 2026-04-29 bilateral+picker bundle, PR-0a infra. First
+ * consumer: PR-A2 `get_matched_availability` for the deal-room guest
+ * composer path.
+ *
+ * Host-only — explicitly NOT in `GUEST_METADATA_ALLOWLIST` because tool
+ * inputs/outputs may contain context (e.g. bilateral availability with
+ * conflict ranges) the guest's surface filters separately.
+ */
+export const ToolInvocationRecordSchema = z.object({
+  name: z.string(),
+  input: z.unknown(),
+  output: z.unknown().optional(),
+  error: z.string().optional(),
+  durationMs: z.number().optional(),
+});
+export type ToolInvocationRecord = z.infer<typeof ToolInvocationRecordSchema>;
+
 export const ChannelMessageMetadataSchema = z
   .object({
     kind: z.string().optional(),
@@ -69,6 +92,7 @@ export const ChannelMessageMetadataSchema = z
     actionResults: z.array(ActionResultRecordSchema).optional(),
     promptContext: PromptContextSchema.optional(),
     marcoPending: MarcoPendingSchema.nullable().optional(),
+    toolInvocations: z.array(ToolInvocationRecordSchema).optional(),
   })
   .passthrough();
 export type ChannelMessageMetadata = z.infer<typeof ChannelMessageMetadataSchema>;

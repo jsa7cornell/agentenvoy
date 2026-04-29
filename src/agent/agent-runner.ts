@@ -1,9 +1,30 @@
-import { streamText, generateText } from "ai";
+import { streamText, generateText, stepCountIs, type StepResult, type ToolSet } from "ai";
 import { envoyModel } from "@/lib/model";
 import { composeSystemPrompt, getModelForDomain } from "./composer";
 import type { DomainType } from "./composer";
 import type { CalendarContext } from "@/lib/calendar";
 import type { ScoredSlot } from "@/lib/scoring";
+import type { ToolRegistry } from "./tools/registry";
+
+/**
+ * Persisted record of a tool invocation that fired during a single
+ * `streamAgentResponse` call. Lands on `Message.metadata.toolInvocations[]`
+ * so feedback bundles can replay what the model did mid-turn.
+ *
+ * Shape is provider-agnostic (no Anthropic-specific block types) so we can
+ * swap providers without rewriting the persistence layer.
+ */
+export interface ToolInvocationRecord {
+  name: string;
+  /** JSON-serializable input the model produced. */
+  input: unknown;
+  /** JSON-serializable output the tool's `execute` returned. */
+  output?: unknown;
+  /** Whether the tool errored during execution. */
+  error?: string;
+  /** Wall-clock duration in milliseconds. */
+  durationMs?: number;
+}
 
 export type AgentRole = "coordinator" | "administrator";
 
@@ -89,10 +110,49 @@ function buildComposeOptions(context: AgentContext) {
   };
 }
 
+/**
+ * Maximum number of model steps per `streamAgentResponse` call when tools
+ * are registered. One "step" = one model turn (text or tool-call). With
+ * tools enabled, a turn might be: tool_use → tool_result → final text =
+ * 2 steps. We cap at 5 to allow up to two tool round-trips with a final
+ * text turn, and as a defense against runaway loops. Bumped here = bumped
+ * for every consumer; revisit per-tool if a use case needs more.
+ *
+ * Background: 2026-04-29 bilateral+picker bundle, PR-0a.
+ */
+const MAX_TOOL_STEPS = 5;
+
+/**
+ * Final-state info passed to `onFinish` after streaming completes.
+ *
+ * `text` is the FINAL assistant text turn — the same shape callers had
+ * before tools were introduced, so existing parsers (`[ACTION]`,
+ * `[CONFIRMATION_PROPOSAL]`, `[STATUS_UPDATE]`) at
+ * `negotiate/message/route.ts:283–294` continue to operate on the right
+ * surface without modification. Tool-call and tool-result turns are NOT
+ * concatenated into `text` — they live on `toolInvocations`.
+ *
+ * `toolInvocations` is empty when no tools were registered or none fired.
+ */
+export interface StreamAgentFinishResult {
+  text: string;
+  toolInvocations: ToolInvocationRecord[];
+}
+
 export async function streamAgentResponse(
   context: AgentContext,
   options?: {
-    onFinish?: (result: { text: string }) => void | Promise<void>;
+    /**
+     * Tools the model may call during this turn. Pass `undefined` (or omit)
+     * for the no-tools path — agent runner falls back to single-turn
+     * streaming with no step cap. Per the registry's privacy/scope
+     * discipline (`src/agent/tools/registry.ts`), each call site explicitly
+     * opts into the tool surface; there is no ambient registry.
+     */
+    tools?: ToolRegistry;
+
+    onFinish?: (result: StreamAgentFinishResult) => void | Promise<void>;
+
     /** Called once with the composed system prompt + modelId, right before
      *  streamText kicks off. Callers use this to snapshot the prompt onto
      *  Message.metadata.promptContext for post-hoc debug (feedback pipeline). */
@@ -104,6 +164,14 @@ export async function streamAgentResponse(
   const modelId = getModelForDomain(opts.domain);
   options?.onInvocation?.({ systemPrompt, modelId });
 
+  const tools = options?.tools;
+  const hasTools = tools !== undefined && Object.keys(tools).length > 0;
+
+  // Track per-step durations so we can populate `toolInvocations[].durationMs`
+  // honestly. AI SDK's `onStepFinish` exposes step-level timing indirectly;
+  // we compute by stamping start/end times around the step boundaries.
+  const stepStartTimes: number[] = [];
+
   return streamText({
     model: envoyModel(modelId),
     maxOutputTokens: 2048,
@@ -112,8 +180,80 @@ export async function streamAgentResponse(
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
-    onFinish: options?.onFinish,
+    // Only thread tools when present — keeps the no-tools path identical
+    // to the pre-PR-0a call shape (no `tools`, no step budget) so any
+    // behavior change is gated on opt-in.
+    ...(hasTools
+      ? {
+          tools,
+          stopWhen: stepCountIs(MAX_TOOL_STEPS),
+        }
+      : {}),
+    onStepFinish: hasTools
+      ? () => {
+          stepStartTimes.push(Date.now());
+        }
+      : undefined,
+    onFinish: options?.onFinish
+      ? async (result) => {
+          const text = result.text ?? "";
+          const toolInvocations = hasTools
+            ? extractToolInvocations(result.steps as ReadonlyArray<StepResult<ToolSet>>)
+            : [];
+          await options.onFinish?.({ text, toolInvocations });
+        }
+      : undefined,
   });
+}
+
+/**
+ * Walk each step's tool calls + matched results into a flat list of
+ * persistable invocation records. The AI SDK groups calls and results
+ * across step boundaries (a tool_use in step N produces a tool_result
+ * available in step N+1). We pair them by `toolCallId`.
+ *
+ * Errors during execute are captured as `error: string` rather than
+ * thrown — the model already saw the error in its tool_result, and
+ * killing the turn would lose the rest of the response.
+ */
+function extractToolInvocations(
+  steps: ReadonlyArray<StepResult<ToolSet>>,
+): ToolInvocationRecord[] {
+  const records: ToolInvocationRecord[] = [];
+  // Map call-id → record so we can attach results (which arrive in a later
+  // step) onto the right invocation.
+  const byId = new Map<string, ToolInvocationRecord>();
+
+  for (const step of steps) {
+    for (const call of step.toolCalls ?? []) {
+      const record: ToolInvocationRecord = {
+        name: call.toolName,
+        input: call.input,
+      };
+      byId.set(call.toolCallId, record);
+      records.push(record);
+    }
+    for (const result of step.toolResults ?? []) {
+      const record = byId.get(result.toolCallId);
+      if (!record) continue;
+      // AI SDK exposes tool errors via the result's typed shape — when an
+      // execute throws, `result.output` is replaced with an error result
+      // that surfaces via the `dynamic` flag or `result.error`. Defensive:
+      // try to capture both shapes.
+      const r = result as unknown as {
+        output?: unknown;
+        error?: { message?: string } | string;
+      };
+      if (r.error) {
+        record.error =
+          typeof r.error === "string" ? r.error : r.error.message ?? "tool execution failed";
+      } else {
+        record.output = r.output;
+      }
+    }
+  }
+
+  return records;
 }
 
 export async function generateAgentResponse(context: AgentContext) {
