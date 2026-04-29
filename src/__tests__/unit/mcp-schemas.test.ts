@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { MCP_TOOLS, MCP_TOOL_NAMES } from "@/lib/mcp/schemas";
 
 describe("MCP tool registry", () => {
-  it("lists all 8 tools from parent proposal §2.7", () => {
+  it("lists all 9 tools (parent proposal §2.7's 8 + lock_activity_location MCP parity)", () => {
     expect(new Set(MCP_TOOL_NAMES)).toEqual(
       new Set([
         "get_meeting_parameters",
@@ -23,6 +23,7 @@ describe("MCP tool registry", () => {
         "propose_lock",
         "cancel_meeting",
         "reschedule_meeting",
+        "lock_activity_location",
       ])
     );
   });
@@ -59,6 +60,10 @@ describe("input schemas — happy case + strict() rejection", () => {
     reschedule_meeting: {
       meetingUrl: "/meet/abc",
       newSlot: { start: "2026-05-02T15:00:00Z" },
+    },
+    lock_activity_location: {
+      meetingUrl: "/meet/abc",
+      activity: "coffee",
     },
   };
 

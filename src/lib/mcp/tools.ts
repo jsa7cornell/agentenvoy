@@ -46,6 +46,7 @@ import {
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
 import { confirmBooking } from "@/lib/confirm-pipeline";
 import { cancelSession } from "@/lib/cancel-pipeline";
+import { handleLockActivityLocation as lockActivityLocationCore } from "@/agent/actions";
 import { writeMcpCallLog } from "@/lib/mcp/call-log";
 import {
   MCP_TOOLS,
@@ -58,6 +59,7 @@ import {
   proposeLockInput,
   cancelMeetingInput,
   rescheduleMeetingInput,
+  lockActivityLocationInput,
 } from "@/lib/mcp/schemas";
 import type { z } from "zod";
 
@@ -1038,6 +1040,111 @@ export async function handleRescheduleMeeting(
 }
 
 // ---------------------------------------------------------------------------
+// Handler: lock_activity_location
+// ---------------------------------------------------------------------------
+
+/**
+ * Lock activity and/or location on behalf of an external agent representing
+ * a guest. Mirrors the host-Envoy dialog action of the same name; the
+ * server-side implementation is shared (`@/agent/actions#handleLockActivityLocation`)
+ * so host and guest paths can never drift.
+ *
+ * Validation: at least one of `activity` or `location` MUST be provided —
+ * enforced here rather than in the schema so the SDK's tool-registration
+ * path can extract a ZodRawShape via `.shape`. See `schemas.ts` note.
+ *
+ * Auth: link-scoped (anyone with the meeting URL can call). The shared
+ * core handler accepts `userId` (the host) and is called with `link.userId`
+ * here — the auth check inside the core (`session.hostId !== userId`)
+ * passes by construction since `link.userId` is `session.hostId` for any
+ * session under that link.
+ */
+export async function handleLockActivityLocation(
+  args: z.infer<typeof lockActivityLocationInput>
+): Promise<CallToolResult> {
+  // 1. Validate: at least one of activity/location.
+  if (!args.activity && !args.location) {
+    return asCallResult({
+      ok: false,
+      reason: "validation_failed",
+      message:
+        "At least one of `activity` or `location` must be provided.",
+    });
+  }
+
+  // 2. Auth boundary.
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "lock_activity_location",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+
+  // 3. Resolve session.
+  const session = await resolveSession({
+    linkId: link.id,
+    hostId: link.userId,
+    sessionId: args.sessionId,
+  });
+  if (!session) {
+    return asCallResult({
+      ok: false,
+      reason: "session_not_found",
+      message: "No session found for this link.",
+    });
+  }
+
+  // 4. Delegate to the shared core handler.
+  const result = await lockActivityLocationCore(
+    {
+      sessionId: session.id,
+      ...(args.activity ? { activity: args.activity } : {}),
+      ...(args.location ? { location: args.location } : {}),
+    },
+    link.userId,
+    session.id
+  );
+
+  if (!result.success) {
+    // Map the core handler's free-text error message back to the schema's
+    // refusal enum. Three known shapes:
+    //   - "Session is already confirmed"            → session_terminal
+    //   - "Format upgrade not allowed: ..."         → format_upgrade_blocked
+    //   - "Not authorized for this session"         → session_not_found
+    //     (shouldn't happen — link.userId == session.hostId by construction)
+    //   - anything else                             → validation_failed
+    const msg = result.message ?? "Lock failed.";
+    let reason:
+      | "session_terminal"
+      | "format_upgrade_blocked"
+      | "session_not_found"
+      | "validation_failed" = "validation_failed";
+    if (msg.includes("already confirmed")) reason = "session_terminal";
+    else if (msg.includes("Format upgrade not allowed"))
+      reason = "format_upgrade_blocked";
+    else if (msg.includes("Not authorized")) reason = "session_not_found";
+
+    return asCallResult({ ok: false, reason, message: msg });
+  }
+
+  const data = (result.data ?? {}) as Record<string, unknown>;
+  return asCallResult({
+    ok: true,
+    sessionId: session.id,
+    locked: {
+      activity: (data.negotiatedActivity as string | null) ?? null,
+      location: (data.negotiatedLocation as string | null) ?? null,
+      format: (data.negotiatedFormat as string | null) ?? null,
+    },
+    lockedBy: "guest" as const,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Registration entry point
 // ---------------------------------------------------------------------------
 
@@ -1047,9 +1154,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
  * Wire every MCP tool handler into an `McpServer`. Called once per request
  * in the stateless Streamable-HTTP transport pattern.
  *
- * We register ALL 8 tools (even the not-yet-implemented ones) so the MCP
- * client's tool discovery list is stable across deploys. Incomplete tools
- * return an `isError: true` refusal.
+ * We register ALL tools in the `MCP_TOOLS` registry (even not-yet-implemented
+ * stubs) so the MCP client's tool discovery list is stable across deploys.
+ * Incomplete tools return an `isError: true` refusal with `reason:
+ * "tool_not_implemented"` (see schemas.ts canonical comment).
  */
 /**
  * Wrap a handler so every call — ok or refusal — lands in `MCPCallLog`.
@@ -1132,6 +1240,10 @@ export function registerMcpTools(server: McpServer): void {
       reschedule_meeting: (args) =>
         handleRescheduleMeeting(
           args as z.infer<typeof rescheduleMeetingInput>
+        ),
+      lock_activity_location: (args) =>
+        handleLockActivityLocation(
+          args as z.infer<typeof lockActivityLocationInput>
         ),
     };
 

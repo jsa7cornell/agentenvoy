@@ -584,6 +584,66 @@ export const rescheduleMeetingOutput = z.discriminatedUnion("ok", [
 ]);
 
 // ---------------------------------------------------------------------------
+// 9. lock_activity_location
+// ---------------------------------------------------------------------------
+
+/**
+ * Guest-side parity for the host-Envoy `lock_activity_location` action.
+ * Per the 2026-04-22 guest-activity-location-negotiation proposal: the
+ * server-side handler is a single function (`@/agent/actions#handleLockActivityLocation`).
+ * The MCP tool is a new entry point to that same handler, so an external
+ * agent acting on behalf of a guest can lock activity/location structurally
+ * rather than routing through chat prose. See WISHLIST "lock_activity_location
+ * on MCP guest-agent surface."
+ *
+ * One of `activity` or `location` MUST be provided — calling with neither
+ * is rejected as `validation_failed`.
+ */
+export const lockActivityLocationInput = z
+  .object({
+    meetingUrl: meetingUrlSchema,
+    sessionId: z.string().optional(),
+    activity: z.string().min(1).max(200).optional(),
+    location: z.string().min(1).max(500).optional(),
+    idempotencyKey: z.string().max(200).optional(),
+    clientMeta: clientMetaSchema.optional(),
+  })
+  .strict();
+// Note: at least one of `activity` or `location` must be provided. Enforced
+// in `tools.ts#handleLockActivityLocation` (returns `validation_failed`)
+// rather than via .refine() on the schema, so the SDK's tool-registration
+// path can still extract a ZodRawShape via .shape.
+
+export const lockActivityLocationOutput = z.discriminatedUnion("ok", [
+  z
+    .object({
+      ok: z.literal(true),
+      sessionId: z.string(),
+      locked: z
+        .object({
+          activity: z.string().nullable(),
+          location: z.string().nullable(),
+          /** Format derived from activity (in-person / video / phone). Null when no activity was set. */
+          format: z.string().nullable(),
+        })
+        .strict(),
+      lockedBy: z.literal("guest"),
+    })
+    .strict(),
+  refusal(
+    z.enum([
+      "link_not_found",
+      "link_expired",
+      "rate_limited",
+      "session_not_found",
+      "session_terminal",
+      "format_upgrade_blocked",
+      "validation_failed",
+    ])
+  ),
+]);
+
+// ---------------------------------------------------------------------------
 // Tool registry — one table that downstream code (route dispatcher,
 // `.well-known/mcp.json` generator, completeness tests) reads.
 // ---------------------------------------------------------------------------
@@ -635,6 +695,12 @@ export const MCP_TOOLS = {
     output: rescheduleMeetingOutput,
     description:
       "In-place calendar.events.patch on the agreed event. Preserves iCalUID. Appends to rescheduleHistory, posts the reschedule announcement.",
+  },
+  lock_activity_location: {
+    input: lockActivityLocationInput,
+    output: lockActivityLocationOutput,
+    description:
+      "Lock the activity and/or location of a coordinating session on behalf of the guest. Mirrors the host-Envoy dialog action; server-side handler is shared. Format may be derived from the activity (e.g. coffee → in-person) and is validated against the host's downgrade ladder unless the activity is one of the host's pre-approved options.",
   },
 } as const;
 
