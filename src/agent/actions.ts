@@ -1672,7 +1672,15 @@ async function handleExpandLink(
   params: Record<string, unknown>,
   userId: string
 ): Promise<ActionResult> {
-  const code = (params.code as string) || null;
+  const rawCode = (params.code as string) || null;
+  // Defang LLM-invented placeholder codes (e.g. "LAST_CREATED", "LATEST")
+  // the same way SESSION_ID_PLACEHOLDERS is applied to sessionId. Observed
+  // 2026-04-29 (feedback cmokpex8b): LLM emitted `code: "LAST_CREATED"` on
+  // update_link → "Link not found". The placeholder list is shared because
+  // the LLM uses the same hallucinated tokens across both id surfaces.
+  const codeIsPlaceholder =
+    typeof rawCode === "string" && SESSION_ID_PLACEHOLDERS.has(rawCode.toUpperCase());
+  const code = codeIsPlaceholder ? null : rawCode;
   // Resolve placeholder sessionIds (e.g. "LAST_CREATED") before lookup — but
   // ONLY when the caller actually passed a sessionId. expand_link is a
   // code-identifier tool; silently falling back to "latest session for user"
@@ -1686,6 +1694,27 @@ async function handleExpandLink(
     : null;
   const sessionId = code ? null : (resolvedSessionId ?? null);
 
+  // Placeholder-code fallback: when the LLM emitted "LAST_CREATED" (or
+  // similar), resolve to the host's most recently created non-archived
+  // link. Mirrors the sessionId placeholder defense (resolveSessionId) and
+  // avoids the exactly-one-recent-draft constraint below — the host's
+  // intent here is unambiguous ("the one I just made"), even if multiple
+  // drafts exist in the last 5 minutes.
+  let inferredLinkId: string | null = null;
+  if (codeIsPlaceholder && !sessionId) {
+    const latestLink = await prisma.negotiationLink.findFirst({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, code: true },
+    });
+    if (latestLink) {
+      inferredLinkId = latestLink.id;
+      console.log(
+        `[expand_link] placeholder code "${rawCode}" → resolved to latest link ${latestLink.code} (id=${latestLink.id}) for user ${userId}`,
+      );
+    }
+  }
+
   // Narrow defensive fallback (2026-04-21): when the LLM omits BOTH code and
   // sessionId but the host has exactly ONE draft link created in the last
   // 5 minutes, use that link. This is the Suzie case from feedback
@@ -1694,8 +1723,7 @@ async function handleExpandLink(
   // "silently misroute to an unrelated link" (which motivated the original
   // strict reject) still holds in the general case; we only soften when
   // there's exactly ONE unambiguous recent draft.
-  let inferredLinkId: string | null = null;
-  if (!code && !sessionId) {
+  if (!inferredLinkId && !code && !sessionId) {
     const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
     const recentDrafts = await prisma.negotiationLink.findMany({
       where: {

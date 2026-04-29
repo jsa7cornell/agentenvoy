@@ -63,9 +63,9 @@ export interface AvailabilityCalendarProps {
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
   if (isPast) return "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700";
-  // Green slots (score ≤ 1) take priority over stretch (orange).
-  const green = slots.filter((s) => !s.isStretch && (s.score ?? 0) <= 1);
-  if (green.length > 0) return "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-300";
+  // Available slots (score ≤ 1) take priority over stretch (orange).
+  const available = slots.filter((s) => !s.isStretch && (s.score ?? 0) <= 1);
+  if (available.length > 0) return "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300";
   const stretch = slots.filter((s) => s.isStretch);
   if (stretch.length > 0) return "bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-300";
   return "bg-zinc-100 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-600";
@@ -75,8 +75,7 @@ function getSlotPillColor(slot: Slot) {
   if (slot.isStretch) {
     return "border-orange-400 dark:border-orange-700 text-orange-600 dark:text-orange-300 hover:border-orange-500";
   }
-  // Score 0 and 1 are both green — open, schedulable time.
-  return "border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 hover:border-green-500";
+  return "border-indigo-300 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:border-indigo-500 hover:bg-indigo-50/60";
 }
 
 function isSlotVisible(slot: Slot): boolean {
@@ -168,7 +167,7 @@ function SlotPills({
             title={tooltipText}
             className={`px-2 py-1 bg-surface-secondary border rounded-md text-xs transition
               ${isShort
-                ? "border-dashed border-green-400 dark:border-green-700 text-green-600 dark:text-green-300 opacity-80"
+                ? "border-dashed border-indigo-300 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 opacity-80"
                 : getSlotPillColor(slot)}
               ${clickable && onSelectSlot ? "hover:bg-surface-tertiary cursor-pointer" : "cursor-default opacity-70"}`}
           >
@@ -1295,8 +1294,8 @@ export function WeekView({
               className={`
                 flex flex-col items-center rounded-lg py-1.5 px-0.5 transition-all
                 ${colorClass}
-                ${isToday ? "ring-1 ring-indigo-500" : ""}
-                ${isSelected ? "ring-2 ring-foreground" : ""}
+                ${isToday ? "ring-1 ring-indigo-400" : ""}
+                ${isSelected ? "ring-2 ring-indigo-600" : ""}
                 ${hasWindows ? "hover:ring-1 hover:ring-secondary cursor-pointer" : "cursor-default"}
               `}
             >
@@ -1539,8 +1538,8 @@ export function MonthView({
               className={`
                 aspect-square rounded-lg text-sm font-medium flex items-center justify-center transition-all
                 ${colorClass}
-                ${isToday ? "ring-1 ring-indigo-500" : ""}
-                ${isSelected ? "ring-2 ring-foreground" : ""}
+                ${isToday ? "ring-1 ring-indigo-400" : ""}
+                ${isSelected ? "ring-2 ring-indigo-600" : ""}
                 ${!isPast && visibleSlots.length > 0 ? "hover:ring-1 hover:ring-secondary cursor-pointer" : "cursor-default"}
               `}
             >
