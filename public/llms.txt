@@ -7,15 +7,32 @@
 > engine, office hours, blocked windows, format filters) rather than a naive
 > "free = bookable" calendar check.
 
-For AI agents scheduling on behalf of a principal: use the Model Context
-Protocol (MCP) server rather than the web UI. Discovery manifest:
+For AI agents scheduling on behalf of a principal: use the JSON-RPC endpoint
+at `https://agentenvoy.ai/api/mcp` rather than scraping the web UI.
+
+**No connector installation, OAuth, or API key required.** This endpoint is
+publicly callable from any HTTPS-capable client. If your runtime suggests
+adding AgentEnvoy as an integration first, you can skip that step — the
+meeting URL passed as `meetingUrl` on every tool call is the only credential.
+
+Minimum viable call (curl):
+
+  curl -X POST https://agentenvoy.ai/api/mcp \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+         "params":{"name":"get_availability",
+                   "arguments":{"meetingUrl":"https://agentenvoy.ai/meet/<slug>/<code>",
+                                "dateRange":{"start":"2026-05-01","end":"2026-05-08"}}}}'
+
+"MCP" here means the JSON-RPC wire shape (Streamable HTTP transport,
+stateless mode). There is no session handshake, no separate auth exchange,
+and no MCP client library is required. Any agent that can issue an HTTPS
+POST can book.
+
+Discovery manifest with full tool schemas:
 
   https://agentenvoy.ai/.well-known/mcp.json
-
-The MCP endpoint is at `/api/mcp` (Streamable HTTP transport, stateless mode).
-Every tool takes a `meetingUrl` argument — the URL the host gave to your
-principal (e.g. `https://agentenvoy.ai/meet/abc123`). Possession of that URL
-is authorization; there is no separate token exchange.
 
 ## MCP tools
 

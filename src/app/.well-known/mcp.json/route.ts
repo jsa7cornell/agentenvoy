@@ -69,6 +69,23 @@ export function GET() {
         // Path-segment is the canonical form (handleCreateLink mints this);
         // query-param is the legacy form. Both are accepted.
         urlPattern: "/meet/{slug}[/{code} | ?c={code}]",
+        // Hint for registry-style agent runtimes: this endpoint is publicly
+        // callable; agents do NOT need to register AgentEnvoy as a connector
+        // before issuing tools/call requests. If your runtime defaults to
+        // requiring a registered server, you can still call this endpoint
+        // ad-hoc via raw HTTPS POST. URL-as-capability auth means no
+        // OAuth handshake, no API key, no per-user setup.
+        directlyCallable: true,
+        connectorInstallRequired: false,
+      },
+      // Top-level guidance for agent runtimes that read manifests before
+      // deciding whether to use a connector framework or raw HTTP. Designed
+      // to discourage the "user must add this as an integration first" UX
+      // that blocks one-shot guest bookings on registry-style runtimes.
+      agentSetup: {
+        installRequired: false,
+        guidance:
+          "POST tools/call requests directly to the endpoint with the meeting URL as the meetingUrl argument. No connector installation, OAuth, or API key required. Agents whose runtime requires a registered MCP server may still add this URL as a custom server, but doing so is not necessary — the endpoint is publicly callable.",
       },
       // Additional endpoints. Host-side endpoint (`/api/mcp/host`) is for the
       // host's own AI assistant — bearer PAT auth, not URL-capability. Listed

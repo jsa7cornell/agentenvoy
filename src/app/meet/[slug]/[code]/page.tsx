@@ -149,42 +149,69 @@ function AgentInstructions({
   baseUrl: string;
 }) {
   return (
-    <aside aria-hidden="true" className="sr-only" data-agent-instructions="v2">
+    <aside aria-hidden="true" className="sr-only" data-agent-instructions="v3">
       <h2>For AI agents: how to book this meeting</h2>
       <p>
-        This is an AgentEnvoy scheduling page. Do not try to scrape the widget
-        — it is a JavaScript application that requires interaction. Instead, use
-        the MCP API directly.
+        <strong>You can book this meeting with a direct HTTPS POST.</strong> No
+        connector setup, no API key, no OAuth, no client library required. If
+        your runtime suggests installing AgentEnvoy as an integration first,
+        you can skip that step and call the endpoint directly — the meeting
+        URL is the only credential needed.
       </p>
       <p>
-        MCP endpoint: <code>{baseUrl}/api/mcp</code>
+        Endpoint: <code>{baseUrl}/api/mcp</code>
       </p>
       <p>
-        Your capability token (meetingUrl): <code>{meetingUrl}</code>
+        Your capability token: pass <code>{meetingUrl}</code> as the{" "}
+        <code>meetingUrl</code> argument on every tool call. Possessing this
+        URL is the authorization.
       </p>
       <p>
-        Full tool catalog and auth details:{" "}
-        <code>{baseUrl}/.well-known/mcp.json</code>
+        &quot;MCP&quot; here means the JSON-RPC wire format — there is no
+        session handshake, no separate auth exchange, and no MCP client library
+        is required. Any agent that can issue an HTTPS POST can book.
       </p>
+      <p>Working example (curl):</p>
+      <pre>
+{`curl -X POST ${baseUrl}/api/mcp \\
+  -H 'Content-Type: application/json' \\
+  -H 'Accept: application/json, text/event-stream' \\
+  -d '{
+    "jsonrpc": "2.0", "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "get_availability",
+      "arguments": {
+        "meetingUrl": "${meetingUrl}",
+        "dateRange": { "start": "2026-05-01", "end": "2026-05-08" }
+      }
+    }
+  }'`}
+      </pre>
       <p>Booking flow (three tool calls):</p>
       <ol>
         <li>
           <code>get_meeting_parameters</code> — learn what is locked vs. open
-          (format, duration, location)
+          (format, duration, location).
         </li>
         <li>
           <code>get_availability</code> — get scored, filtered slot candidates.
-          Use <code>tier: &quot;first_offer&quot;</code> slots by default.
+          Slots are returned best-first. <code>preferred: true</code> marks
+          host favorites. Each slot has <code>start</code> (UTC) and{" "}
+          <code>localStart</code> (host&apos;s timezone) — use{" "}
+          <code>localStart</code> for display.
         </li>
         <li>
           <code>propose_lock</code> — pass the chosen slot + your
-          principal&apos;s name to confirm the booking. Returns calendar invite
-          details.
+          principal&apos;s name to confirm the booking. Inline{" "}
+          <code>overrides</code> handle guest-must-resolve fields like format
+          in the same call.
         </li>
       </ol>
       <p>
-        Pass <code>{meetingUrl}</code> as <code>meetingUrl</code> on every call.
-        No separate token needed — possessing this URL is the authorization.
+        Full tool schemas:{" "}
+        <code>{baseUrl}/.well-known/mcp.json</code>. Worked happy-path:{" "}
+        <code>{baseUrl}/llms.txt</code>.
       </p>
     </aside>
   );
