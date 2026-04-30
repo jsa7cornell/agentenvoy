@@ -817,12 +817,31 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       })
     : Promise.resolve(null);
 
+  // Task F: post-confirm Envoy thread message. Closes the deal-room
+  // conversation with a short summary so both host and guest see a
+  // definitive "this is booked" beat in the thread (the meeting card
+  // updates above, but a chat-side acknowledgement was missing — guests
+  // were left wondering if the click registered). Non-blocking: a
+  // failure here doesn't unbook the meeting.
+  const taskConfirmMessage = prisma.message
+    .create({
+      data: {
+        sessionId,
+        role: "administrator",
+        content: `Great — you're confirmed for ${confirmSummary}. Details are above. ✓`,
+      },
+    })
+    .catch((e: unknown) => {
+      console.error("[confirm] post-confirm message insert failed (non-blocking):", e);
+    });
+
   const [, , holdResult, allMessages] = await Promise.all([
     taskFinalizeSession,
     taskInvalidate,
     taskHoldCleanup,
     taskMessages,
     taskParticipants,
+    taskConfirmMessage,
   ]);
   const tParMs = Date.now() - tParStart;
 
