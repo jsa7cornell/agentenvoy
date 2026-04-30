@@ -60,6 +60,10 @@ export const CALL_LOG_REDACTION: Record<string, Record<string, RedactionClass>> 
     // Slot timestamps are not secret, but we shape-summary to keep the log
     // row bounded — a 60-slot week would blow up the JSON column otherwise.
     slots: "shape-summary",
+    // parameters/rules echoed when caller wants single-call envelope
+    // (Town agent feedback #4 fold). Same redaction as get_meeting_parameters.
+    parameters: "shape-summary",
+    rules: "shape-summary",
   },
   get_session_status: {
     ...REFUSAL_COMMON,

@@ -169,35 +169,46 @@ export async function handleGetMeetingParameters(
     ok: true,
     meetingUrl: args.meetingUrl,
     parameters,
-    rules: (() => {
-      const r = rules as Record<string, unknown>;
-      const isVip = typeof r.isVip === "boolean" ? r.isVip : undefined;
-      const anchor = deriveTimingAnchor(rules.timingLabel);
-      const timingPreference =
-        rules.timingLabel !== undefined ? { anchor } : undefined;
-      const gpWindow = (r.guestPicks as { window?: unknown } | undefined)?.window;
-      const guestPicksWindow =
-        gpWindow &&
-        typeof (gpWindow as { startHour?: unknown }).startHour === "number" &&
-        typeof (gpWindow as { endHour?: unknown }).endHour === "number"
-          ? {
-              startHour: (gpWindow as { startHour: number }).startHour,
-              endHour: (gpWindow as { endHour: number }).endHour,
-            }
-          : undefined;
-      return {
-        ...(rules.activity ? { activity: rules.activity } : {}),
-        ...(rules.activityIcon ? { activityIcon: rules.activityIcon } : {}),
-        ...(Array.isArray(rules.activityOptions) && (rules.activityOptions as string[]).length > 1
-          ? { activityOptions: rules.activityOptions }
-          : {}),
-        ...(rules.timingLabel ? { timingLabel: rules.timingLabel } : {}),
-        ...(isVip !== undefined ? { isVip } : {}),
-        ...(timingPreference ? { timingPreference } : {}),
-        ...(guestPicksWindow ? { guestPicksWindow } : {}),
-      };
-    })(),
+    rules: buildRulesPassthrough(rules),
   });
+}
+
+/**
+ * Build the wire-shape `rules` passthrough from a link's stored parameters.
+ * Shared between `get_meeting_parameters` (top-level rules object) and
+ * `get_availability` (optional rules field — Town agent feedback #4 fold,
+ * 2026-04-30 stabilization-package follow-up).
+ *
+ * Keeping this factored prevents the two surfaces from drifting on which
+ * fields they advertise. SPEC invariant #9.
+ */
+function buildRulesPassthrough(rules: LinkParameters): Record<string, unknown> {
+  const r = rules as Record<string, unknown>;
+  const isVip = typeof r.isVip === "boolean" ? r.isVip : undefined;
+  const anchor = deriveTimingAnchor(rules.timingLabel);
+  const timingPreference =
+    rules.timingLabel !== undefined ? { anchor } : undefined;
+  const gpWindow = (r.guestPicks as { window?: unknown } | undefined)?.window;
+  const guestPicksWindow =
+    gpWindow &&
+    typeof (gpWindow as { startHour?: unknown }).startHour === "number" &&
+    typeof (gpWindow as { endHour?: unknown }).endHour === "number"
+      ? {
+          startHour: (gpWindow as { startHour: number }).startHour,
+          endHour: (gpWindow as { endHour: number }).endHour,
+        }
+      : undefined;
+  return {
+    ...(rules.activity ? { activity: rules.activity } : {}),
+    ...(rules.activityIcon ? { activityIcon: rules.activityIcon } : {}),
+    ...(Array.isArray(rules.activityOptions) && (rules.activityOptions as string[]).length > 1
+      ? { activityOptions: rules.activityOptions }
+      : {}),
+    ...(rules.timingLabel ? { timingLabel: rules.timingLabel } : {}),
+    ...(isVip !== undefined ? { isVip } : {}),
+    ...(timingPreference ? { timingPreference } : {}),
+    ...(guestPicksWindow ? { guestPicksWindow } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -237,10 +248,27 @@ export async function handleGetAvailability(
   const prefs = (host?.preferences ?? {}) as Record<string, unknown>;
   const timezone = getUserTimezone(prefs);
 
+  // Resolve the parameters envelope alongside slots — Town agent feedback #4
+  // (2026-04-30 stabilization fold). For the 90% case where parameters are
+  // locked, this collapses the three-call (get_meeting_parameters →
+  // get_availability → propose_lock) flow to two calls. Agents that need
+  // to negotiate parameters can still call get_meeting_parameters separately.
+  const hostPreferences = (host?.preferences ?? null) as UserPreferences | null;
+  const compiledRules =
+    ((hostPreferences?.explicit as Record<string, unknown> | undefined)
+      ?.compiled as CompiledRules | undefined) ?? null;
+  const parameters = resolveParameters({
+    rules,
+    hostPreferences,
+    hostTimezone: timezone,
+    compiledRules,
+  });
+  const rulesPassthrough = buildRulesPassthrough(rules);
+
   // Pull the host's global scored schedule.
   const schedule = await getOrComputeSchedule(link.userId);
   if (!schedule.connected) {
-    return asCallResult({ ok: true, timezone, slots: [] });
+    return asCallResult({ ok: true, timezone, slots: [], parameters, rules: rulesPassthrough });
   }
 
   // Event-level overrides from link rules (dateRange, preferredDays, etc).
@@ -403,6 +431,8 @@ export async function handleGetAvailability(
     ok: true,
     timezone: args.timezone ?? timezone,
     slots: wireSlots,
+    parameters,
+    rules: rulesPassthrough,
   });
 }
 

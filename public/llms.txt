@@ -134,6 +134,46 @@ typically:
 4. **Per-tool rate limits.** Read-only tools fail open; write tools fail
    closed with `retryAfterSeconds`. See `/.well-known/mcp.json`.
 
+## Failure modes — typed refusals you'll see and how to recover
+
+Every tool returns either `{ ok: true, ... }` or `{ ok: false, reason, message, ... }`.
+Match on `reason` (not `message`) — messages are human-readable and may
+change; reasons are the contract.
+
+**Auth / lookup (any tool):**
+- `link_not_found` — meetingUrl doesn't resolve to a live link. Wrong slug,
+  expired link, or a typo. Don't retry; surface to user.
+- `link_expired` — the link itself has an `expiresAt` in the past. Same
+  recovery as above.
+- `rate_limited` — bucket full. The response carries `retryAfterSeconds`;
+  back off that long and retry.
+- `rate_limit_store_unavailable` — counter store is down. Same `retryAfterSeconds`
+  semantics; usually short. Don't fail the user-facing flow.
+
+**`propose_lock` race-loss / preflight refusals:**
+- `slot_taken_during_handshake` — someone else booked between your
+  `get_availability` and your `propose_lock`. The response carries
+  `counterProposal: [{ start, end, score }, ...]` with up to 3 alternates,
+  ranked best-first. Recover by picking from `counterProposal` and
+  re-issuing `propose_lock` with the new slot. **Idempotent**: a second
+  `propose_lock` with the same slot/guest after a successful one returns
+  `idempotent: true` rather than double-booking.
+- `consent_not_accepted` — the host has a pending consent request on a
+  parameter you're about to lock (rare; only happens if a previous
+  `propose_parameters` triggered host approval and the host hasn't acted).
+  Don't retry; surface or wait.
+- `host_profile_incomplete` — the host hasn't connected their calendar.
+  Surface to user; nothing the agent can do.
+- `field_locked` (on `propose_parameters`) — the field is closed for
+  changes (host marked it `mutability: "locked"`). Don't retry that field;
+  others in the batch may have succeeded — check the per-field results.
+
+**`cancel_meeting`:**
+- `session_not_agreed` — there's nothing to cancel; the session was never
+  locked.
+- `idempotent: true` on success — second cancel returns success without
+  re-dispatching emails.
+
 ## Note for HTML→markdown fetchers
 
 If you're fetching the per-link page (`/meet/<slug>` or `/meet/<slug>/<code>`)

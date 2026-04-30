@@ -148,46 +148,52 @@ export const getMeetingParametersInput = z
   })
   .strict();
 
+// Shared rules shape — appears in both `get_meeting_parameters` (top-level)
+// and `get_availability` (as the optional `rules` field, recon #4 of the
+// 2026-04-30 stabilization-package). Keeping it factored so the two surfaces
+// can't drift.
+const rulesPassthroughSchema = z
+  .object({
+    activity: z.string().optional(),
+    activityIcon: z.string().optional(),
+    timingLabel: z.string().optional(),
+    // VIP classification, echoed so guest agents can explain their
+    // output ("your host prioritized these times because you're a VIP").
+    // Gates stretch1/stretch2 tier visibility server-side — see
+    // `handleGetAvailability`. Not a secret: intentionally echoed per
+    // SPEC invariant #9.
+    isVip: z.boolean().optional(),
+    // Structured anchor derived from `timingLabel`. Guest agents branch
+    // on this without re-implementing the regex; `timingLabel` is kept
+    // alongside for free-form nuance. Derivation lives in
+    // `src/lib/scoring.ts#deriveTimingAnchor` (single source of truth
+    // shared with the web greeting's prose opener).
+    timingPreference: z
+      .object({
+        anchor: z.enum(["this-week", "next-week"]).nullable(),
+      })
+      .optional(),
+    // Host's `guestPicks.window` (hour-of-day clamp), echoed so guest
+    // agents can explain "why am I only seeing slots after 9am." The
+    // server already applies it to the slot filter — this is the
+    // context for the guest-side narration. Hours are host-tz local.
+    guestPicksWindow: z
+      .object({
+        startHour: z.number().int().min(0).max(23),
+        endHour: z.number().int().min(1).max(24),
+      })
+      .optional(),
+  })
+  .partial()
+  .passthrough();
+
 export const getMeetingParametersOutput = z.discriminatedUnion("ok", [
   z
     .object({
       ok: z.literal(true),
       meetingUrl: z.string(),
       parameters: resolvedParametersSchema,
-      rules: z
-        .object({
-          activity: z.string().optional(),
-          activityIcon: z.string().optional(),
-          timingLabel: z.string().optional(),
-          // VIP classification, echoed so guest agents can explain their
-          // output ("your host prioritized these times because you're a VIP").
-          // Gates stretch1/stretch2 tier visibility server-side — see
-          // `handleGetAvailability`. Not a secret: intentionally echoed per
-          // SPEC invariant #9.
-          isVip: z.boolean().optional(),
-          // Structured anchor derived from `timingLabel`. Guest agents branch
-          // on this without re-implementing the regex; `timingLabel` is kept
-          // alongside for free-form nuance. Derivation lives in
-          // `src/lib/scoring.ts#deriveTimingAnchor` (single source of truth
-          // shared with the web greeting's prose opener).
-          timingPreference: z
-            .object({
-              anchor: z.enum(["this-week", "next-week"]).nullable(),
-            })
-            .optional(),
-          // Host's `guestPicks.window` (hour-of-day clamp), echoed so guest
-          // agents can explain "why am I only seeing slots after 9am." The
-          // server already applies it to the slot filter — this is the
-          // context for the guest-side narration. Hours are host-tz local.
-          guestPicksWindow: z
-            .object({
-              startHour: z.number().int().min(0).max(23),
-              endHour: z.number().int().min(1).max(24),
-            })
-            .optional(),
-        })
-        .partial()
-        .passthrough(),
+      rules: rulesPassthroughSchema,
     })
     .strict(),
   refusal(authRefusalReasonSchema),
@@ -267,6 +273,24 @@ export const getAvailabilityOutput = z.discriminatedUnion("ok", [
       ok: z.literal(true),
       timezone: z.string(),
       slots: z.array(availabilitySlotSchema),
+      /**
+       * Resolved parameter envelope (format / duration / location / topic /
+       * timezone) — same shape get_meeting_parameters returns at top level.
+       * Echoed here so single-call agent flows don't need a separate
+       * get_meeting_parameters round-trip when the parameters are locked
+       * (the 90% case). When agents need to negotiate parameter values,
+       * they can still call get_meeting_parameters for the canonical
+       * envelope. Stabilization fold (Town agent feedback #4): the
+       * three-call flow becomes two-call for the common case.
+       */
+      parameters: resolvedParametersSchema.optional(),
+      /**
+       * Same `rules` passthrough as get_meeting_parameters — activity,
+       * activityIcon, timingLabel, isVip, timingPreference, guestPicksWindow.
+       * Optional for backward compatibility; agents that didn't request it
+       * (or older clients) keep working. Town agent feedback #4 fold.
+       */
+      rules: rulesPassthroughSchema.optional(),
     })
     .strict(),
   refusal(authRefusalReasonSchema),
