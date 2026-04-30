@@ -80,6 +80,8 @@ model User {
   guestSessions     NegotiationSession[] @relation("guest")
   participations    SessionParticipant[]
   apiKeys           ApiKey[]
+  hostAccessTokens  HostAccessToken[]
+  mcpHostCallLogs   MCPCallLog[]      @relation("MCPHostCallLogs")
   channel           Channel?
   calendarCaches    CalendarCache[]
   computedSchedule  ComputedSchedule?
@@ -257,6 +259,34 @@ model ApiKey {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([key])
+}
+
+/// Personal access token for the host-side MCP surface (`/api/mcp/host`).
+/// Bearer-authenticated; plaintext is shown ONCE at mint and stored only as a
+/// SHA-256 hash. `displayId` (8 chars) lets the host identify a token to
+/// revoke without ever re-displaying the secret.
+/// Token format: `agentenvoy_pat_live_<32-byte-base62>`
+model HostAccessToken {
+  id         String    @id @default(cuid())
+  userId     String
+  /// SHA-256 hex of the plaintext bearer. Unique → O(1) lookup at auth time.
+  tokenHash  String    @unique
+  /// First 8 chars of the random portion. Display-only — never the secret.
+  displayId  String
+  /// Human label set at mint: "Claude desktop", "CLI", "iPhone shortcut".
+  name       String
+  /// Subset of {"read","schedule","admin"}. Never widens after mint.
+  scopes     String[]
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([tokenHash])
 }
 
 model NegotiationLink {
@@ -942,7 +972,10 @@ model ConsentRequest {
 model MCPCallLog {
   id           String   @id @default(cuid())
   ts           DateTime @default(now())
-  linkId       String
+  /// Nullable — host-side calls have no link (e.g. list_my_links, create_link).
+  linkId       String?
+  /// Set for host-side calls; null for guest-side calls.
+  userId       String?
   sessionId    String?
   /// MCP tool name: propose_lock, post_message, get_session_status, etc.
   tool         String
@@ -964,9 +997,11 @@ model MCPCallLog {
   /// check. Null on early-abort paths (e.g. link lookup 404).
   latencyMs    Int?
 
-  link NegotiationLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  link NegotiationLink? @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  user User?            @relation("MCPHostCallLogs", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([linkId, ts])
+  @@index([userId, ts])
   @@index([sessionId, ts])
   @@index([tool, ts])
 }

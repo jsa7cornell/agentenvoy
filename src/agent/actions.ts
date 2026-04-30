@@ -862,7 +862,7 @@ async function handleUpdateLocation(
   };
 }
 
-async function handleCreateLink(
+export async function handleCreateLink(
   params: Record<string, unknown>,
   userId: string,
   meetSlug?: string
