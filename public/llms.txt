@@ -7,28 +7,61 @@
 > engine, office hours, blocked windows, format filters) rather than a naive
 > "free = bookable" calendar check.
 
-For AI agents scheduling on behalf of a principal: use the JSON-RPC endpoint
-at `https://agentenvoy.ai/api/mcp` rather than scraping the web UI.
+For AI agents scheduling on behalf of a principal: there are TWO surfaces.
+Pick the one that matches your runtime — don't use both for the same booking.
 
-**No connector installation, OAuth, or API key required.** This endpoint is
-publicly callable from any HTTPS-capable client. If your runtime suggests
-adding AgentEnvoy as an integration first, you can skip that step — the
-meeting URL passed as `meetingUrl` on every tool call is the only credential.
+## Fast path — single fetch, GET then POST
 
-Minimum viable call (curl):
+If you only need to book a slot, fetch the meeting URL's `/agent.json`
+companion. Returns parameters + scored slots + the booking endpoint in a
+single response. No JSON-RPC, no MCP client library, just GET-then-POST.
+
+  curl https://agentenvoy.ai/meet/<slug>/<code>/agent.json
+
+Response:
+
+  {
+    "schemaVersion": "2026-04-30",
+    "meetingUrl": "https://agentenvoy.ai/meet/<slug>/<code>",
+    "host": { "name": "...", "timezone": "America/Los_Angeles" },
+    "parameters": { /* format/duration/location envelopes */ },
+    "rules": { /* activity, isVip, timingPreference, etc */ },
+    "slots": [
+      { "start": "2026-05-05T16:00:00.000Z",
+        "localStart": "2026-05-05T09:00:00",
+        "end": "2026-05-05T16:30:00.000Z",
+        "score": -1, "preferred": true,
+        "tier": "first_offer" }
+    ],
+    "booking": {
+      "endpoint": "https://agentenvoy.ai/api/mcp",
+      "method": "POST", "tool": "propose_lock",
+      "auth": "url-capability", "tokenParam": "meetingUrl"
+    }
+  }
+
+The contextual `/meet/<slug>/<code>` HTML page also embeds this same
+snapshot as `<script type="application/agent+json" data-agent-snapshot>` —
+parse it from the source HTML if you've already fetched the page.
+
+## Full MCP surface — for negotiation, deal-room messaging, status polling
+
+JSON-RPC at `https://agentenvoy.ai/api/mcp`. Same auth model (URL is the
+capability). Tools include `get_meeting_parameters`, `get_availability`,
+`propose_parameters`, `propose_lock`, `post_message`, `get_session_status`,
+`cancel_meeting`, and `lock_activity_location`. Use this surface when you
+need richer interactions than "see slots, pick one, book it."
 
   curl -X POST https://agentenvoy.ai/api/mcp \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
          "params":{"name":"get_availability",
-                   "arguments":{"meetingUrl":"https://agentenvoy.ai/meet/<slug>/<code>",
-                                "dateRange":{"start":"2026-05-01","end":"2026-05-08"}}}}'
+                   "arguments":{"meetingUrl":"https://agentenvoy.ai/meet/<slug>/<code>"}}}'
 
-"MCP" here means the JSON-RPC wire shape (Streamable HTTP transport,
-stateless mode). There is no session handshake, no separate auth exchange,
-and no MCP client library is required. Any agent that can issue an HTTPS
-POST can book.
+**No connector installation, OAuth, or API key required** for either
+surface. If your runtime suggests adding AgentEnvoy as an integration
+first, you can skip that step.
 
 Discovery manifest with full tool schemas:
 

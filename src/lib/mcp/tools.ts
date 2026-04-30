@@ -182,7 +182,7 @@ export async function handleGetMeetingParameters(
  * Keeping this factored prevents the two surfaces from drifting on which
  * fields they advertise. SPEC invariant #9.
  */
-function buildRulesPassthrough(rules: LinkParameters): Record<string, unknown> {
+export function buildRulesPassthrough(rules: LinkParameters): Record<string, unknown> {
   const r = rules as Record<string, unknown>;
   const isVip = typeof r.isVip === "boolean" ? r.isVip : undefined;
   const anchor = deriveTimingAnchor(rules.timingLabel);

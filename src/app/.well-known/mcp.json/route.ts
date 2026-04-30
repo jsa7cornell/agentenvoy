@@ -91,6 +91,8 @@ export function GET() {
       // host's own AI assistant — bearer PAT auth, not URL-capability. Listed
       // here so a host's agent doing dynamic discovery can find it; guest
       // agents should keep using `/api/mcp` (the primary `endpoint` above).
+      // The `agent.json` entries advertise the single-fetch JSON snapshot
+      // surface (per the 2026-04-30 single-fetch-agent-surface proposal).
       additionalEndpoints: [
         {
           url: `${BASE_URL}/api/mcp/host`,
@@ -101,7 +103,35 @@ export function GET() {
             scopes: ["read", "schedule", "admin"],
           },
         },
+        {
+          url: `${BASE_URL}/meet/{slug}/{code}/agent.json`,
+          purpose: "agent-snapshot",
+          auth: { type: "url-capability", note: "no auth header — possessing the URL is the authorization" },
+          method: "GET",
+          contentType: "application/agent+json",
+          description:
+            "Single-fetch JSON snapshot of a contextual link's parameters + scored slot list + booking guidance. For agents that prefer GET-then-POST over JSON-RPC. Same data as MCP get_availability + get_meeting_parameters; defaults: limit=20, no dateRange floor, sorted best-first.",
+        },
+        {
+          url: `${BASE_URL}/meet/{slug}/agent.json`,
+          purpose: "agent-snapshot-vanity",
+          auth: { type: "url-capability" },
+          method: "GET",
+          contentType: "application/agent+json",
+          description:
+            "Bare-vanity form for a host's primary link. Resolves the slug to the host's default link.",
+        },
       ],
+      // In-page discovery hint — the contextual /meet/<slug>/<code> page
+      // server-renders the snapshot as an embedded script tag. Bare-vanity
+      // /meet/<slug> does NOT embed (privacy posture: bare URLs are widely
+      // shared and crawlable; bookable detail stays behind a deliberate fetch).
+      inPageDiscovery: {
+        selector: 'script[type="application/agent+json"][data-agent-snapshot]',
+        scope: "/meet/{slug}/{code}",
+        description:
+          "On contextual meet pages, an `<script type=\"application/agent+json\">` tag carries the same snapshot as `/agent.json`. Cold web_fetch agents that can't issue separate API calls can parse this from the page HTML.",
+      },
       docs: {
         description: `${BASE_URL}/llms.txt`,
         humanSite: BASE_URL,
