@@ -54,7 +54,19 @@ export function DealRoomConnectCtas({
       <div className={wrapperClass}>
         <button
           type="button"
-          onClick={signUpFlow.trigger}
+          onClick={() => {
+            // Mark this tab as having just initiated calendar connection so
+            // the post-OAuth bilateral celebration banner only fires for
+            // fresh connects, not on every revisit. Consumed by deal-room
+            // useEffect that flips hasCelebrated. SessionStorage survives
+            // the OAuth redirect round-trip in the same tab.
+            try {
+              window.sessionStorage.setItem("aenv-cal-just-connected", "1");
+            } catch {
+              // ignore — Safari private mode etc.
+            }
+            signUpFlow.trigger();
+          }}
           className={
             variant === "mobile-banner"
               ? "w-full px-3 py-2 rounded-md text-xs font-semibold bg-blue-500/90 hover:bg-blue-500 text-white transition leading-snug"

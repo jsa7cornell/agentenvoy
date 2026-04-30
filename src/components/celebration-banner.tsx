@@ -53,14 +53,7 @@ export function CelebrationBanner({ matchCount, firstMatchDayLabel }: Celebratio
   return (
     <div className="mb-3 perspective-1000">
       <div
-        className="celebration-banner relative flex items-center gap-4 overflow-hidden rounded-2xl border px-5 py-5"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(16,185,129,0.22) 0%, rgba(20,184,166,0.18) 40%, rgba(124,58,237,0.18) 100%)",
-          borderColor: "rgba(110,231,183,0.5)",
-          boxShadow:
-            "0 0 0 1px rgba(16,185,129,0.15), 0 8px 40px rgba(16,185,129,0.25), inset 0 1px 0 rgba(255,255,255,0.08)",
-        }}
+        className="celebration-banner relative flex items-center gap-4 overflow-hidden rounded-2xl border border-indigo-300 dark:border-indigo-700 bg-gradient-to-br from-indigo-50 to-violet-50 dark:from-indigo-950/60 dark:to-violet-950/60 px-5 py-5 shadow-sm"
         role="status"
         aria-live="polite"
       >
@@ -150,20 +143,11 @@ export function CelebrationBanner({ matchCount, firstMatchDayLabel }: Celebratio
 
         {/* Copy */}
         <div className="relative z-[2] flex-1">
-          <div
-            className="celebration-head text-base font-semibold"
-            style={{
-              backgroundImage:
-                "linear-gradient(90deg, #6ee7b7, #ffffff 60%, #a78bfa)",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-            }}
-          >
+          <div className="celebration-head text-base font-semibold text-indigo-900 dark:text-indigo-100">
             Calendar connected — your matches just got smarter
           </div>
-          <div className="celebration-sub mt-1 text-[13px] text-secondary">
-            <strong className="font-semibold" style={{ color: "#6ee7b7" }}>
+          <div className="celebration-sub mt-1 text-[13px] text-indigo-800 dark:text-indigo-200">
+            <strong className="font-semibold text-emerald-700 dark:text-emerald-300">
               {matchPhrase}
             </strong>
             . Pick one below.

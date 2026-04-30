@@ -562,8 +562,9 @@ function WindowCards({
       />
     );
   }
-  // For longer meetings, use the drag-to-pick timeline instead of window cards
-  if (durationMinutes > 30) {
+  // For meetings longer than 1 hour, use the drag-to-pick timeline instead
+  // of chip-style picker. ≤60 min → chips (most meetings); >60 → drag.
+  if (durationMinutes > 60) {
     return (
       <DragSlotPicker
         slotsForDay={slotsForDay}

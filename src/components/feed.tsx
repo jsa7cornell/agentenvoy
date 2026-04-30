@@ -1584,9 +1584,9 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
               (msg.thread.agreedTime && new Date(msg.thread.agreedTime) < new Date());
 
             return (
-              <div key={msg.id} className="self-start flex flex-col gap-2 max-w-[85%]">
+              <div key={msg.id} className="self-start flex flex-col gap-2 w-full max-w-[440px]">
                 {msg.content && (
-                  <div className="max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed bg-black/5 dark:bg-white/7 rounded-bl-sm">
+                  <div className="rounded-2xl px-4 py-3 text-sm leading-relaxed bg-black/5 dark:bg-white/7 rounded-bl-sm">
                     <div className="text-[10px] font-semibold uppercase tracking-wide mb-1 text-purple-400">Envoy</div>
                     <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
                   </div>
