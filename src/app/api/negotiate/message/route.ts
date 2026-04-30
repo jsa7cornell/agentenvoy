@@ -401,13 +401,25 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Update session status from AI block, or fall back to thread status heuristic
+        // Update session status from AI block, or fall back to thread status heuristic.
+        //
+        // Invariant (2026-04-29): `agreedTime` / `agreedFormat` are valid only
+        // when status === "agreed". VALID_STATUSES intentionally excludes
+        // "agreed" — only confirm-pipeline writes that. Any STATUS_UPDATE
+        // landing here is therefore a transition AWAY from agreed (or never
+        // entered agreed). Clear the agreed-state fields so the deal-room
+        // doesn't enter "pending confirm" mode against a stale slot. Surfaced
+        // by feedback cmokr58r2 — guest re-opened a confirmed negotiation,
+        // LLM flipped status back to "proposed", agreedTime stayed stale,
+        // picker became non-clickable.
         if (statusUpdate && VALID_STATUSES.includes(statusUpdate.status)) {
           await prisma.negotiationSession.update({
             where: { id: sessionId },
             data: {
               status: statusUpdate.status,
               statusLabel: statusUpdate.label,
+              agreedTime: null,
+              agreedFormat: null,
             },
           });
         } else {

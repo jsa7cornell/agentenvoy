@@ -717,9 +717,17 @@ async function handleUpdateTime(
     };
   }
 
+  // Invariant (2026-04-29): clear agreed-state fields whenever status
+  // transitions away from "agreed". Without this, a host's update_time on a
+  // previously-confirmed session leaves stale agreedTime/agreedFormat, and
+  // the deal-room reads them as "pending confirm" against the OLD slot —
+  // disabling the picker. Mirrors the same invariant enforced on
+  // [STATUS_UPDATE] writes in api/negotiate/message/route.ts.
   const updateData: Record<string, unknown> = {
     status: "proposed",
     statusLabel: "Time change proposed by host",
+    agreedTime: null,
+    agreedFormat: null,
   };
 
   if (duration !== undefined) updateData.duration = duration;
