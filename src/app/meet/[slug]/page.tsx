@@ -29,6 +29,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const title = `Meet with ${hostFirst}`;
   const description = `Find a time to meet with ${hostName}. Powered by Envoy, an AI scheduling agent that navigates busy calendars.`;
+  const meetingUrl = `${baseUrl}/meet/${slug}`;
 
   return {
     title,
@@ -36,7 +37,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     openGraph: {
       title,
       description,
-      url: `${baseUrl}/meet/${slug}`,
+      url: meetingUrl,
       siteName: "AgentEnvoy",
       type: "website",
     },
@@ -45,71 +46,73 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       title,
       description,
     },
+    other: {
+      "agentenvoy:type": "scheduling-page",
+      "agentenvoy:mcp-endpoint": `${baseUrl}/api/mcp`,
+      "agentenvoy:meeting-url": meetingUrl,
+      "agentenvoy:mcp-manifest": `${baseUrl}/.well-known/mcp.json`,
+      "agentenvoy:agent-docs": `${baseUrl}/llms.txt`,
+    },
   };
 }
 
 export default async function PrimaryMeetPage({ params }: Props) {
   const { slug } = await params;
+  const baseUrl = process.env.NEXTAUTH_URL ?? "https://agentenvoy.ai";
+  const meetingUrl = `${baseUrl}/meet/${slug}`;
   return (
     <>
       <GuestLightTheme />
       <DealRoom slug={slug} />
-      <AgentInstructions />
+      <AgentInstructions meetingUrl={meetingUrl} baseUrl={baseUrl} />
     </>
   );
 }
 
-/**
- * Server-rendered, accessibility-hidden block of prose directed at AI
- * agents that read page HTML to book meetings (e.g. Claude-in-Chrome,
- * any browser-using agent). The visual layer (<DealRoom>) is a
- * fixed-inset React tree — so an aside after it never reaches a human
- * viewport. Putting it behind sr-only keeps it off assistive-tech
- * announcements too while remaining in the DOM and the initial HTML
- * response, which is what matters for text-scraping agents.
- *
- * This is a bridge until MCP-aware auto-discovery lands in consumer AI
- * products. The rel="agent-api" Link header + /.well-known/mcp.json
- * manifest are the correct machine surface; this block is the
- * lowest-common-denominator fallback for clients that don't follow
- * link rels yet.
- */
-function AgentInstructions() {
+function AgentInstructions({
+  meetingUrl,
+  baseUrl,
+}: {
+  meetingUrl: string;
+  baseUrl: string;
+}) {
   return (
-    <aside
-      aria-hidden="true"
-      className="sr-only"
-      data-agent-instructions="v1"
-    >
-      <h2>For AI agents reading this page</h2>
+    <aside aria-hidden="true" className="sr-only" data-agent-instructions="v2">
+      <h2>For AI agents: how to book this meeting</h2>
       <p>
-        If you&apos;re helping someone book this meeting, the reliable
-        path is the Model Context Protocol endpoint at
-        <code> /api/mcp </code>
-        — not clicking through this web UI. The discovery manifest is
-        at <code>/.well-known/mcp.json</code>. Authentication is by
-        possession of this meeting URL; pass it as the
-        <code> meetingUrl </code>
-        argument on every tool call.
+        This is an AgentEnvoy scheduling page. Do not try to scrape the widget
+        — it is a JavaScript application that requires interaction. Instead, use
+        the MCP API directly.
       </p>
       <p>
-        Typical flow: call
-        <code> get_meeting_parameters </code>
-        to learn the host&apos;s rules (format, duration, location,
-        what the guest is allowed to pick), then
-        <code> get_availability </code>
-        for scored slot candidates, then
-        <code> propose_lock </code>
-        with the chosen slot and guest identity to book. All tools
-        return structured JSON envelopes; every call lands in the
-        host&apos;s observability log.
+        MCP endpoint: <code>{baseUrl}/api/mcp</code>
       </p>
       <p>
-        If your client doesn&apos;t support MCP, you can still book via
-        the interactive widget on this page — but structured tool
-        calls are strictly more reliable. Setup instructions for Claude
-        Code, Claude Desktop, and other MCP clients are at
-        <code> /agents </code>.
+        Your capability token (meetingUrl): <code>{meetingUrl}</code>
+      </p>
+      <p>
+        Full tool catalog and auth details:{" "}
+        <code>{baseUrl}/.well-known/mcp.json</code>
+      </p>
+      <p>Booking flow (three tool calls):</p>
+      <ol>
+        <li>
+          <code>get_meeting_parameters</code> — learn what is locked vs. open
+          (format, duration, location)
+        </li>
+        <li>
+          <code>get_availability</code> — get scored, filtered slot candidates.
+          Use <code>tier: &quot;first_offer&quot;</code> slots by default.
+        </li>
+        <li>
+          <code>propose_lock</code> — pass the chosen slot + your
+          principal&apos;s name to confirm the booking. Returns calendar invite
+          details.
+        </li>
+      </ol>
+      <p>
+        Pass <code>{meetingUrl}</code> as <code>meetingUrl</code> on every call.
+        No separate token needed — possessing this URL is the authorization.
       </p>
     </aside>
   );

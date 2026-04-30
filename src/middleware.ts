@@ -22,6 +22,12 @@ export function middleware(req: NextRequest) {
   // Primary discovery: the MCP endpoint itself. Agents should fetch
   // `/.well-known/mcp.json` for the full manifest; the Link header is the
   // "HTTP-level pointer" form that's cheap to emit on every /meet/* GET.
+  // rel="mcp-server" is the emerging MCP community convention; rel="agent-api"
+  // is our prior value — keep both so older clients still find it.
+  res.headers.append(
+    "Link",
+    `<${origin}/api/mcp>; rel="mcp-server"; type="application/json"`
+  );
   res.headers.append(
     "Link",
     `<${origin}/api/mcp>; rel="agent-api"; type="application/json"`

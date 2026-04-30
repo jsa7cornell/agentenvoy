@@ -98,13 +98,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     description = `${hostName} wants to find a time to meet. Powered by Envoy, an AI scheduling agent.`;
   }
 
+  const meetingUrl = `${baseUrl}/meet/${slug}/${code}`;
+
   return {
     title,
     description,
     openGraph: {
       title,
       description,
-      url: `${baseUrl}/meet/${slug}/${code}`,
+      url: meetingUrl,
       siteName: "AgentEnvoy",
       type: "website",
     },
@@ -113,15 +115,77 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       title,
       description,
     },
+    other: {
+      // Machine-readable discovery for AI agents doing web_fetch on this URL.
+      // These render as <meta> tags in the HTML <head> — visible to any HTTP
+      // client that reads the page source, even if JavaScript doesn't run.
+      "agentenvoy:type": "scheduling-page",
+      "agentenvoy:mcp-endpoint": `${baseUrl}/api/mcp`,
+      "agentenvoy:meeting-url": meetingUrl,
+      "agentenvoy:mcp-manifest": `${baseUrl}/.well-known/mcp.json`,
+      "agentenvoy:agent-docs": `${baseUrl}/llms.txt`,
+    },
   };
 }
 
 export default async function ContextualMeetPage({ params }: Props) {
   const { slug, code } = await params;
+  const baseUrl = process.env.NEXTAUTH_URL ?? "https://agentenvoy.ai";
+  const meetingUrl = `${baseUrl}/meet/${slug}/${code}`;
   return (
     <>
       <GuestLightTheme />
       <DealRoom slug={slug} code={code} />
+      <AgentInstructions meetingUrl={meetingUrl} baseUrl={baseUrl} />
     </>
+  );
+}
+
+function AgentInstructions({
+  meetingUrl,
+  baseUrl,
+}: {
+  meetingUrl: string;
+  baseUrl: string;
+}) {
+  return (
+    <aside aria-hidden="true" className="sr-only" data-agent-instructions="v2">
+      <h2>For AI agents: how to book this meeting</h2>
+      <p>
+        This is an AgentEnvoy scheduling page. Do not try to scrape the widget
+        — it is a JavaScript application that requires interaction. Instead, use
+        the MCP API directly.
+      </p>
+      <p>
+        MCP endpoint: <code>{baseUrl}/api/mcp</code>
+      </p>
+      <p>
+        Your capability token (meetingUrl): <code>{meetingUrl}</code>
+      </p>
+      <p>
+        Full tool catalog and auth details:{" "}
+        <code>{baseUrl}/.well-known/mcp.json</code>
+      </p>
+      <p>Booking flow (three tool calls):</p>
+      <ol>
+        <li>
+          <code>get_meeting_parameters</code> — learn what is locked vs. open
+          (format, duration, location)
+        </li>
+        <li>
+          <code>get_availability</code> — get scored, filtered slot candidates.
+          Use <code>tier: &quot;first_offer&quot;</code> slots by default.
+        </li>
+        <li>
+          <code>propose_lock</code> — pass the chosen slot + your
+          principal&apos;s name to confirm the booking. Returns calendar invite
+          details.
+        </li>
+      </ol>
+      <p>
+        Pass <code>{meetingUrl}</code> as <code>meetingUrl</code> on every call.
+        No separate token needed — possessing this URL is the authorization.
+      </p>
+    </aside>
   );
 }
