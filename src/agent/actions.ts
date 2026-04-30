@@ -28,7 +28,7 @@ import {
   GUEST_PICKS_DURATION_MIN_MINUTES,
   GUEST_PICKS_DURATION_MAX_MINUTES,
 } from "@/lib/mcp/parameter-resolver";
-import { isGenericTopic, findActivity } from "@/lib/activity-vocab";
+import { isGenericTopic, findActivity, defaultDurationForActivity } from "@/lib/activity-vocab";
 import { MATERIAL_FIELDS, type MaterialField } from "@/lib/material-fields";
 
 // --- Helpers ---
@@ -1036,6 +1036,28 @@ export async function handleCreateLink(
       `[create_link] physical activity "${activity}" had no format — defaulting to in-person`,
     );
   }
+
+  // Activity-driven duration default (2026-04-30). When the host names a
+  // canonical activity but doesn't specify a duration, use the activity's
+  // sensible default from `activity-vocab.ts` (run → 60, hike → 120,
+  // lunch → 60, coffee → 30, etc.) instead of falling through to the
+  // global 30-min default. Solves "set up a run with John" producing a
+  // 30-min run. Host's explicit `params.duration` always wins. Compose
+  // cleanly with `guestPicks.duration: true` — when the host defers to
+  // the guest, the activity default seeds the suggestion the guest sees
+  // and they can still change it via the picker's ✏️ affordance.
+  let effectiveDurationParam: number | undefined;
+  if (typeof params.duration === "number") {
+    effectiveDurationParam = params.duration;
+  } else {
+    const activityDefault = defaultDurationForActivity(activity);
+    if (activityDefault != null) {
+      effectiveDurationParam = activityDefault;
+      console.log(
+        `[create_link] activity "${activity}" → defaultDuration=${activityDefault}min`,
+      );
+    }
+  }
   // Rebind so the rest of the handler uses the corrected value.
   // (The `format` const above is already read; we introduce effectiveFormat
   // and use it in linkRulesPreIntent below.)
@@ -1076,7 +1098,7 @@ export async function handleCreateLink(
   // long day names ("Monday") or short ones ("Mon"); persist the canonical form.
   const isVip = params.isVip === true;
   const allowWeekends = params.allowWeekends === true;
-  const isDateModeLink = (params.duration as number | undefined ?? 0) >= 24 * 60;
+  const isDateModeLink = (effectiveDurationParam ?? 0) >= 24 * 60;
   // For date-mode links (duration ≥ 1440 min), preferredTimeStart/End express
   // an event start time, not a daily slot filter. Storing them as a filter
   // window produces start==end → zero-width → all slots dropped (bug: surf trip
@@ -1227,7 +1249,7 @@ export async function handleCreateLink(
   const linkRulesPreIntent = normalizeLinkParameters({
     ...rules,
     ...(effectiveFormat ? { format: effectiveFormat } : {}),
-    ...(params.duration ? { duration: params.duration } : {}),
+    ...(effectiveDurationParam != null ? { duration: effectiveDurationParam } : {}),
     ...(urgency ? { urgency } : {}),
     ...(isVip ? { isVip: true } : {}),
     ...(allowWeekends ? { allowWeekends: true } : {}),
@@ -1339,7 +1361,7 @@ export async function handleCreateLink(
       title,
       statusLabel: getWaitingLabel({ inviteeNames, inviteeName }),
       format: effectiveFormat,
-      duration: (params.duration as number) || 30,
+      duration: effectiveDurationParam ?? 30,
     },
   });
 

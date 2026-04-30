@@ -38,25 +38,34 @@ export interface ActivityEntry {
    * Times are HH:MM in host-local TZ (interpreted at write time).
    */
   naturalWindow: { start: string; end: string } | null;
+  /**
+   * Sensible default meeting length in minutes when the host names this
+   * activity but doesn't specify a duration. Read by `handleCreateLink`
+   * before falling through to the global 30-min default. Solves the
+   * "set up a run with John — 30 min" problem (a run is naturally an
+   * hour, not half an hour). null = no override; downstream falls back
+   * to the global default.
+   */
+  defaultDuration: number | null;
 }
 
 export const ACTIVITY_VOCAB: readonly ActivityEntry[] = [
-  { name: "coffee",     aliases: ["coffee", "cafe", "café"],                            emoji: "☕",  defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "10:00" } },
-  { name: "breakfast",  aliases: ["breakfast"],                                         emoji: "🍳", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "09:00" } },
-  { name: "lunch",      aliases: ["lunch", "brunch"],                                   emoji: "🍽️", defaultFormat: "in-person", naturalWindow: { start: "11:30", end: "14:00" } },
-  { name: "dinner",     aliases: ["dinner"],                                            emoji: "🍽️", defaultFormat: "in-person", naturalWindow: { start: "18:00", end: "21:00" } },
-  { name: "drinks",     aliases: ["drinks", "cocktails", "happy hour"],                 emoji: "🍻", defaultFormat: "in-person", naturalWindow: { start: "17:00", end: "21:00" } },
-  { name: "bike ride",  aliases: ["bike ride", "bike", "biking", "cycling", "cycle"],   emoji: "🚴", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" } },
-  { name: "hike",       aliases: ["hike", "hiking", "trail"],                           emoji: "🥾", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "17:00" } },
-  { name: "run",        aliases: ["run", "running", "jog", "jogging", "trail run"],     emoji: "🏃", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" } },
-  { name: "walk",       aliases: ["walk", "walking"],                                   emoji: "🚶", defaultFormat: "in-person", naturalWindow: { start: "11:00", end: "20:00" } },
-  { name: "surf",       aliases: ["surf", "surfing"],                                   emoji: "🏄", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "18:00" } },
-  { name: "yoga",       aliases: ["yoga"],                                              emoji: "🧘", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" } },
-  { name: "workout",    aliases: ["workout", "gym", "training", "lift"],                emoji: "🏋️", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" } },
-  { name: "swim",       aliases: ["swim", "swimming"],                                  emoji: "🏊", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" } },
-  { name: "brainstorm", aliases: ["brainstorm", "brainstorming"],                       emoji: "🧠", defaultFormat: "video",     naturalWindow: null },
-  { name: "intro",      aliases: ["intro", "introduction", "meet-and-greet"],           emoji: "👋", defaultFormat: "video",     naturalWindow: null },
-  { name: "interview",  aliases: ["interview"],                                         emoji: "🎤", defaultFormat: "video",     naturalWindow: null },
+  { name: "coffee",     aliases: ["coffee", "cafe", "café"],                            emoji: "☕",  defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "10:00" }, defaultDuration: 30 },
+  { name: "breakfast",  aliases: ["breakfast"],                                         emoji: "🍳", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "09:00" }, defaultDuration: 60 },
+  { name: "lunch",      aliases: ["lunch", "brunch"],                                   emoji: "🍽️", defaultFormat: "in-person", naturalWindow: { start: "11:30", end: "14:00" }, defaultDuration: 60 },
+  { name: "dinner",     aliases: ["dinner"],                                            emoji: "🍽️", defaultFormat: "in-person", naturalWindow: { start: "18:00", end: "21:00" }, defaultDuration: 90 },
+  { name: "drinks",     aliases: ["drinks", "cocktails", "happy hour"],                 emoji: "🍻", defaultFormat: "in-person", naturalWindow: { start: "17:00", end: "21:00" }, defaultDuration: 90 },
+  { name: "bike ride",  aliases: ["bike ride", "bike", "biking", "cycling", "cycle"],   emoji: "🚴", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
+  { name: "hike",       aliases: ["hike", "hiking", "trail"],                           emoji: "🥾", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "17:00" }, defaultDuration: 120 },
+  { name: "run",        aliases: ["run", "running", "jog", "jogging", "trail run"],     emoji: "🏃", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
+  { name: "walk",       aliases: ["walk", "walking"],                                   emoji: "🚶", defaultFormat: "in-person", naturalWindow: { start: "11:00", end: "20:00" }, defaultDuration: 60 },
+  { name: "surf",       aliases: ["surf", "surfing"],                                   emoji: "🏄", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "18:00" }, defaultDuration: 90 },
+  { name: "yoga",       aliases: ["yoga"],                                              emoji: "🧘", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
+  { name: "workout",    aliases: ["workout", "gym", "training", "lift"],                emoji: "🏋️", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
+  { name: "swim",       aliases: ["swim", "swimming"],                                  emoji: "🏊", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
+  { name: "brainstorm", aliases: ["brainstorm", "brainstorming"],                       emoji: "🧠", defaultFormat: "video",     naturalWindow: null, defaultDuration: null },
+  { name: "intro",      aliases: ["intro", "introduction", "meet-and-greet"],           emoji: "👋", defaultFormat: "video",     naturalWindow: null, defaultDuration: null },
+  { name: "interview",  aliases: ["interview"],                                         emoji: "🎤", defaultFormat: "video",     naturalWindow: null, defaultDuration: null },
 ] as const;
 
 /**
@@ -119,6 +128,17 @@ export function naturalWindowForActivity(
   activity: string | null | undefined,
 ): { start: string; end: string } | null {
   return findActivity(activity)?.naturalWindow ?? null;
+}
+
+/**
+ * Sensible duration override for a given activity. Null if the activity
+ * isn't in the vocab or doesn't carry an opinion. Read by handleCreateLink
+ * before falling through to the global 30-min default.
+ */
+export function defaultDurationForActivity(
+  activity: string | null | undefined,
+): number | null {
+  return findActivity(activity)?.defaultDuration ?? null;
 }
 
 /**
