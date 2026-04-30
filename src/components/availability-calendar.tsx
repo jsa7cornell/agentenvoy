@@ -394,12 +394,12 @@ function SlotChipRows({
         }
         disabled={!onSelectSlot}
         className={`
-          inline-flex items-center px-2 py-0.5 rounded-full text-[11px] leading-none border transition-all
+          inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium leading-none border transition-all
           ${variant === "matched"
-            ? "border-emerald-400/60 bg-emerald-950/30 text-emerald-300 hover:border-emerald-300"
+            ? "border-emerald-300 dark:border-emerald-700 bg-emerald-100 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 hover:border-emerald-400"
             : variant === "hostOnly"
-              ? "border-dashed border-DEFAULT bg-transparent text-muted hover:border-secondary hover:text-primary"
-              : "border-DEFAULT bg-surface-secondary text-primary hover:border-secondary hover:bg-surface"}
+              ? "border-dashed border-zinc-300 dark:border-zinc-700 bg-transparent text-zinc-500 dark:text-zinc-500 hover:border-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+              : "border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-900 dark:text-indigo-100 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 hover:border-indigo-400"}
           ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
         `}
       >
