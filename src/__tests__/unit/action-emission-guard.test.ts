@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { needsActionEmissionRetry } from "@/agent/action-emission-guard";
+import { needsActionEmissionRetry, needsActionShapeRetry } from "@/agent/action-emission-guard";
+import type { ActionRequest } from "@/agent/actions";
 
 describe("needsActionEmissionRetry", () => {
   it("returns false when an agentenvoy-action block is present", () => {
@@ -79,5 +80,161 @@ describe("needsActionEmissionRetry", () => {
       '[ACTION]{"action":"create_link","params":{"inviteeName":"Bob","format":"video","duration":30,"rules":{"preferredDays":["Tue","Wed","Thu"]}}}[/ACTION]\n\n' +
       "Set up a 30-min video call with Bob. I'm offering Tue and Wed mornings, plus Thu afternoon PT. Share his email if you want me to send it — or copy the link below and send it yourself. Let me know any tweaks.";
     expect(needsActionEmissionRetry(canonical)).toBe(false);
+  });
+
+  // Layer 2a (proposal `2026-04-30_composer-action-fidelity` Gap B):
+  // "Set up X" pattern must accept activity-vocab nouns, not just
+  // meeting/call/chat/etc. The composer's "Set up a coffee with Suzie..."
+  // failure (failure #3) slipped past the original pattern because "coffee"
+  // wasn't on the trailing-noun whitelist.
+  it("2a: catches 'Set up a coffee with Suzie' (activity-vocab noun)", () => {
+    expect(
+      needsActionEmissionRetry("Set up a coffee with Suzie next Tuesday."),
+    ).toBe(true);
+  });
+
+  it("2a: catches 'Set up a run with Jason' (activity-vocab noun)", () => {
+    expect(
+      needsActionEmissionRetry("Set up a run with Jason for next week."),
+    ).toBe(true);
+  });
+
+  it("2a: catches 'Set up a hike with Larry' (activity-vocab noun)", () => {
+    expect(
+      needsActionEmissionRetry("Set up a hike with Larry on Saturday."),
+    ).toBe(true);
+  });
+
+  it("2a: catches 'Set up a bike ride with Sarah' (multi-word activity-vocab noun)", () => {
+    expect(
+      needsActionEmissionRetry("Set up a bike ride with Sarah this weekend."),
+    ).toBe(true);
+  });
+
+  it("2a: still catches the original 'Set up a 30-min phone call' pattern", () => {
+    // Belt-and-suspenders: the activity-vocab union must NOT regress the
+    // original noun-list coverage.
+    expect(
+      needsActionEmissionRetry("Set up a 30-min phone call with Mike."),
+    ).toBe(true);
+  });
+});
+
+describe("needsActionShapeRetry", () => {
+  // Helper: build an ActionRequest tersely.
+  const action = (params: Record<string, unknown>): ActionRequest => ({
+    action: "create_link",
+    params,
+  });
+
+  it("returns null when no delegation prose detected", () => {
+    expect(
+      needsActionShapeRetry("Set up a 30-min call with Bob.", [
+        action({ inviteeName: "Bob" }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("returns null on empty input", () => {
+    expect(needsActionShapeRetry("", [])).toBeNull();
+  });
+
+  // Layer 2b (Gap A1): the prose-action coherence check is the new shape
+  // of validation that runs alongside the existing emission guard.
+  it("flags 'she picks the spot' without guestPicks.location", () => {
+    const result = needsActionShapeRetry(
+      "Set up a coffee with Suzie — she picks the spot.",
+      [action({ inviteeName: "Suzie", activity: "coffee" })],
+    );
+    expect(result).not.toBeNull();
+    expect(result?.flaggedReason).toBe("delegation:location");
+    expect(result?.hint).toMatch(/guestPicks\.location/);
+  });
+
+  it("does NOT flag when guestPicks.location IS set", () => {
+    expect(
+      needsActionShapeRetry(
+        "Set up a coffee with Suzie — she picks the spot.",
+        [
+          action({
+            inviteeName: "Suzie",
+            activity: "coffee",
+            guestPicks: { location: true },
+          }),
+        ],
+      ),
+    ).toBeNull();
+  });
+
+  it("flags 'he picks the location' without guestPicks.location", () => {
+    const result = needsActionShapeRetry(
+      "Set up a meeting with Larry — he picks the location.",
+      [action({ inviteeName: "Larry" })],
+    );
+    expect(result?.flaggedReason).toBe("delegation:location");
+  });
+
+  it("flags 'they pick the day' without guestPicks.date", () => {
+    const result = needsActionShapeRetry(
+      "Set up a sync with the team — they pick the day.",
+      [action({ inviteeNames: ["Alex", "Sam"] })],
+    );
+    expect(result?.flaggedReason).toBe("delegation:date");
+  });
+
+  it("flags 'let her choose where' without guestPicks.location", () => {
+    const result = needsActionShapeRetry(
+      "Set up a coffee with Suzie — let her choose where.",
+      [action({ inviteeName: "Suzie", activity: "coffee" })],
+    );
+    expect(result?.flaggedReason).toBe("let-them-pick:location");
+  });
+
+  it("flags 'wherever works for her' without guestPicks.location", () => {
+    const result = needsActionShapeRetry(
+      "Set up a meeting with Suzie — wherever works for her.",
+      [action({ inviteeName: "Suzie" })],
+    );
+    expect(result?.flaggedReason).toBe("wherever-works");
+  });
+
+  it("does NOT flag 'she picks' without a field anchor (too generic)", () => {
+    // The patterns require a field noun (spot/location/day/length/format etc).
+    // Bare "she picks" is too ambiguous — composer might be narrating
+    // post-confirmation that the guest already picked something.
+    expect(
+      needsActionShapeRetry("She picks one of the times.", [
+        action({ inviteeName: "Suzie" }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("flags location delegation when actions array is empty", () => {
+    // If composer narrates delegation but emitted no actions at all, the
+    // shape check still fires (parsedActions=[] means there's no action
+    // with a matching guestPicks key). The emission guard catches "no
+    // action" cases; this is a defense-in-depth assertion that shape doesn't
+    // silently pass.
+    const result = needsActionShapeRetry(
+      "Set up a coffee with Suzie — she picks the spot.",
+      [],
+    );
+    expect(result?.flaggedReason).toBe("delegation:location");
+  });
+
+  it("returns null when delegation matches an array-form guestPicks", () => {
+    // guestPicks.format can be an array (allowed values list); coherence
+    // check should treat that as 'present'.
+    expect(
+      needsActionShapeRetry(
+        "Set up a meeting with Bob — he picks the format.",
+        [
+          action({
+            inviteeName: "Bob",
+            guestPicks: { format: ["video", "phone"] },
+          }),
+        ],
+      ),
+    ).toBeNull();
   });
 });

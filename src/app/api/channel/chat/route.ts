@@ -17,7 +17,8 @@ import {
   parseChannelMessageMetadata,
 } from "@/lib/channel/metadata-schema";
 import type { ChannelMessageMetadata } from "@/lib/channel/metadata-schema";
-import { needsActionEmissionRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
+import { needsActionEmissionRetry, needsActionShapeRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
+import type { SelfCheckRecord } from "@/lib/channel/metadata-schema";
 import {
   selectVariant,
   type ProgressStage,
@@ -1032,27 +1033,63 @@ export async function POST(req: NextRequest) {
           );
           let fullText = first.text;
 
+          // selfCheck record — written to message metadata if either guard
+          // fires. Read by future eval rig (proposal §2 Layer 4).
+          let selfCheckRecord: SelfCheckRecord | null = null;
+
           // Skip the action-emission retry for inquire — the inquire
           // playbook forbids [ACTION] blocks by contract. A missing ACTION
           // block is expected, not a drift signal.
-          if (!isInquireTier && needsActionEmissionRetry(fullText)) {
-            console.warn(
-              `[channel/chat] intent-without-emit detected for user ${safeUser.id}, forcing retry`
-            );
-            // Emit retry frame (capped at 2 per turn).
-            emitStatus("retrying");
-            const retry = await generateText({
-              model: envoyModel(modelId),
-              maxOutputTokens: 512,
-              system,
-              messages: [
-                ...messages,
-                { role: "assistant", content: fullText },
-                { role: "user", content: ACTION_EMISSION_RETRY_PROMPT },
-              ],
-            });
-            if (retry.text.trim()) {
-              fullText += "\n\n" + retry.text;
+          if (!isInquireTier) {
+            // Layer 2a — existing emission guard (no [ACTION] block at all).
+            const emissionFired = needsActionEmissionRetry(fullText);
+            // Layer 2b — new shape guard (action emitted but missing
+            // guestPicks key required by prose). Only runs when emission
+            // guard didn't fire — emission's [ACTION]-present short-circuit
+            // is what enables shape to inspect actions, but if no [ACTION]
+            // is present at all the shape check has nothing to inspect.
+            const shapeFired = !emissionFired
+              ? needsActionShapeRetry(fullText, parseActions(fullText))
+              : null;
+
+            if (emissionFired || shapeFired) {
+              const flaggedReason = shapeFired?.flaggedReason ?? "set-up-x";
+              const retryHint = shapeFired?.hint ?? ACTION_EMISSION_RETRY_PROMPT;
+              console.warn(
+                `[channel/chat] action-fidelity guard fired (${flaggedReason}) for user ${safeUser.id}, forcing retry`
+              );
+              const originalText = fullText;
+              selfCheckRecord = {
+                flaggedReason,
+                retryAttempted: true,
+                retrySucceeded: null,
+                originalText,
+              };
+              // Emit retry frame (capped at 2 per turn).
+              emitStatus("retrying");
+              const retry = await generateText({
+                model: envoyModel(modelId),
+                maxOutputTokens: 512,
+                system,
+                messages: [
+                  ...messages,
+                  { role: "assistant", content: fullText },
+                  { role: "user", content: retryHint },
+                ],
+              });
+              if (retry.text.trim()) {
+                fullText += "\n\n" + retry.text;
+                // Retry succeeded if it added any content. We don't try to
+                // judge whether the retry's content actually fixed the
+                // problem here — Layer 4 corpus + offline eval analyze that.
+                selfCheckRecord = {
+                  ...selfCheckRecord,
+                  retrySucceeded: true,
+                  correctedText: fullText,
+                };
+              } else {
+                selfCheckRecord = { ...selfCheckRecord, retrySucceeded: false };
+              }
             }
           }
 
@@ -1096,6 +1133,9 @@ export async function POST(req: NextRequest) {
                 contextBlock: contextParts.join("\n"),
                 modelId,
               };
+            }
+            if (selfCheckRecord) {
+              additions.selfCheck = selfCheckRecord;
             }
             return mergeChannelMetadata(base ?? null, additions);
           };

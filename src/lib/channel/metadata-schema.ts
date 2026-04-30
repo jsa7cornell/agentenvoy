@@ -79,6 +79,26 @@ export const ToolInvocationRecordSchema = z.object({
 });
 export type ToolInvocationRecord = z.infer<typeof ToolInvocationRecordSchema>;
 
+/**
+ * Self-check trip record — written when `action-emission-guard` fires (either
+ * `needsActionEmissionRetry` or `needsActionShapeRetry`). Co-locates the
+ * eval-relevant payload with the rest of the message metadata. Read by a
+ * future eval rig (proposal `2026-04-30_composer-action-fidelity` Layer 3,
+ * deferred). Host-only — NOT in `GUEST_METADATA_ALLOWLIST` below.
+ */
+export const SelfCheckRecordSchema = z.object({
+  /** Pattern name from the guard ("set-up-x", "delegation:location", etc.). */
+  flaggedReason: z.string(),
+  retryAttempted: z.boolean(),
+  /** null while retry is in flight; true/false after it resolves. */
+  retrySucceeded: z.boolean().nullable(),
+  /** Pre-retry composer output. */
+  originalText: z.string().optional(),
+  /** Post-retry composer output (when changed by retry). */
+  correctedText: z.string().optional(),
+});
+export type SelfCheckRecord = z.infer<typeof SelfCheckRecordSchema>;
+
 export const ChannelMessageMetadataSchema = z
   .object({
     kind: z.string().optional(),
@@ -93,6 +113,7 @@ export const ChannelMessageMetadataSchema = z
     promptContext: PromptContextSchema.optional(),
     marcoPending: MarcoPendingSchema.nullable().optional(),
     toolInvocations: z.array(ToolInvocationRecordSchema).optional(),
+    selfCheck: SelfCheckRecordSchema.optional(),
   })
   .passthrough();
 export type ChannelMessageMetadata = z.infer<typeof ChannelMessageMetadataSchema>;
