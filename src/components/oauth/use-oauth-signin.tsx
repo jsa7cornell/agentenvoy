@@ -44,16 +44,25 @@ interface Result {
 const RETURNING_COOKIE = "ae_returning";
 
 /**
- * Google's `prompt` parameter, chosen per mode. Single source of truth —
- * mode encodes intent, prompt follows.
+ * Google's `prompt` parameter, chosen per mode + cookie state.
  *
- * - `login`         → `select_account`. Cookie-state-independent: Google
- *                     forces the consent screen on first-ever authorization
- *                     for a (clientId, account, scope set) tuple regardless
- *                     of `prompt`, so first-time users still see it; returning
- *                     users skip it without minting a new refresh_token (the
- *                     1i regression). The cookie controls the modal (UX hint),
- *                     not Google's flow — keep them independent.
+ * - `login` + cookie present  → `select_account`. Returning user: preserve
+ *                               the existing refresh_token (the 1i regression
+ *                               fix). Google's account picker runs, no new
+ *                               token minted.
+ * - `login` + cookie absent   → `consent`. The user is either genuinely new
+ *                               OR re-signing up after account deletion whose
+ *                               Google token revocation failed (best-effort in
+ *                               delete/route.ts). In the re-signup case Google
+ *                               remembers the old authorization and with
+ *                               `select_account` skips the consent screen AND
+ *                               does not re-issue a refresh_token. That leaves
+ *                               refresh_token: null in the new Account row →
+ *                               getGoogleCalendarClient throws "No Google
+ *                               account connected" → right panel shows
+ *                               "Calendar not connected" even though scope
+ *                               includes calendar. Using `consent` forces a
+ *                               fresh grant + new refresh_token in both cases.
  * - `first-connect` → `consent`. Defensive — Google forces consent on first
  *                     grant anyway; this is belt-and-suspenders.
  * - `upgrade-scope` → `consent`. Load-bearing — re-show scope checklist
@@ -66,7 +75,10 @@ const RETURNING_COOKIE = "ae_returning";
  * 2026-04-21 §2.6 / §1.2 N7.
  */
 function promptForMode(mode: PreConsentMode): string {
-  return mode === "login" ? "select_account" : "consent";
+  if (mode === "login") {
+    return hasReturningCookie() ? "select_account" : "consent";
+  }
+  return "consent";
 }
 
 export function hasReturningCookie(): boolean {
