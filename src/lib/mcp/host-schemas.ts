@@ -66,7 +66,10 @@ export const HOST_MCP_TOOLS = {
     output: createLinkOutput,
     requiredScope: "schedule" as HostScope,
     description:
-      "Mint a new scheduling link for the host. Returns a shareable URL the host can send to the person they want to meet. No email required — the URL is the capability.",
+      "Mint a new scheduling link for the host. Returns a shareable URL the host can send to the person they want to meet. No email required — the URL is the capability. " +
+      "If `activity` is one of {run, walk, bike ride, yoga, workout, swim, breakfast, lunch, dinner, drinks, surf, coffee, hike, brainstorm, intro, interview}, " +
+      "omitting `durationMinutes` produces a sensible activity-default (e.g., coffee=30, lunch=60, hike=120). " +
+      "Otherwise duration falls back to 30. The activity also seeds the link title and the post-confirm event card icon.",
   },
 } as const;
 

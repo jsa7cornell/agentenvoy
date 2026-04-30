@@ -17,10 +17,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { NextRequest, NextResponse } from "next/server";
-import { authorizeHostMcpCall, hasScope } from "./auth";
+import { authorizeHostMcpCall } from "./auth";
+import { checkHostPatRateLimit } from "@/lib/mcp/auth";
 import { registerHostMcpTools } from "@/lib/mcp/host-tools";
-import { HOST_MCP_TOOLS } from "@/lib/mcp/host-schemas";
-import type { HostMcpToolName } from "@/lib/mcp/host-schemas";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,8 +34,16 @@ function unauthorized(reason: string): NextResponse {
 }
 
 async function handle(req: NextRequest): Promise<NextResponse | Response> {
-  // Auth is checked BEFORE handing off to the MCP transport. The transport
-  // never sees unauthenticated traffic — this is the choke-point per §2.3.
+  // Auth is checked BEFORE the MCP transport. The transport never sees
+  // unauthenticated traffic — this is the auth choke-point.
+  //
+  // Scope is NOT checked here. It used to be — a union-check across every
+  // registered tool's requiredScope — which made `read`-only PATs reject at
+  // the route layer because the SDK had no way to advertise a different
+  // tool subset per token. Scope is now checked per-tool in
+  // `wrapWithScopeCheck` (see `lib/mcp/host-tools.ts`), so a read-only
+  // token can list/call read tools but gets `scope_denied` per-call on
+  // write tools. Decided: 2026-04-30 stabilization-package proposal §B5.
   const principalCtx = await authorizeHostMcpCall(
     req.headers.get("authorization")
   );
@@ -45,25 +52,17 @@ async function handle(req: NextRequest): Promise<NextResponse | Response> {
     return unauthorized(principalCtx.reason);
   }
 
-  // Scope pre-flight: check that every registered tool's required scope is
-  // satisfied. This produces a clear "scope_denied" before the SDK ever runs
-  // tool resolution. Individual handlers trust that scope is already verified.
-  // (Per §2.3: "The host route's middleware checks requiredScope ⊆ issuedScopes
-  // BEFORE the handler runs.")
-  //
-  // For per-tool scope denial we'd need to intercept after tool selection;
-  // for now we check the union and fail the whole request if any tool in the
-  // registry requires a scope the token doesn't have. This is safe at PR-3a
-  // scope (single tool requiring "schedule"). Per-tool scope denial is a
-  // follow-up if the read/schedule split matters in practice.
-  for (const name of Object.keys(HOST_MCP_TOOLS) as HostMcpToolName[]) {
-    const required = HOST_MCP_TOOLS[name].requiredScope;
-    if (!hasScope(principalCtx.scopes, required)) {
-      return NextResponse.json(
-        { error: "scope_denied", required, issued: principalCtx.scopes },
-        { status: 403 }
-      );
-    }
+  // Per-PAT rate limit. Fail-closed — every host call (read or write) draws
+  // from the same per-token bucket. WISHLIST #39 + stabilization-package §B.
+  const rate = await checkHostPatRateLimit(principalCtx.tokenId);
+  if (!rate.ok) {
+    return NextResponse.json(
+      { error: rate.error, retryAfterSeconds: rate.retryAfterSeconds },
+      {
+        status: rate.error === "rate_limit_exceeded" ? 429 : 503,
+        headers: { "retry-after": String(rate.retryAfterSeconds) },
+      }
+    );
   }
 
   const server = new McpServer(HOST_MCP_SERVER_INFO);

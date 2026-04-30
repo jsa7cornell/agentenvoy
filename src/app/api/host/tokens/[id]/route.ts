@@ -1,6 +1,11 @@
 /**
- * POST /api/host/tokens/:id/revoke  — revoke a PAT
- * DELETE /api/host/tokens/:id       — revoke a PAT (alias)
+ * DELETE /api/host/tokens/:id — revoke a PAT.
+ *
+ * Convention: REST semantics. The parent host-MCP proposal §3.4 originally
+ * sketched `POST /api/host/tokens/:id/revoke` (sub-path); we use DELETE on
+ * `:id` instead because (a) it matches REST convention agents expect and
+ * (b) it's the same shape as `/api/host/tokens` (POST mint, GET list,
+ * DELETE :id revoke). Decided: 2026-04-30 stabilization-package §3 Group B.
  */
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
@@ -10,7 +15,12 @@ import { prisma } from "@/lib/prisma";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function revoke(id: string): Promise<NextResponse> {
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+): Promise<NextResponse> {
+  const { id } = await params;
+
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -41,20 +51,4 @@ async function revoke(id: string): Promise<NextResponse> {
   });
 
   return NextResponse.json({ ok: true });
-}
-
-export async function POST(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
-): Promise<NextResponse> {
-  const { id } = await params;
-  return revoke(id);
-}
-
-export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
-): Promise<NextResponse> {
-  const { id } = await params;
-  return revoke(id);
 }

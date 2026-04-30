@@ -779,7 +779,11 @@ describe("POST /api/mcp — cancel_meeting / reschedule_meeting", () => {
     const sc = rpc.result?.structuredContent;
     expect(sc?.ok).toBe(false);
     expect(sc?.reason).toBe("tool_not_implemented");
-    expect(String(sc?.message)).toMatch(/not yet implemented/);
+    // Message is guest-safe — no internal repo paths, no proposal filenames.
+    // Stabilization-package §3 Group A.
+    expect(String(sc?.message)).toMatch(/not currently available/);
+    expect(String(sc?.message)).not.toMatch(/proposals\//);
+    expect(String(sc?.message)).not.toMatch(/reschedule-pipeline/);
   });
 });
 

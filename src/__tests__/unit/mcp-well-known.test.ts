@@ -32,9 +32,18 @@ describe("GET /.well-known/mcp.json", () => {
     expect(json.auth.tokenParam).toBe("meetingUrl");
     expect(json.endpoint).toMatch(/\/api\/mcp$/);
 
+    // Manifest advertises every registered tool EXCEPT those explicitly
+    // hidden — currently `reschedule_meeting`, which returns
+    // `tool_not_implemented` and is gated on the in-flight reschedule-pipeline
+    // proposal. The SDK still registers the stub for already-cached agents.
+    // Stabilization-package §3 Group A.
+    const MANIFEST_HIDDEN = new Set(["reschedule_meeting"]);
     const manifestNames = json.tools.map((t) => t.name).sort();
-    const registryNames = [...MCP_TOOL_NAMES].sort();
+    const registryNames = [...MCP_TOOL_NAMES]
+      .filter((n) => !MANIFEST_HIDDEN.has(n))
+      .sort();
     expect(manifestNames).toEqual(registryNames);
+    expect(manifestNames).not.toContain("reschedule_meeting");
 
     // Every tool's input schema should be an object — the SDK rejects
     // non-object roots, and `.well-known` clients will trip on the same

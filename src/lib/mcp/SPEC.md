@@ -39,12 +39,37 @@ High-level map of what's built vs. what's still owed. "Agent platform" = the who
 | `canObject` derivation | `can-object.ts` | Pure function over session state (invariant 6). |
 | Preference signal surface | `tools.ts` + `scoring.ts` | Envelope `.preferred` primitive + `slot.preferred` + `rules.isVip`/`timingPreference`/`guestPicksWindow` passthrough (invariant 8, 9). Shipped PR sweep 2026-04-20. |
 
+### Shipped (live today — host-side)
+
+| Capability | Where | Notes |
+|---|---|---|
+| Host-side MCP server | `/api/mcp/host` (Next.js route) | PAT-bearer auth; principal is the host's user account. Per-PAT rate-limit bucket (`host_pat:<tokenId>`). **Shipped 2026-04-30** (parent: `proposals/2026-04-29_host-side-mcp-act-as-me_*_decided-2026-04-29.md`; stabilization fold: `proposals/2026-04-30_host-mcp-stabilization-package_*_decided-2026-04-30.md`). |
+| PAT mint / list / revoke | `/api/host/tokens` (POST mint, GET list), `/api/host/tokens/:id` (DELETE revoke) | Format: `agentenvoy_pat_live_<43-char-base62>`. Plaintext shown ONCE at mint; SHA-256 stored. `displayId` (8 chars) for revocation UI. **`_live_` prefix is reserved**: when a `_test_` tier lands, it shares the same hash table and rate-limit bucket-space prefix; no plaintext crosses tiers; mint endpoint validates the prefix. |
+| Scope cascade | `auth.ts#hasScope` | `admin ⊇ schedule ⊇ read`. Coarse-grained by deliberate decision per parent §6 — fine-grained scopes deferred until a real use case requires them. |
+| Per-tool scope enforcement | `host-tools.ts#wrapWithScopeCheck` | Scope is checked PER-CALL (typed `scope_denied` refusal), not per-request union. The earlier transport-boundary union check was a bug — read-only PATs were structurally non-functional because they'd fail the union of every registered tool's `requiredScope`. Stabilization-package §B5. |
+| Tool: `create_link` | `host-tools.ts#handleCreateLinkTool` → `agent/actions.ts#handleCreateLink` | Mints a shareable URL the host distributes manually. **No email parameters** — AgentEnvoy is URL-based, not email-reliant. Activity-vocab seeds duration when omitted (e.g., `activity: "coffee"` → 30 min, `"hike"` → 120 min; see `src/lib/activity-vocab.ts`). |
+| Host call logging | `host-tools.ts#withHostCallLogging` → `call-log.ts#writeMcpCallLog` | Each host call writes `MCPCallLog` with `userId` set, `linkId` null, `principal: { kind: "host_pat", tokenId, displayId }`. Discriminator on `principal.kind` per parent §7.4 Option A — no parallel column. |
+| **Scope IS consent** | (architectural) | No per-call consent gate. No `consent_required` refusal. The host granting a `schedule`-scoped token IS the authorization for write tools. Decided in parent §6, reaffirmed in stabilization-package. |
+| Rate limiting (host bucket) | `auth.ts#checkHostPatRateLimit` | Single bucket per PAT (60 calls / 60 sec, fail-closed). Distinct from per-link guest buckets. |
+| Manifest discovery | `/.well-known/mcp.json` | Advertises both `/api/mcp` (guest URL-capability) and `/api/mcp/host` (host PAT-bearer). `urlPattern` accepts both `/meet/{slug}/{code}` (canonical) and `/meet/{slug}?c={code}` (legacy). `reschedule_meeting` filtered from manifest until reschedule-pipeline ships (the SDK still registers the stub for already-cached agents). |
+
+### CI lints (structural protections)
+
+These tests run on every PR and fail loudly when registry shapes drift:
+
+| Lint | Where | What it catches |
+|---|---|---|
+| Every `MCP_TOOLS` entry has `MCP_RATE_LIMITS` | `__tests__/unit/mcp-schemas.test.ts` | A tool registered without a rate-limit policy falls into the unknown-tool fail-closed branch (which is what bit `lock_activity_location` — every call returned a fixed `retryAfterSeconds: 30` regardless of caller IP or timing). |
+| Every `HOST_MCP_TOOLS` entry has `requiredScope` ∈ {read,schedule,admin} | `__tests__/unit/mcp-schemas.test.ts` | A host tool registered without a scope would inherit no enforcement. |
+
 ### Owed (roadmap)
 
 | Gap | Blocker / owner | Tracked |
 |---|---|---|
-| **Host-side MCP server.** A separate `/api/mcp/host` route, authenticated as a principal (OAuth 2.1 + PKCE preferred; PAT as phase-1 fallback). Initial tool set: `list_my_links`, `create_link`, `get_my_availability`, `list_my_sessions`, `post_to_deal_room`, `confirm_session`, `update_my_preferences`. Scopes: `read` / `schedule` / `admin`. | Big feature — standalone proposal pending | `WISHLIST.md` #39 |
-| **OAuth 2.1 + PKCE infrastructure.** Needed for both host-side MCP and for the Connector Directory submission. AgentEnvoy has no OAuth server today. | Blocked on proposal for host-side MCP | `WISHLIST.md` #39 |
+| **Additional host tools — read-tier (`get_my_availability`, `list_my_sessions`).** PR-2 of parent host-MCP proposal. Sequenced after stabilization-package lands. | Stabilization shipped 2026-04-30 — PR-2 next | parent host-MCP proposal §11 |
+| **Additional host tools — write-tier (`post_to_deal_room`, `confirm_session`).** PR-3b of parent. Includes deal-room `host_agent` banner. | Stabilization shipped 2026-04-30 — after PR-2 | parent host-MCP proposal §11 |
+| **Reschedule patch-in-place pipeline.** Both surfaces (guest `reschedule_meeting`, eventual host `reschedule_my_session`). Currently stubbed (`tool_not_implemented`). | Proposal in draft | `proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md` |
+| **OAuth 2.1 + PKCE infrastructure.** PAT bridge is sufficient for John and friends-with-Claude per the friend-fit framing; OAuth deferred indefinitely until there's a real reason (Connector Directory submission, friend asks for it). | Indefinitely deferred | parent §11 |
 | **`propose_lock` offer-set enforcement.** Server currently does not validate that a proposed `start` is a member of the last `get_availability` slot set. Guest agents have a client-side contract not to synthesize out-of-set times, but nothing enforces it server-side. Follow-up: reuse or fork `slot_mismatch` into offer-set membership vs. session-level contention. | Carried as wishlist | §8 bullet "Class 4"; issue follow-up |
 | **Script F' enablement.** External-agent "suggest a time outside the offered set" path. Two gaps that must ship together: (a) MCP wire — either new `propose_slot` tool or extend `propose_parameters` to carry a datetime override; (b) widget `deriveMode` — auto-transition from `offer` → `negotiate` with one-line narration when the external agent's suggestion lands. | ~1 day of work once proposal lands | `WISHLIST.md` #40 |
 | **Directives → `linkRules` persistence + MCP passthrough.** Directives extracted from Envoy↔host clarification turns don't persist into `linkRules` yet. When they do, the preference signal surface extends to include them — same pattern as `timingLabel`. | Decoupled; lands on its own clock | Noted in §8 "Envoy↔host clarifications (out of scope here)" |

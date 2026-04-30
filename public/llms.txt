@@ -42,10 +42,72 @@ is authorization; there is no separate token exchange.
 - `cancel_meeting`, `reschedule_meeting` — lifecycle tools for previously
   agreed meetings. (In development at time of writing — check the manifest.)
 
+## Worked example — booking in 3 calls
+
+A guest agent given `https://agentenvoy.ai/meet/johnanderson/abc123` would
+typically:
+
+1. Read the parameter envelope to see what's locked vs. open:
+
+   ```json
+   {
+     "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+     "params": {
+       "name": "get_meeting_parameters",
+       "arguments": { "meetingUrl": "https://agentenvoy.ai/meet/johnanderson/abc123" }
+     }
+   }
+   ```
+
+2. Read scored availability for the relevant date range:
+
+   ```json
+   {
+     "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+     "params": {
+       "name": "get_availability",
+       "arguments": {
+         "meetingUrl": "https://agentenvoy.ai/meet/johnanderson/abc123",
+         "dateRange": { "start": "2026-05-04", "end": "2026-05-10" }
+       }
+     }
+   }
+   ```
+
+   Returns up to 20 slots by default (best-first by score). Each slot has
+   `start` (UTC) and `localStart` (host's timezone, no offset) — display in
+   `localStart` to save the agent and the user from doing UTC math. Slots
+   with `preferred: true` are host-favorite picks; prefer those.
+
+3. Lock the slot — `propose_lock` accepts inline `overrides` for any open
+   parameter, so a guest-must-resolve `format` doesn't need a separate
+   `propose_parameters` round-trip:
+
+   ```json
+   {
+     "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+     "params": {
+       "name": "propose_lock",
+       "arguments": {
+         "meetingUrl": "https://agentenvoy.ai/meet/johnanderson/abc123",
+         "slot": { "start": "2026-05-05T16:00:00Z" },
+         "guest": { "email": "alice@example.com", "name": "Alice Example" },
+         "overrides": { "format": "video" }
+       }
+     }
+   }
+   ```
+
+   Returns `meetLink` + `eventLink` on success, or a typed refusal
+   (`slot_taken_during_handshake`, `consent_not_accepted`, etc.) with
+   `counterProposal[]` when the server has alternates.
+
 ## Principles
 
 1. **URL-as-capability-token.** The meeting URL IS the bearer. Don't share
-   it outside the guest-agent chain it was delegated to.
+   it outside the guest-agent chain it was delegated to. Both URL forms
+   resolve identically at the API: `/meet/<slug>/<code>` (canonical, what
+   `create_link` mints) and `/meet/<slug>?c=<code>` (legacy).
 2. **Ground-truth calendar.** Every availability read is the host's actual
    scored schedule filtered through the link rules — what the UI widget
    shows, your agent sees.
@@ -54,6 +116,15 @@ is authorization; there is no separate token exchange.
    in `propose_lock` has a paper trail.
 4. **Per-tool rate limits.** Read-only tools fail open; write tools fail
    closed with `retryAfterSeconds`. See `/.well-known/mcp.json`.
+
+## Note for HTML→markdown fetchers
+
+If you're fetching the per-link page (`/meet/<slug>` or `/meet/<slug>/<code>`)
+through an HTML-to-markdown converter and seeing tool names like
+`get\_meeting\_parameters` with literal backslashes, that's your fetcher
+escaping underscores for markdown. The source HTML emits the names
+unescaped — strip the backslashes or use the JSON manifest at
+`/.well-known/mcp.json` as the canonical source of truth.
 
 ## For humans
 

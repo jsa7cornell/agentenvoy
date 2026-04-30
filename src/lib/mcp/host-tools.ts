@@ -2,23 +2,28 @@
  * Host-side MCP tool handlers.
  *
  * `registerHostMcpTools(server, principalCtx)` wires each handler into a
- * per-request `McpServer`. Auth and scope were checked by the route before
- * this is called — handlers get a pre-resolved `HostPrincipalContext`.
+ * per-request `McpServer`. Auth was checked by the route before this is
+ * called — handlers get a pre-resolved `HostPrincipalContext`. Scope is
+ * checked PER-TOOL inside this module (`wrapWithScopeCheck`), not at the
+ * route level. This is the load-bearing fix for the read-only-PAT bug:
+ * the previous union-check at route.ts rejected any request unless the
+ * token's scope satisfied EVERY registered tool's requiredScope, making
+ * `read`-scoped PATs structurally non-functional.
  *
- * PR-3a: `create_link` only.
- *
- * Proposal: 2026-04-29_host-side-mcp-act-as-me_reviewed-2026-04-29_decided-2026-04-29.md §5.3
+ * Stabilization package §3 Group A (B5 promoted), proposal:
+ * `2026-04-30_host-mcp-stabilization-package_reviewed-2026-04-30_decided-2026-04-30.md`.
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { HostPrincipalContext } from "@/app/api/mcp/host/auth";
+import { hasScope, type HostPrincipalContext } from "@/app/api/mcp/host/auth";
 import {
   HOST_MCP_TOOLS,
   createLinkInput,
   type HostMcpToolName,
 } from "@/lib/mcp/host-schemas";
 import { handleCreateLink } from "@/agent/actions";
+import { writeMcpCallLog } from "@/lib/mcp/call-log";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -91,6 +96,78 @@ async function handleCreateLinkTool(
 // Registration
 // ---------------------------------------------------------------------------
 
+/**
+ * Wrap a handler with a per-tool scope check. The principal's scope set is
+ * checked against the tool's `requiredScope` at call time — so a `read`-only
+ * PAT can call read tools, a `schedule` PAT can call read + schedule tools,
+ * and an `admin` PAT can call everything (per the cascade in `auth.ts`).
+ *
+ * Returning a typed `scope_denied` is intentionally per-call rather than
+ * per-request — the agent can keep its connection and try a different tool
+ * without re-handshaking.
+ */
+function wrapWithScopeCheck(
+  toolName: HostMcpToolName,
+  principalCtx: HostPrincipalContext & { ok: true },
+  handler: (args: Record<string, unknown>) => Promise<CallToolResult>
+): (args: Record<string, unknown>) => Promise<CallToolResult> {
+  const required = HOST_MCP_TOOLS[toolName].requiredScope;
+  return async (args) => {
+    if (!hasScope(principalCtx.scopes, required)) {
+      return fail(
+        "scope_denied",
+        `This tool requires scope "${required}". Your token has: ${principalCtx.scopes.join(", ")}.`
+      );
+    }
+    return handler(args);
+  };
+}
+
+/**
+ * Wrap a handler with MCPCallLog writing. Mirrors guest-side `withCallLogging`
+ * (`tools.ts:1175`) but populates host fields per parent §7.4: `userId` set,
+ * `linkId` null, `principal: { kind: "host_pat", tokenId, displayId }`.
+ *
+ * Same fire-and-forget semantics — log writes never block the response.
+ */
+function withHostCallLogging(
+  toolName: HostMcpToolName,
+  principalCtx: HostPrincipalContext & { ok: true },
+  handler: (args: Record<string, unknown>) => Promise<CallToolResult>
+): (args: Record<string, unknown>) => Promise<CallToolResult> {
+  return async (args) => {
+    const started = Date.now();
+    const result = await handler(args);
+    const latencyMs = Date.now() - started;
+
+    // Result content[0] is JSON-serialized text per ok()/fail() helpers.
+    let response: Record<string, unknown> = {};
+    try {
+      const first = result.content?.[0];
+      if (first && first.type === "text" && typeof first.text === "string") {
+        response = JSON.parse(first.text) as Record<string, unknown>;
+      }
+    } catch {
+      response = { ok: false, reason: "log_parse_failed" };
+    }
+
+    void writeMcpCallLog({
+      tool: toolName,
+      userId: principalCtx.userId,
+      principal: {
+        kind: "host_pat",
+        tokenId: principalCtx.tokenId,
+        displayId: principalCtx.displayId,
+      },
+      requestArgs: args,
+      response,
+      latencyMs,
+    });
+
+    return result;
+  };
+}
+
 export function registerHostMcpTools(
   server: McpServer,
   principalCtx: HostPrincipalContext & { ok: true }
@@ -110,11 +187,18 @@ export function registerHostMcpTools(
     const tool = HOST_MCP_TOOLS[name];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const inputShape = (tool.input as any).shape as Record<string, any>;
+    // Composition: scope check OUTSIDE call logging — denied calls still get
+    // logged (signal: which tokens are trying which tools they shouldn't).
+    const wrapped = withHostCallLogging(
+      name,
+      principalCtx,
+      wrapWithScopeCheck(name, principalCtx, handlers[name])
+    );
     server.registerTool(
       name,
       { description: tool.description, inputSchema: inputShape },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      handlers[name] as any
+      wrapped as any
     );
   }
 }

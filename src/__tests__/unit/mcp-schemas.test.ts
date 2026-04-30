@@ -10,6 +10,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { MCP_TOOLS, MCP_TOOL_NAMES } from "@/lib/mcp/schemas";
+import { MCP_RATE_LIMITS } from "@/lib/mcp/auth";
+import { HOST_MCP_TOOLS } from "@/lib/mcp/host-schemas";
 
 describe("MCP tool registry", () => {
   it("lists all 9 tools (parent proposal §2.7's 8 + lock_activity_location MCP parity)", () => {
@@ -94,6 +96,31 @@ describe("propose_parameters — batch semantics", () => {
       proposal: { format: "video", duration: 45, location: "Zoom" },
     });
     expect(r.success).toBe(true);
+  });
+});
+
+// Structural lints — every tool registered in MCP_TOOLS must have a
+// rate-limit policy and (for host tools) a requiredScope. These exist to
+// catch the kind of drift that bit us with `lock_activity_location`, where
+// the tool was registered without an MCP_RATE_LIMITS entry and every call
+// fell into the unknown-tool fail-closed branch returning a fixed
+// retryAfterSeconds: 30. The lint is structural, not procedural — adding a
+// new tool without these entries fails CI.
+//
+// 2026-04-30 stabilization-package §3 Group B (B1's CI lint suggestion).
+describe("structural lints — registry coverage", () => {
+  it("every MCP_TOOLS entry has a corresponding MCP_RATE_LIMITS entry", () => {
+    const missing = MCP_TOOL_NAMES.filter((name) => !MCP_RATE_LIMITS[name]);
+    expect(missing, `Missing MCP_RATE_LIMITS for: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("every HOST_MCP_TOOLS entry declares a requiredScope in {read, schedule, admin}", () => {
+    for (const [name, def] of Object.entries(HOST_MCP_TOOLS)) {
+      expect(
+        def.requiredScope,
+        `HOST_MCP_TOOLS.${name}.requiredScope missing or invalid`
+      ).toMatch(/^(read|schedule|admin)$/);
+    }
   });
 });
 

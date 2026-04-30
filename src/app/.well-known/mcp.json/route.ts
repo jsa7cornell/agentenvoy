@@ -27,16 +27,29 @@ export const revalidate = 300;
 
 const BASE_URL = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
 
+// Tools that are registered in MCP_TOOLS but should not be advertised in the
+// public manifest. Today: `reschedule_meeting` returns `tool_not_implemented`
+// and is gated on the in-draft reschedule-pipeline proposal
+// (`proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md`). We keep
+// the SDK-side registration so any agent that already cached the tool name
+// gets a typed refusal rather than "unknown tool", but we narrow static
+// discovery so fresh agents don't try a tool that doesn't work.
+const MANIFEST_HIDDEN_TOOLS: ReadonlySet<McpToolName> = new Set<McpToolName>([
+  "reschedule_meeting",
+]);
+
 export function GET() {
-  const tools = (Object.keys(MCP_TOOLS) as McpToolName[]).map((name) => {
-    const tool = MCP_TOOLS[name];
-    return {
-      name,
-      description: tool.description,
-      inputSchema: z.toJSONSchema(tool.input),
-      outputSchema: z.toJSONSchema(tool.output),
-    };
-  });
+  const tools = (Object.keys(MCP_TOOLS) as McpToolName[])
+    .filter((name) => !MANIFEST_HIDDEN_TOOLS.has(name))
+    .map((name) => {
+      const tool = MCP_TOOLS[name];
+      return {
+        name,
+        description: tool.description,
+        inputSchema: z.toJSONSchema(tool.input),
+        outputSchema: z.toJSONSchema(tool.output),
+      };
+    });
 
   return NextResponse.json(
     {
@@ -53,8 +66,25 @@ export function GET() {
         // call. No bearer exchange — possession of the URL is authorization.
         type: "url-capability",
         tokenParam: "meetingUrl",
-        urlPattern: "/meet/{slug}[?c={code}]",
+        // Path-segment is the canonical form (handleCreateLink mints this);
+        // query-param is the legacy form. Both are accepted.
+        urlPattern: "/meet/{slug}[/{code} | ?c={code}]",
       },
+      // Additional endpoints. Host-side endpoint (`/api/mcp/host`) is for the
+      // host's own AI assistant — bearer PAT auth, not URL-capability. Listed
+      // here so a host's agent doing dynamic discovery can find it; guest
+      // agents should keep using `/api/mcp` (the primary `endpoint` above).
+      additionalEndpoints: [
+        {
+          url: `${BASE_URL}/api/mcp/host`,
+          purpose: "host-self-service",
+          auth: {
+            type: "pat-bearer",
+            scheme: "Bearer agentenvoy_pat_live_<token>",
+            scopes: ["read", "schedule", "admin"],
+          },
+        },
+      ],
       docs: {
         description: `${BASE_URL}/llms.txt`,
         humanSite: BASE_URL,

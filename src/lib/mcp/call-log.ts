@@ -113,6 +113,15 @@ export const CALL_LOG_REDACTION: Record<string, Record<string, RedactionClass>> 
     idempotent: "verbatim",
     counterProposal: "shape-summary",
   },
+  // Host-side tools (`/api/mcp/host`) — single host-tool today (`create_link`),
+  // more land with PR-2/PR-3b. Same redaction discipline as guest tools.
+  // Stabilization-package §3 Group B (B3 fold).
+  create_link: {
+    ...REFUSAL_COMMON,
+    linkCode: "verbatim",
+    slug: "verbatim",
+    url: "verbatim",
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -214,19 +223,40 @@ export function redactResponseForCallLog(
 // Write path
 // ---------------------------------------------------------------------------
 
-export type McpCallLogContext = {
-  tool: string;
-  linkId: string;
-  sessionId?: string | null;
-  clientMeta?: {
-    clientName?: string;
-    clientType?: string;
-    principal?: { name?: string; email?: string };
-  };
-  requestArgs: Record<string, unknown>;
-  response: Record<string, unknown>;
-  latencyMs: number;
-};
+/**
+ * Discriminated by which principal made the call. Guest calls carry a
+ * `linkId` (the capability resolved from `meetingUrl`); host calls carry a
+ * `userId` (the host's own MCP token, no link). Per parent host-MCP proposal
+ * §7.1/§7.4 (Option A — discriminator on the JSON `principal` field, not a
+ * parallel column). Stabilization-package §B3 fold confirms this shape.
+ */
+export type McpCallLogContext =
+  | {
+      tool: string;
+      linkId: string;
+      userId?: undefined;
+      sessionId?: string | null;
+      clientMeta?: {
+        clientName?: string;
+        clientType?: string;
+        principal?: { name?: string; email?: string };
+      };
+      requestArgs: Record<string, unknown>;
+      response: Record<string, unknown>;
+      latencyMs: number;
+    }
+  | {
+      tool: string;
+      linkId?: null;
+      userId: string;
+      sessionId?: string | null;
+      // Host calls don't go through the guest clientMeta channel — the
+      // principal is the PAT itself. Provide it inline.
+      principal: { kind: "host_pat" | "host_oauth"; tokenId: string; displayId: string };
+      requestArgs: Record<string, unknown>;
+      response: Record<string, unknown>;
+      latencyMs: number;
+    };
 
 /**
  * Redact and persist one `MCPCallLog` row. Callers should invoke this
@@ -247,16 +277,27 @@ export async function writeMcpCallLog(ctx: McpCallLogContext): Promise<void> {
     const redactedResponse = redactResponseForCallLog(ctx.tool, ctx.response);
     const redactedRequest = redactRequestArgs(ctx.requestArgs);
 
+    // Discriminator on `principal.kind` per parent §7.1 Option A.
+    // Guest calls: linkId set, userId null, principal carries optional name/email
+    //   from clientMeta (or null).
+    // Host calls: linkId null, userId set, principal carries
+    //   { kind: "host_pat", tokenId, displayId }.
+    const isHostCall = ctx.userId !== undefined;
+    const principalJson: Prisma.InputJsonValue | typeof Prisma.JsonNull = isHostCall
+      ? (ctx.principal as unknown as Prisma.InputJsonValue)
+      : (ctx.clientMeta?.principal
+          ? (ctx.clientMeta.principal as unknown as Prisma.InputJsonValue)
+          : Prisma.JsonNull);
+
     await prisma.mCPCallLog.create({
       data: {
-        linkId: ctx.linkId,
+        linkId: ctx.linkId ?? null,
+        userId: isHostCall ? ctx.userId : null,
         sessionId: ctx.sessionId ?? null,
         tool: ctx.tool,
-        clientName: ctx.clientMeta?.clientName ?? null,
-        clientType: ctx.clientMeta?.clientType ?? null,
-        principal: (ctx.clientMeta?.principal
-          ? (ctx.clientMeta.principal as unknown as Prisma.InputJsonValue)
-          : Prisma.JsonNull),
+        clientName: isHostCall ? null : ctx.clientMeta?.clientName ?? null,
+        clientType: isHostCall ? null : ctx.clientMeta?.clientType ?? null,
+        principal: principalJson,
         requestBody: redactedRequest as Prisma.InputJsonValue,
         responseBody: redactedResponse as Prisma.InputJsonValue,
         outcome,

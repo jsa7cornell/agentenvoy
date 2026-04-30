@@ -33,10 +33,15 @@ export type MeetingUrlParseError =
 
 /**
  * Parse a meeting URL. Accepts absolute URL or root-relative path.
- * Accepted shapes:
+ * Accepted shapes (trailing slash on any tolerated):
  *   - `/meet/<slug>`
  *   - `/meet/<slug>?c=<code>`
- *   - `https://host/meet/<slug>[?c=<code>]`
+ *   - `/meet/<slug>/<code>`
+ *   - `https://host/meet/<slug>[/<code> | ?c=<code>]`
+ *
+ * Path-segment code is the canonical mint form (`handleCreateLink` in
+ * `agent/actions.ts` returns `${baseUrl}/meet/${slug}/${code}`). Query-param
+ * form is the legacy form. If both are present, path-segment wins.
  */
 export function parseMeetingUrl(
   input: string,
@@ -45,18 +50,18 @@ export function parseMeetingUrl(
     return { ok: false, error: "invalid_url" };
   }
   let pathname: string;
-  let code: string | null = null;
+  let queryCode: string | null = null;
   try {
-    // URL() requires a base for relative paths.
     const u = new URL(input, "https://placeholder.local");
     pathname = u.pathname;
-    code = u.searchParams.get("c");
+    queryCode = u.searchParams.get("c");
   } catch {
     return { ok: false, error: "invalid_url" };
   }
-  const m = pathname.match(/^\/meet\/([A-Za-z0-9_-]+)\/?$/);
+  const m = pathname.match(/^\/meet\/([A-Za-z0-9_-]+)(?:\/([A-Za-z0-9_-]+))?\/?$/);
   if (!m) return { ok: false, error: "not_meeting_path" };
-  return { ok: true, slug: m[1], code };
+  const pathCode = m[2] ?? null;
+  return { ok: true, slug: m[1], code: pathCode ?? queryCode };
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +138,7 @@ export const MCP_RATE_LIMITS: Record<
   propose_lock:           { limit: 10, windowSec: 60, failMode: "closed" },
   cancel_meeting:         { limit: 5,  windowSec: 60, failMode: "closed" },
   reschedule_meeting:     { limit: 5,  windowSec: 60, failMode: "closed" },
+  lock_activity_location: { limit: 20, windowSec: 60, failMode: "closed" },
 };
 
 export type RateLimitGateResult =
@@ -178,6 +184,53 @@ export async function checkRateLimit(
     if (cfg.failMode === "open") {
       return { ok: true, bypassed: true, reason: "store_unavailable_fail_open" };
     }
+    return { ok: false, error: "rate_limit_store_unavailable", retryAfterSeconds: 30 };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Host-PAT rate limit — separate bucket from per-link guest rate limits.
+// Per WISHLIST #39 + stabilization-package §3 Group B. The host bucket is
+// keyed by `host_pat:<tokenId>` (no link involved), with a single global
+// policy across all host tools. If a single host's PAT becomes a problem,
+// the bucket fills and the route returns 429 — the tool selector inside
+// the SDK never runs.
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-PAT rate limit. Conservative starting point — every host-MCP call,
+ * regardless of tool, increments the same bucket. Tighten or split per-tool
+ * if real traffic shows asymmetric needs.
+ */
+export const HOST_PAT_RATE_LIMIT = {
+  limit: 60,
+  windowSec: 60,
+} as const;
+
+/**
+ * Check the per-PAT bucket. Returns ok: true on pass, ok: false with
+ * retryAfterSeconds on bucket-full or store-down. Fail-closed (host
+ * surface includes write tools so we never want to fail-open here).
+ */
+export async function checkHostPatRateLimit(
+  tokenId: string,
+): Promise<RateLimitGateResult> {
+  try {
+    const result = await incrementRateCounter({
+      tool: "host_pat",
+      token: `host_pat:${tokenId}`,
+      limit: HOST_PAT_RATE_LIMIT.limit,
+      windowSec: HOST_PAT_RATE_LIMIT.windowSec,
+    });
+    if (result.exceeded) {
+      const retryAfterSeconds = Math.max(
+        1,
+        Math.ceil((result.expiresAt.getTime() - Date.now()) / 1000),
+      );
+      return { ok: false, error: "rate_limit_exceeded", retryAfterSeconds };
+    }
+    return { ok: true, result };
+  } catch {
     return { ok: false, error: "rate_limit_store_unavailable", retryAfterSeconds: 30 };
   }
 }

@@ -199,8 +199,18 @@ export const getMeetingParametersOutput = z.discriminatedUnion("ok", [
 
 export const availabilitySlotSchema = z
   .object({
+    /** Slot start in UTC (ISO with `Z`). */
     start: z.iso.datetime(),
+    /** Slot end in UTC (ISO with `Z`). */
     end: z.iso.datetime(),
+    /**
+     * Same start formatted in the host's timezone, no offset suffix.
+     * E.g. `"2026-05-05T09:00:00"` for a 09:00 slot in America/Los_Angeles.
+     * Saves agents from doing UTC→local math just to display options.
+     * Always emitted alongside `start`; `start` remains the canonical UTC value.
+     * Stabilization-package §3 Group C; reconciliation #4.
+     */
+    localStart: z.string().optional(),
     /**
      * Slot protection score. Integer-valued by construction (every writer in
      * `scoring.ts` emits an int literal). SPEC invariant #9 documents the
@@ -240,6 +250,14 @@ export const getAvailabilityInput = z
       .describe(
         "Display timezone. Does NOT shift slot timestamps (those are UTC)."
       ),
+    /**
+     * Maximum number of slots to return. Default 20 — Town agent feedback
+     * showed ~80 slots on a 7-day range produces decision fatigue and burns
+     * agent tokens. Pass higher (max 200) when an agent specifically wants
+     * the broader set. Slots are returned best-first (lowest score, ties
+     * broken by earliest start). Stabilization-package §3 Group C; recon #5.
+     */
+    limit: z.number().int().min(1).max(200).optional().default(20),
   })
   .strict();
 

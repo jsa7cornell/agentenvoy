@@ -343,6 +343,33 @@ export async function handleGetAvailability(
     });
   }
 
+  // Sort best-first (lowest score, ties broken by earliest start) BEFORE
+  // applying limit, so the truncated set is the most-preferred slots not
+  // an arbitrary chronological prefix.
+  slots.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return new Date(a.start).getTime() - new Date(b.start).getTime();
+  });
+
+  // Cap at caller's limit (default 20). Stabilization-package §3 Group C —
+  // Town agent feedback showed ~80 slots produces decision fatigue.
+  const limit = args.limit ?? 20;
+  if (slots.length > limit) {
+    slots = slots.slice(0, limit);
+  }
+
+  // Format `localStart` in the host's timezone — saves agents UTC math.
+  const localFmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
   // Emit wire shape. Map "first-offer" (internal) → "first_offer" (schema).
   const wireSlots = slots.map((s) => {
     const tier = getTier(s, rules, timezone);
@@ -358,9 +385,14 @@ export async function handleGetAvailability(
     // (`score <= -1`) so guest agents get the same star-worthiness signal
     // without hardcoding the threshold. SPEC invariant #9.
     const preferred = s.score <= -1;
+    // sv-SE locale produces "YYYY-MM-DD HH:MM:SS" — replace the space with T
+    // for ISO-like shape, no offset suffix (the timezone is implicit per the
+    // top-level `timezone` field on the response).
+    const localStart = localFmt.format(new Date(s.start)).replace(" ", "T");
     return {
       start: s.start,
       end: s.end,
+      localStart,
       score: s.score,
       ...(wireTier ? { tier: wireTier } : {}),
       ...(preferred ? { preferred: true } : {}),
@@ -1032,8 +1064,11 @@ export async function handleRescheduleMeeting(
     {
       ok: false,
       reason: "tool_not_implemented",
+      // Guest-safe: never leak internal repo paths or proposal filenames in
+      // wire-visible messages. Agents that hit this fall back to
+      // cancel + rebook via cancel_meeting + propose_lock.
       message:
-        "reschedule_meeting is not yet implemented. Proper patch-in-place implementation requires schema migration + reschedule-pipeline.ts; proposal under review at proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md.",
+        "This tool is not currently available. Cancel and rebook to achieve the same result.",
     },
     { isError: true }
   );
