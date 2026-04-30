@@ -14,6 +14,10 @@ interface ThreadCardProps {
   statusLabel: string;
   statusColor: string;
   subtitle?: string;
+  /** Optional deferral status line ("🤔 Gathering John's suggestions on the
+   *  location"). Rendered below the subtitle when host has deferred fields
+   *  to the guest via guestPicks. Caller suppresses post-confirm. */
+  deferralLine?: string;
   inviteeName?: string;
   inviteeEmail?: string;
   messageCount?: number;
@@ -64,6 +68,7 @@ export default function ThreadCard({
   statusLabel,
   statusColor,
   subtitle,
+  deferralLine,
   inviteeName,
   inviteeEmail,
   messageCount,
@@ -179,6 +184,9 @@ export default function ThreadCard({
           </div>
           {subtitle && (
             <div className="text-xs text-muted mt-0.5 truncate">{subtitle}</div>
+          )}
+          {deferralLine && (
+            <div className="text-xs italic text-muted mt-0.5 truncate">{deferralLine}</div>
           )}
         </div>
       </div>

@@ -13,6 +13,7 @@ import { CelebrationBanner } from "./celebration-banner";
 import { DashboardHeader } from "./dashboard-header";
 import { PublicHeader } from "./public-header";
 import { DealRoomConnectCtas } from "./oauth/deal-room-connect-ctas";
+import { formatDeferralFieldsList, type DeferralFieldNoun } from "@/agent/greetings/registry";
 import { TimezonePicker } from "./timezone-picker";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { onboardingCallbackUrl } from "@/lib/onboarding/return-to";
@@ -1672,6 +1673,26 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             </span>
           )}
         </div>
+
+        {/* Deferral status line — "🤔 Gathering John's suggestions on the
+            location". Same neutral phrasing on host + guest views. Suppressed
+            post-confirm; deferrals stop mattering once a slot is locked.
+            Date deferral intentionally skipped (calendar widget IS the day
+            picker). Reuses formatDeferralFieldsList for canonical phrasing. */}
+        {!confirmed && (() => {
+          const deferred: DeferralFieldNoun[] = [];
+          if (linkGuestPicksLocation) deferred.push("location");
+          if (linkGuestPicksDuration) deferred.push("length");
+          if (linkGuestPicksFormat) deferred.push("format");
+          const list = formatDeferralFieldsList(deferred);
+          if (!list) return null;
+          const firstName = (inviteeName || "").split(/\s+/)[0] || "the guest";
+          return (
+            <div className="ml-5 mt-1 text-xs italic text-muted">
+              🤔 Gathering {firstName}&apos;s suggestions on {list}
+            </div>
+          );
+        })()}
 
         {/* T3c: host-only soft upsell when the confirm pipeline degraded
             to .ics-only (no calendar.events write scope). Degrade-not-block:

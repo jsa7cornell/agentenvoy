@@ -6,6 +6,7 @@ import ThreadCard from "./thread-card";
 import { ChannelChatStreamParser, type ChannelChatFrame } from "@/lib/channel-chat-stream";
 import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-status";
 import { formatDuration } from "@/lib/format-duration";
+import { formatDeferralFieldsList, type DeferralFieldNoun } from "@/agent/greetings/registry";
 import { QuickReplies } from "./onboarding/quick-replies";
 import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
 import { shortTimezoneLabel } from "@/lib/timezone";
@@ -1610,6 +1611,25 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                       msg.thread.duration ? `${formatDuration(msg.thread.duration)}${durationDeferred ? " ✏️" : ""}` : null,
                       isGroup ? `${guestParticipants.length} participant${guestParticipants.length !== 1 ? "s" : ""}` : null,
                     ].filter(Boolean).join(" · ") || undefined;
+                  })()}
+                  deferralLine={(() => {
+                    // "Gathering John's suggestions on the location" line —
+                    // surfaces deferral state in human prose alongside the
+                    // existing ✏️ pencil suffixes on the subtitle. Suppressed
+                    // once the meeting is confirmed; deferrals stop mattering
+                    // after a slot is locked. Date deferral is intentionally
+                    // skipped (calendar widget IS the day picker).
+                    if (msg.thread.status === "agreed") return undefined;
+                    const gp = (msg.thread.link as Record<string, unknown> | null | undefined)?.guestPicks as Record<string, unknown> | null | undefined;
+                    if (!gp) return undefined;
+                    const deferred: DeferralFieldNoun[] = [];
+                    if (gp.location === true) deferred.push("location");
+                    if (gp.duration === true || (Array.isArray(gp.duration) && gp.duration.length > 0)) deferred.push("length");
+                    if (gp.format === true || Array.isArray(gp.format)) deferred.push("format");
+                    const list = formatDeferralFieldsList(deferred);
+                    if (!list) return undefined;
+                    const firstName = (msg.thread.link.inviteeName || "").split(/\s+/)[0] || "the guest";
+                    return `🤔 Gathering ${firstName}'s suggestions on ${list}`;
                   })()}
                   inviteeName={msg.thread.link.inviteeName || undefined}
                   inviteeEmail={msg.thread.link.inviteeEmail || undefined}
