@@ -7,6 +7,13 @@
  *   - Single match under `create_link` defaults to `deterministic-create` (R1).
  *   - New `modify_link` / `cancel_link` branches.
  *   - 5 bug repros (proposal §10 prod-bug catalog).
+ *
+ * Updated 2026-04-30 (feedback report cmokrgfly000529unsajrqqli):
+ *   - `create_link` / `schedule` no longer multi-match-disambiguates at any
+ *     matchCount. The classifier already separates create from modify/cancel;
+ *     the matcher trusts that signal and always goes to deterministic-create.
+ *   - `multi-match-disambiguate` now only fires from `modify_link` /
+ *     `cancel_link`.
  */
 
 import { describe, it, expect } from "vitest";
@@ -53,9 +60,11 @@ describe("schedulingPrecheck", () => {
     }
   });
 
-  it("returns multi-match-disambiguate when there are TWO active links for the same guest", () => {
-    // Multi-match (>= 2 active/agreed links) is now the only path that fires
-    // marco. The host has to choose which existing link they meant.
+  it("returns deterministic-create even with TWO active links for the same guest (create_link trusts classifier)", () => {
+    // Post-2026-04-30 (feedback cmokrgfly000529unsajrqqli): create_link no
+    // longer multi-match-disambiguates. Edit verbs ("change", "shift",
+    // "cancel") classify as modify_link/cancel_link — those still
+    // disambiguate. A creation-classified message goes straight to create.
     const result = schedulingPrecheck(
       baseInput({
         userMessage: "Set up a 3-hour bike ride with Jon for next week",
@@ -77,12 +86,11 @@ describe("schedulingPrecheck", () => {
         ],
       }),
     );
-    expect(result.kind).toBe("multi-match-disambiguate");
-    if (result.kind === "multi-match-disambiguate") {
-      expect(result.matchedLinkIds.sort()).toEqual(["abc123", "qx4bmg"]);
-      expect(result.originatingIntent).toBe("create_link");
-      expect(result.matchedSessions).toHaveLength(2);
-      expect(result.matchedSessions.every((m) => m.guest === "Jon")).toBe(true);
+    expect(result.kind).toBe("deterministic-create");
+    if (result.kind === "deterministic-create") {
+      expect(result.args.inviteeName).toBe("Jon");
+      expect(result.args.topic).toBe("bike ride");
+      expect(result.args.duration).toBe(180);
     }
   });
 
@@ -535,6 +543,40 @@ describe("schedulingPrecheck", () => {
       );
       expect(result.kind).toBe("deterministic-create");
       expect(result.kind).not.toBe("multi-match-disambiguate");
+    });
+
+    it("feedback cmokrgfly000529unsajrqqli: 'find time with john 30 mins tomorrow' with TWO John links → deterministic-create", () => {
+      // Repro of the 2026-04-30 host feedback: matcher was firing
+      // multi-match-disambiguate on plain creation messages. Post-fix the
+      // matcher trusts the create_link classification and always creates.
+      const result = schedulingPrecheck(
+        baseInput({
+          classifiedIntent: "create_link",
+          userMessage: "find time with john 30 mins tomorrow",
+          activeSessions: [
+            {
+              id: "s1",
+              title: "John + Tester",
+              guestName: "John",
+              linkCode: "2ej9h8",
+              status: "active",
+            },
+            {
+              id: "s2",
+              title: "VC: John + Tester",
+              guestName: "John",
+              linkCode: "pvvnhu",
+              status: "active",
+            },
+          ],
+        }),
+      );
+      expect(result.kind).toBe("deterministic-create");
+      if (result.kind === "deterministic-create") {
+        expect(result.args.inviteeName).toBe("John");
+        expect(result.args.duration).toBe(30);
+        expect(result.args.dateRangeKeyword).toBe("tomorrow");
+      }
     });
   });
 

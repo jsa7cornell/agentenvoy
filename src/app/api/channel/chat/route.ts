@@ -683,25 +683,21 @@ export async function POST(req: NextRequest) {
                 await userMsgPersist;
                 const matchedSessions = precheckResult.matchedSessions;
                 const { originatingIntent, matchedLinkIds } = precheckResult;
-                const guestName = matchedSessions[0]?.guest ?? "that person";
                 const list = matchedSessions
                   .map(
                     (m) =>
                       `- "${m.topic}" (${m.linkCode})`,
                   )
                   .join("\n");
-                const verb =
-                  originatingIntent === "modify_link"
-                    ? "change"
-                    : originatingIntent === "cancel_link"
-                      ? "cancel"
-                      : "create alongside";
-                const closer =
-                  originatingIntent === "create_link"
-                    ? "Or want a new one anyway?"
-                    : "Which one?";
+                // Post-2026-04-30: matcher only routes here for modify_link
+                // / cancel_link (create_link trusts the classifier and goes
+                // straight to deterministic-create). The prompt always
+                // offers a "create new" escape hatch in case the user
+                // actually meant a fresh link.
                 const text =
-                  `I see ${matchedSessions.length} ${guestName} links — which one to ${verb}?\n${list}\n\n${closer}`;
+                  originatingIntent === "cancel_link"
+                    ? `I see similar meetings — which one did you want to cancel?\n${list}`
+                    : `I see similar meetings, including these:\n${list}\n\nDid you want to change one of them, or create a new one?`;
                 await prisma.channelMessage.create({
                   data: {
                     channelId: safeChannel.id,

@@ -8,6 +8,11 @@
  * only trigger for `multi-match-disambiguate`. The legacy `"schedule"` intent
  * is still accepted at the precheck boundary (guest call-site) and is
  * handled identically to `create_link`.
+ *
+ * Updated 2026-04-30 (feedback cmokrgfly000529unsajrqqli): create_link /
+ * schedule no longer multi-match-disambiguates at any matchCount — the
+ * classifier already separates create from modify/cancel. The Jon-case
+ * multi-match-on-create test is reframed to expect deterministic-create.
  */
 
 import { describe, it, expect } from "vitest";
@@ -86,7 +91,13 @@ describe("scheduling-precheck integration — Jon-case end-to-end", () => {
     }
   });
 
-  it("routes to multi-match-disambiguate when there are TWO active Jon links (>= 2 only)", () => {
+  it("routes to deterministic-create when there are TWO active Jon links under create_link/schedule", () => {
+    // Post-2026-04-30: the matcher trusts the classifier. A creation-verb
+    // message classified as `schedule`/`create_link` always goes to
+    // deterministic-create regardless of matchCount. Disambiguation is
+    // reserved for modify_link/cancel_link, where the verb is unambiguous
+    // edit ("change", "shift", "cancel") — see modify_link/cancel_link
+    // multi-match coverage in scheduling-precheck.test.ts.
     const activeSessions = [
       {
         id: "sess_a",
@@ -111,10 +122,11 @@ describe("scheduling-precheck integration — Jon-case end-to-end", () => {
       echoFlag: false,
     });
 
-    expect(result.kind).toBe("multi-match-disambiguate");
-    if (result.kind === "multi-match-disambiguate") {
-      expect(result.matchedLinkIds.sort()).toEqual(["code_a", "code_b"]);
-      expect(result.originatingIntent).toBe("create_link");
+    expect(result.kind).toBe("deterministic-create");
+    if (result.kind === "deterministic-create") {
+      expect(result.args.inviteeName).toBe("Jon");
+      expect(result.args.topic).toBe("bike ride");
+      expect(result.args.duration).toBe(180);
     }
   });
 

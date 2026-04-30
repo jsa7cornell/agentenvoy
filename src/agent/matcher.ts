@@ -375,36 +375,20 @@ export function schedulingPrecheck(input: PrecheckInput): PrecheckResult {
   // ---------------------------------------------------------------------
   // CREATE_LINK (and legacy "schedule")
   // ---------------------------------------------------------------------
-  // Per §2.3 R1 verification (handleCreateLink is reversible-without-side-
-  // effects pre-confirm), a single match defaults to create. Multi-match
-  // genuinely needs the user to pick which existing link they meant — that's
-  // when marco fires. The previous "active or agreed → marco" branch is
-  // dropped entirely (PLAYBOOK Rule 19e protects against re-introduction).
+  // Trust the classifier: a `create_link` intent means the user used a
+  // creation verb. We always go to deterministic-create regardless of how
+  // many existing links match the named guest. Modify/cancel verbs
+  // ("change", "update", "shift", "cancel", "drop") are unambiguous and
+  // classify as modify_link/cancel_link — that's where we ask "which one?".
+  //
+  // History: pre-2026-04-30 this branch fired multi-match-disambiguate when
+  // matchCount >= 2 (per chat-decisioning-layer-redesign §2.3 R5). In
+  // practice that produced confusing prompts like "I see 2 John links —
+  // which one to create alongside?" for plain creation messages
+  // ("find time with john 30 mins tomorrow"). Per host feedback report
+  // cmokrgfly000529unsajrqqli, the classifier already separates create
+  // from modify/cancel; second-guessing it here just generates noise.
   if (intent === "create_link" || intent === "schedule") {
-    // Explicit-create-another bypass: when the host's wording clearly says
-    // "I want a NEW link in addition to whatever exists" ("add another
-    // meeting with katie", "create a new one for katie", "second katie
-    // meeting"), skip multi-match disambiguation and go straight to
-    // deterministic-create. Symmetric with the marcoPending replay
-    // bypass in /api/channel/chat — the same keyword set short-circuits
-    // disambiguation in BOTH directions (before and after marco fires).
-    // Bug repro 2026-04-28: "add another meeting with katie" was wrongly
-    // marco-disambiguating against existing Katie links.
-    const explicitAnother = /\b(another|additional|second|new|fresh)\b/i.test(
-      input.userMessage,
-    );
-    if (matchCount >= 2 && !explicitAnother) {
-      return {
-        kind: "multi-match-disambiguate",
-        matchedLinkIds: existingMatches
-          .map((s) => s.linkCode)
-          .filter((c): c is string => Boolean(c)),
-        matchedSessions: buildMatchedSessions(existingMatches, named),
-        originatingIntent: "create_link",
-        reason: `multi-match for ${named}: ${matchCount} active/agreed links${echoSuffix}`,
-      };
-    }
-    // 0, 1, or 2+ (with explicit-another) match → deterministic create.
     const topic = extractTopic(
       input.userMessage,
       named,
@@ -424,7 +408,7 @@ export function schedulingPrecheck(input: PrecheckInput): PrecheckResult {
       reason:
         matchCount === 0
           ? `named guest ${named}, no active link${echoSuffix}`
-          : `named guest ${named}, single match defaults to create (R1)${echoSuffix}`,
+          : `named guest ${named}, ${matchCount} existing link(s), create_link trusts classifier${echoSuffix}`,
     };
   }
 
