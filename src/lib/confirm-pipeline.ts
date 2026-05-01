@@ -38,6 +38,7 @@ import { dispatch } from "@/lib/side-effects/dispatcher";
 import { logRouteError } from "@/lib/route-error";
 import { buildGuestConfirmationEmail } from "@/lib/emails/guest-confirmation";
 import { parseLinkParameters } from "@/lib/link-parameters";
+import { generateCode } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -542,9 +543,20 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       : [hostEmail, ...(guestEmail ? [guestEmail] : [])];
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://agentenvoy.ai";
-  const dealRoomUrl = session.link.code
-    ? `${baseUrl}/meet/${session.link.slug}/${session.link.code}`
-    : `${baseUrl}/meet/${session.link.slug}`;
+
+  // If the link has no code (MCP bare-slug bookings + pre-minting sessions),
+  // stamp one now so the GCal event description has a session-specific URL.
+  let linkCode = session.link.code;
+  if (!linkCode) {
+    const minted = generateCode();
+    await prisma.negotiationLink.update({
+      where: { id: session.link.id },
+      data: { code: minted },
+    });
+    linkCode = minted;
+  }
+
+  const dealRoomUrl = `${baseUrl}/meet/${session.link.slug}/${linkCode}`;
 
   const hostPhone = (hostPrefs?.phone as string) || null;
   const videoProvider = (hostPrefs?.videoProvider as string) || "google-meet";

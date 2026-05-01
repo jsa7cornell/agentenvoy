@@ -1046,12 +1046,21 @@ export function AvailabilityPanel({
                   href={gcalUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block text-xs text-indigo-400 hover:text-indigo-300 transition mb-3"
+                  className="block text-xs text-indigo-400 hover:text-indigo-300 transition mb-1"
                 >
                   View in Google Calendar →
                 </a>
               );
             })()}
+
+            {clickedSession && clickedSession.dealRoomUrl && (
+              <a
+                href={clickedSession.dealRoomUrl}
+                className="block text-xs text-indigo-400 hover:text-indigo-300 transition mb-3"
+              >
+                View event →
+              </a>
+            )}
 
             {clickedSession === undefined && (
               <p className="text-xs text-muted py-2">Looking up session…</p>
