@@ -554,6 +554,27 @@ model NegotiationSession {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
+  /// Reserved for the reschedule chain pattern (proposal
+  /// `2026-04-29_mcp-reschedule-meeting-patch-in-place`). v1 always null.
+  /// When the chain pattern lands, this points to the new session that
+  /// supersedes this one. Read by `canObject()` in src/lib/mcp/can-object.ts.
+  /// Today `agreed` is terminal in canObject — column ships unwired.
+  supersededByRescheduleId String? @unique
+  /// When this session reached terminal `agreed` state. SET BY confirm-pipeline
+  /// (out of scope for reschedule PR — column ships unwired here; existing
+  /// agreed sessions stay null). Read by `canObject()` for "did we miss the
+  /// host-objection window" computation. Cleared on reschedule.
+  finalizesAt DateTime?
+  /// Append-only history of reschedule events. Json array of
+  /// `{ from, to, at, by, byName?, reason? }`. Default null (NOT '[]') so
+  /// the first append produces a clean `[{...entry}]`. Promotes to a
+  /// dedicated `RescheduleEvent` model when (a) any session has >5 entries,
+  /// (b) a query pattern wants this indexed, OR (c) the JSON exceeds 4kb.
+  rescheduleHistory Json?
+  /// When the most-recent reschedule fired. Lets the deal-room render
+  /// "last moved Xm ago" without parsing the JSON history.
+  lastRescheduledAt DateTime?
+
   link            NegotiationLink     @relation(fields: [linkId], references: [id], onDelete: Cascade)
   host            User                @relation("host", fields: [hostId], references: [id])
   guest           User?               @relation("guest", fields: [guestId], references: [id])
@@ -565,6 +586,44 @@ model NegotiationSession {
   invitees        SessionInvitee[]
   slotRsvps       InviteeSlotRsvp[]
   holds           Hold[]
+  rescheduleAttempts RescheduleAttempt[]
+}
+
+/// Idempotent-replay store for MCP `reschedule_meeting` calls. Mirrors
+/// `ConfirmAttempt` shape from confirm-pipeline. A retry with the same
+/// `(sessionId, idempotencyKey)` returns the original `responseBody`
+/// verbatim — no double-execution. Boundary is the row's lifetime (no
+/// 24h TTL — proposal §B5 fold: "at hour 25, retry IS a new reschedule").
+///
+/// Future: host-side `reschedule_my_session` (WISHLIST #46) reuses this
+/// table. The `sessionId` scope is sufficient — host vs. guest origin
+/// is captured in `responseBody.initiator`.
+model RescheduleAttempt {
+  id              String    @id @default(cuid())
+  sessionId       String
+  /// Caller-supplied idempotency key. NULL = no idempotency intent;
+  /// every call is a new attempt. NON-NULL = same key + same sessionId
+  /// returns the original outcome.
+  idempotencyKey  String?
+  /// `session.agreedTime` at the moment of the call.
+  fromStart       DateTime
+  /// Target slot start.
+  toStart         DateTime
+  /// success | already_at_target | slot_mismatch | gcal_patch_failed
+  /// | session_not_agreed | session_not_found | server_error | validation_failed
+  outcome         String
+  /// Replay payload — the wire response body emitted on success.
+  /// Replayed verbatim on idempotent retry.
+  responseBody    Json?
+  errorMessage    String?   @db.Text
+  durationMs      Int?
+  createdAt       DateTime  @default(now())
+
+  session         NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, idempotencyKey])
+  @@index([sessionId, createdAt])
+  @@index([outcome, createdAt])
 }
 
 model Message {

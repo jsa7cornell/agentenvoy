@@ -611,13 +611,19 @@ export const rescheduleMeetingOutput = z.discriminatedUnion("ok", [
       "session_not_agreed",
       "session_terminal",
       "slot_taken_during_handshake",
+      // Google Calendar refused the patch — typically transient (rate
+      // limits, auth-token refresh failure, network blip). Reschedule
+      // breaks parity with cancel-pipeline's "log and continue" pattern:
+      // a missed-cancel leaves a ghost event (recoverable), a missed-
+      // reschedule sends people to the wrong time (not). On this refusal
+      // the DB is untouched — agents can retry the same idempotencyKey.
+      // Per proposal §B1 fold (2026-04-30).
+      "gcal_patch_failed",
       // Stub tools — advertised in tools/list, not yet wired to a real
-      // pipeline. Today: reschedule_meeting (proposal filed
-      // 2026-04-29_mcp-reschedule-meeting-patch-in-place.md). Discipline:
-      // any future stub MUST return this reason; do NOT reuse a state-
-      // specific reason like `session_terminal`. Agents reading the wire
-      // need to distinguish "this server doesn't support this yet" from
-      // "your session is closed."
+      // pipeline. Discipline: any future stub MUST return this reason;
+      // do NOT reuse a state-specific reason like `session_terminal`.
+      // Agents reading the wire need to distinguish "this server doesn't
+      // support this yet" from "your session is closed."
       "tool_not_implemented",
     ])
   ).extend({

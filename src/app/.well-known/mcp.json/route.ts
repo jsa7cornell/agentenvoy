@@ -28,15 +28,14 @@ export const revalidate = 300;
 const BASE_URL = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
 
 // Tools that are registered in MCP_TOOLS but should not be advertised in the
-// public manifest. Today: `reschedule_meeting` returns `tool_not_implemented`
-// and is gated on the in-draft reschedule-pipeline proposal
-// (`proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md`). We keep
-// the SDK-side registration so any agent that already cached the tool name
-// gets a typed refusal rather than "unknown tool", but we narrow static
-// discovery so fresh agents don't try a tool that doesn't work.
-const MANIFEST_HIDDEN_TOOLS: ReadonlySet<McpToolName> = new Set<McpToolName>([
-  "reschedule_meeting",
-]);
+// public manifest. Empty today (`reschedule_meeting` was previously hidden
+// while its stub returned `tool_not_implemented`; the patch-in-place
+// implementation shipped 2026-04-30, so it's now live and visible).
+//
+// If a future tool ships as a stub awaiting a backing pipeline, add it here
+// AND wire its handler to return `tool_not_implemented` (per the
+// stub-discipline comment on `rescheduleMeetingOutput.tool_not_implemented`).
+const MANIFEST_HIDDEN_TOOLS: ReadonlySet<McpToolName> = new Set<McpToolName>();
 
 export function GET() {
   const tools = (Object.keys(MCP_TOOLS) as McpToolName[])

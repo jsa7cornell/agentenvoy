@@ -46,6 +46,7 @@ import {
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
 import { confirmBooking } from "@/lib/confirm-pipeline";
 import { cancelSession } from "@/lib/cancel-pipeline";
+import { rescheduleSession } from "@/lib/reschedule-pipeline";
 import { handleLockActivityLocation as lockActivityLocationCore } from "@/agent/actions";
 import { writeMcpCallLog } from "@/lib/mcp/call-log";
 import {
@@ -1063,45 +1064,130 @@ export async function handleCancelMeeting(
 }
 
 // ---------------------------------------------------------------------------
-// Handler: reschedule_meeting  (stub — awaiting reschedule-pipeline.ts)
+// Handler: reschedule_meeting  (live — patch-in-place via reschedule-pipeline.ts)
 // ---------------------------------------------------------------------------
 
 /**
- * Stub. Returns `tool_not_implemented` until the proper patch-in-place
- * implementation lands. The HTTP route `/api/negotiate/reschedule` does
- * cancel-and-rebook (two notifications, new iCalUID); the MCP wire's
- * intended behavior per `app/src/lib/mcp/SPEC.md` §11.2 is in-place
- * `calendar.events.patch` (one notification, preserved iCalUID, appends to
- * `rescheduleHistory`). The semantic gap + schema additions
- * (`supersededByRescheduleId`, `finalizesAt`, `rescheduleHistory`) make
- * this proposal-required work.
+ * Reschedule a confirmed session in-place via Google Calendar's `events.patch`.
+ * Preserves iCalUID (single update notification, calendar apps update in
+ * place). Idempotent on `(sessionId, idempotencyKey)` via RescheduleAttempt.
  *
- * Proposal: `proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md`.
- * Wishlist: #42 (Agent Platform).
+ * Asymmetry vs. cancel-pipeline (proposal §B1): GCal patch failures
+ * BLOCK — return `gcal_patch_failed`, no DB update. A missed-cancel
+ * leaves a recoverable ghost event; a missed-reschedule sends people
+ * to the wrong time.
  *
- * --- Stub discipline ---
- * Any tool advertised in `MCP_TOOLS` but not yet wired to a real handler
- * MUST return `reason: "tool_not_implemented"`. Do NOT reuse a state-specific
- * reason like `session_terminal` — agents reading the wire must be able to
- * distinguish "this server doesn't support this yet" from "your session is
- * closed." See the `tool_not_implemented` enum value in
- * `schemas.ts#rescheduleMeetingOutput` for the canonical comment.
+ * Proposal: 2026-04-29_mcp-reschedule-meeting-patch-in-place_*_decided-2026-04-30.md
  */
 export async function handleRescheduleMeeting(
-  _args: z.infer<typeof rescheduleMeetingInput> // eslint-disable-line @typescript-eslint/no-unused-vars
+  args: z.infer<typeof rescheduleMeetingInput>,
 ): Promise<CallToolResult> {
-  return asCallResult(
-    {
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "reschedule_meeting",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+
+  // Resolve sessionId — either passed explicitly or latest agreed session
+  // on this link. Latest-on-link mirrors handleCancelMeeting's resolver.
+  const session = args.sessionId
+    ? await prisma.negotiationSession.findUnique({
+        where: { id: args.sessionId },
+        select: { id: true, hostId: true, status: true },
+      })
+    : await prisma.negotiationSession.findFirst({
+        where: { linkId: link.id, status: "agreed" },
+        orderBy: { agreedTime: "desc" },
+        select: { id: true, hostId: true, status: true },
+      });
+
+  if (!session) {
+    return asCallResult({
       ok: false,
-      reason: "tool_not_implemented",
-      // Guest-safe: never leak internal repo paths or proposal filenames in
-      // wire-visible messages. Agents that hit this fall back to
-      // cancel + rebook via cancel_meeting + propose_lock.
-      message:
-        "This tool is not currently available. Cancel and rebook to achieve the same result.",
+      reason: "session_not_found",
+      message: "No matching session for this link.",
+    });
+  }
+  if (session.hostId !== link.userId) {
+    // Defense-in-depth — link.userId == session.hostId by resolver
+    // construction, but assert it.
+    return asCallResult({
+      ok: false,
+      reason: "session_not_found",
+      message: "Session does not belong to this link's host.",
+    });
+  }
+
+  // Pipeline-level state guard handles non-agreed states; we only need
+  // to detect the terminal-but-not-agreed cases for a clearer wire reason.
+  if (session.status === "cancelled" || session.status === "rescheduled") {
+    return asCallResult({
+      ok: false,
+      reason: "session_terminal",
+      message: `Session is in terminal state '${session.status}' and cannot be rescheduled.`,
+    });
+  }
+
+  const result = await rescheduleSession({
+    sessionId: session.id,
+    hostId: link.userId,
+    newSlot: {
+      start: new Date(args.newSlot.start),
+      durationMinutes: args.newSlot.durationMinutes,
     },
-    { isError: true }
-  );
+    initiator: "agent",
+    initiatorName: args.clientMeta?.principal?.name ?? null,
+    reason: args.reason ?? null,
+    notifyAttendees: true,
+    overrides: args.overrides
+      ? {
+          ...(args.overrides.format ? { format: args.overrides.format } : {}),
+          ...(args.overrides.location !== undefined
+            ? { location: args.overrides.location ?? null }
+            : {}),
+        }
+      : undefined,
+    idempotencyKey: args.idempotencyKey ?? null,
+  });
+
+  if (!result.ok) {
+    // Map pipeline outcome → wire refusal reason. The pipeline's outcome
+    // strings are 1:1 with wire reasons by design (proposal §3.5).
+    const wireReason =
+      result.outcome === "session_not_found" ||
+      result.outcome === "session_not_agreed" ||
+      result.outcome === "slot_mismatch" ||
+      result.outcome === "gcal_patch_failed" ||
+      result.outcome === "validation_failed"
+        ? result.outcome === "validation_failed"
+          ? ("session_not_agreed" as const)
+          : (result.outcome as
+              | "session_not_found"
+              | "session_not_agreed"
+              | "slot_mismatch"
+              | "gcal_patch_failed")
+        : ("session_terminal" as const);
+
+    return asCallResult({
+      ok: false,
+      reason: wireReason,
+      message: result.error,
+    });
+  }
+
+  return asCallResult({
+    ok: true,
+    sessionId: session.id,
+    status: "rescheduled",
+    from: result.fromStart,
+    to: result.toStart,
+    ...(result.changed === false ? { idempotent: true } : {}),
+  });
 }
 
 // ---------------------------------------------------------------------------

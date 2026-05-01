@@ -757,15 +757,26 @@ describe("POST /api/mcp — cancel_meeting / reschedule_meeting", () => {
     );
   });
 
-  it("reschedule_meeting returns tool_not_implemented (awaiting patch-in-place implementation)", async () => {
-    // Stub-tool discipline: any tool advertised in tools/list but not yet
-    // wired to a real handler MUST return reason: "tool_not_implemented".
-    // Reschedule is the only stub today; proposal under review at
-    // proposals/2026-04-29_mcp-reschedule-meeting-patch-in-place.md.
+  it("reschedule_meeting now patches in place (no longer a stub)", async () => {
+    // The reschedule-pipeline shipped 2026-04-30; reschedule_meeting is
+    // live (not stubbed). Smoke test only — the pipeline itself has
+    // dedicated unit + integration coverage in reschedule-pipeline.test.ts
+    // (parallel to confirm-pipeline.test.ts). This test confirms the
+    // wire-side path no longer returns `tool_not_implemented`.
     //
-    // This assertion is the audit. If a future tool gets stubbed, its
-    // handler must follow the same pattern; add a parallel test row here
-    // when that happens.
+    // Wiring up a full happy path here would require mocking the GCal
+    // dispatcher + Prisma session lookup; that lives in the pipeline's
+    // own test file. Here we verify only that the route path resolves
+    // through to the pipeline (auth → resolveSession → pipeline) rather
+    // than short-circuiting at the stub.
+    mockAuthorize.mockResolvedValueOnce({
+      ok: true,
+      link: { id: "link_1", userId: "user_1" },
+      parsed: { slug: "abc", code: null },
+      rateLimit: { ok: true, result: {} },
+    });
+    // No matching session → session_not_found. Confirms the handler
+    // reached the resolver code path (not the stub branch).
     const res = await POST(
       makeRpcRequest(
         jsonRpcCall("reschedule_meeting", {
@@ -775,15 +786,10 @@ describe("POST /api/mcp — cancel_meeting / reschedule_meeting", () => {
       )
     );
     const rpc = await readJsonRpc(res);
-    expect(rpc.result?.isError).toBe(true);
     const sc = rpc.result?.structuredContent;
-    expect(sc?.ok).toBe(false);
-    expect(sc?.reason).toBe("tool_not_implemented");
-    // Message is guest-safe — no internal repo paths, no proposal filenames.
-    // Stabilization-package §3 Group A.
-    expect(String(sc?.message)).toMatch(/not currently available/);
-    expect(String(sc?.message)).not.toMatch(/proposals\//);
-    expect(String(sc?.message)).not.toMatch(/reschedule-pipeline/);
+    // The stub used to return `tool_not_implemented`. Live handler returns
+    // session_not_found here because the test mock has no session.
+    expect(sc?.reason).not.toBe("tool_not_implemented");
   });
 });
 
