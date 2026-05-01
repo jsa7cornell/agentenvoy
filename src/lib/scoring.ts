@@ -1975,15 +1975,34 @@ export function applyEventOverrides(
     });
   }
 
-  // Apply preferredDays as a SOFT boost — promote slots on preferred days
-  // into the ★ tier (score ≤ -1), leave other days alone so they remain
-  // offerable at lower priority. Prior behavior was a hard filter that
-  // dropped non-preferred days entirely, which broke the intended pattern
-  // of "Wed preferred, Thu–Fri as fallback" (bug reported 2026-04-21 via
-  // feedback cmo8d9eqs — Katie link `aeetnc` had dateRange Wed–Sat +
-  // preferredDays:[Wed], but guest could only book Wed). Weekend filtering
-  // is handled separately via `allowWeekends`; `preferredDays` should never
-  // double-duty as a day exclusion.
+  // Apply preferredDays — interpretation depends on `intent.steering`:
+  //
+  //   - intent.steering === "narrow" | "exclusive"  → HARD FILTER
+  //     The host directly narrowed to specific days ("any Wednesday",
+  //     "tomorrow or next Tuesday"). Drop slots on non-preferred days
+  //     entirely. The composer emits `intent.steering: "narrow"` in this
+  //     case (per calendar-event-composer.md §3 4-step discriminator).
+  //
+  //   - any other intent (soft / open / unset)      → SOFT BOOST
+  //     The host expressed a preference WITH fallback tolerance
+  //     ("Wed ideally, else Thu"), or no day preference at all. Keep the
+  //     non-preferred days offerable at base score; promote preferred
+  //     days into the ★ tier (score ≤ -1).
+  //
+  // History (2026-04-21 → 2026-05-01): pre-2026-04-21 the behavior was
+  // always-hard. 2026-04-21 changed it to always-soft to fix the
+  // "Wed preferred, Thu–Fri fallback" case (Katie link `aeetnc`,
+  // feedback cmo8d9eqs) — but that overcorrected by ignoring
+  // intent.steering, leaving narrow-intent links offering all days.
+  // Reported 2026-05-01 via feedback `cmon70ahd000g8cbbl2t821jk`
+  // (Josh J. coffee, "any Wednesday", showed every weekday). This
+  // re-introduces the hard filter ONLY when intent.steering signals
+  // narrow/exclusive — preserving the 2026-04-21 fix for soft-intent
+  // links while honoring narrow-intent host directives. See COMPOSER.md
+  // §2 catalogue F10.
+  //
+  // Weekend filtering remains separate via `allowWeekends`;
+  // `preferredDays` should never double-duty as a weekend exclusion.
   //
   // Tolerate any day-name shape on read via normalizeDayName.
   if (rules.preferredDays && rules.preferredDays.length > 0) {
@@ -1994,17 +2013,28 @@ export function applyEventOverrides(
     );
     if (allowed.size > 0) {
       const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
-      slots = slots.map((s) => {
-        // Only promote otherwise-offerable slots (score ≤ 1). Don't override
-        // a real conflict (score ≥ 2) — a stretch/conflict slot on a preferred
-        // day stays a stretch/conflict; the host's day preference can't paper
-        // over an actual calendar issue.
-        if (s.score > 1) return s;
-        const dayStr = dayFmt.format(new Date(s.start));
-        if (!allowed.has(dayStr)) return s;
-        // Push to ★ tier (score ≤ -1). Keep already-lower scores lower.
-        return { ...s, score: Math.min(s.score, -1) };
-      });
+      const steering = rules.intent?.steering;
+      const hardFilter = steering === "narrow" || steering === "exclusive";
+      if (hardFilter) {
+        // Hard filter — drop non-preferred days. Conflicts on preferred
+        // days are preserved (their score signals the conflict downstream).
+        slots = slots.filter((s) => {
+          const dayStr = dayFmt.format(new Date(s.start));
+          return allowed.has(dayStr);
+        });
+      } else {
+        // Soft boost — promote preferred-day slots into the ★ tier; leave
+        // other days alone. Only promote otherwise-offerable slots
+        // (score ≤ 1) — a stretch/conflict slot on a preferred day stays
+        // a stretch/conflict; the host's day preference can't paper over
+        // a real calendar issue.
+        slots = slots.map((s) => {
+          if (s.score > 1) return s;
+          const dayStr = dayFmt.format(new Date(s.start));
+          if (!allowed.has(dayStr)) return s;
+          return { ...s, score: Math.min(s.score, -1) };
+        });
+      }
     }
   }
 
