@@ -206,15 +206,17 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
                 <button
                   type="button"
                   onClick={copyStandardLink}
-                  className="flex items-center justify-center w-8 h-8 text-tertiary hover:bg-surface-secondary/90 hover:text-primary transition"
+                  className={`flex items-center justify-center h-8 px-2.5 transition ${
+                    copied
+                      ? "text-emerald-400"
+                      : "text-tertiary hover:bg-surface-secondary/90 hover:text-primary"
+                  }`}
                   title={copied ? "Copied!" : "Copy link"}
                   aria-label="Copy standard link"
                   data-testid="desktop-header-standard-link-copy"
                 >
                   {copied ? (
-                    <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
+                    <span className="text-[12px] font-medium">Copied!</span>
                   ) : (
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <rect x="9" y="9" width="13" height="13" rx="2" />
