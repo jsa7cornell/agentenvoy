@@ -9,6 +9,7 @@ import { formatDuration } from "@/lib/format-duration";
 import { formatDeferralFieldsList, type DeferralFieldNoun } from "@/agent/greetings/registry";
 import { QuickReplies } from "./onboarding/quick-replies";
 import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
+import { PreferencesExtendedFlow } from "./onboarding/preferences-extended-flow";
 import { shortTimezoneLabel } from "@/lib/timezone";
 import { GcalUpdateCard } from "./gcal-update-card";
 import { RuleConfirmCard } from "./onboarding/rule-confirm-card";
@@ -792,6 +793,10 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
   // via `/api/onboarding/primary-link`. Render gate derives "in progress"
   // from messages, not from `messages.length === 0`.
   const [primaryLinkFlowActive, setPrimaryLinkFlowActive] = useState(false);
+  // Continuation flow ("Fine-tune availability + theme"). Activated by the
+  // CTA shown after primary-link completion, and auto-resumed on reload if
+  // prior preferences-extended messages exist without the terminal flag.
+  const [extendedFlowActive, setExtendedFlowActive] = useState(false);
   // Lightweight context for `PrimaryLinkFlow` — fetched once on mount.
   // Not gating: if these are null, the flow degrades gracefully (no
   // primary-link slug in the celebration, no browser tz proposal).
@@ -912,18 +917,31 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
 
   // Auto-resume tuning if the channel has unfinished tuning history. Per
   // proposal §2.3: `primaryLinkFlowActive` is the React signal but
-  // "in-progress vs done" derives from messages.
+  // "in-progress vs done" derives from messages. Same logic for the
+  // preferences-extended continuation flow.
   useEffect(() => {
     if (initialLoading) return;
     const tuning = messages.filter((m) => {
       const meta = m.metadata as { kind?: string; subkind?: string } | null;
       return meta?.kind === "onboarding" && meta?.subkind === "primary-link-tuning";
     });
-    if (tuning.length === 0) return;
-    const terminal = tuning.some(
-      (m) => (m.metadata as { terminal?: boolean } | null)?.terminal === true,
-    );
-    if (!terminal) setPrimaryLinkFlowActive(true);
+    if (tuning.length > 0) {
+      const terminal = tuning.some(
+        (m) => (m.metadata as { terminal?: boolean } | null)?.terminal === true,
+      );
+      if (!terminal) setPrimaryLinkFlowActive(true);
+    }
+
+    const extended = messages.filter((m) => {
+      const meta = m.metadata as { kind?: string; subkind?: string } | null;
+      return meta?.kind === "onboarding" && meta?.subkind === "preferences-extended";
+    });
+    if (extended.length > 0) {
+      const terminal = extended.some(
+        (m) => (m.metadata as { terminal?: boolean } | null)?.terminal === true,
+      );
+      if (!terminal) setExtendedFlowActive(true);
+    }
   }, [initialLoading, messages]);
 
   // ── Calibrated user with onboardReturnTo → bounce immediately ──────────
@@ -1642,6 +1660,56 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           );
         })()}
 
+        {/* Continue-setup CTA — shows once primary-link tuning is complete
+            and the preferences-extended flow hasn't yet started. Single
+            button beneath the chat thread; dismissing the celebration
+            doesn't auto-advance — the user opts in. SPEC §6.6 invariant
+            still holds: this CTA bubble is rendered from React state, but
+            *clicking* it kicks off a server-route flow whose turns persist. */}
+        {(() => {
+          if (loading || !isCalibrated) return null;
+          if (primaryLinkFlowActive || extendedFlowActive) return null;
+          const primaryDone = messages.some((m) => {
+            const meta = m.metadata as { kind?: string; subkind?: string; terminal?: boolean } | null;
+            return (
+              meta?.kind === "onboarding" &&
+              meta?.subkind === "primary-link-tuning" &&
+              meta?.terminal === true
+            );
+          });
+          const extendedStarted = messages.some((m) => {
+            const meta = m.metadata as { kind?: string; subkind?: string } | null;
+            return meta?.kind === "onboarding" && meta?.subkind === "preferences-extended";
+          });
+          if (!primaryDone || extendedStarted) return null;
+          return (
+            <div className="flex flex-col gap-2 mt-2">
+              <EnvoyBubble showLabel={false}>
+                Want to keep going? Fine-tune your availability (buffer,
+                custom rules, evenings) and pick a theme — about 90 seconds.
+              </EnvoyBubble>
+              <div className="px-1">
+                <button
+                  type="button"
+                  onClick={() => setExtendedFlowActive(true)}
+                  className="text-xs px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition"
+                >
+                  Continue setting up →
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Preferences-extended continuation flow. */}
+        {!loading && isCalibrated && extendedFlowActive && (
+          <PreferencesExtendedFlow
+            messages={messages}
+            onAppendMessage={(m) => setMessages((prev) => [...prev, m])}
+            onDismiss={() => setExtendedFlowActive(false)}
+          />
+        )}
+
         {messages.map((msg, i) => {
           // Skip primary-link tuning messages here ONLY while
           // PrimaryLinkFlow is mounted — it renders them itself. Once
@@ -1651,6 +1719,12 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           if (primaryLinkFlowActive) {
             const meta = msg.metadata as { kind?: string; subkind?: string } | null;
             if (meta?.kind === "onboarding" && meta?.subkind === "primary-link-tuning") {
+              return null;
+            }
+          }
+          if (extendedFlowActive) {
+            const meta = msg.metadata as { kind?: string; subkind?: string } | null;
+            if (meta?.kind === "onboarding" && meta?.subkind === "preferences-extended") {
               return null;
             }
           }
