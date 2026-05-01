@@ -46,16 +46,32 @@ vi.mock("@/lib/mcp/call-log", () => ({
   writeMcpCallLog: vi.fn().mockResolvedValue(undefined),
 }));
 
+// PR-2 read tools hit the schedule cache + Postgres. Mock both for wiring.
+vi.mock("@/lib/calendar", () => ({
+  getOrComputeSchedule: vi.fn(),
+}));
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    user: { findUnique: vi.fn() },
+    negotiationSession: { findMany: vi.fn() },
+  },
+}));
+
 import { authorizeHostMcpCall } from "@/app/api/mcp/host/auth";
 import { checkHostPatRateLimit } from "@/lib/mcp/auth";
 import { handleCreateLink } from "@/agent/actions";
 import { writeMcpCallLog } from "@/lib/mcp/call-log";
+import { getOrComputeSchedule } from "@/lib/calendar";
+import { prisma } from "@/lib/prisma";
 import { POST } from "@/app/api/mcp/host/route";
 
 const mockAuth = authorizeHostMcpCall as unknown as ReturnType<typeof vi.fn>;
 const mockRate = checkHostPatRateLimit as unknown as ReturnType<typeof vi.fn>;
 const mockCreateLink = handleCreateLink as unknown as ReturnType<typeof vi.fn>;
 const mockWriteLog = writeMcpCallLog as unknown as ReturnType<typeof vi.fn>;
+const mockSchedule = getOrComputeSchedule as unknown as ReturnType<typeof vi.fn>;
+const mockUserFind = prisma.user.findUnique as unknown as ReturnType<typeof vi.fn>;
+const mockSessionFind = prisma.negotiationSession.findMany as unknown as ReturnType<typeof vi.fn>;
 
 function makeRpcRequest(body: unknown, bearer = "agentenvoy_pat_live_x"): Request {
   return new Request("http://localhost/api/mcp/host", {
@@ -96,6 +112,9 @@ beforeEach(() => {
   mockRate.mockReset();
   mockCreateLink.mockReset();
   mockWriteLog.mockClear();
+  mockSchedule.mockReset();
+  mockUserFind.mockReset();
+  mockSessionFind.mockReset();
   // Default: rate limit passes
   mockRate.mockResolvedValue({ ok: true, result: {} });
 });
@@ -224,5 +243,165 @@ describe("POST /api/mcp/host — create_link happy path", () => {
       tokenId: "tok_sched",
       displayId: "sch12345",
     });
+  });
+});
+
+describe("POST /api/mcp/host — get_my_availability (PR-2)", () => {
+  it("read-scope PAT can call get_my_availability; returns scored slots + timezone", async () => {
+    mockAuth.mockResolvedValueOnce({
+      ok: true,
+      kind: "host_pat",
+      userId: "user_1",
+      tokenId: "tok_read",
+      displayId: "read1234",
+      scopes: ["read"],
+    });
+    mockUserFind.mockResolvedValueOnce({
+      preferences: { explicit: { timezone: "America/Los_Angeles" } },
+    });
+    const future1 = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+    const future2 = new Date(Date.now() + 48 * 60 * 60_000).toISOString();
+    const dateFmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const start = dateFmt.format(new Date(future1));
+    const end = dateFmt.format(new Date(future2));
+    mockSchedule.mockResolvedValueOnce({
+      connected: true,
+      slots: [
+        { start: future2, end: new Date(new Date(future2).getTime() + 30 * 60_000).toISOString(), score: 0 },
+        { start: future1, end: new Date(new Date(future1).getTime() + 30 * 60_000).toISOString(), score: -1 },
+      ],
+    });
+
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("get_my_availability", {
+          dateRange: { start, end },
+        })
+      ) as never
+    );
+
+    expect(res.status).toBe(200);
+    const rpc = await readJsonRpc(res);
+    const text = rpc.result?.content?.[0]?.text;
+    const parsed = JSON.parse(text!);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.timezone).toBe("America/Los_Angeles");
+    // Best-first: -1 (preferred) before 0
+    expect(parsed.slots[0].score).toBe(-1);
+    expect(parsed.slots[0].preferred).toBe(true);
+    expect(parsed.slots[1].score).toBe(0);
+    expect(parsed.slots[1].preferred).toBeUndefined();
+    // localStart is host-TZ formatted, no offset
+    expect(parsed.slots[0].localStart).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
+    expect(parsed.slots[0].localStart).not.toMatch(/Z|[+-]\d{2}:\d{2}/);
+  });
+
+  it("disconnected calendar returns calendar_not_connected refusal", async () => {
+    mockAuth.mockResolvedValueOnce({
+      ok: true,
+      kind: "host_pat",
+      userId: "user_1",
+      tokenId: "tok_read",
+      displayId: "read1234",
+      scopes: ["read"],
+    });
+    mockUserFind.mockResolvedValueOnce({ preferences: {} });
+    mockSchedule.mockResolvedValueOnce({ connected: false, slots: [] });
+
+    const res = await POST(
+      makeRpcRequest(
+        jsonRpcCall("get_my_availability", {
+          dateRange: { start: "2026-05-01", end: "2026-05-08" },
+        })
+      ) as never
+    );
+
+    const rpc = await readJsonRpc(res);
+    const text = rpc.result?.content?.[0]?.text;
+    const parsed = JSON.parse(text!);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.reason).toBe("calendar_not_connected");
+  });
+});
+
+describe("POST /api/mcp/host — list_my_sessions (PR-2)", () => {
+  it("read-scope PAT can call list_my_sessions; returns hashed emails (never plaintext)", async () => {
+    mockAuth.mockResolvedValueOnce({
+      ok: true,
+      kind: "host_pat",
+      userId: "user_1",
+      tokenId: "tok_read",
+      displayId: "read1234",
+      scopes: ["read"],
+    });
+    mockSessionFind.mockResolvedValueOnce([
+      {
+        id: "sess_1",
+        status: "agreed",
+        guestName: "Alice Example",
+        guestEmail: "alice@example.com",
+        agreedTime: new Date("2026-05-05T16:00:00Z"),
+        updatedAt: new Date("2026-05-04T10:00:00Z"),
+        link: { code: "abc123", hashSalt: "test-salt-link-1" },
+        _count: { messages: 7 },
+      },
+      {
+        id: "sess_2",
+        status: "active",
+        guestName: null,
+        guestEmail: null,
+        agreedTime: null,
+        updatedAt: new Date("2026-05-04T09:00:00Z"),
+        link: { code: "xyz789", hashSalt: "test-salt-link-2" },
+        _count: { messages: 2 },
+      },
+    ]);
+
+    const res = await POST(
+      makeRpcRequest(jsonRpcCall("list_my_sessions", {})) as never
+    );
+
+    expect(res.status).toBe(200);
+    const rpc = await readJsonRpc(res);
+    const text = rpc.result?.content?.[0]?.text;
+    const parsed = JSON.parse(text!);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.sessions).toHaveLength(2);
+    // Plaintext email NEVER appears in output
+    const json = JSON.stringify(parsed);
+    expect(json).not.toContain("alice@example.com");
+    // Hash is hex sha256
+    expect(parsed.sessions[0].guestEmailHash).toMatch(/^[a-f0-9]{64}$/);
+    // Null guestEmail → null hash
+    expect(parsed.sessions[1].guestEmailHash).toBeNull();
+    expect(parsed.sessions[0].guestName).toBe("Alice Example");
+    expect(parsed.sessions[0].linkCode).toBe("abc123");
+    expect(parsed.sessions[0].messageCount).toBe(7);
+  });
+
+  it("filters to host-only via where clause hostId = principal.userId", async () => {
+    mockAuth.mockResolvedValueOnce({
+      ok: true,
+      kind: "host_pat",
+      userId: "user_42",
+      tokenId: "tok_read",
+      displayId: "read1234",
+      scopes: ["read"],
+    });
+    mockSessionFind.mockResolvedValueOnce([]);
+
+    await POST(
+      makeRpcRequest(jsonRpcCall("list_my_sessions", {})) as never
+    );
+
+    // Confirm the prisma query was scoped to hostId = principal.userId.
+    expect(mockSessionFind).toHaveBeenCalledTimes(1);
+    const callArgs = mockSessionFind.mock.calls[0][0];
+    expect(callArgs.where.hostId).toBe("user_42");
   });
 });

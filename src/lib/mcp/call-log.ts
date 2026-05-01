@@ -117,14 +117,28 @@ export const CALL_LOG_REDACTION: Record<string, Record<string, RedactionClass>> 
     idempotent: "verbatim",
     counterProposal: "shape-summary",
   },
-  // Host-side tools (`/api/mcp/host`) — single host-tool today (`create_link`),
-  // more land with PR-2/PR-3b. Same redaction discipline as guest tools.
-  // Stabilization-package §3 Group B (B3 fold).
+  // Host-side tools (`/api/mcp/host`). Same redaction discipline as guest.
+  // Stabilization-package §3 Group B (B3 fold) → PR-2 (read tools).
   create_link: {
     ...REFUSAL_COMMON,
     linkCode: "verbatim",
     slug: "verbatim",
     url: "verbatim",
+  },
+  get_my_availability: {
+    ...REFUSAL_COMMON,
+    timezone: "verbatim",
+    // Same shape-summary discipline as guest get_availability — bound the
+    // log row size; a 200-slot week would blow up the JSON column otherwise.
+    slots: "shape-summary",
+  },
+  list_my_sessions: {
+    ...REFUSAL_COMMON,
+    // Each session row carries `guestEmailHash` (already per-link salted —
+    // never plaintext, so verbatim is safe), `guestName` (host-typed,
+    // verbatim), `agreedTime`/`lastActivityAt` (timestamps, not secrets).
+    // Shape-summary the array to bound row size.
+    sessions: "shape-summary",
   },
 };
 

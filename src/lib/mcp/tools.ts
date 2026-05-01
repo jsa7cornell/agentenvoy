@@ -443,7 +443,7 @@ export async function handleGetAvailability(
 /** Map the DB session status string onto the wire enum. "escalated" is an
  *  internal detour; externally it's still an active negotiation. Unknown
  *  values fall back to "active" rather than 500'ing the call. */
-function mapSessionStatus(
+export function mapSessionStatus(
   s: string
 ): "active" | "agreed" | "cancelled" | "rescheduled" | "expired" {
   switch (s) {

@@ -20,10 +20,18 @@ import { hasScope, type HostPrincipalContext } from "@/app/api/mcp/host/auth";
 import {
   HOST_MCP_TOOLS,
   createLinkInput,
+  getMyAvailabilityInput,
+  listMySessionsInput,
   type HostMcpToolName,
 } from "@/lib/mcp/host-schemas";
 import { handleCreateLink } from "@/agent/actions";
 import { writeMcpCallLog } from "@/lib/mcp/call-log";
+import { mapSessionStatus } from "@/lib/mcp/tools";
+import { hashGuestEmail } from "@/lib/mcp/email-hash";
+import { prisma } from "@/lib/prisma";
+import { getUserTimezone } from "@/lib/timezone";
+import { getOrComputeSchedule } from "@/lib/calendar";
+import { getTier, type ScoredSlot, type LinkParameters } from "@/lib/scoring";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,6 +98,158 @@ async function handleCreateLinkTool(
   const slug = slugAndCode.split("/")[0] ?? "";
 
   return ok({ linkCode: d.code, slug, url: d.url });
+}
+
+// ---------------------------------------------------------------------------
+// get_my_availability  (PR-2, parent §5.4)
+// ---------------------------------------------------------------------------
+
+async function handleGetMyAvailabilityTool(
+  args: z.infer<typeof getMyAvailabilityInput>,
+  userId: string
+): Promise<CallToolResult> {
+  const host = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferences: true },
+  });
+  const prefs = (host?.preferences ?? {}) as Record<string, unknown>;
+  const hostTimezone = getUserTimezone(prefs);
+  const displayTz = args.timezone ?? hostTimezone;
+
+  const schedule = await getOrComputeSchedule(userId);
+  if (!schedule.connected) {
+    return fail(
+      "calendar_not_connected",
+      "Connect your Google Calendar in Preferences before reading availability."
+    );
+  }
+
+  // No link rules apply at the host surface — the principal IS the host,
+  // so there's no link.parameters / guestPicks.window / VIP gating. Just
+  // the global scored schedule + caller-supplied dateRange clip.
+  let slots: ScoredSlot[] = schedule.slots;
+
+  // Score filter: same as guest non-VIP path. The host is reading their
+  // own calendar; protected-band stretches don't make sense here.
+  slots = slots.filter((s) => s.score <= 1);
+
+  // Drop past slots.
+  const now = Date.now();
+  slots = slots.filter((s) => new Date(s.start).getTime() > now);
+
+  // dateRange clip in display timezone (YYYY-MM-DD).
+  const dateFmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: displayTz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const { start: rangeStart, end: rangeEnd } = args.dateRange;
+  slots = slots.filter((s) => {
+    const local = dateFmt.format(new Date(s.start));
+    return local >= rangeStart && local <= rangeEnd;
+  });
+
+  // Sort best-first (score asc; ties broken by earliest), then cap.
+  slots.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    return new Date(a.start).getTime() - new Date(b.start).getTime();
+  });
+  const limit = args.limit ?? 20;
+  if (slots.length > limit) {
+    slots = slots.slice(0, limit);
+  }
+
+  // Format localStart in host timezone (matches guest schema; saves agents UTC math).
+  const localFmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: hostTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+
+  // No link rules to drive tier/VIP semantics → emit the bookable-band tier
+  // for everything. Empty rules object passed to getTier; preferred from score.
+  const emptyRules = {} as LinkParameters;
+  const wireSlots = slots.map((s) => {
+    const tier = getTier(s, emptyRules, hostTimezone);
+    const wireTier =
+      tier === "first-offer" ? "first_offer"
+      : tier === "stretch1" ? "stretch1"
+      : tier === "stretch2" ? "stretch2"
+      : undefined;
+    const preferred = s.score <= -1;
+    const localStart = localFmt.format(new Date(s.start)).replace(" ", "T");
+    return {
+      start: s.start,
+      end: s.end,
+      localStart,
+      score: s.score,
+      ...(wireTier ? { tier: wireTier } : {}),
+      ...(preferred ? { preferred: true } : {}),
+    };
+  });
+
+  return ok({ timezone: displayTz, slots: wireSlots });
+}
+
+// ---------------------------------------------------------------------------
+// list_my_sessions  (PR-2, parent §5.5)
+// ---------------------------------------------------------------------------
+
+async function handleListMySessionsTool(
+  args: z.infer<typeof listMySessionsInput>,
+  userId: string
+): Promise<CallToolResult> {
+  // Map wire status enum → DB status. "all" = no filter.
+  // Wire's "active" maps to DB "active" + "escalated" (the latter is an
+  // internal detour, externally still active per mapSessionStatus).
+  const statusFilter =
+    args.status === "all"
+      ? undefined
+      : args.status === "active"
+        ? { in: ["active", "escalated"] }
+        : args.status;
+
+  const limit = args.limit ?? 50;
+
+  const sessions = await prisma.negotiationSession.findMany({
+    where: {
+      hostId: userId,
+      ...(statusFilter !== undefined ? { status: statusFilter } : {}),
+      ...(args.linkCode ? { link: { code: args.linkCode } } : {}),
+    },
+    select: {
+      id: true,
+      status: true,
+      guestName: true,
+      guestEmail: true,
+      agreedTime: true,
+      updatedAt: true,
+      link: { select: { code: true, hashSalt: true } },
+      _count: { select: { messages: true } },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: limit,
+  });
+
+  const wireSessions = sessions.map((s) => ({
+    sessionId: s.id,
+    linkCode: s.link.code ?? "",
+    status: mapSessionStatus(s.status),
+    guestName: s.guestName,
+    // Per-link salted hash. Never plaintext. SPEC §4 invariant.
+    guestEmailHash: s.guestEmail ? hashGuestEmail(s.link.hashSalt, s.guestEmail) : null,
+    agreedTime: s.agreedTime?.toISOString() ?? null,
+    lastActivityAt: s.updatedAt.toISOString(),
+    messageCount: s._count.messages,
+  }));
+
+  return ok({ sessions: wireSessions });
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +339,16 @@ export function registerHostMcpTools(
     create_link: (args) =>
       handleCreateLinkTool(
         args as z.infer<typeof createLinkInput>,
+        principalCtx.userId
+      ),
+    get_my_availability: (args) =>
+      handleGetMyAvailabilityTool(
+        args as z.infer<typeof getMyAvailabilityInput>,
+        principalCtx.userId
+      ),
+    list_my_sessions: (args) =>
+      handleListMySessionsTool(
+        args as z.infer<typeof listMySessionsInput>,
         principalCtx.userId
       ),
   };
