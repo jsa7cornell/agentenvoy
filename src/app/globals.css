@@ -23,6 +23,23 @@ body {
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
+/* Pick-pulse — one-shot emerald pulse on the deal-room Confirm card when
+   pendingProposal first appears after a picker click. Draws the eye to the
+   next-step destination after the auto-scroll lands. Pairs with the F11
+   "Picked — confirm below ↓" picker label so the user has both a directive
+   AND a visual cue. Single ~1.4s cycle; no-op under prefers-reduced-motion. */
+@keyframes pick-pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(16, 185, 129, 0.55); }
+  50%  { box-shadow: 0 0 0 12px rgba(16, 185, 129, 0.10); }
+  100% { box-shadow: 0 0 0 0   rgba(16, 185, 129, 0); }
+}
+.pick-pulse-once {
+  animation: pick-pulse 1.4s ease-out 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pick-pulse-once { animation: none; }
+}
+
 @keyframes flow-line {
   to { left: 130%; }
 }

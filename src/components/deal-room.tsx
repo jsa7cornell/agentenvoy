@@ -2696,7 +2696,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           };
           return (
             <div className="flex justify-start">
-              <div className="max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3">
+              {/* Pick-pulse: one-shot emerald box-shadow pulse that runs when
+                  this card first mounts. The card mounts when pendingProposal
+                  transitions null → set (i.e. right after the picker click),
+                  so the animation fires exactly once per "pick this time"
+                  click. Pairs with the F11 "Picked — confirm below ↓" picker
+                  label and the auto-scroll in proposeFromSlot to make the
+                  next-step destination unmistakable. We gate on
+                  `pendingProposal` so the pulse only fires after a picker
+                  click — NOT for the legacy CONFIRMATION_PROPOSAL render
+                  path that mounts this same card from a non-picker source. */}
+              <div className={`max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3 ${pendingProposal ? "pick-pulse-once" : ""}`}>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
                   {pendingProposal ? "Your pick" : "Proposed meeting"}
                 </div>
