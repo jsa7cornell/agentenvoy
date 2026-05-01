@@ -28,7 +28,7 @@
  */
 import type { NegotiationLink } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getUserTimezone } from "@/lib/timezone";
+import { getUserTimezone, formatIsoWithOffset } from "@/lib/timezone";
 import {
   applyEventOverrides,
   filterByDuration,
@@ -160,7 +160,9 @@ export async function buildAgentSnapshot(
     auth: "url-capability",
     tokenParam: "meetingUrl",
     guidance:
-      "POST tools/call with name: 'propose_lock' and the meetingUrl above as the meetingUrl argument. Possessing the URL is the authorization.",
+      "POST tools/call with name: 'propose_lock' and the meetingUrl above as the meetingUrl argument. Possessing the URL is the authorization. " +
+      "On success the response includes both `sessionId` and a canonical `meetingUrl` (with code) — save them; you'll need either to cancel or reschedule. " +
+      "To cancel: POST tools/call `cancel_meeting` with `{ meetingUrl, sessionId }`. To reschedule: POST tools/call `reschedule_meeting` with `{ meetingUrl, sessionId, newSlot: { start } }`.",
   };
 
   const baseSnapshot: Omit<AgentSnapshot, "slots"> = {
@@ -285,19 +287,9 @@ export async function buildAgentSnapshot(
     slots = slots.slice(0, limit);
   }
 
-  // Format localStart in host TZ; map internal "first-offer" → wire
-  // "first_offer"; emit `preferred: true` for score ≤ -1.
-  const localFmt = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-
+  // Format localStart in host TZ as full ISO 8601 with offset suffix
+  // (e.g. "2026-05-04T09:30:00-07:00"). Friend's FEEDBACK.md 2026-05-01:
+  // earlier offset-less format ("2026-05-04T09:30:00") was ambiguous.
   const wireSlots: WireSlot[] = slots.map((s) => {
     const tier = getTier(s, rules, timezone);
     const wireTier =
@@ -309,7 +301,7 @@ export async function buildAgentSnapshot(
             ? ("stretch2" as const)
             : undefined;
     const preferred = s.score <= -1;
-    const localStart = localFmt.format(new Date(s.start)).replace(" ", "T");
+    const localStart = formatIsoWithOffset(new Date(s.start), timezone);
     return {
       start: s.start,
       end: s.end,

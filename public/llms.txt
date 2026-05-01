@@ -88,9 +88,29 @@ Discovery manifest with full tool schemas:
   decide rather than the link's rules.
 - `propose_lock` — the booking handshake. Pass the chosen slot + guest info;
   the server validates, compare-and-swaps the session to `agreed`, and
-  dispatches the calendar invite + confirmation email.
-- `cancel_meeting`, `reschedule_meeting` — lifecycle tools for previously
-  agreed meetings. (In development at time of writing — check the manifest.)
+  dispatches the calendar invite + confirmation email. Returns
+  `{ sessionId, meetingUrl, ... }` — save BOTH; you'll need them to
+  cancel or reschedule later. The canonical `meetingUrl` in the response
+  is the session-specific URL (with code), which differs from the
+  bare-vanity URL you may have booked through.
+- `cancel_meeting` — pass `{ meetingUrl, sessionId }`. The `sessionId`
+  is the primary identifier; you can pass the bare-vanity URL as
+  `meetingUrl` and the session resolves correctly. Idempotent: a second
+  cancel returns `ok: true, idempotent: true`.
+- `reschedule_meeting` — pass `{ meetingUrl, sessionId, newSlot: { start } }`.
+  Patches the GCal event in place (preserves the Meet link, single
+  notification). Idempotent on `(sessionId, idempotencyKey)`.
+
+## Cancelling and rescheduling — the sessionId flow
+
+You only need `sessionId` after `propose_lock`. Save it with the
+booking confirmation. The cancel/reschedule tools accept either:
+
+- `meetingUrl: <session URL with code>` (returned by `propose_lock`)
+- OR `meetingUrl: <bare vanity URL>` + `sessionId: <from propose_lock>`
+
+Both forms work. The second is what you'd use if the only URL you
+have on file is the original vanity link the guest was sent.
 
 ## Worked example — booking in 3 calls
 

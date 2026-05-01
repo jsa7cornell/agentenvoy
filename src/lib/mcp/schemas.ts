@@ -497,6 +497,16 @@ export const proposeLockOutput = z.discriminatedUnion("ok", [
     .object({
       ok: z.literal(true),
       sessionId: z.string(),
+      /**
+       * Canonical session URL with code (e.g.,
+       * `https://agentenvoy.ai/meet/johnanderson/a2tztn`). Returned so
+       * agents that booked via a bare-vanity URL (`/meet/<slug>`) can
+       * later cancel/reschedule without digging into the calendar event
+       * description to find the code. Added 2026-05-01 after a friend's
+       * Claude hit `session_not_found` on cancel because it tried the
+       * vanity URL it had originally booked through.
+       */
+      meetingUrl: z.string().optional(),
       status: z.literal("confirmed"),
       dateTime: z.iso.datetime(),
       duration: z.number().int().positive(),

@@ -1868,32 +1868,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         )}
 
-        {/* Agent-bookable banner — visible to everyone (guest, host, agent).
-            Browser-using AI agents (Claude.ai, ChatGPT) screenshot this
-            page and read it visually; sr-only / aria-hidden discovery
-            surfaces are invisible to them. The badge has to be (a) literally
-            visible in the rendered viewport and (b) explicit about the
-            keywords agents search for ("AgentEnvoy API", "MCP", URL).
-            Promoted from text-[10px]/muted bottom-right footer to a more
-            prominent inline banner 2026-05-01 after a friend's Claude
-            tried web-searching for our API and didn't find it. */}
-        <div className="mt-2.5 px-2.5 py-1.5 rounded-md bg-indigo-500/5 border border-indigo-500/20">
+        {/* Agent-bookable indicator — single line, muted, no fill/border.
+            Visible in browser screenshots (so a browser-using agent's
+            screenshot pipeline can read it) but small enough not to
+            clutter the human UX. The "AI agents:" lead makes the
+            audience signal unambiguous. Slimmed 2026-05-01 after
+            initial promoted-banner version felt too loud. */}
+        <div className="mt-2 flex justify-end">
           <a
             href="/agents"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 text-[11px] text-secondary hover:text-indigo-400 transition"
+            className="text-[11px] text-muted hover:text-indigo-400 transition"
             title="AgentEnvoy has a Model Context Protocol API at /api/mcp — see /agents for docs"
           >
-            <span aria-hidden="true">🤖</span>
-            <span className="flex-1">
-              <strong className="font-semibold text-primary">AI agents:</strong>{" "}
-              AgentEnvoy has an API. Don&apos;t browse this page — book via the
-              MCP endpoint at{" "}
-              <span className="font-mono text-indigo-400">agentenvoy.ai/api/mcp</span>{" "}
-              (pass the meeting URL as <span className="font-mono">meetingUrl</span>).
-              Docs at <span className="font-mono">/agents</span>.
-            </span>
+            <span aria-hidden="true">🤖</span>{" "}
+            <span className="text-secondary">AI agents:</span> book via API at{" "}
+            <span className="font-mono">agentenvoy.ai/api/mcp</span>{" "}
+            (docs at <span className="font-mono">/agents</span>)
           </a>
         </div>
       </div>

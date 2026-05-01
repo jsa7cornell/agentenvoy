@@ -134,6 +134,46 @@ export function isSupportedTimezone(iana: string): boolean {
   return BY_IANA.has(iana);
 }
 
+/**
+ * Format a Date into ISO 8601 with the given timezone's offset suffix.
+ *
+ * Returns e.g. `"2026-05-04T09:30:00-07:00"` for a Date in
+ * America/Los_Angeles. Useful for the agent-snapshot `localStart` field
+ * (friend's Claude FEEDBACK.md 2026-05-01: wanted full ISO with offset).
+ *
+ * UTC times produce a `+00:00` suffix.
+ */
+export function formatIsoWithOffset(date: Date, timeZone: string): string {
+  const wallFmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  // sv-SE produces "YYYY-MM-DD HH:MM:SS"
+  const wall = wallFmt.format(date).replace(" ", "T");
+
+  // Get the offset via Intl `longOffset` — returns "GMT-07:00" or "GMT"
+  // for UTC. Strip the "GMT" prefix; "GMT" alone (no suffix) means +00:00.
+  const offsetFmt = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    timeZoneName: "longOffset",
+  });
+  const tzPart = offsetFmt
+    .formatToParts(date)
+    .find((p) => p.type === "timeZoneName")?.value ?? "GMT";
+  const offset =
+    tzPart === "GMT" || tzPart === "UTC"
+      ? "+00:00"
+      : tzPart.replace(/^GMT/, "") || "+00:00";
+
+  return `${wall}${offset}`;
+}
+
 /** Look up a table entry, or null if unknown. */
 export function getTimezoneEntry(iana: string): TimezoneEntry | null {
   return BY_IANA.get(iana) ?? null;

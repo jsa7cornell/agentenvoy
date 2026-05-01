@@ -17,7 +17,7 @@
  */
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getUserTimezone } from "@/lib/timezone";
+import { getUserTimezone, formatIsoWithOffset } from "@/lib/timezone";
 import {
   applyEventOverrides,
   getTier,
@@ -387,19 +387,9 @@ export async function handleGetAvailability(
     slots = slots.slice(0, limit);
   }
 
-  // Format `localStart` in the host's timezone — saves agents UTC math.
-  const localFmt = new Intl.DateTimeFormat("sv-SE", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-
   // Emit wire shape. Map "first-offer" (internal) → "first_offer" (schema).
+  // localStart is full ISO 8601 with TZ offset (e.g., "2026-05-05T09:00:00-07:00").
+  // Updated 2026-05-01 — was offset-less; friend's FEEDBACK.md flagged ambiguity.
   const wireSlots = slots.map((s) => {
     const tier = getTier(s, rules, timezone);
     const wireTier =
@@ -414,10 +404,7 @@ export async function handleGetAvailability(
     // (`score <= -1`) so guest agents get the same star-worthiness signal
     // without hardcoding the threshold. SPEC invariant #9.
     const preferred = s.score <= -1;
-    // sv-SE locale produces "YYYY-MM-DD HH:MM:SS" — replace the space with T
-    // for ISO-like shape, no offset suffix (the timezone is implicit per the
-    // top-level `timezone` field on the response).
-    const localStart = localFmt.format(new Date(s.start)).replace(" ", "T");
+    const localStart = formatIsoWithOffset(new Date(s.start), timezone);
     return {
       start: s.start,
       end: s.end,
@@ -935,9 +922,20 @@ export async function handleProposeLock(
     });
   }
 
+  // Build the canonical session URL with code so the agent can cancel /
+  // reschedule later without digging into the calendar event. Prefer
+  // link.code (path-segment form, the canonical mint shape); fall back
+  // to bare-vanity URL if somehow missing. NEXTAUTH_URL is the prod base
+  // in deploy; localhost is the dev base.
+  const baseUrl = process.env.NEXTAUTH_URL ?? "https://agentenvoy.ai";
+  const sessionMeetingUrl = link.code
+    ? `${baseUrl}/meet/${link.slug}/${link.code}`
+    : `${baseUrl}/meet/${link.slug}`;
+
   return asCallResult({
     ok: true,
     sessionId: session.id,
+    meetingUrl: sessionMeetingUrl,
     status: "confirmed",
     dateTime: result.dateTime,
     duration: result.duration,
@@ -989,16 +987,49 @@ export async function handleCancelMeeting(
 
   const { link } = auth;
 
-  const session = await resolveSession({
-    linkId: link.id,
-    hostId: link.userId,
-    sessionId: args.sessionId,
-  });
+  // When sessionId is supplied, look it up by sessionId DIRECTLY — not
+  // constrained to the auth'd link. This is the cancel-flow ergonomic
+  // fix (2026-05-01, friend's Claude FEEDBACK.md): an agent that booked
+  // through a bare-vanity URL (/meet/<slug>) gets back a sessionId from
+  // propose_lock; that session is often associated with a *different*
+  // link row (contextual w/ code) than the bare-vanity primary the auth
+  // path resolves to. Constraining by linkId here produced spurious
+  // session_not_found.
+  //
+  // Authorization is preserved by checking session.hostId === link.userId
+  // — possessing the bare-vanity URL means you're the host, so any
+  // session of yours is yours to cancel. No cross-host leakage.
+  let session: { id: string; hostId: string; status: string } | null = null;
+  if (args.sessionId) {
+    session = await prisma.negotiationSession.findUnique({
+      where: { id: args.sessionId },
+      select: { id: true, hostId: true, status: true },
+    });
+    if (session && session.hostId !== link.userId) {
+      // Auth'd link belongs to a different host than this session.
+      // Don't leak existence — return session_not_found.
+      session = null;
+    }
+  } else {
+    // No sessionId — fall back to "latest agreed session on the auth'd
+    // link." This is the legacy path; works when bare-vanity URL maps to
+    // the same link the booking is on (contextual flows where the agent
+    // has the full /meet/<slug>/<code> URL).
+    const resolved = await resolveSession({
+      linkId: link.id,
+      hostId: link.userId,
+    });
+    session = resolved
+      ? { id: resolved.id, hostId: link.userId, status: resolved.status }
+      : null;
+  }
   if (!session) {
     return asCallResult({
       ok: false,
       reason: "session_not_found",
-      message: "No session found for this link.",
+      message: args.sessionId
+        ? "Session id did not resolve, or it belongs to a different host."
+        : "No session found for this link. Pass `sessionId` if you have it from a prior `propose_lock`.",
     });
   }
 
