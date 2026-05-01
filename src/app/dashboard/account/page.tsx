@@ -2,6 +2,7 @@
 
 import { useSession, signOut } from "next-auth/react";
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { TIMEZONE_TABLE, shortTimezoneLabel, getTimezoneEntry } from "@/lib/timezone";
 import { useOAuthSignIn } from "@/components/oauth/use-oauth-signin";
@@ -564,6 +565,30 @@ export default function AccountPage() {
               </button>
             </div>
           </div>
+        </section>
+
+        {/* Connectors — PAT management for letting an AI (Claude, ChatGPT, etc.)
+            act on your behalf via the host-MCP surface. Lives on its own page;
+            this is just the entry point. */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
+            Connectors
+          </h2>
+          <Link
+            href="/dashboard/account/connectors"
+            className="block bg-surface-inset/50 border border-secondary rounded-xl p-4 hover:border-indigo-500/50 transition group"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm text-primary font-medium">Connect Claude or another AI</p>
+                <p className="text-[11px] text-muted mt-1 leading-relaxed">
+                  Mint access tokens that let an AI act as you on AgentEnvoy —
+                  read your calendar, mint links, reschedule meetings.
+                </p>
+              </div>
+              <span className="text-muted group-hover:text-primary transition text-lg">→</span>
+            </div>
+          </Link>
         </section>
 
         {/* Dev Tools — admin-only. The underlying /api/debug/onboarding-reset
