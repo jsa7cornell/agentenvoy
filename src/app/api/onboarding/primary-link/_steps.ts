@@ -16,9 +16,15 @@ export type PrimaryLinkStep =
   | "hours"
   | "duration"
   | "format"
+  | "zoom_link"
+  | "phone_number"
   | "guest_flex"
   | "complete";
 
+/** Linear sequence; conditional sub-steps (`zoom_link`, `phone_number`)
+ *  are inserted by the route after `format` only when their format is
+ *  selected. STEP_ORDER lists the always-present spine; route logic
+ *  decides whether the sub-step fires or we jump straight to guest_flex. */
 export const STEP_ORDER: PrimaryLinkStep[] = [
   "timezone",
   "hours",
@@ -31,10 +37,10 @@ export const STEP_ORDER: PrimaryLinkStep[] = [
 export interface StepPrompt {
   step: PrimaryLinkStep;
   messages: EnvoyMessage[];
-  /** When `true`, the route should not render quick-reply options — the
-   *  client renders a freetext input instead (timezone "Other / not sure"
-   *  or hours "Custom hours"). */
-  freetextHint?: "timezone-other" | "hours-custom";
+  /** When set, the route persists this hint on the latest message's
+   *  metadata so the client renders a freetext input instead of quick-
+   *  reply options. */
+  freetextHint?: "timezone-other" | "hours-custom" | "zoom-link" | "phone-number";
 }
 
 // ── Common option sets ────────────────────────────────────────────────
@@ -72,32 +78,38 @@ export const DURATION_OPTIONS: QuickReplyOption[] = [
   { ...UNSURE_OPTION, number: 5 },
 ];
 
+/** Format options. Two video providers are surfaced separately so we can
+ *  collect the right credential immediately on selection (Zoom needs a
+ *  meeting URL; Meet needs nothing). Phone collects a number. In-person
+ *  has no follow-up. The persisted shape is `defaultFormat` (video /
+ *  phone / in-person) plus `videoProvider` (google_meet / zoom). */
 export const FORMAT_OPTIONS: QuickReplyOption[] = [
-  { number: 1, label: "Video call", value: "video" },
-  { number: 2, label: "Phone call", value: "phone" },
-  { number: 3, label: "In-person", value: "in-person" },
-  { ...UNSURE_OPTION, number: 4 },
+  { number: 1, label: "Google Meet (video)", value: "google_meet" },
+  { number: 2, label: "Zoom (video)", value: "zoom" },
+  { number: 3, label: "Phone call", value: "phone" },
+  { number: 4, label: "In-person", value: "in-person" },
+  { ...UNSURE_OPTION, number: 5 },
 ];
 
+/**
+ * Guest-flexibility options. Simplified per round-2 feedback to three
+ * options — drop the granular format-only / duration-only / vip_only
+ * variants from the primary-link tuning surface (those values are still
+ * accepted by the route's writer for back-compat with anything that may
+ * already have them persisted).
+ */
 export const GUEST_FLEX_OPTIONS: QuickReplyOption[] = [
-  { number: 1, label: "Just what I posted — no changes", value: "locked" },
+  {
+    number: 1,
+    label: "Slots are firm — don't allow changes (politely)",
+    value: "locked",
+  },
   {
     number: 2,
-    label: "Format flexibility — phone, video, or in-person are all OK",
-    value: "format",
+    label: "Allow guests to suggest different formats or durations",
+    value: "both",
   },
-  {
-    number: 3,
-    label: "Duration flexibility — longer or shorter slots are OK",
-    value: "duration",
-  },
-  { number: 4, label: "Both — format and duration are open", value: "both" },
-  {
-    number: 5,
-    label: "Only for VIPs — flexibility for select people, locked otherwise",
-    value: "vip_only",
-  },
-  { ...UNSURE_OPTION, number: 6 },
+  { ...UNSURE_OPTION, number: 3 },
 ];
 
 function tzOptions(browserTz: string | null): QuickReplyOption[] {
@@ -152,9 +164,9 @@ export function hoursPrompt(): StepPrompt {
   return {
     step: "hours",
     messages: [
-      { content: "What ordinary available hours should we offer up?" },
       {
-        content: "_(You can always customize this later, or per-link.)_",
+        content:
+          "What ordinary available hours should we offer up?\n\n_(You can always customize this later, or per-link.)_",
         options: HOURS_OPTIONS,
       },
     ],
@@ -178,9 +190,9 @@ export function durationPrompt(): StepPrompt {
   return {
     step: "duration",
     messages: [
-      { content: "…and what's your default meeting length?" },
       {
-        content: "_(You can always customize this later, or per-link.)_",
+        content:
+          "…and what's your default meeting length?\n\n_(You can always customize this later, or per-link.)_",
         options: DURATION_OPTIONS,
       },
     ],
@@ -192,13 +204,37 @@ export function formatPrompt(): StepPrompt {
     step: "format",
     messages: [
       {
-        content: "What's your default meeting format — video, phone, or in person?",
-      },
-      {
-        content: "_(You can always customize this later, or per-link.)_",
+        content:
+          "What's your default meeting format?\n\n_(You can always customize this later, or per-link.)_",
         options: FORMAT_OPTIONS,
       },
     ],
+  };
+}
+
+export function zoomLinkPrompt(): StepPrompt {
+  return {
+    step: "zoom_link",
+    messages: [
+      {
+        content:
+          "Got it — drop your Zoom personal meeting link or room URL and I'll include it on every Zoom invite.",
+      },
+    ],
+    freetextHint: "zoom-link",
+  };
+}
+
+export function phoneNumberPrompt(): StepPrompt {
+  return {
+    step: "phone_number",
+    messages: [
+      {
+        content:
+          "What number should guests call? I'll include it on phone-call invites.",
+      },
+    ],
+    freetextHint: "phone-number",
   };
 }
 

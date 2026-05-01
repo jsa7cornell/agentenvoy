@@ -37,6 +37,8 @@ import {
   hoursCustomPrompt,
   durationPrompt,
   formatPrompt,
+  zoomLinkPrompt,
+  phoneNumberPrompt,
   guestFlexPrompt,
   completePrompt,
   parseHoursValue,
@@ -104,7 +106,7 @@ async function persistStepTurns(
   userLabel: string | null,
   envoyMessages: { content: string }[],
   step: PrimaryLinkStep,
-  freetextHint?: "timezone-other" | "hours-custom",
+  freetextHint?: "timezone-other" | "hours-custom" | "zoom-link" | "phone-number",
 ): Promise<void> {
   let channel = await prisma.channel.findUnique({ where: { userId } });
   if (!channel) channel = await prisma.channel.create({ data: { userId } });
@@ -177,8 +179,12 @@ async function emitNextPrompt(
   ctx: TuningCtx,
   userLabel: string | null,
   fromStep: PrimaryLinkStep,
+  /** When set, override the linear STEP_ORDER successor — used by `format`
+   *  to insert the conditional sub-steps `zoom_link` / `phone_number`
+   *  before `guest_flex`. */
+  overrideNext?: PrimaryLinkStep,
 ): Promise<NextResponse> {
-  const next = nextStepAfter(fromStep);
+  const next = overrideNext ?? nextStepAfter(fromStep);
   if (next === "complete") {
     const summary = await buildSummaryMessage(ctx);
     const prompt = completePrompt(summary);
@@ -194,6 +200,8 @@ async function emitNextPrompt(
   if (next === "hours") prompt = hoursPrompt();
   else if (next === "duration") prompt = durationPrompt();
   else if (next === "format") prompt = formatPrompt();
+  else if (next === "zoom_link") prompt = zoomLinkPrompt();
+  else if (next === "phone_number") prompt = phoneNumberPrompt();
   else if (next === "guest_flex") {
     const e = ctx.prefs.explicit ?? {};
     const dur = (e as { defaultDuration?: number }).defaultDuration ?? 30;
@@ -346,15 +354,86 @@ export async function POST(req: NextRequest) {
       await logTuningUnsure(userId, "format");
       return await emitNextPrompt(ctx, label, "format");
     }
-    if (value !== "video" && value !== "phone" && value !== "in-person") {
+    // The UI surfaces `google_meet | zoom | phone | in-person`, but the
+    // persisted shape is `defaultFormat: video|phone|in-person` plus
+    // `videoProvider: google_meet|zoom`. Map the UI value to both. After
+    // the write, hop to the conditional sub-step that collects the
+    // credential the chosen format needs (zoom-link / phone-number),
+    // skipping it for Meet + in-person which need nothing further.
+    let defaultFormat: FormatValue;
+    let videoProvider: string | undefined;
+    let nextStep: PrimaryLinkStep = "guest_flex";
+    if (value === "google_meet") {
+      defaultFormat = "video";
+      videoProvider = "google_meet";
+    } else if (value === "zoom") {
+      defaultFormat = "video";
+      videoProvider = "zoom";
+      nextStep = "zoom_link";
+    } else if (value === "phone") {
+      defaultFormat = "phone";
+      nextStep = "phone_number";
+    } else if (value === "in-person") {
+      defaultFormat = "in-person";
+    } else {
       return NextResponse.json({ error: "Invalid format" }, { status: 400 });
     }
-    await writeExplicit(userId, { defaultFormat: value });
+    const patch: Record<string, unknown> = { defaultFormat };
+    if (videoProvider) patch.videoProvider = videoProvider;
+    await writeExplicit(userId, patch);
     ctx.prefs = {
       ...ctx.prefs,
-      explicit: { ...(ctx.prefs.explicit ?? {}), defaultFormat: value } as UserPreferences["explicit"],
+      explicit: { ...(ctx.prefs.explicit ?? {}), ...patch } as UserPreferences["explicit"],
     };
-    return await emitNextPrompt(ctx, label, "format");
+    return await emitNextPrompt(ctx, label, "format", nextStep);
+  }
+
+  if (step === "zoom_link") {
+    if (value === "__unsure__") {
+      await logTuningUnsure(userId, "zoom_link");
+      return await emitNextPrompt(ctx, label, "zoom_link", "guest_flex");
+    }
+    const link = (freetext ?? value)?.trim();
+    if (!link) {
+      return NextResponse.json({ error: "Zoom link required" }, { status: 400 });
+    }
+    // Light validation — must look URL-ish; we don't constrain to zoom.us
+    // because some hosts use vanity domains (zoom.example.com).
+    if (!/^https?:\/\//i.test(link) && !link.includes(".")) {
+      return NextResponse.json(
+        { error: "That doesn't look like a meeting URL — try the full https://… link." },
+        { status: 400 },
+      );
+    }
+    await writeExplicit(userId, { zoomLink: link });
+    ctx.prefs = {
+      ...ctx.prefs,
+      explicit: { ...(ctx.prefs.explicit ?? {}), zoomLink: link } as UserPreferences["explicit"],
+    };
+    return await emitNextPrompt(ctx, label ?? link, "zoom_link", "guest_flex");
+  }
+
+  if (step === "phone_number") {
+    if (value === "__unsure__") {
+      await logTuningUnsure(userId, "phone_number");
+      return await emitNextPrompt(ctx, label, "phone_number", "guest_flex");
+    }
+    const phone = (freetext ?? value)?.trim();
+    if (!phone) {
+      return NextResponse.json({ error: "Phone number required" }, { status: 400 });
+    }
+    if (phone.replace(/[^\d]/g, "").length < 7) {
+      return NextResponse.json(
+        { error: "That doesn't look like a phone number — try a full number like +1 555-1234." },
+        { status: 400 },
+      );
+    }
+    await writeExplicit(userId, { phone });
+    ctx.prefs = {
+      ...ctx.prefs,
+      explicit: { ...(ctx.prefs.explicit ?? {}), phone } as UserPreferences["explicit"],
+    };
+    return await emitNextPrompt(ctx, label ?? phone, "phone_number", "guest_flex");
   }
 
   if (step === "guest_flex") {

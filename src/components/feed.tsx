@@ -257,17 +257,16 @@ function PostureBubble({ p, showLabel }: { p: SeededPosture; showLabel?: boolean
   );
 }
 
-/** Standalone "your standard link is ready" card — renders under the
+/** Standalone "your primary link is ready" card — renders under the
  *  PostureBubble in the first-run welcome. Indigo-ringed, uppercase
- *  micro-label header, URL + Copy in a tinted inset row. Mirrors the
- *  `.standalone-link-card` block in mockups/mobile-v2.html §1 Frame 1. */
-function StandardLinkReadyCard({ url }: { url: string }) {
+ *  micro-label header, URL + Copy in a tinted inset row. */
+function PrimaryLinkReadyCard({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="self-start w-full max-w-lg bg-surface border border-indigo-500/40 rounded-xl px-3.5 py-3 flex flex-col gap-2">
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
         <span aria-hidden="true">🔗</span>
-        Your standard link is ready
+        Your primary link is ready
       </div>
       <div className="flex items-center gap-2 bg-surface-secondary border border-border rounded-lg px-3 py-1.5">
         <code className="font-mono text-[11px] text-primary truncate flex-1">
@@ -296,37 +295,40 @@ interface ConnectedCalendar {
   backgroundColor: string | null;
 }
 
+type CalendarRole = "primary" | "include" | "ignore";
+
 /**
  * Calendar picker bubble — surfaces the user's connected Google calendars
  * during onboarding (right after the calendar-connect step has implicitly
  * happened via seed-everything). WISHLIST §1n item 1; rendered in both
  * first-run and guest-first variants per the §1n followup (2026-04-28).
  *
- * Single-calendar hosts: skip silently. ≥2 calendars: render the list with a
- * "Primary" badge on whichever calendar is at activeCalendarIds[0] (default:
- * whatever Google flags as `primary: true`), plus a "Make primary" button on
- * non-primary entries. Click reorders activeCalendarIds[] so the chosen
- * calendar moves to position 0.
+ * Single-calendar hosts: skip silently. ≥2 calendars: each calendar gets a
+ * three-action picker (Primary / Include / Ignore) backed by
+ * `activeCalendarIds[]`:
+ *   - **Primary** = activeCalendarIds[0]. Determines the write-target
+ *     calendar for new events.
+ *   - **Include** = present in activeCalendarIds (not at position 0).
+ *     Contributes to availability calculations.
+ *   - **Ignore** = absent from activeCalendarIds. Not consulted at all.
+ *
+ * Default on first paint: only the Google-flagged primary is in
+ * activeCalendarIds; everything else is ignored. Hosts can promote secondary
+ * calendars to "include" (e.g. a personal calendar that should block work
+ * meetings) or shift "primary" to a different calendar.
  *
  * Seed-resolution (§1n followup b/a, 2026-04-28): the seed default writes
- * `activeCalendarIds: ["primary"]` — the literal string "primary" is Google's
- * own canonical alias for the user's main calendar, but the manage-calendars
- * dropdown enumerates IDs as actual email addresses, so the literal never
- * matches. On first paint, if activeCalendarIds is empty or equal to the seed
- * literal, we auto-resolve to the Google-flagged primary's actual ID and PUT
- * to calendar-filter so downstream surfaces (Calendars dropdown, scoring) all
- * see the same resolved ID.
- *
- * Semantic: AgentEnvoy's "primary" = activeCalendarIds[0]. No separate column
- * — reuse of the existing list ordering. Write-target consequences (which
- * calendar receives the events.insert call) are not adjusted in this PR;
- * write-target follows whatever the existing calendar.events.insert path
- * resolves to. Promote to a separate proposal if explicit write-target
- * control becomes a feature ask.
+ * `activeCalendarIds: ["primary"]` — the literal "primary" string is
+ * Google's canonical alias for the user's main calendar, but the manage-
+ * calendars dropdown enumerates IDs as actual email addresses, so the
+ * literal never matches. On first paint, if activeCalendarIds is empty or
+ * equal to the seed literal, auto-resolve to the Google-flagged primary's
+ * actual ID and PUT to calendar-filter so downstream surfaces (Calendars
+ * dropdown, scoring) all see the same resolved ID.
  */
 function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
   const [calendars, setCalendars] = useState<ConnectedCalendar[] | null>(null);
-  const [primaryId, setPrimaryId] = useState<string | null>(null);
+  const [activeIds, setActiveIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -345,11 +347,6 @@ function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
         const fallbackId = googlePrimary?.id ?? list[0]?.id ?? null;
         const stored = (knowledgeData?.activeCalendarIds as string[] | undefined) ?? [];
 
-        // Seed-resolution: if activeCalendarIds is empty (legacy nullish) or
-        // equals the seed literal `["primary"]`, write the resolved actual
-        // ID so downstream readers (Calendars dropdown, scoring) all see a
-        // real email. Idempotent — re-running while already resolved is a
-        // no-op semantic.
         const needsResolution =
           stored.length === 0 ||
           (stored.length === 1 && stored[0] === "primary");
@@ -361,18 +358,17 @@ function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ activeCalendarIds: [fallbackId] }),
             });
-            setPrimaryId(fallbackId);
+            setActiveIds([fallbackId]);
           } catch {
-            setPrimaryId(fallbackId); // local state still right even if PUT fails
+            setActiveIds([fallbackId]);
           }
           return;
         }
 
-        // Already-resolved case: pick the first stored ID as primary, falling
-        // back to Google's flag if stored is somehow empty after the check.
-        const resolvedPrimary =
-          stored.find((id) => list.some((c) => c.id === id)) ?? fallbackId;
-        setPrimaryId(resolvedPrimary);
+        // Already-resolved: keep stored order, but filter to known calendar
+        // IDs in case Google removed one since the last write.
+        const filtered = stored.filter((id) => list.some((c) => c.id === id));
+        setActiveIds(filtered.length > 0 ? filtered : fallbackId ? [fallbackId] : []);
       })
       .catch(() => {});
     return () => {
@@ -382,39 +378,86 @@ function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
 
   if (!calendars || calendars.length < 2) return null;
 
-  const handleMakePrimary = async (id: string) => {
-    if (busy || id === primaryId) return;
-    setBusy(true);
-    const previous = primaryId;
-    setPrimaryId(id); // optimistic
+  const primaryId = activeIds[0] ?? null;
+
+  function roleOf(id: string): CalendarRole {
+    if (id === primaryId) return "primary";
+    if (activeIds.includes(id)) return "include";
+    return "ignore";
+  }
+
+  async function persistActiveIds(next: string[]): Promise<boolean> {
     try {
-      // Reorder: chosen calendar first, then the rest in their original order.
-      const reordered = [
-        id,
-        ...calendars.filter((c) => c.id !== id).map((c) => c.id),
-      ];
       const res = await fetch("/api/connections/calendar-filter", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ activeCalendarIds: reordered }),
+        body: JSON.stringify({ activeCalendarIds: next }),
       });
-      if (!res.ok) setPrimaryId(previous); // revert
+      return res.ok;
     } catch {
-      setPrimaryId(previous);
-    } finally {
-      setBusy(false);
+      return false;
     }
-  };
+  }
+
+  async function handleRoleChange(id: string, role: CalendarRole) {
+    if (busy) return;
+    const current = roleOf(id);
+    if (current === role) return;
+    setBusy(true);
+    const previous = activeIds;
+
+    // Compute next activeCalendarIds[] from the role change. Primary is
+    // always position 0; included calendars follow in their original
+    // ordering; ignored calendars are absent.
+    let next: string[];
+    if (role === "primary") {
+      next = [id, ...activeIds.filter((x) => x !== id)];
+    } else if (role === "include") {
+      // If the calendar was previously primary, we need a new primary —
+      // promote the next-active calendar (or the only remaining one).
+      // Disallow demoting primary if it would leave the list empty.
+      if (current === "primary") {
+        const rest = activeIds.filter((x) => x !== id);
+        if (rest.length === 0) {
+          setBusy(false);
+          return; // refuse — at least one calendar must be active
+        }
+        next = [...rest, id];
+      } else {
+        // Was ignored → append to activeIds.
+        next = [...activeIds, id];
+      }
+    } else {
+      // role === "ignore"
+      if (current === "primary") {
+        const rest = activeIds.filter((x) => x !== id);
+        if (rest.length === 0) {
+          setBusy(false);
+          return;
+        }
+        next = rest;
+      } else {
+        next = activeIds.filter((x) => x !== id);
+      }
+    }
+
+    setActiveIds(next); // optimistic
+    const ok = await persistActiveIds(next);
+    if (!ok) setActiveIds(previous);
+    setBusy(false);
+  }
 
   return (
     <EnvoyBubble showLabel={showLabel}>
         <div className="mb-2">
-          You&rsquo;ve got {calendars.length} Google calendars — we&rsquo;ve
-          selected your primary. Feel free to change it here:
+          I use your Google calendar(s) to determine your availability and
+          send invites. You&rsquo;ve got {calendars.length} Google calendars
+          — we&rsquo;ve selected your primary calendar, but let me know if I
+          should add others or make a different calendar your primary.
         </div>
         <ul className="space-y-1.5">
           {calendars.map((cal) => {
-            const isPrimary = cal.id === primaryId;
+            const role = roleOf(cal.id);
             return (
               <li
                 key={cal.id}
@@ -429,22 +472,20 @@ function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
                     />
                   )}
                   <span className="truncate">{cal.name}</span>
-                  {isPrimary && (
-                    <span className="text-[10px] font-semibold uppercase tracking-wide text-purple-400 flex-shrink-0">
-                      Primary
-                    </span>
-                  )}
                 </span>
-                {!isPrimary && (
-                  <button
-                    type="button"
-                    onClick={() => handleMakePrimary(cal.id)}
-                    disabled={busy}
-                    className="text-[11px] text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition flex-shrink-0"
-                  >
-                    Make primary
-                  </button>
-                )}
+                <select
+                  value={role}
+                  onChange={(ev) =>
+                    handleRoleChange(cal.id, ev.target.value as CalendarRole)
+                  }
+                  disabled={busy}
+                  aria-label={`Role for ${cal.name}`}
+                  className="text-[11px] bg-surface-secondary border border-border rounded px-2 py-0.5 text-primary disabled:opacity-50 transition flex-shrink-0"
+                >
+                  <option value="primary">Primary</option>
+                  <option value="include">Include</option>
+                  <option value="ignore">Ignore</option>
+                </select>
               </li>
             );
           })}
@@ -640,7 +681,7 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
           rather than a footnote. Only rendered for first-run (existing
           users on the dormant variant haven't been issued a fresh link). */}
       {posture.meetSlug && (
-        <StandardLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
+        <PrimaryLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
       )}
 
       {/* Single CTA — nudge new hosts into the preference-tuning flow.

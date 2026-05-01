@@ -5,7 +5,7 @@
  * of onboarding.
  *
  * Visual contract: mockups/mobile-v2.html §1 Frame 5 + desktop-v2.html §2.
- * Sparkles + gradient headline + standard-link card with Copy + "→ Back to
+ * Sparkles + gradient headline + primary-link card with Copy + "→ Back to
  * chat" next-step CTA. Lighter than the guest-side calendar-connect
  * celebration (`celebration-banner.tsx` + `previews/post-onboard-welcome.html`)
  * — this is a host-side moment that drops into the Tune-preferences chat
@@ -139,7 +139,7 @@ export function WelcomeCelebration({
         I&rsquo;ll handle the rest.
       </p>
 
-      {/* Standard-link card — surface tokens flip across modes */}
+      {/* Primary-link card — surface tokens flip across modes */}
       {meetUrl && (
         <div className="celebration-sub relative z-[2] w-full bg-surface border border-border rounded-xl px-3 py-2 flex items-center gap-2">
           <code className="font-mono text-[11px] text-primary truncate flex-1 text-left">

@@ -75,12 +75,13 @@ export async function GET() {
 
   const links: LinkEntry[] = [];
 
-  // Standard link — always first; omitted if no meetSlug (account not
-  // yet initialized).
+  // Primary link — always first; omitted if no meetSlug (account not
+  // yet initialized). `kind: "standard"` is preserved on the wire for
+  // back-compat with existing consumers; user-visible copy uses "primary".
   if (user.meetSlug) {
     links.push({
       kind: "standard",
-      title: user.name ? `Meet ${user.name}` : "Standard link",
+      title: user.name ? `Meet ${user.name}` : "Primary link",
       url: `${baseUrl}/meet/${user.meetSlug}`,
       slug: user.meetSlug,
     });

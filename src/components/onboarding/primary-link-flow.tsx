@@ -37,7 +37,39 @@ interface ChannelMsg {
   metadata?: Record<string, unknown> | null;
 }
 
-type FreetextHint = "timezone-other" | "hours-custom";
+/** Minimal inline markdown for tuning bubbles. Supports **bold**, _italic_,
+ *  and `code` — same vocabulary the route emits in step prompts. Not full
+ *  markdown; if a step needs links or lists, route emits explicit text and
+ *  this stays small. */
+function renderTuningMarkdown(text: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|_[^_]+_|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <strong key={i} className="font-semibold">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith("_") && part.endsWith("_") && part.length > 2) {
+      return (
+        <em key={i} className="text-secondary">
+          {part.slice(1, -1)}
+        </em>
+      );
+    }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return (
+        <code key={i} className="text-purple-400 text-[0.9em]">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+type FreetextHint = "timezone-other" | "hours-custom" | "zoom-link" | "phone-number";
 
 interface PrimaryLinkFlowProps {
   /** Channel messages (host's full conversation history). The component
@@ -265,7 +297,7 @@ export function PrimaryLinkFlow({
               Envoy
             </span>
             <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed whitespace-pre-wrap">
-              {m.content}
+              {renderTuningMarkdown(m.content)}
             </div>
           </div>
         ) : (
@@ -298,7 +330,13 @@ export function PrimaryLinkFlow({
               value={freetextInput}
               onChange={(ev) => setFreetextInput(ev.target.value)}
               placeholder={
-                freetextHint === "hours-custom" ? "e.g. 8:30 to 5:30" : "e.g. America/Phoenix"
+                freetextHint === "hours-custom"
+                  ? "e.g. 8:30 to 5:30"
+                  : freetextHint === "zoom-link"
+                    ? "https://zoom.us/j/…"
+                    : freetextHint === "phone-number"
+                      ? "+1 555-1234"
+                      : "e.g. America/Phoenix"
               }
               className="flex-1 text-sm px-3.5 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-500/5 text-primary placeholder:text-primary/40 focus:outline-none focus:border-indigo-500/60"
               disabled={saving}
