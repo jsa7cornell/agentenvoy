@@ -55,11 +55,6 @@ interface MintedToken {
   plaintext: string;
 }
 
-const ENDPOINT_URL =
-  typeof window !== "undefined"
-    ? `${window.location.origin}/api/mcp/host`
-    : "https://agentenvoy.ai/api/mcp/host";
-
 export default function ConnectorsPage() {
   const [tokens, setTokens] = useState<ListedToken[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -75,7 +70,6 @@ export default function ConnectorsPage() {
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
-  const [showInstructions, setShowInstructions] = useState(false);
   const [copied, setCopied] = useState(false);
 
   async function reloadTokens() {
@@ -239,6 +233,69 @@ export default function ConnectorsPage() {
           </section>
         )}
 
+        {/* Active tokens — top of page so the host sees what's connected
+            before deciding to mint more. */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
+            Active tokens
+          </h2>
+          {revokeError && (
+            <p className="text-xs text-red-500 dark:text-red-400 mb-2">{revokeError}</p>
+          )}
+          {loadError ? (
+            <p className="text-sm text-red-500 dark:text-red-400">{loadError}</p>
+          ) : tokens === null ? (
+            <p className="text-sm text-muted">Loading…</p>
+          ) : tokens.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-secondary bg-surface-inset/30 px-4 py-6 text-center">
+              <p className="text-sm text-muted">
+                No tokens yet. Mint one below to connect Claude.
+              </p>
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {tokens.map((token) => (
+                <li
+                  key={token.id}
+                  className="rounded-xl border border-secondary bg-surface-inset/30 p-3 sm:p-4 flex items-start justify-between gap-4"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-primary truncate">
+                      {token.name}
+                    </div>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {token.scopes.map((s) => (
+                        <span
+                          key={s}
+                          className="text-[10px] font-medium uppercase tracking-wide text-secondary bg-surface-secondary/70 border border-surface-tertiary/40 rounded px-1.5 py-0.5"
+                        >
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="text-[11px] text-muted mt-1.5">
+                      <span className="font-mono">{token.displayId}</span>
+                      <span className="mx-1.5">·</span>
+                      <span>
+                        {token.lastUsedAt
+                          ? `Last used ${formatRelative(token.lastUsedAt)}`
+                          : "Never used"}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRevoke(token)}
+                    disabled={revokingId === token.id}
+                    className="text-xs text-red-500 dark:text-red-400 hover:underline disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {revokingId === token.id ? "Revoking…" : "Revoke"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
         {/* Mint form */}
         <section>
           <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
@@ -308,124 +365,6 @@ export default function ConnectorsPage() {
               </button>
             </div>
           </form>
-        </section>
-
-        {/* Active tokens */}
-        <section>
-          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
-            Active tokens
-          </h2>
-          {revokeError && (
-            <p className="text-xs text-red-500 dark:text-red-400 mb-2">{revokeError}</p>
-          )}
-          {loadError ? (
-            <p className="text-sm text-red-500 dark:text-red-400">{loadError}</p>
-          ) : tokens === null ? (
-            <p className="text-sm text-muted">Loading…</p>
-          ) : tokens.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-secondary bg-surface-inset/30 px-4 py-6 text-center">
-              <p className="text-sm text-muted">
-                No tokens yet. Mint one above to connect Claude or another AI.
-              </p>
-            </div>
-          ) : (
-            <ul className="space-y-2">
-              {tokens.map((token) => (
-                <li
-                  key={token.id}
-                  className="rounded-xl border border-secondary bg-surface-inset/30 p-3 sm:p-4 flex items-start justify-between gap-4"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-primary truncate">
-                      {token.name}
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {token.scopes.map((s) => (
-                        <span
-                          key={s}
-                          className="text-[10px] font-medium uppercase tracking-wide text-secondary bg-surface-secondary/70 border border-surface-tertiary/40 rounded px-1.5 py-0.5"
-                        >
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="text-[11px] text-muted mt-1.5">
-                      <span className="font-mono">{token.displayId}</span>
-                      <span className="mx-1.5">·</span>
-                      <span>
-                        {token.lastUsedAt
-                          ? `Last used ${formatRelative(token.lastUsedAt)}`
-                          : "Never used"}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleRevoke(token)}
-                    disabled={revokingId === token.id}
-                    className="text-xs text-red-500 dark:text-red-400 hover:underline disabled:opacity-50 whitespace-nowrap"
-                  >
-                    {revokingId === token.id ? "Revoking…" : "Revoke"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* How-to instructions (collapsed by default) */}
-        <section>
-          <button
-            onClick={() => setShowInstructions((v) => !v)}
-            className="w-full flex items-center justify-between text-left rounded-xl border border-secondary bg-surface-inset/30 px-4 py-3 hover:bg-surface-inset/50 transition"
-          >
-            <span className="text-sm font-medium text-primary">
-              How to connect Claude (or another AI)
-            </span>
-            <span className="text-muted">{showInstructions ? "▾" : "▸"}</span>
-          </button>
-          {showInstructions && (
-            <div className="mt-3 rounded-xl border border-secondary bg-surface-inset/30 p-4 space-y-4 text-sm text-secondary">
-              <div>
-                <h3 className="text-xs font-semibold text-primary uppercase tracking-wide mb-1.5">
-                  Claude.ai (custom connector)
-                </h3>
-                <ol className="list-decimal list-inside space-y-1 text-xs">
-                  <li>Mint a token above and copy the plaintext.</li>
-                  <li>
-                    In Claude.ai, go to Settings → Custom Connectors → Add MCP
-                    server.
-                  </li>
-                  <li>
-                    URL: <code className="text-xs bg-surface-secondary/60 px-1.5 py-0.5 rounded">{ENDPOINT_URL}</code>
-                  </li>
-                  <li>
-                    Auth header:{" "}
-                    <code className="text-xs bg-surface-secondary/60 px-1.5 py-0.5 rounded">
-                      Authorization: Bearer &lt;your token&gt;
-                    </code>
-                  </li>
-                  <li>
-                    Then ask Claude things like: <em>&quot;what does my calendar look
-                    like next week?&quot;</em> or <em>&quot;create a 30-min coffee link for Maria.&quot;</em>
-                  </li>
-                </ol>
-              </div>
-              <div>
-                <h3 className="text-xs font-semibold text-primary uppercase tracking-wide mb-1.5">
-                  Test with curl
-                </h3>
-                <pre className="text-[11px] bg-surface-secondary/60 border border-surface-tertiary/40 rounded-md p-2.5 overflow-x-auto">{`curl -X POST ${ENDPOINT_URL} \\
-  -H "Authorization: Bearer <your token>" \\
-  -H "Content-Type: application/json" \\
-  -H "Accept: application/json, text/event-stream" \\
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'`}</pre>
-              </div>
-              <p className="text-xs text-muted">
-                Lost a token? Revoke it above and mint a new one. Tokens are
-                stored as a hash; even AgentEnvoy can&apos;t recover the plaintext.
-              </p>
-            </div>
-          )}
         </section>
       </div>
     </main>
