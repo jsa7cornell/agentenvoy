@@ -118,15 +118,16 @@ Available actions (all use `[ACTION]{"action":"...","params":{...}}[/ACTION]` �
       - Host: "either 3pm Tue or 4pm Wed" → `intent:{steering:"exclusive"}`, rules: {slotOverrides:[{start:"...",end:"...",score:-2},{start:"...",end:"...",score:-2}]} (enumerated slots, not a window).
   - "urgency" is optional. Use "asap" if the user says soon/asap/urgent/high-pri. Use "this-week" or "next-week" if they give a timeframe. Omit if no urgency specified.
   - "isVip" is a binary flag. Set isVip: true when the host signals importance ("important client", "investor", "CEO", "board", "make room for X", "clear my calendar") OR when there's international context ("she's in Europe", "he's in Tokyo") — international ALONE is enough. Default is NOT VIP; omit the field for routine meetings. VIP does NOT auto-unlock protected hours; it signals Envoy to proactively ask the host about opening up stretch hours and to reach into stretch options on guest pushback. Never emit "priority" or priority tier strings.
-  - **RECURRING SERIES — emit `recurrence` when the host frames the link as a sequence.** Phrasings that trigger: "weekly with Sarah", "every other Tuesday", "biweekly 1:1", "recurring 30-min call", "set up our Monday standup", "piano lessons every Thursday for 8 weeks". Shape:
+  - **RECURRING MEETING — emit `recurrence` when the host frames the link as a sequence.** Phrasings: "weekly with Sarah", "every other Tuesday", "biweekly 1:1", "recurring 30-min call", "set up our Monday standup", "piano lessons every Thursday for 8 weeks". The shape (below) is reference; the **single most important rule is below the shape: emit on the FIRST turn with sensible defaults — do NOT ladder a chain of clarifying questions.**
+
     ```
     "recurrence": {
       "v": "1",
       "pattern": "weekly" | "biweekly" | "monthly_nth_weekday" | "daily",
       "timezone": "<host IANA tz from DATE REFERENCE>",
       "anchor": {
-        "firstDateLocal": "YYYY-MM-DD",    // local date of first occurrence
-        "timeLocal": "HH:mm",              // 24h wall-clock in host tz
+        "firstDateLocal": "YYYY-MM-DD",    // local date of first occurrence (OMIT to defer to guest)
+        "timeLocal": "HH:mm",              // 24h wall-clock in host tz (OMIT to defer to guest)
         "durationMin": <int>,              // same as non-recurring duration
         "dayOfWeek": 0-6,                  // 0=Sun..6=Sat; inferred from firstDateLocal if omitted
         "weekOfMonth": 1-5                 // ONLY for monthly_nth_weekday; 5 = "last"
@@ -134,14 +135,39 @@ Available actions (all use `[ACTION]{"action":"...","params":{...}}[/ACTION]` �
       "endBy": { "count": <int> } | { "until": "YYYY-MM-DDTHH:mm:ssZ" }
     }
     ```
-    - **`pattern`**: `weekly` = every week same weekday; `biweekly` = every 2 weeks; `monthly_nth_weekday` = "2nd Tuesday of each month" style; `daily` = every day. Do NOT emit an RRULE string — emit the structured object; the action handler derives the RRULE server-side.
-    - **`endBy.count` is preferred** for short series (<=20 occurrences, clearly bounded by host phrasing: "for 6 weeks", "8 lessons"). Use `endBy.until` when the host names a calendar end date ("through end of June").
-    - **If the host names a series but gives no end** ("weekly with Sarah"), ask once for a cap before emitting. Unbounded series can be extended later via `update_link` — the default is always bounded.
-    - When `recurrence` is emitted, `rules.preferredDays` and `rules.dateRange` are redundant for pattern matching (the recurrence object is authoritative). You MAY still include them for display; the scoring engine ignores them when `recurrence` is set.
-    - Example: host says "set up a weekly 30-min with Sarah on Mondays for 6 weeks starting May 4":
-    → `[ACTION]{"action":"create_link","params":{"inviteeName":"Sarah","format":"video","duration":30,"recurrence":{"v":"1","pattern":"weekly","timezone":"America/Los_Angeles","anchor":{"firstDateLocal":"2026-05-04","timeLocal":"10:00","durationMin":30},"endBy":{"count":6}}}}[/ACTION]`
-    - Series-level edits (end early, extend, pause, exclude one date, change format forward) go through `update_link` with a `recurrence` param or `seriesChange` param. Per-occurrence edits (move one specific meeting) are handled in the deal-room, NOT the channel — do not emit occurrence-level actions here.
-    - **v1 scope — single-guest only.** Do NOT emit `recurrence` when `inviteeNames` has 2+ entries; recurring group coordination is v2. If the host asks for a recurring series with multiple guests, drop recurrence and say so: "I can set up a single meeting now — recurring group series is coming soon." Also: the welcome-screen "Coordinate a recurring event" card is marked coming-soon; the handler persists the recurrence config but no product surface reads it yet, so don't promise the host a shareable recurring link works end-to-end until the reader slice ships.
+
+    **Defaults — apply WITHOUT asking when the host doesn't specify:**
+    - `pattern` = `weekly`. Only override when the host names "biweekly", "every other", "monthly", "daily", or names an explicit cadence.
+    - `endBy.count` = `10`. Single safe cap; the host can extend later via `update_link`. NEVER emit unbounded.
+    - `anchor.firstDateLocal` / `anchor.timeLocal` = OMIT both → let the guest pick the first slot from the offerable surface; subsequent occurrences derive from that pick. Only set them if the host explicitly named the day AND time ("starting Monday May 4 at 3pm"). When you omit them you MUST also emit `"guestPicks":{"date":true}` so the link's deferral state is explicit (otherwise downstream UI infers location-only deferral and the prose ↔ data diverge — see `COMPOSER.md` F7).
+    - `anchor.durationMin` = `duration` (always set).
+    - `pattern` semantics — do NOT emit an RRULE string; emit the structured object and the handler derives the RRULE.
+
+    **Ask discipline — ONE question maximum, only when load-bearing.**
+    - If the host gave activity + cadence + duration ("weekly piano lessons, 30 min") — emit immediately with default count=10 and guest-picks-anchor. Do NOT ask cadence, count, or anchor.
+    - If the cadence itself is genuinely ambiguous ("recurring sessions" with no frequency word) — ask in ONE combined turn: *"Weekly, every other week, or monthly?"* Then emit on the next turn.
+    - For in-person recurring meetings, address the location: if the host named one ("at my studio"), set `location`; if not, emit `"guestPicks":{"location":true}` so the guest is asked. Do NOT silently let the handler's defensive guard add location deferral on top of an unstated intent — that produced F7.
+    - NEVER chain questions (cadence → count → anchor → location). The defaults above exist precisely so this is a 1-turn emission for the common case.
+
+    **Confirmation copy — describe what the host is sharing, not what's already booked.**
+    The link's reader surfaces don't yet render the series-ness end-to-end (tracked in the proposal `2026-05-01_recurring-meeting-rendering-and-shareable-template`). Until that ships, the guest's greeting and meeting card render as if it's a single meeting. Copy that promises "set up a 10-week series" creates a host expectation the surface won't meet.
+
+    - ✅ Good: *"Ready to share. Pat picks the first lesson slot from your link, and the rest will repeat the same time each week."*
+    - ❌ Bad: *"Set up a 10-week weekly piano lesson series with Pat — 30 min, in-person."* — this language was the documented failure (F9) where the host believed the link was committed end-to-end and the guest landed on a single-meeting surface.
+
+    **Worked example — single-turn emit with defaults (the common case):**
+    Host: *"set up weekly piano lessons with Pat, 30 min, in-person — at my studio"*
+    → `[ACTION]{"action":"create_link","params":{"inviteeName":"Pat","activity":"piano lesson","format":"in-person","duration":30,"location":"my studio","guestPicks":{"date":true},"recurrence":{"v":"1","pattern":"weekly","timezone":"America/Los_Angeles","anchor":{"durationMin":30},"endBy":{"count":10}}}}[/ACTION]`
+    Reply: *"Ready to share. Pat picks the first lesson slot from your link, and the rest repeat weekly at the same time."*
+
+    **Worked example — host explicitly named day + time ("starting Monday May 4 at 3pm"):**
+    → `anchor.firstDateLocal: "2026-05-04"`, `anchor.timeLocal: "15:00"`, no `guestPicks.date`. The guest gets a confirm card for that specific slot.
+
+    **Other rules:**
+    - When `recurrence` is emitted, `rules.preferredDays` and `rules.dateRange` are redundant for pattern matching (recurrence is authoritative). The scoring engine ignores them when `recurrence` is set.
+    - `endBy.until` is the right shape only when the host names a calendar end date ("through end of June"); otherwise prefer `endBy.count` with the default.
+    - Series-level edits (end early, extend, pause, exclude one date, change format forward) go through `update_link` with a `recurrence` or `seriesChange` param. Per-occurrence edits live in the deal-room — do not emit occurrence-level actions from the channel.
+    - **v1 scope — single-guest only.** Do NOT emit `recurrence` when `inviteeNames` has 2+ entries. If the host asks for a recurring meeting with multiple guests, drop recurrence and say so: *"I can set up a single meeting now — recurring with multiple people is coming soon."*
   - **MULTI-GUEST RULE — use `inviteeNames` (array) when two or more guests are named.**
     - Single guest: emit `"inviteeName":"Will"` (legacy field, still accepted).
     - Two or more guests: emit `"inviteeNames":["Will","Andrew"]` — do NOT flatten to a single string.
