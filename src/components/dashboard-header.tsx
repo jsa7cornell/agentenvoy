@@ -82,6 +82,18 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
 
   const hasAwaitingAck = awaitingAck > 0;
 
+  // Copy feedback for the standard-link pill. Mirrors the pattern in
+  // `my-links-popover.tsx` — flag flips for 1.5s, then resets.
+  const [copied, setCopied] = useState(false);
+  const meetSlug = session?.user?.meetSlug ?? null;
+  const standardUrl = meetSlug ? `agentenvoy.ai/meet/${meetSlug}` : null;
+  function copyStandardLink() {
+    if (!standardUrl) return;
+    navigator.clipboard?.writeText(`https://${standardUrl}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
   // `mode: "login"` — anonymous viewers on a logged-in-host surface (deal
   // room, etc.) are likely returning users. `useOAuthSignIn` suppresses the
   // pre-consent modal when the `ae_returning` cookie is present and uses
@@ -152,53 +164,113 @@ export function DashboardHeader({ signInCallbackUrl }: { signInCallbackUrl?: str
             )}
           </Link>
 
-          {/* Event Links tab (center). Links to /dashboard/event-links
-              (Phase 2 PR 3). The `isEventLinks` matcher still accepts the
-              legacy `/dashboard/meetings` route so deep links highlight.
-              Cyan dot when one or more sessions are awaiting host
-              acknowledgement. */}
+          {/* Standard-link pill (center) — three segments separated by
+              vertical dividers:
+                · URL button (click copies)
+                · Copy icon button (click copies)
+                · "Edit my links and events" → /dashboard/event-links
+              The `isEventLinks` matcher still accepts the legacy
+              `/dashboard/meetings` route so deep links highlight on the
+              edit segment. Cyan dot rides on the edit segment when one or
+              more sessions are awaiting host acknowledgement. */}
           <div className="justify-self-center">
-            <Link
-              href="/dashboard/event-links"
-              className={`relative flex items-center gap-2 rounded-lg px-3 py-1.5 transition ${
-                isEventLinks
-                  ? "bg-accent/15 ring-1 ring-accent/40 text-accent"
-                  : "text-secondary hover:bg-surface-secondary/60 hover:text-primary"
-              }`}
-              data-active={isEventLinks ? "true" : undefined}
-              data-testid="desktop-header-event-links"
-              title="Event Links"
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
+            {standardUrl ? (
+              <div
+                className="relative inline-flex items-center bg-surface-secondary/60 border border-secondary rounded-lg overflow-hidden"
+                data-testid="desktop-header-standard-link-pill"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 6"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M14 11a5 5 0 0 0-7.07 0l-1.41 1.41a5 5 0 0 0 7.07 7.07L14 18"
-                />
-              </svg>
-              <span className="text-sm font-medium">Event Links</span>
-              {hasAwaitingAck && (
-                <span
-                  className="w-2 h-2 rounded-full bg-cyan-400"
-                  aria-label="One or more events need your attention"
-                  data-testid="desktop-header-awaiting-ack-dot"
-                />
-              )}
-              {isEventLinks && (
-                <span className="absolute left-3 right-3 -bottom-[13px] h-0.5 bg-accent rounded-full" />
-              )}
-            </Link>
+                <button
+                  type="button"
+                  onClick={copyStandardLink}
+                  className="flex items-center gap-2 px-3 py-1.5 text-secondary hover:bg-surface-secondary/90 hover:text-primary transition"
+                  title={copied ? "Copied!" : "Click to copy"}
+                  aria-label="Copy standard link"
+                  data-testid="desktop-header-standard-link-url"
+                >
+                  <svg
+                    className="w-4 h-4 text-accent flex-shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 13a5 5 0 0 0 7.07 0l1.41-1.41a5 5 0 0 0-7.07-7.07L10 6" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14 11a5 5 0 0 0-7.07 0l-1.41 1.41a5 5 0 0 0 7.07 7.07L14 18" />
+                  </svg>
+                  <span className="text-[13px] font-mono tracking-tight">
+                    <span className="text-tertiary">agentenvoy.ai/meet/</span>
+                    <span className="text-primary font-medium">{meetSlug}</span>
+                  </span>
+                </button>
+                <div className="w-px h-5 bg-secondary" aria-hidden />
+                <button
+                  type="button"
+                  onClick={copyStandardLink}
+                  className="flex items-center justify-center w-8 h-8 text-tertiary hover:bg-surface-secondary/90 hover:text-primary transition"
+                  title={copied ? "Copied!" : "Copy link"}
+                  aria-label="Copy standard link"
+                  data-testid="desktop-header-standard-link-copy"
+                >
+                  {copied ? (
+                    <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <rect x="9" y="9" width="13" height="13" rx="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  )}
+                </button>
+                <div className="w-px h-5 bg-secondary" aria-hidden />
+                <Link
+                  href="/dashboard/event-links"
+                  className={`relative flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium transition ${
+                    isEventLinks
+                      ? "text-accent bg-accent/15"
+                      : "text-accent hover:bg-surface-secondary/90"
+                  }`}
+                  data-active={isEventLinks ? "true" : undefined}
+                  data-testid="desktop-header-event-links"
+                  title="Edit my links and events"
+                >
+                  <span>Edit my links and events</span>
+                  {hasAwaitingAck && (
+                    <span
+                      className="w-2 h-2 rounded-full bg-cyan-400"
+                      aria-label="One or more events need your attention"
+                      data-testid="desktop-header-awaiting-ack-dot"
+                    />
+                  )}
+                  {isEventLinks && (
+                    <span className="absolute left-3 right-3 -bottom-[10px] h-0.5 bg-accent rounded-full" />
+                  )}
+                </Link>
+              </div>
+            ) : (
+              // Fallback for users without a meetSlug (rare — auth.ts seeds
+              // one on first sign-in). Keep the edit affordance only.
+              <Link
+                href="/dashboard/event-links"
+                className={`relative flex items-center gap-2 rounded-lg px-3 py-1.5 transition ${
+                  isEventLinks
+                    ? "bg-accent/15 ring-1 ring-accent/40 text-accent"
+                    : "text-secondary hover:bg-surface-secondary/60 hover:text-primary"
+                }`}
+                data-active={isEventLinks ? "true" : undefined}
+                data-testid="desktop-header-event-links"
+                title="Edit my links and events"
+              >
+                <span className="text-sm font-medium">Edit my links and events</span>
+                {hasAwaitingAck && (
+                  <span
+                    className="w-2 h-2 rounded-full bg-cyan-400"
+                    aria-label="One or more events need your attention"
+                    data-testid="desktop-header-awaiting-ack-dot"
+                  />
+                )}
+              </Link>
+            )}
           </div>
 
           {/* Avatar + name + Preferences (right) — active state on /dashboard/account. */}

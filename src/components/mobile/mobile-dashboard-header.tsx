@@ -158,8 +158,8 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
             type="button"
             onClick={() => setLinksOpen(true)}
             className="relative inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-surface-secondary/60 border border-secondary text-primary text-xs font-medium hover:border-accent/50 transition"
-            title="Event Links"
-            aria-label="Open Event Links"
+            title="Links & Events"
+            aria-label="Open Links and Events"
             aria-haspopup="dialog"
             aria-expanded={linksOpen}
             data-testid="mobile-header-event-links"
@@ -182,7 +182,7 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
                 d="M14 11a5 5 0 0 0-7.07 0l-1.41 1.41a5 5 0 0 0 7.07 7.07L14 18"
               />
             </svg>
-            <span>Event Links</span>
+            <span>Links &amp; Events</span>
             {hasAwaitingAck && (
               <span
                 className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-accent3 ring-2 ring-surface"
