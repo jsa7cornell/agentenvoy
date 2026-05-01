@@ -67,7 +67,16 @@ export function DragSlotPicker({
   workingHourEnd = 18,
 }: DragSlotPickerProps) {
   const rulerRef = useRef<HTMLDivElement>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  // Tracks whether the user has clicked the picker button. Renamed from
+  // `confirmed` 2026-05-01 (F11 fix) — the click does NOT confirm the
+  // meeting; it stages a pendingProposal in the parent (deal-room.tsx
+  // proposeFromSlot) which surfaces a SEPARATE Confirm card with name/
+  // email fields. Until that card is submitted, session.status stays
+  // "active". Calling this state `confirmed` led to "✓ Confirmed" labels
+  // that lied to the user (bundle cmon7wqkx... — guest saw "Confirmed"
+  // while DB session was un-confirmed). The real confirm transition lives
+  // in confirm-pipeline.ts via the deal-room's confirm card.
+  const [picked, setPicked] = useState(false);
 
   const SPAN = (workingHourEnd - workingHourStart) * 60;
 
@@ -110,7 +119,7 @@ export function DragSlotPicker({
   // Reset only when the day changes — NOT on every render (which would undo
   // every drag). dateStr is the source of truth for "new day, reset pill".
   useEffect(() => {
-    setConfirmed(false);
+    setPicked(false);
     setCurrentMins(defaultMins);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateStr]);
@@ -164,13 +173,13 @@ export function DragSlotPicker({
   }, [candidates]);
 
   const onDragStart = useCallback((clientX: number) => {
-    if (!rulerRef.current || confirmed || candidates.length === 0) return;
+    if (!rulerRef.current || picked || candidates.length === 0) return;
     drag.current = {
       startX: clientX,
       startMins: currentMins,
       rulerWidth: rulerRef.current.getBoundingClientRect().width,
     };
-  }, [confirmed, currentMins, candidates.length]);
+  }, [picked, currentMins, candidates.length]);
 
   const onDragMove = useCallback((clientX: number) => {
     if (!drag.current) return;
@@ -215,14 +224,17 @@ export function DragSlotPicker({
 
   return (
     <div className="select-none">
-      {/* Confirmed badge — surfaces the committed state above the picker */}
-      {confirmed && (
+      {/* Picked badge — surfaces the staged-proposal state above the picker.
+          Renamed 2026-05-01 (F11): was "Confirmed" but the click doesn't
+          actually confirm — it stages a pendingProposal that the host's
+          name/email Confirm card finishes. The "Confirmed" copy lied. */}
+      {picked && (
         <div className="flex justify-end mb-1.5">
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
             </svg>
-            Confirmed
+            Picked — confirm below ↓
           </span>
         </div>
       )}
@@ -264,7 +276,7 @@ export function DragSlotPicker({
               without language overhead (Concept B in the affordance mockup). */}
           <div
             className={`absolute top-1 bottom-1 rounded-md z-[2] flex items-center justify-center gap-1.5
-              ${confirmed
+              ${picked
                 ? "cursor-default bg-emerald-500"
                 : "cursor-grab active:cursor-grabbing bg-green-500 hover:bg-green-400"
               }
@@ -311,14 +323,19 @@ export function DragSlotPicker({
         </div>
       </div>
 
-      {/* Time readout + confirm row — readout centered, button anchored right */}
+      {/* Time readout + pick-time row — readout centered, button anchored
+          right. Button label says "Pick this time" not "Confirm" — the
+          actual confirm step lives on the Confirm card downstream (with
+          name/email fields), and labelling this one "Confirm" misled
+          users into thinking the click finished the booking when it only
+          staged a pendingProposal (F11 fix, 2026-05-01). */}
       <div className="relative flex items-center mt-2 min-h-[28px]">
         <p className="w-full text-center text-xs font-medium text-primary">{displayTime}</p>
         {onSelectSlot && (
           <button
             onClick={() => {
-              if (confirmed) return;
-              setConfirmed(true);
+              if (picked) return;
+              setPicked(true);
               onSelectSlot(
                 fmtMsg(currentMins, endMins, dateStr, timezone),
                 {
@@ -327,13 +344,13 @@ export function DragSlotPicker({
                 },
               );
             }}
-            disabled={confirmed}
+            disabled={picked}
             className={`absolute right-0 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition disabled:opacity-100
-              ${confirmed
+              ${picked
                 ? "bg-emerald-600"
                 : "bg-accent hover:bg-accent-hover"}`}
           >
-            {confirmed ? "✓ Confirmed" : "Confirm"}
+            {picked ? "✓ Picked" : "Pick this time"}
           </button>
         )}
       </div>
