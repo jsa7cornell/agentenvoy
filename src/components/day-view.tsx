@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { TunerEvent, TunerSlot, slotTooltip, slotTierLabel } from "@/components/weekly-calendar";
 import {
   HOUR_START,
@@ -50,6 +50,19 @@ export function DayView({
 }: DayViewProps) {
   const todayStr = toDateStr(new Date());
   const [selectedDay, setSelectedDay] = useState<string>(todayStr);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Scroll so current time is visible (~¼ from top) on first render.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const now = new Date();
+    const minutesInDay = now.getHours() * 60 + now.getMinutes();
+    const gridStartMin = HOUR_START * 60;
+    if (minutesInDay < gridStartMin) return;
+    const top = ((minutesInDay - gridStartMin) / 30) * ROW_HEIGHT;
+    el.scrollTop = Math.max(0, top - el.clientHeight / 4);
+  }, []);
 
   // Build 7 day strings for the week
   const days = useMemo(() => {
@@ -205,8 +218,8 @@ export function DayView({
         </div>
       )}
 
-      {/* Day timeline */}
-      <div className="flex-1 overflow-auto">
+      {/* Day timeline — scrollable; auto-scrolled to current time on mount */}
+      <div ref={scrollRef} className="flex-1 overflow-auto">
         <div className="grid relative" style={{ gridTemplateColumns: "44px 1fr" }}>
           {/* Hour labels */}
           <div className="relative" style={{ height: TOTAL_ROWS * ROW_HEIGHT }}>

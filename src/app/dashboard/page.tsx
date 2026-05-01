@@ -6,18 +6,18 @@ import Feed from "@/components/feed";
 import { AvailabilityPanel } from "@/components/availability-panel";
 import { validateReturnTo } from "@/lib/onboarding/return-to";
 
-// v2 layout — mockup §Home is `grid-template-columns:1fr 1.2fr` (chat
-// narrower than calendar). At a 1440px desktop viewport the spec ratio
-// puts chat at ~654px; we round to 660 as the resizable default. Min/max
-// are unchanged so users who preferred the wider chat from v1 can still
-// drag back. See mockups/desktop-v2.html
-// .home-body / .chat-pane.
-const CHAT_MIN = 400;
+// ⅓ chat / ⅔ calendar split on first load. Sidebar is ~260px, so the
+// resizable region is (window.innerWidth - 260). Chat gets ⅓ of that,
+// clamped to [CHAT_MIN, CHAT_MAX]. User can drag to any width within
+// that range and it snaps back to the ⅓ default only on fresh page load.
+const CHAT_MIN = 320;
 const CHAT_MAX = 860;
-const CHAT_DEFAULT = 660;
 
 function DashboardPageInner() {
-  const [chatWidth, setChatWidth] = useState(CHAT_DEFAULT);
+  const [chatWidth, setChatWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 380;
+    return Math.max(CHAT_MIN, Math.min(CHAT_MAX, Math.round((window.innerWidth - 260) / 3)));
+  });
   const dragging = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);

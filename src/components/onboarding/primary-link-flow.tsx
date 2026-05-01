@@ -1,502 +1,331 @@
 "use client";
 
 /**
- * Guided "set up your primary invite link" flow, triggered from the 🔗
- * card on the first-run welcome screen.
+ * Renderer for the primary-link tuning conversational flow.
  *
- * Scoped to the welcome page for now — this is the first-time-user primary
- * path (~90% of new users); the 10% who land on it later re-run to tune
- * their scheduling defaults. Intentionally doesn't reuse the heavier
- * `onboarding-machine` phase flow: that machine gates on `!isCalibrated`,
- * and this flow runs for calibrated users too.
+ * Per SPEC §6.6 "Chat thread invariants" + proposal `2026-04-30_onboarding-and-tuning-as-chat`:
+ * this component does NOT own a state machine. Each user pick POSTs to
+ * `/api/onboarding/primary-link`, which persists the user's message + the
+ * Envoy response as `ChannelMessage` rows tagged
+ * `metadata: { kind: "onboarding", subkind: "primary-link-tuning", step }`,
+ * and returns the response so the parent (`Feed`) can append to its in-memory
+ * messages state.
  *
- * Four questions — hours, default duration, default format,
- * guest-flexibility — each rendered as an Envoy bubble with quick-reply
- * buttons. Each answer POSTs to `/api/me/scheduling-defaults` (or the
- * primary-link-settings endpoint for guest_flex) immediately so a partial
- * completion still leaves the user better-configured than before.
- *
- * Buffer defaults to 0 silently (set on the duration POST) — not asked.
- * Theme is asked separately, not part of this flow.
+ * Resume model: current step is inferred from the most recent persisted
+ * tuning message's metadata. The component reads `messages` from props
+ * (filtered to the tuning subkind), renders them, and shows the active
+ * step's quick-replies based on that latest message's metadata.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QuickReplies } from "./quick-replies";
 import { WelcomeCelebration } from "./welcome-celebration";
-import { parseBusinessHoursRange } from "@/lib/time-parse";
+import {
+  HOURS_OPTIONS,
+  DURATION_OPTIONS,
+  FORMAT_OPTIONS,
+  GUEST_FLEX_OPTIONS,
+  type PrimaryLinkStep,
+} from "@/app/api/onboarding/primary-link/_steps";
+import type { QuickReplyOption } from "@/lib/onboarding-machine";
 
-type HourRangeValue = `${number}-${number}` | "__custom__";
-
-const HOURS_OPTIONS: { number: number; label: string; value: HourRangeValue }[] = [
-  { number: 1, label: "8am – 4pm", value: "8-16" },
-  { number: 2, label: "9am – 5pm", value: "9-17" },
-  { number: 3, label: "9am – 6pm", value: "9-18" },
-  { number: 4, label: "10am – 6pm", value: "10-18" },
-  { number: 5, label: "Flexible — no restrictions", value: "0-24" },
-  { number: 6, label: "Custom hours (type your own)", value: "__custom__" },
-];
-
-const DURATION_OPTIONS = [
-  { number: 1, label: "30 minutes", value: "30" },
-  { number: 2, label: "45 minutes", value: "45" },
-  { number: 3, label: "60 minutes", value: "60" },
-  { number: 4, label: "15 minutes (quick sync)", value: "15" },
-];
-
-type Turn =
-  | { role: "envoy"; content: React.ReactNode }
-  | { role: "user"; content: string };
-
-type Step = "intro" | "hours" | "duration" | "format" | "guest_flex" | "done";
-
-/**
- * Guest-flexibility options. Reusable-link guest-picks proposal,
- * decided 2026-04-28. Maps directly to `primaryLinkGuestPicks: { format, duration }`.
- * Default-selected option is "1" (locked) — matches the per-link default
- * everywhere else.
- */
-type GuestFlexValue = "locked" | "format" | "duration" | "both";
-const GUEST_FLEX_OPTIONS: { number: number; label: string; value: GuestFlexValue }[] = [
-  { number: 1, label: "Just what I posted — no changes", value: "locked" },
-  { number: 2, label: "Format flexibility — phone, video, or in-person are all OK", value: "format" },
-  { number: 3, label: "Duration flexibility — longer or shorter slots are OK", value: "duration" },
-  { number: 4, label: "Both — format and duration are open", value: "both" },
-];
-
-type FormatValue = "video" | "phone" | "in-person";
-
-interface Answers {
-  // Minute-of-day bounds (canonical, 30-min aligned). See proposal
-  // `2026-04-23_primary-link-config-convergence` §3.1 Path A.
-  businessHoursStartMinutes?: number;
-  businessHoursEndMinutes?: number;
-  defaultDuration?: number;
-  /** Defaults to 0 (no buffer). Buffer is set silently on the first persist
-   *  call rather than asked — most hosts don't have a strong preference and
-   *  zero-buffer is the right default for a Primary link. They can adjust
-   *  in chat or Settings later. (Theme moved out of this flow entirely —
-   *  it's asked separately, not part of the primary-link setup.) */
-  bufferMinutes?: number;
-  defaultFormat?: FormatValue;
+interface ChannelMsg {
+  id: string;
+  role: string;
+  content: string;
+  createdAt: string;
+  metadata?: Record<string, unknown> | null;
 }
 
-const FORMAT_OPTIONS: { number: number; label: string; value: FormatValue }[] = [
-  { number: 1, label: "Video call", value: "video" },
-  { number: 2, label: "Phone call", value: "phone" },
-  { number: 3, label: "In-person", value: "in-person" },
-];
-
-/** Format a minute-of-day value for display. 510 → "8:30am", 540 → "9am". */
-function formatMinutes(m: number): string {
-  const h = Math.floor(m / 60);
-  const min = m % 60;
-  const suffix = h < 12 || h === 24 ? "am" : "pm";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return min === 0 ? `${h12}${suffix}` : `${h12}:${String(min).padStart(2, "0")}${suffix}`;
-}
+type FreetextHint = "timezone-other" | "hours-custom";
 
 interface PrimaryLinkFlowProps {
-  /** Fires when the host taps the celebration's "Back to chat" CTA at the
-   *  end of the flow. Caller should clear its `primaryLinkFlowActive` state
-   *  so the steady-state Home re-renders. Optional — older callers that
-   *  don't pass it simply leave the flow rendered (legacy behaviour). */
+  /** Channel messages (host's full conversation history). The component
+   *  filters to `metadata.subkind === "primary-link-tuning"` to identify
+   *  its own turns. */
+  messages: ChannelMsg[];
+  /** Push a new message into the parent's in-memory state so it appears
+   *  in the feed without a refetch. Mirrors the legacy
+   *  `addEnvoyMessage`/`addUserMessage` pattern. */
+  onAppendMessage: (msg: ChannelMsg) => void;
+  /** Browser-detected timezone — passed on `start` so the route can
+   *  propose it as the default. */
+  browserTz: string | null;
+  /** Fires when the host taps the celebration's "Back to chat" CTA. */
   onDismiss?: () => void;
-  /** §1n item 4: post-flow chips on the celebration card. Caller should
-   *  dismiss the flow AND auto-submit the seed message (handleSend path).
-   *  When omitted, the celebration shows only "Back to chat". */
+  /** Optional post-flow seed handler — see legacy contract. */
   onPostFlowSeed?: (seed: string) => void;
+  /** Display name for the celebration headline. */
+  hostName: string | null;
+  /** Primary-link slug for the celebration headline + summary fallback. */
+  meetSlug: string | null;
 }
 
-export function PrimaryLinkFlow({ onDismiss, onPostFlowSeed }: PrimaryLinkFlowProps = {}) {
-  const [meetSlug, setMeetSlug] = useState<string | null>(null);
-  const [name, setName] = useState<string | null>(null);
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [step, setStep] = useState<Step>("intro");
-  const [answers, setAnswers] = useState<Answers>({});
-  const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
-  // Hours freetext composer state — shown when the user picks "Custom hours".
-  const [hoursFreetext, setHoursFreetext] = useState("");
-  const [hoursFreetextError, setHoursFreetextError] = useState<string | null>(null);
-  const [showHoursFreetext, setShowHoursFreetext] = useState(false);
+/**
+ * Static option set for each step. The tuning route writes the prompt
+ * content to ChannelMessage but the options are determined by the step
+ * name alone (deterministic). Timezone options are dynamic — they need
+ * the browser tz — so they're built inline below.
+ */
+function staticOptionsForStep(step: PrimaryLinkStep): QuickReplyOption[] | null {
+  switch (step) {
+    case "hours":
+      return HOURS_OPTIONS;
+    case "duration":
+      return DURATION_OPTIONS;
+    case "format":
+      return FORMAT_OPTIONS;
+    case "guest_flex":
+      return GUEST_FLEX_OPTIONS;
+    default:
+      return null;
+  }
+}
 
-  // Fetch slug + current defaults on mount, then kick off the intro.
-  // Preview-mode short-circuit: skip the fetch entirely and seed turns
-  // from the preview props so John can iterate inline without auth.
+const TZ_BASE = [
+  { label: "America/Los_Angeles", value: "America/Los_Angeles" },
+  { label: "America/Denver", value: "America/Denver" },
+  { label: "America/Chicago", value: "America/Chicago" },
+  { label: "America/New_York", value: "America/New_York" },
+  { label: "Europe/London", value: "Europe/London" },
+  { label: "Asia/Tokyo", value: "Asia/Tokyo" },
+];
+
+function timezoneOptions(browserTz: string | null): QuickReplyOption[] {
+  const opts: QuickReplyOption[] = [];
+  let n = 1;
+  if (browserTz) {
+    opts.push({ number: n++, label: `Yes, ${browserTz} is right`, value: browserTz });
+  }
+  for (const o of TZ_BASE) {
+    if (o.value === browserTz) continue;
+    opts.push({ number: n++, label: o.label, value: o.value });
+  }
+  opts.push({ number: n++, label: "Other / not sure", value: "__other__" });
+  return opts;
+}
+
+function activeOptionsFor(step: PrimaryLinkStep, browserTz: string | null): QuickReplyOption[] | null {
+  if (step === "timezone") return timezoneOptions(browserTz);
+  return staticOptionsForStep(step);
+}
+
+/** Extract the latest tuning message and its inferred step + freetextHint
+ *  from the channel. Used both on first mount and after each POST to know
+ *  what to render. */
+function readTuningState(messages: ChannelMsg[]): {
+  tuningMsgs: ChannelMsg[];
+  step: PrimaryLinkStep | null;
+  freetextHint: FreetextHint | null;
+  terminal: boolean;
+} {
+  const tuningMsgs = messages
+    .filter((m) => {
+      const meta = m.metadata as { kind?: string; subkind?: string } | null;
+      return meta?.kind === "onboarding" && meta?.subkind === "primary-link-tuning";
+    })
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  if (tuningMsgs.length === 0) {
+    return { tuningMsgs, step: null, freetextHint: null, terminal: false };
+  }
+  // Latest envoy message determines the active step's options.
+  const latestEnvoy = [...tuningMsgs].reverse().find((m) => m.role === "envoy");
+  const meta = (latestEnvoy?.metadata ?? {}) as {
+    step?: PrimaryLinkStep;
+    freetextHint?: FreetextHint;
+    terminal?: boolean;
+  };
+  return {
+    tuningMsgs,
+    step: meta.step ?? null,
+    freetextHint: meta.freetextHint ?? null,
+    terminal: meta.terminal === true,
+  };
+}
+
+export function PrimaryLinkFlow({
+  messages,
+  onAppendMessage,
+  browserTz,
+  onDismiss,
+  onPostFlowSeed,
+  hostName,
+  meetSlug,
+}: PrimaryLinkFlowProps) {
+  const { tuningMsgs, step, freetextHint, terminal } = readTuningState(messages);
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [freetextInput, setFreetextInput] = useState("");
+  const startedRef = useRef(false);
+
+  // Kick-off: if there are no tuning messages yet, POST {start: true} to
+  // get the timezone prompt persisted + returned.
   useEffect(() => {
-    const introTurns = (slug: string | null): Turn[] => [
-      {
-        role: "envoy",
-        content: (
-          <>
-            Great — let&rsquo;s set up your primary invite link.
-            {slug && (
-              <>
-                {" "}Your link is{" "}
-                <code className="text-purple-400">
-                  agentenvoy.ai/meet/{slug}
-                </code>
-                .
-              </>
-            )}{" "}
-            This is a link you can share over and over with standard
-            meeting preferences. Separately from this you&rsquo;ll be able
-            to create personalized meeting invites for anyone you want to
-            coordinate with.
-          </>
-        ),
-      },
-      {
-        role: "envoy",
-        content: <>What ordinary available hours should we offer up?</>,
-      },
-    ];
-    let cancelled = false;
-    fetch("/api/me/scheduling-defaults")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled || !data) return;
-        setMeetSlug(data.meetSlug ?? null);
-        setName(data.name ?? null);
-        setTurns(introTurns(data.meetSlug ?? null));
-        setStep("hours");
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
+    if (startedRef.current) return;
+    if (tuningMsgs.length > 0) {
+      startedRef.current = true;
+      return;
+    }
+    startedRef.current = true;
+    void postAdvance({ start: true, browserTz });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function persist(patch: Answers) {
+  async function postAdvance(body: Record<string, unknown>): Promise<void> {
     setSaving(true);
+    setError(null);
     try {
-      await fetch("/api/me/scheduling-defaults", {
+      const res = await fetch("/api/onboarding/primary-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
+        body: JSON.stringify(body),
       });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Something went wrong");
+        return;
+      }
+      // Append the new turns the server persisted. We synthesize transient
+      // ChannelMsg shapes (matching what /api/channel/messages returns) so
+      // the parent's render loop picks them up. createdAt uses now() so
+      // ordering is stable until the next refetch.
+      const now = new Date().toISOString();
+      // If the body included a label (user pick), the server persisted a
+      // user message — synthesize it client-side too for immediate feedback.
+      if (typeof body.label === "string" && body.label) {
+        onAppendMessage({
+          id: `tuning-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          role: "user",
+          content: body.label,
+          createdAt: now,
+          metadata: { kind: "onboarding", subkind: "primary-link-tuning", step: data.step },
+        });
+      }
+      const envoyMsgs = (data.messages ?? []) as { content: string }[];
+      for (let i = 0; i < envoyMsgs.length; i++) {
+        const m = envoyMsgs[i];
+        if (!m.content) continue;
+        const isLast = i === envoyMsgs.length - 1;
+        const meta: Record<string, unknown> = {
+          kind: "onboarding",
+          subkind: "primary-link-tuning",
+          step: data.step,
+        };
+        if (isLast && data.freetextHint) meta.freetextHint = data.freetextHint;
+        if (isLast && data.complete) meta.terminal = true;
+        onAppendMessage({
+          id: `tuning-envoy-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+          role: "envoy",
+          content: m.content,
+          createdAt: new Date(Date.now() + i + 1).toISOString(),
+          metadata: meta,
+        });
+      }
+      setFreetextInput("");
     } catch {
-      // Non-fatal; next step still proceeds. User can tune later in chat.
+      setError("Network error — please try again.");
     } finally {
       setSaving(false);
     }
   }
 
-  function commitHours(startMinutes: number, endMinutes: number, userLabel: string) {
-    const patch = {
-      businessHoursStartMinutes: startMinutes,
-      businessHoursEndMinutes: endMinutes,
-    };
-    setAnswers((a) => ({ ...a, ...patch }));
-    setTurns((t) => [
-      ...t,
-      { role: "user", content: userLabel },
-      {
-        role: "envoy",
-        content: <>…and what&rsquo;s your default meeting length?</>,
-      },
-    ]);
-    setStep("duration");
-    setShowHoursFreetext(false);
-    setHoursFreetext("");
-    setHoursFreetextError(null);
-    void persist(patch);
+  function handlePick(value: string, label: string) {
+    if (!step) return;
+    void postAdvance({ step, value, label, browserTz });
   }
 
-  function handleHoursFreetextSubmit() {
-    const parsed = parseBusinessHoursRange(hoursFreetext);
-    if (!parsed) {
-      setHoursFreetextError(
-        'Hmm, I couldn\'t parse that. Try "8:30 to 5:30" or "9am-6pm". Times must be on the half hour.',
-      );
-      return;
-    }
-    commitHours(
-      parsed.startMinutes,
-      parsed.endMinutes,
-      `${formatMinutes(parsed.startMinutes)} – ${formatMinutes(parsed.endMinutes)}`,
-    );
+  function handleFreetextSubmit() {
+    if (!step) return;
+    const trimmed = freetextInput.trim();
+    if (!trimmed) return;
+    const label =
+      freetextHint === "timezone-other"
+        ? trimmed
+        : freetextHint === "hours-custom"
+          ? trimmed
+          : trimmed;
+    void postAdvance({ step, freetext: trimmed, label, browserTz });
   }
 
-  function handleHours(value: string, label: string) {
-    if (value === "__custom__") {
-      setShowHoursFreetext(true);
-      setHoursFreetextError(null);
-      return;
-    }
-    const [sRaw, eRaw] = value.split("-");
-    const s = parseInt(sRaw, 10);
-    const e = parseInt(eRaw, 10);
-    if (!Number.isFinite(s) || !Number.isFinite(e)) return;
-    // Quick-reply values are whole hours; convert to minute-of-day so the
-    // scoring engine stores canonical data.
-    commitHours(s * 60, e * 60, label);
-  }
+  const activeOptions = !terminal && step ? activeOptionsFor(step, browserTz) : null;
 
-  function handleDuration(value: string, label: string) {
-    const dur = parseInt(value, 10);
-    if (!Number.isFinite(dur)) return;
-    // Buffer defaults to 0 silently — not asked. Persist alongside the
-    // duration so the user's preferences are coherent if they bail before
-    // completing the flow.
-    const patch = { defaultDuration: dur, bufferMinutes: 0 };
-    setAnswers((a) => ({ ...a, ...patch }));
-    setTurns((t) => [
-      ...t,
-      { role: "user", content: label },
-      {
-        role: "envoy",
-        content: (
-          <>
-            What&rsquo;s your default meeting format — video, phone, or in
-            person?
-          </>
-        ),
-      },
-    ]);
-    setStep("format");
-    void persist(patch);
-  }
-
-  function handleFormat(value: string, label: string) {
-    if (value !== "video" && value !== "phone" && value !== "in-person") return;
-    const patch = { defaultFormat: value as FormatValue };
-    setAnswers((a) => ({ ...a, ...patch }));
-    // Build the "30m VC"-style shorthand for the next prompt off the
-    // answers we already have, so the question reads contextually.
-    const dur = answers.defaultDuration ?? 30;
-    const fmtShort =
-      value === "video" ? "VC" : value === "phone" ? "phone call" : "in-person";
-    setTurns((t) => [
-      ...t,
-      { role: "user", content: label },
-      {
-        role: "envoy",
-        content: (
-          <>
-            If a guest asks to adjust the format or duration from your
-            standard <strong>{dur}m {fmtShort}</strong>, how should I
-            handle it?
-          </>
-        ),
-      },
-    ]);
-    setStep("guest_flex");
-    void persist(patch);
-  }
-
-  /**
-   * Persist the host's guest-flexibility pick to
-   * `preferences.explicit.primaryLinkGuestPicks`. Reusable-link guest-picks
-   * proposal, decided 2026-04-28.
-   */
-  async function persistGuestFlex(picks: { format: boolean; duration: boolean }) {
-    setSaving(true);
-    try {
-      await fetch("/api/me/primary-link-settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guestPicks: picks }),
-      });
-    } catch {
-      // Non-fatal — host can flip the toggles later in /dashboard/my-links.
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleGuestFlex(value: string, label: string) {
-    if (
-      value !== "locked" &&
-      value !== "format" &&
-      value !== "duration" &&
-      value !== "both"
-    )
-      return;
-    const picks = {
-      format: value === "format" || value === "both",
-      duration: value === "duration" || value === "both",
-    };
-    const finalAnswers = answers;
-    setTurns((t) => [
-      ...t,
-      { role: "user", content: label },
-      {
-        role: "envoy",
-        content: (
-          <>
-            All set! Here&rsquo;s your primary link:
-            {meetSlug && (
-              <>
-                {" "}
-                <code className="text-purple-400">
-                  agentenvoy.ai/meet/{meetSlug}
-                </code>
-              </>
-            )}
-            . I&rsquo;ll offer times{" "}
-            <strong>
-              {formatMinutes(
-                finalAnswers.businessHoursStartMinutes ?? 540,
-              )}
-              –
-              {formatMinutes(
-                finalAnswers.businessHoursEndMinutes ?? 1020,
-              )}
-            </strong>
-            , default to{" "}
-            <strong>{finalAnswers.defaultDuration ?? 30}-minute</strong>{" "}
-            <strong>{finalAnswers.defaultFormat ?? "video"}</strong> meetings
-            {finalAnswers.bufferMinutes
-              ? `, and keep a ${finalAnswers.bufferMinutes}-minute buffer between them`
-              : ""}
-            {picks.format || picks.duration
-              ? `, and guests can ${picks.format && picks.duration ? "adjust format or duration" : picks.format ? "pick a different format" : "ask for a longer or shorter slot"}`
-              : ""}
-            . You can tweak any of this later — just tell me in chat.
-          </>
-        ),
-      },
-    ]);
-    setStep("done");
-    void persistGuestFlex(picks);
-  }
-
-  const activeOptions =
-    step === "hours"
-      ? HOURS_OPTIONS
-      : step === "duration"
-        ? DURATION_OPTIONS
-        : step === "format"
-          ? FORMAT_OPTIONS
-          : step === "guest_flex"
-            ? GUEST_FLEX_OPTIONS
-            : null;
-
-  const onSelect =
-    step === "hours"
-      ? handleHours
-      : step === "duration"
-        ? handleDuration
-        : step === "format"
-          ? handleFormat
-          : step === "guest_flex"
-            ? handleGuestFlex
-            : () => {};
-
-  // Legacy copy handler — kept for the fallback link card below the
-  // celebration when no `onDismiss` is wired (older callers). New callers
-  // get the celebration's own Copy button + Back-to-chat CTA.
-  const copyLink = () => {
-    if (!meetSlug) return;
-    navigator.clipboard.writeText(`https://agentenvoy.ai/meet/${meetSlug}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  /** First-name extract for the celebration headline. Mirrors feed.tsx's
-   *  `firstNameOf`; kept local so the onboarding tree doesn't depend on
-   *  the feed component. */
   function firstNameOf(n: string | null): string | null {
     if (!n) return null;
-    const first = n.split(/\s+/)[0]?.trim();
-    return first ? first : null;
+    const f = n.split(/\s+/)[0]?.trim();
+    return f || null;
   }
 
   return (
     <div className="flex-1 flex flex-col py-6 gap-3">
-      {turns.map((turn, i) =>
-        turn.role === "envoy" ? (
-          <div key={i} className="flex flex-col gap-1">
+      {tuningMsgs.map((m) =>
+        m.role === "envoy" ? (
+          <div key={m.id} className="flex flex-col gap-1">
             <span className="text-purple-400 text-[10px] font-semibold uppercase tracking-wide px-1">
               Envoy
             </span>
-            <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed">
-              {turn.content}
+            <div className="bg-black/5 dark:bg-white/[0.07] rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-primary max-w-lg leading-relaxed whitespace-pre-wrap">
+              {m.content}
             </div>
           </div>
         ) : (
-          <div key={i} className="self-end">
+          <div key={m.id} className="self-end">
             <div className="bg-purple-600 text-white rounded-2xl rounded-br-sm px-4 py-2.5 text-sm max-w-lg leading-relaxed">
-              {turn.content}
+              {m.content}
             </div>
           </div>
         ),
       )}
 
-      {activeOptions && (
+      {!terminal && activeOptions && !freetextHint && (
         <div className="self-start max-w-[72%] mt-1">
-          <QuickReplies
-            options={activeOptions}
-            onSelect={onSelect}
-            disabled={saving}
-          />
+          <QuickReplies options={activeOptions} onSelect={handlePick} disabled={saving} />
         </div>
       )}
 
-      {step === "hours" && showHoursFreetext && (
+      {!terminal && freetextHint && (
         <div className="self-start max-w-[72%] mt-2 flex flex-col gap-1.5">
           <form
             onSubmit={(ev) => {
               ev.preventDefault();
-              handleHoursFreetextSubmit();
+              handleFreetextSubmit();
             }}
             className="flex gap-2"
           >
             <input
               type="text"
               autoFocus
-              value={hoursFreetext}
-              onChange={(ev) => {
-                setHoursFreetext(ev.target.value);
-                if (hoursFreetextError) setHoursFreetextError(null);
-              }}
-              placeholder="e.g. 8:30 to 5:30"
+              value={freetextInput}
+              onChange={(ev) => setFreetextInput(ev.target.value)}
+              placeholder={
+                freetextHint === "hours-custom" ? "e.g. 8:30 to 5:30" : "e.g. America/Phoenix"
+              }
               className="flex-1 text-sm px-3.5 py-2.5 rounded-xl border border-indigo-500/30 bg-indigo-500/5 text-primary placeholder:text-primary/40 focus:outline-none focus:border-indigo-500/60"
               disabled={saving}
             />
             <button
               type="submit"
-              disabled={saving || !hoursFreetext.trim()}
+              disabled={saving || !freetextInput.trim()}
               className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white text-sm font-medium rounded-xl transition"
             >
               Set
             </button>
           </form>
-          {hoursFreetextError && (
-            <span className="text-xs text-rose-400 px-1">{hoursFreetextError}</span>
-          )}
+          {error && <span className="text-xs text-rose-400 px-1">{error}</span>}
         </div>
       )}
 
-      {/* Tune-preferences flow completion. The "All set!" Envoy recap
-          bubble (above) does the literal readback; the celebration drops
-          in alongside as the moment-marker, per mockups/mobile-v2.html
-          §1 Frame 5 + CODEBASE-CLEANUP item 21.
-          When no `onDismiss` is wired (legacy callers), fall through to a
-          calm link card so the host still has a copy affordance. */}
-      {step === "done" && onDismiss && (
+      {!freetextHint && error && (
+        <div className="self-start text-xs text-rose-400 px-1 mt-1">{error}</div>
+      )}
+
+      {terminal && onDismiss && (
         <WelcomeCelebration
-          firstName={firstNameOf(name)}
+          firstName={firstNameOf(hostName)}
           meetSlug={meetSlug}
           onDismiss={onDismiss}
           onPostFlowSeed={onPostFlowSeed}
         />
-      )}
-
-      {step === "done" && !onDismiss && meetSlug && (
-        <div className="self-start mt-2 bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 flex items-center gap-3 max-w-lg">
-          <code className="text-xs text-purple-400 truncate flex-1">
-            agentenvoy.ai/meet/{meetSlug}
-          </code>
-          <button
-            type="button"
-            onClick={copyLink}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded-md transition flex-shrink-0"
-          >
-            {copied ? "Copied!" : "Copy link"}
-          </button>
-        </div>
       )}
     </div>
   );

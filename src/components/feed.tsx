@@ -135,34 +135,6 @@ function firstNameOf(name: string | null): string {
   return name.split(/\s+/)[0];
 }
 
-/** Seed-prompt example chips for the first-run variant. WISHLIST §1n item 5
- *  — gives the host concrete examples covering the four categories John named:
- *  time guidance / format / length variants / activity-based. Each auto-submits
- *  via item 6's chip-handler change. Curated subset of PROMPT-SEEDS.md;
- *  rotation logic deferred (just shows a static set for now). */
-function SeedPromptChips({ onSeed }: { onSeed: (seed: string) => void }) {
-  const seeds = [
-    "Find time next week, mornings preferred",
-    "Set up a 60-min video call",
-    "A quick 15-min sync",
-    "Coffee Tuesday afternoon",
-  ];
-  return (
-    <div className="flex flex-wrap gap-2 px-1">
-      {seeds.map((s) => (
-        <button
-          key={s}
-          type="button"
-          onClick={() => onSeed(s)}
-          className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-secondary hover:text-primary transition"
-        >
-          {s}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /** Three forward chips reused across all greeting variants. Same actions
  *  (coordinate / explore / tune); the bubble copy around them is what
  *  changes per variant. */
@@ -437,8 +409,8 @@ function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
   return (
     <EnvoyBubble showLabel={showLabel}>
         <div className="mb-2">
-          You&rsquo;ve got {calendars.length} Google calendars — pick a
-          different primary if you&rsquo;d like:
+          You&rsquo;ve got {calendars.length} Google calendars — we&rsquo;ve
+          selected your primary. Feel free to change it here:
         </div>
         <ul className="space-y-1.5">
           {calendars.map((cal) => {
@@ -671,26 +643,21 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
         <StandardLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
       )}
 
-      {/* Forward bubble — same speaker run, label suppressed. Shorter copy
-          than the previous "Now let's get going..." version; the chips
-          below speak for themselves. */}
+      {/* Single CTA — nudge new hosts into the preference-tuning flow.
+          Other options removed so there is one clear next step. */}
       <EnvoyBubble showLabel={false}>
-          You can ask about{" "}
-          <strong className="font-semibold">office hours</strong>,{" "}
-          <strong className="font-semibold">group events</strong>, or{" "}
-          <strong className="font-semibold">tailor your preferences</strong>{" "}
-          — or hand me your first meeting:
+          Take 2 minutes to tune your preferences — it makes every meeting
+          better.
       </EnvoyBubble>
 
-      <ForwardChips onSeed={onSeed} />
-
-      {/* Seed-prompt examples — concrete starting points covering the four
-          categories (time / format / length / activity). WISHLIST §1n item 5. */}
-      <div className="flex flex-col gap-1.5">
-        <span className="text-muted text-[10px] font-semibold uppercase tracking-wide px-1">
-          Or jump in
-        </span>
-        <SeedPromptChips onSeed={onSeed} />
+      <div className="px-1">
+        <button
+          type="button"
+          onClick={() => onSeed("__primary_link_flow__")}
+          className="text-xs px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition"
+        >
+          Continue tuning my preferences →
+        </button>
       </div>
     </div>
   );
@@ -779,11 +746,29 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
   const [calendarConnected, setCalendarConnected] = useState(true);
   const [isCalibrated, setIsCalibrated] = useState(true);
   // Primary-link guided setup flow — toggled from the 🔗 welcome card.
-  // Replaces the suggestion grid with a scripted Q&A that writes to
-  // scheduling-defaults. Stays active until the user navigates or sends
-  // their first real chat message (at which point the normal feed takes
-  // over because messages.length > 0).
+  // Per SPEC §6.6 and proposal `2026-04-30_onboarding-and-tuning-as-chat`:
+  // the flow now reads/writes `ChannelMessage`s with subkind=primary-link-tuning
+  // via `/api/onboarding/primary-link`. Render gate derives "in progress"
+  // from messages, not from `messages.length === 0`.
   const [primaryLinkFlowActive, setPrimaryLinkFlowActive] = useState(false);
+  // Lightweight context for `PrimaryLinkFlow` — fetched once on mount.
+  // Not gating: if these are null, the flow degrades gracefully (no
+  // primary-link slug in the celebration, no browser tz proposal).
+  const [tuningCtx, setTuningCtx] = useState<{
+    name: string | null;
+    meetSlug: string | null;
+    browserTz: string | null;
+  }>(() => ({
+    name: null,
+    meetSlug: null,
+    browserTz: (() => {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+      } catch {
+        return null;
+      }
+    })(),
+  }));
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -862,6 +847,43 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     }
     loadMessages();
   }, []);
+
+  // Fetch tuning context (name + meetSlug) once. Used by PrimaryLinkFlow's
+  // celebration card and resume detection. Cheap enough that we don't
+  // gate it behind a lazy mount.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/me/scheduling-defaults")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setTuningCtx((prev) => ({
+          ...prev,
+          name: data.name ?? null,
+          meetSlug: data.meetSlug ?? null,
+        }));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Auto-resume tuning if the channel has unfinished tuning history. Per
+  // proposal §2.3: `primaryLinkFlowActive` is the React signal but
+  // "in-progress vs done" derives from messages.
+  useEffect(() => {
+    if (initialLoading) return;
+    const tuning = messages.filter((m) => {
+      const meta = m.metadata as { kind?: string; subkind?: string } | null;
+      return meta?.kind === "onboarding" && meta?.subkind === "primary-link-tuning";
+    });
+    if (tuning.length === 0) return;
+    const terminal = tuning.some(
+      (m) => (m.metadata as { terminal?: boolean } | null)?.terminal === true,
+    );
+    if (!terminal) setPrimaryLinkFlowActive(true);
+  }, [initialLoading, messages]);
 
   // ── Calibrated user with onboardReturnTo → bounce immediately ──────────
   // If the user arrived at /dashboard?onboardReturnTo=... but is already
@@ -1534,33 +1556,63 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           lands at the sidebar divider; inner wrapper re-centers the content. */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-3xl mx-auto w-full min-h-full px-4 sm:px-6 pt-5 pb-16 flex flex-col gap-1.5">
-        {/* First-run welcome — only for calibrated users with no messages.
-            When the user picks the 🔗 primary-link card, we swap the welcome
-            cards out for the guided PrimaryLinkFlow in-place. */}
-        {messages.length === 0 && !loading && isCalibrated && !primaryLinkFlowActive && (
-          <FirstRunWelcome
-            onSeed={(seed) => {
-              if (seed === "__primary_link_flow__") {
-                setPrimaryLinkFlowActive(true);
-                return;
-              }
-              // §1n item 6: chips auto-SUBMIT (not just fill the composer).
-              // Same code path as user typing + hitting enter.
-              handleSend(seed);
-            }}
-          />
-        )}
-        {messages.length === 0 && !loading && isCalibrated && primaryLinkFlowActive && (
-          <PrimaryLinkFlow
-            onDismiss={() => setPrimaryLinkFlowActive(false)}
-            onPostFlowSeed={(seed) => {
-              setPrimaryLinkFlowActive(false);
-              handleSend(seed);
-            }}
-          />
-        )}
+        {/* First-run welcome — calibrated users with no real chat yet.
+            "Real chat" excludes onboarding-tagged messages so a user mid-
+            tuning doesn't see the welcome card. When the user picks the 🔗
+            primary-link card, we set `primaryLinkFlowActive` and swap to
+            the tuning surface. */}
+        {(() => {
+          const hasRealChat = messages.some((m) => {
+            const meta = m.metadata as { kind?: string } | null;
+            return meta?.kind !== "onboarding";
+          });
+          const showWelcome =
+            !hasRealChat && !loading && isCalibrated && !primaryLinkFlowActive;
+          const showTuning = !loading && isCalibrated && primaryLinkFlowActive;
+          return (
+            <>
+              {showWelcome && (
+                <FirstRunWelcome
+                  onSeed={(seed) => {
+                    if (seed === "__primary_link_flow__") {
+                      setPrimaryLinkFlowActive(true);
+                      return;
+                    }
+                    // §1n item 6: chips auto-SUBMIT (not just fill the composer).
+                    handleSend(seed);
+                  }}
+                />
+              )}
+              {showTuning && (
+                <PrimaryLinkFlow
+                  messages={messages}
+                  onAppendMessage={(m) => setMessages((prev) => [...prev, m])}
+                  browserTz={tuningCtx.browserTz}
+                  hostName={tuningCtx.name}
+                  meetSlug={tuningCtx.meetSlug}
+                  onDismiss={() => setPrimaryLinkFlowActive(false)}
+                  onPostFlowSeed={(seed) => {
+                    setPrimaryLinkFlowActive(false);
+                    handleSend(seed);
+                  }}
+                />
+              )}
+            </>
+          );
+        })()}
 
         {messages.map((msg, i) => {
+          // Skip primary-link tuning messages here ONLY while
+          // PrimaryLinkFlow is mounted — it renders them itself. Once
+          // the flow dismisses, they fall back to the default text-
+          // bubble render path so the user can scroll back through
+          // the conversation. SPEC §6.6.
+          if (primaryLinkFlowActive) {
+            const meta = msg.metadata as { kind?: string; subkind?: string } | null;
+            if (meta?.kind === "onboarding" && meta?.subkind === "primary-link-tuning") {
+              return null;
+            }
+          }
           // Thread card — skip archived
           if (msg.threadId && msg.thread) {
             if (msg.thread.archived) return null;

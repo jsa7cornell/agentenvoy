@@ -249,6 +249,12 @@ export async function POST(req: NextRequest) {
   const buf = body.bufferMinutes !== undefined ? parseBuffer(body.bufferMinutes) : undefined;
   const fmt =
     body.defaultFormat !== undefined ? parseDefaultFormat(body.defaultFormat) : undefined;
+  // Timezone — accept any non-empty string; validated by safeTimezone at read
+  // sites. The PrimaryLinkFlow timezone step writes via this field.
+  const tz =
+    typeof body.timezone === "string" && body.timezone.trim().length > 0
+      ? body.timezone.trim()
+      : undefined;
 
   if (
     bhs === undefined &&
@@ -257,7 +263,8 @@ export async function POST(req: NextRequest) {
     bheMin === undefined &&
     dur === undefined &&
     buf === undefined &&
-    fmt === undefined
+    fmt === undefined &&
+    tz === undefined
   ) {
     return NextResponse.json(
       { error: "No recognized fields in payload" },
@@ -280,6 +287,7 @@ export async function POST(req: NextRequest) {
   const prefs = (current.preferences as UserPreferences | null) ?? {};
   const nextExplicit = {
     ...(prefs.explicit ?? {}),
+    ...(tz !== undefined ? { timezone: tz, timezoneSource: "user-confirmed" } : {}),
     ...(bhs !== undefined ? { businessHoursStart: bhs } : {}),
     ...(bhe !== undefined ? { businessHoursEnd: bhe } : {}),
     ...(bhsMin !== undefined ? { businessHoursStartMinutes: bhsMin } : {}),

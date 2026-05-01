@@ -27,6 +27,7 @@ import { safeTimezone, getUserTimezone } from "@/lib/timezone";
 import { generateOnboardingCalendarRead } from "@/lib/calendar-read";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
 import { parseCustomBusinessHours } from "./_parse-business-hours";
+import { persistOnboardingTurn, respondWithPersist } from "../_persist";
 import {
   emitOnboardingEntered,
   emitOnboardingCompleted,
@@ -531,44 +532,6 @@ async function updatePrefs(
 
 // parseCustomBusinessHours lives in ./_parse-business-hours — App Router
 // route files can only export HTTP verbs.
-
-/**
- * Persist one onboarding turn as a ChannelMessage so history survives page
- * reload and reviewing past settings decisions is possible. Metadata tags
- * kind="onboarding" so the client can filter/collapse if needed.
- */
-async function persistOnboardingTurn(
-  userId: string,
-  role: "user" | "envoy",
-  content: string,
-) {
-  let channel = await prisma.channel.findUnique({ where: { userId } });
-  if (!channel) channel = await prisma.channel.create({ data: { userId } });
-  await prisma.channelMessage.create({
-    data: {
-      channelId: channel.id,
-      role,
-      content,
-      metadata: { kind: "onboarding" },
-    },
-  });
-}
-
-/**
- * Shared exit point for onboarding handlers: persist the envoy messages
- * we're about to return, then emit the JSON response. The user's prior
- * turn was already persisted at the top of POST.
- */
-async function respondWithPersist(
-  userId: string,
-  result: PhaseResult,
-  extras: Record<string, unknown> = {},
-) {
-  for (const m of result.messages) {
-    if (m.content) await persistOnboardingTurn(userId, "envoy", m.content);
-  }
-  return NextResponse.json({ ...result, ...extras });
-}
 
 async function completeOnboarding(userId: string) {
   const now = new Date();

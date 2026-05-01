@@ -3,7 +3,7 @@
 export const HOUR_START = 6;
 export const HOUR_END = 19;
 export const TOTAL_ROWS = (HOUR_END - HOUR_START) * 2;
-export const ROW_HEIGHT = 28; // px per 30-min row
+export const ROW_HEIGHT = 40; // px per 30-min row — 40px ensures the day grid always overflows the viewport (26 rows × 40 = 1040px), making the calendar vertically scrollable
 
 // Score bands: Available (0-1), Protected (2-3), Blocked (4-5)
 // Office hours get a distinct teal to stand out from regular available (emerald).
