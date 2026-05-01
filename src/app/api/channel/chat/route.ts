@@ -17,7 +17,7 @@ import {
   parseChannelMessageMetadata,
 } from "@/lib/channel/metadata-schema";
 import type { ChannelMessageMetadata } from "@/lib/channel/metadata-schema";
-import { needsActionEmissionRetry, needsActionShapeRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
+import { needsActionEmissionRetry, needsActionShapeRetry, needsActionRedundancyRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
 import type { SelfCheckRecord } from "@/lib/channel/metadata-schema";
 import {
   selectVariant,
@@ -1043,18 +1043,36 @@ export async function POST(req: NextRequest) {
           if (!isInquireTier) {
             // Layer 2a — existing emission guard (no [ACTION] block at all).
             const emissionFired = needsActionEmissionRetry(fullText);
+            // Parse actions once so the shape + redundancy checks can both
+            // inspect them without re-parsing.
+            const parsedActions = !emissionFired ? parseActions(fullText) : [];
             // Layer 2b — new shape guard (action emitted but missing
             // guestPicks key required by prose). Only runs when emission
             // guard didn't fire — emission's [ACTION]-present short-circuit
             // is what enables shape to inspect actions, but if no [ACTION]
             // is present at all the shape check has nothing to inspect.
             const shapeFired = !emissionFired
-              ? needsActionShapeRetry(fullText, parseActions(fullText))
+              ? needsActionShapeRetry(fullText, parsedActions)
               : null;
+            // F6 (2026-05-01) — false-apology / duplicate-re-emit guard.
+            // Detects composer prose claiming a prior action didn't fire
+            // (when in fact it did) followed by a redundant re-emit. Runs
+            // only when an action was emitted; otherwise emission guard
+            // already covers the no-emit case.
+            const redundancyFired =
+              !emissionFired && !shapeFired
+                ? needsActionRedundancyRetry(fullText, parsedActions)
+                : null;
 
-            if (emissionFired || shapeFired) {
-              const flaggedReason = shapeFired?.flaggedReason ?? "set-up-x";
-              const retryHint = shapeFired?.hint ?? ACTION_EMISSION_RETRY_PROMPT;
+            if (emissionFired || shapeFired || redundancyFired) {
+              const flaggedReason =
+                shapeFired?.flaggedReason ??
+                redundancyFired?.flaggedReason ??
+                "set-up-x";
+              const retryHint =
+                shapeFired?.hint ??
+                redundancyFired?.hint ??
+                ACTION_EMISSION_RETRY_PROMPT;
               console.warn(
                 `[channel/chat] action-fidelity guard fired (${flaggedReason}) for user ${safeUser.id}, forcing retry`
               );

@@ -213,6 +213,98 @@ export function needsActionShapeRetry(
 }
 
 /**
+ * Returns a retry hint when the composer's prose narrates a false-apology
+ * for a prior turn that DID emit successfully — typically followed by a
+ * duplicate `create_link` re-emission of the prior action.
+ *
+ * F6 — proposal `2026-04-30_composer-action-fidelity` §2 catalogue
+ * (2026-05-01). Bundle `cmon1vhs6...` showed the composer say *"Apologies
+ * — I got ahead of myself and hadn't emitted the piano lesson link yet"*
+ * when the prior turn's `create_link` had successfully produced session
+ * `rb9m9j`. Composer then re-emitted the same shape as `54avwc`, polluting
+ * the host's dashboard with a duplicate.
+ *
+ * Stateless — does NOT inspect channel state to verify whether the
+ * "missing" action actually ran. The check fires whenever the composer
+ * narrates retry/apology language AND emits at least one action — the
+ * conservative read is that prior actions did run (the pipeline always
+ * persists results; the LLM's belief that they didn't is the hallucination)
+ * and any duplicate emission this turn is redundant. The retry hint tells
+ * the composer to ground on `actionResults` in conversation history and
+ * skip the redundant emit.
+ *
+ * Fully stateful Layer 2c (channel-state injection comparing emitted
+ * params against active sessions) is still tracked as deferred — this
+ * stateless check catches the loud apology-prose case observed in the
+ * 2026-05-01 bundle. Returns `null` for prose with no apology-retry
+ * pattern, OR for apology prose with no `[ACTION]` block (then the
+ * existing `needsActionEmissionRetry` handles it as the original no-emit
+ * shape).
+ */
+export function needsActionRedundancyRetry(
+  text: string,
+  parsedActions: ActionRequest[],
+): { hint: string; flaggedReason: string } | null {
+  if (!text) return null;
+  // No actions emitted → nothing to be redundant. The existing emission
+  // guard (`needsActionEmissionRetry`) handles "narrated but didn't emit"
+  // already.
+  if (parsedActions.length === 0) return null;
+
+  // Apology-retry prose patterns. Each is a distinct shape we've observed
+  // OR reasonably expect from the LLM's narration of a perceived prior-
+  // turn failure. Anchored case-insensitively; designed for high precision
+  // (false positives would force unnecessary retries on legitimate apologies).
+  const patterns: Array<{ rx: RegExp; name: string }> = [
+    // "Apologies — I hadn't emitted X yet" / "...I didn't create the link yet"
+    {
+      rx: /\b(apolog(?:y|ies|ize))[\s,.—–\-:!]+[\s\S]{0,80}\b(?:hadn'?t|didn'?t|forgot(?:\s+to)?|missed|haven'?t)\s+(?:emit|emitted|create|created|sent|set\s+up|made|built)\b/i,
+      name: "apology-retry:hadnt-emitted",
+    },
+    // "I got ahead of myself" — exact phrase from F6 bundle
+    {
+      rx: /\bi\s+got\s+ahead\s+of\s+myself\b/i,
+      name: "apology-retry:got-ahead",
+    },
+    // "Let me re-emit / emit again / try that again / retry that"
+    {
+      rx: /\blet\s+me\s+(?:re-?emit|emit\s+(?:that\s+)?again|try\s+(?:that|this)\s+again|retry\s+(?:that|this))\b/i,
+      name: "apology-retry:let-me-retry",
+    },
+    // "That's now created" / "That's now done" — narration of a (claimed)
+    // belated emit, which is the false-apology pattern's tell when paired
+    // with action presence
+    {
+      rx: /\bthat'?s\s+now\s+(?:created|done|emitted|set\s+up|in\s+place|sent)\b/i,
+      name: "apology-retry:thats-now-x",
+    },
+    // "I should have / I meant to" + emit verb — confessional retry framing
+    {
+      rx: /\bi\s+(?:should\s+have|meant\s+to)\s+(?:emit|emitted|create|created|sent|made|built|set\s+up)\b/i,
+      name: "apology-retry:should-have",
+    },
+  ];
+
+  for (const { rx, name } of patterns) {
+    if (!rx.test(text)) continue;
+    return {
+      flaggedReason: name,
+      hint: ACTION_REDUNDANCY_RETRY_PROMPT,
+    };
+  }
+  return null;
+}
+
+/**
+ * Retry hint for the F6 false-apology / duplicate-re-emit case. Tells the
+ * composer that prior actions DID run (they're always persisted before the
+ * next turn) and instructs it to drop the redundant emit, responding only
+ * to the host's current request.
+ */
+export const ACTION_REDUNDANCY_RETRY_PROMPT =
+  "Your prior turn's actions ran successfully — see the `actionResults` blocks in conversation history. Don't re-emit prior actions; they're already in the host's dashboard. Re-read the host's MOST RECENT message and respond to that fresh: emit `[ACTION]` blocks ONLY for what the host's current message asks for, nothing else. If you're unsure whether a prior action ran, default to NOT re-emitting (the actionResults in history are authoritative).";
+
+/**
  * Terse reminder for the retry call. The LLM should emit ONLY the action
  * block, no conversational text. Concatenated with the first response so
  * the user sees one coherent message (their UI strips the action block).

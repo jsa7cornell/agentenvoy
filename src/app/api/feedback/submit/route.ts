@@ -134,21 +134,32 @@ export async function POST(request: NextRequest) {
 
   const isAdmin = await isAdminSession();
 
-  // Admin convenience: auto-mint an agent token on submit so the Thank-you
-  // screen can show a ready-to-paste prompt. Same semantics as the manual
-  // mint at /api/admin/feedback/[id]/mint-token — row + audit + 15-min TTL.
+  // Auto-mint an agent token on submit so the Thank-you screen can show a
+  // ready-to-paste curl + agent prompt. Generalized 2026-05-01: previously
+  // gated to admins only; now available to any authenticated submitter.
+  // Token is short-lived (15 min) and only useful for THIS specific report,
+  // so non-admin self-mint carries no privilege escalation — the submitter
+  // already has the report ID and can already view it. The convenience here
+  // is testability: John's test accounts (non-admin) can grab the curl
+  // without round-tripping through the admin tooling. Guest flow (no user
+  // session at all) still skips because `mintedById` is non-nullable in
+  // the schema.
   let agentPrompt: string | undefined;
-  if (isAdmin) {
-    try {
-      const minted = signAgentToken({ reportId: report.id });
-      await prisma.agentAccessToken.create({
-        data: {
-          reportId: report.id,
-          mintedById: userId,
-          jti: minted.jti,
-          expiresAt: minted.expiresAt,
-        },
-      });
+  try {
+    const minted = signAgentToken({ reportId: report.id });
+    await prisma.agentAccessToken.create({
+      data: {
+        reportId: report.id,
+        mintedById: userId,
+        jti: minted.jti,
+        expiresAt: minted.expiresAt,
+      },
+    });
+    // Admin-access audit only when the submitter is an admin — that's the
+    // privileged-cross-user-inspection trail. Self-mint for one's own report
+    // doesn't belong in the admin log; the AgentAccessToken row itself
+    // (with mintedById) is the record.
+    if (isAdmin) {
       await logAdminAccess({
         adminId: userId,
         path: "/api/feedback/submit",
@@ -160,29 +171,29 @@ export async function POST(request: NextRequest) {
           action: "auto_mint_on_submit",
         },
       });
-      const origin = request.headers.get("origin") || new URL(request.url).origin;
-      const fetchUrl = `${origin}/api/agent/feedback/${report.id}?token=${minted.token}`;
-      agentPrompt = [
-        `curl -s '${fetchUrl}'`,
-        ``,
-        `Run the curl above to fetch { report, bundle } for AgentEnvoy feedback report ${report.id}.`,
-        ``,
-        `Bundle triage map — start where the complaint points:`,
-        `  • Widget offered wrong slots / today missing → bundle.replay.slotsByDay is what the scoring engine serves now. bundle.recentLinks[].rulesJson is the rule that drove it. Compare replay vs. rule + guestPicks.window.`,
-        `  • Greeting / first-message wrong → bundle.messages.recentTurns[0] (or sharedChannel.recentTurns[0] for guest bundles).`,
-        `  • Timezone confusion → bundle.clientState.viewerTimezone vs. the host tz implied by replay.hostTimezone.`,
-        `  • Link went to wrong place → scan messages for action.params.url / action.params.linkCode.`,
-        `  • Classification / intent bugs → bundle.filingContext.suspectedIncidentTurn + recentLinks[].rulesJson.`,
-        ``,
-        `What the bundle does NOT carry: raw Google Calendar events (only title+time via bundle.calendar), secrets, cross-user data. If you need something outside the bundle, say so — do not fabricate it.`,
-        ``,
-        `Then follow agentenvoy/PLAYBOOK.md → "Debug bundle handling".`,
-      ].join("\n");
-    } catch (err) {
-      // Non-fatal: if mint fails (e.g. AGENT_TOKEN_SECRET unset), the Thank-you
-      // screen still shows the Open-report link as a fallback path.
-      console.error("[feedback.submit] auto-mint failed", { userId, err });
     }
+    const origin = request.headers.get("origin") || new URL(request.url).origin;
+    const fetchUrl = `${origin}/api/agent/feedback/${report.id}?token=${minted.token}`;
+    agentPrompt = [
+      `curl -s '${fetchUrl}'`,
+      ``,
+      `Run the curl above to fetch { report, bundle } for AgentEnvoy feedback report ${report.id}.`,
+      ``,
+      `Bundle triage map — start where the complaint points:`,
+      `  • Widget offered wrong slots / today missing → bundle.replay.slotsByDay is what the scoring engine serves now. bundle.recentLinks[].rulesJson is the rule that drove it. Compare replay vs. rule + guestPicks.window.`,
+      `  • Greeting / first-message wrong → bundle.messages.recentTurns[0] (or sharedChannel.recentTurns[0] for guest bundles).`,
+      `  • Timezone confusion → bundle.clientState.viewerTimezone vs. the host tz implied by replay.hostTimezone.`,
+      `  • Link went to wrong place → scan messages for action.params.url / action.params.linkCode.`,
+      `  • Classification / intent bugs → bundle.filingContext.suspectedIncidentTurn + recentLinks[].rulesJson.`,
+      ``,
+      `What the bundle does NOT carry: raw Google Calendar events (only title+time via bundle.calendar), secrets, cross-user data. If you need something outside the bundle, say so — do not fabricate it.`,
+      ``,
+      `Then follow agentenvoy/PLAYBOOK.md → "Debug bundle handling".`,
+    ].join("\n");
+  } catch (err) {
+    // Non-fatal: if mint fails (e.g. AGENT_TOKEN_SECRET unset), the Thank-you
+    // screen still shows the Open-report link as a fallback path.
+    console.error("[feedback.submit] auto-mint failed", { userId, err });
   }
 
   return NextResponse.json({ ok: true, reportId: report.id, isAdmin, agentPrompt });

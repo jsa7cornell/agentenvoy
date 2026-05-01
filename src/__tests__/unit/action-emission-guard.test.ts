@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { needsActionEmissionRetry, needsActionShapeRetry } from "@/agent/action-emission-guard";
+import { needsActionEmissionRetry, needsActionShapeRetry, needsActionRedundancyRetry } from "@/agent/action-emission-guard";
 import type { ActionRequest } from "@/agent/actions";
 
 describe("needsActionEmissionRetry", () => {
@@ -236,5 +236,125 @@ describe("needsActionShapeRetry", () => {
         ],
       ),
     ).toBeNull();
+  });
+});
+
+describe("needsActionRedundancyRetry (F6 — false-apology / duplicate-emit)", () => {
+  const action = (params: Record<string, unknown>): ActionRequest => ({
+    action: "create_link",
+    params,
+  });
+
+  it("returns null when no apology-retry prose is present", () => {
+    expect(
+      needsActionRedundancyRetry("Set up a 30-min call with Bob.", [
+        action({ inviteeName: "Bob" }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("returns null when prose has apology language but no actions emitted", () => {
+    // The existing emission guard handles the no-action case; this guard
+    // is specifically for redundant duplicate emits.
+    expect(
+      needsActionRedundancyRetry(
+        "Apologies — I hadn't emitted that yet, let me try again.",
+        [],
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null on empty input", () => {
+    expect(needsActionRedundancyRetry("", [])).toBeNull();
+    expect(needsActionRedundancyRetry("anything", [])).toBeNull();
+  });
+
+  // Bundle cmon1vhs6... — the verbatim prose that triggered F6.
+  it("flags 'I got ahead of myself' (F6 bundle prose)", () => {
+    const result = needsActionRedundancyRetry(
+      "Apologies — I got ahead of myself and hadn't emitted the piano lesson link yet. That's now created: 10-week weekly series.",
+      [action({ topic: "piano lessons", inviteeName: "MainJohn" })],
+    );
+    expect(result).not.toBeNull();
+    // First-matching pattern wins; in this prose both apology-retry
+    // patterns match, but the regex order in the implementation determines
+    // which `flaggedReason` surfaces. Just assert one of the family.
+    expect(result?.flaggedReason).toMatch(/^apology-retry:/);
+  });
+
+  it("flags 'Apologies — I hadn't emitted X yet' generic", () => {
+    const result = needsActionRedundancyRetry(
+      "Apologies — I hadn't emitted the meeting link yet.",
+      [action({ inviteeName: "Bob" })],
+    );
+    expect(result?.flaggedReason).toBe("apology-retry:hadnt-emitted");
+  });
+
+  it("flags 'Apologies, I forgot to create the link'", () => {
+    const result = needsActionRedundancyRetry(
+      "Apologies, I forgot to create the link earlier.",
+      [action({ inviteeName: "Bob" })],
+    );
+    expect(result?.flaggedReason).toBe("apology-retry:hadnt-emitted");
+  });
+
+  it("flags 'Let me re-emit'", () => {
+    const result = needsActionRedundancyRetry(
+      "Let me re-emit that piano lesson link.",
+      [action({ inviteeName: "Bob" })],
+    );
+    expect(result?.flaggedReason).toBe("apology-retry:let-me-retry");
+  });
+
+  it("flags 'Let me try that again'", () => {
+    const result = needsActionRedundancyRetry(
+      "Let me try that again — should be set up now.",
+      [action({ inviteeName: "Bob" })],
+    );
+    expect(result?.flaggedReason).toBe("apology-retry:let-me-retry");
+  });
+
+  it("flags \"That's now created\"", () => {
+    const result = needsActionRedundancyRetry(
+      "That's now created: 10-week weekly series, 30 min in-person.",
+      [action({ inviteeName: "Bob" })],
+    );
+    expect(result?.flaggedReason).toBe("apology-retry:thats-now-x");
+  });
+
+  it("flags 'I should have emitted that'", () => {
+    const result = needsActionRedundancyRetry(
+      "I should have emitted that on the prior turn.",
+      [action({ inviteeName: "Bob" })],
+    );
+    expect(result?.flaggedReason).toBe("apology-retry:should-have");
+  });
+
+  it("does NOT flag a legitimate apology without retry framing", () => {
+    // "Apologies for the delay" with no claim about prior emission ≠ F6.
+    expect(
+      needsActionRedundancyRetry(
+        "Apologies for the delay — here's the meeting link.",
+        [action({ inviteeName: "Bob" })],
+      ),
+    ).toBeNull();
+  });
+
+  it("does NOT flag a forward-looking 'I'll create' phrase", () => {
+    expect(
+      needsActionRedundancyRetry(
+        "I'll create the link now — give me a moment.",
+        [action({ inviteeName: "Bob" })],
+      ),
+    ).toBeNull();
+  });
+
+  it("returns the F6 retry hint that grounds the LLM on actionResults", () => {
+    const result = needsActionRedundancyRetry(
+      "I got ahead of myself and forgot to emit. That's now created.",
+      [action({ inviteeName: "Bob" })],
+    );
+    expect(result?.hint).toMatch(/actionResults/);
+    expect(result?.hint).toMatch(/already in the host's dashboard/i);
   });
 });

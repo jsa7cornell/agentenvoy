@@ -351,10 +351,18 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
                 <code className="font-mono text-zinc-400 select-all">{submittedId}</code>
               </p>
             ) : null}
-            {submittedId && submittedIsAdmin ? (
-              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-[11px]">
-                <span className="text-sky-200">Admin:</span>
-                {submittedPrompt ? (
+            {submittedId && submittedPrompt ? (
+              // Auto-mint agent prompt for ALL authenticated submitters
+              // (2026-05-01) — previously admin-only. Token in the curl is
+              // short-lived (15 min) and only useful for THIS report, so
+              // showing it broadly carries no privilege escalation. Admin
+              // viewers also get the "Open report →" link in the same row.
+              // Treatment is intentionally discreet: small, monospace,
+              // selectable — suits John's "test from non-admin accounts"
+              // workflow without dominating the Thank-you copy.
+              <div className="mt-2 flex flex-col gap-1.5 rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-[11px]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sky-200">Debug:</span>
                   <button
                     type="button"
                     onClick={async () => {
@@ -370,15 +378,24 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
                   >
                     {promptCopied ? "Copied ✓" : "Copy agent prompt (15 min)"}
                   </button>
-                ) : null}
-                <a
-                  href={`/admin/feedback/${submittedId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 font-medium text-sky-100 hover:bg-sky-500/20"
-                >
-                  Open report →
-                </a>
+                  {submittedIsAdmin ? (
+                    <a
+                      href={`/admin/feedback/${submittedId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 font-medium text-sky-100 hover:bg-sky-500/20"
+                    >
+                      Open report →
+                    </a>
+                  ) : null}
+                </div>
+                {/* Show the curl line itself, monospace + selectable, so the
+                    user can copy by selection too (some test flows prefer
+                    that to clipboard API). Truncated visually but full text
+                    is selectable. */}
+                <code className="block max-w-full overflow-x-auto whitespace-nowrap font-mono text-[10px] text-zinc-300/80 select-all">
+                  {submittedPrompt.split("\n")[0]}
+                </code>
               </div>
             ) : null}
             <div className="flex justify-end pt-2">

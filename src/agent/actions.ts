@@ -1234,14 +1234,35 @@ export async function handleCreateLink(
   // The previous guard required `isPhysicalActivity` (activity token
   // present) so this case silently dropped the deferral and Larry's
   // greeting was missing "Let me know where works for you."
+  //
+  // F7 fix (2026-05-01) — proposal `2026-04-30_composer-action-fidelity` §2
+  // catalogue: when the composer emitted a NON-EMPTY `guestPicks` object
+  // (any field signaled), it has thought about deferral and made an
+  // explicit choice. Trust that choice — do NOT layer on a defensive
+  // location auto-add behind the composer's back. The original target
+  // case (composer fully omitted guestPicks on an in-person link) is
+  // still caught: an empty/absent guestPicks means the composer never
+  // engaged with deferral, and the guard's defensive write remains
+  // valuable. Repro: bundle `cmon1vhs6...` link `rb9m9j` had composer-
+  // emitted `guestPicks: { date: true }` for a recurring piano-lessons
+  // anchor; handler auto-added `location: true` causing the UI deferral
+  // line to read "location" while the composer's prose narrated date.
   const isInPerson = effectiveFormat === "in-person";
   if (isInPerson && !location) {
     const existingGuestPicks = params.guestPicks as Record<string, unknown> | undefined;
-    if (!existingGuestPicks?.location) {
+    const composerExpressedDeferral =
+      existingGuestPicks != null &&
+      typeof existingGuestPicks === "object" &&
+      Object.keys(existingGuestPicks).length > 0;
+    if (!existingGuestPicks?.location && !composerExpressedDeferral) {
       // Inject into the guestPicksOut that will be written to the link rules.
       guestPicksOut = { ...(guestPicksOut ?? {}), location: true };
       console.warn(
         `[create_link] in-person link${activity ? ` "${activity}"` : ""} had no location — setting guestPicks.location=true`,
+      );
+    } else if (composerExpressedDeferral && !existingGuestPicks?.location) {
+      console.log(
+        `[create_link] in-person link${activity ? ` "${activity}"` : ""} omitted location, but composer expressed other guestPicks (keys=${Object.keys(existingGuestPicks!).join(",")}); skipping defensive location auto-add (F7 fix)`,
       );
     }
   }

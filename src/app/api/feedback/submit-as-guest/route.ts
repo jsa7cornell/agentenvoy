@@ -250,10 +250,17 @@ export async function POST(request: NextRequest) {
   // (John testing from a deal-room as a guest), auto-mint an agent token so
   // the Thank-you screen can show the copy-prompt shortcut. Same semantics
   // as the authenticated submit path.
+  //
+  // Generalized 2026-05-01: previously gated to admin sessions only; now
+  // available to any authenticated submitter. Token is short-lived (15 min)
+  // and useful only for THIS specific report. Anonymous guests (no user
+  // session at all) still skip — `mintedById` is non-nullable and there's
+  // no userId to attribute. Admin-access audit only when the submitter is
+  // an admin.
   const session = await getServerSession(authOptions);
   const isAdmin = session?.user?.id ? await isAdminSession() : false;
   let agentPrompt: string | undefined;
-  if (isAdmin && session?.user?.id) {
+  if (session?.user?.id) {
     try {
       const minted = signAgentToken({ reportId: report.id });
       await prisma.agentAccessToken.create({
@@ -264,17 +271,19 @@ export async function POST(request: NextRequest) {
           expiresAt: minted.expiresAt,
         },
       });
-      await logAdminAccess({
-        adminId: session.user.id,
-        path: "/api/feedback/submit-as-guest",
-        action: "view",
-        targetUserId: link.userId,
-        context: {
-          feedbackReportId: report.id,
-          tokenJti: minted.jti,
-          action: "auto_mint_on_submit",
-        },
-      });
+      if (isAdmin) {
+        await logAdminAccess({
+          adminId: session.user.id,
+          path: "/api/feedback/submit-as-guest",
+          action: "view",
+          targetUserId: link.userId,
+          context: {
+            feedbackReportId: report.id,
+            tokenJti: minted.jti,
+            action: "auto_mint_on_submit",
+          },
+        });
+      }
       const reqOrigin = request.headers.get("origin") || new URL(request.url).origin;
       const fetchUrl = `${reqOrigin}/api/agent/feedback/${report.id}?token=${minted.token}`;
       agentPrompt = [
