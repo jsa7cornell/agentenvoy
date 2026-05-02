@@ -45,6 +45,7 @@ import {
 } from "@/lib/event-links-buckets";
 import { type ReusableLinkRow } from "@/components/mobile/event-links-card";
 import { EventLinksEditDialog } from "@/components/mobile/event-links-edit-dialog";
+import { PrimaryEditDialog } from "@/components/links/primary-edit-dialog";
 import { CreateLinkPicker } from "@/components/desktop/create-link-picker";
 
 interface UpcomingEventRow extends SessionLike {
@@ -278,9 +279,20 @@ export function EventLinksPageContent() {
   const [eventsLoaded, setEventsLoaded] = useState(false);
   const [filter, setFilter] = useState<EventFilter>("all");
   const [editing, setEditing] = useState<ReusableLinkRow | null>(null);
+  const [editingPrimary, setEditingPrimary] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const [hostFirstName, setHostFirstName] = useState<string>("");
+
+  // Route the Edit click on a Primary card to the PrimaryEditDialog;
+  // office_hours / other variance rows continue to use EventLinksEditDialog.
+  function handleEditClick(row: ReusableLinkRow) {
+    if (row.kind === "primary") {
+      setEditingPrimary(true);
+    } else {
+      setEditing(row);
+    }
+  }
 
   function refetchReusable() {
     fetch("/api/tuner/preferences")
@@ -420,7 +432,7 @@ export function EventLinksPageContent() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {reusableRows.map((r) => (
-                <ReusableCardGrid key={r.key} row={r} onEdit={(row) => setEditing(row)} />
+                <ReusableCardGrid key={r.key} row={r} onEdit={handleEditClick} />
               ))}
             </div>
           )}
@@ -649,9 +661,9 @@ export function EventLinksPageContent() {
         </section>
       </div>
 
-      {/* Edit dialog — reuses the mobile dialog component (chrome-neutral
-          modal that overlays the page). Desktop-specific edit chrome is
-          a follow-up. */}
+      {/* Edit dialogs — Primary uses the new posture editor (writes to
+          User.preferences + Apply-to-all flow); Office Hours uses the
+          existing rule-edit dialog. */}
       <EventLinksEditDialog
         row={editing}
         onSaved={() => {
@@ -659,6 +671,14 @@ export function EventLinksPageContent() {
           refetchReusable();
         }}
         onDismiss={() => setEditing(null)}
+      />
+      <PrimaryEditDialog
+        open={editingPrimary}
+        onSaved={() => {
+          setReusableLoaded(false);
+          refetchReusable();
+        }}
+        onDismiss={() => setEditingPrimary(false)}
       />
       {/* hostFirstName reserved for header chrome refactor; suppress unused
           state warning until that lands. */}

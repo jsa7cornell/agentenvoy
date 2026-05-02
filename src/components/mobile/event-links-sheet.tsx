@@ -39,6 +39,7 @@ import {
 } from "@/lib/event-links-buckets";
 import { EventLinksCard, type ReusableLinkRow } from "./event-links-card";
 import { EventLinksEditDialog } from "./event-links-edit-dialog";
+import { PrimaryEditDialog } from "@/components/links/primary-edit-dialog";
 import { CreateLinkPickerMobile } from "@/components/desktop/create-link-picker";
 
 interface EventLinksSheetProps {
@@ -138,9 +139,20 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
   const [eventsLoaded, setEventsLoaded] = useState(false);
   const [filter, setFilter] = useState<EventFilter>("all");
   const [editing, setEditing] = useState<ReusableLinkRow | null>(null);
+  const [editingPrimary, setEditingPrimary] = useState(false);
   const [archiving, setArchiving] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+
+  // Route Edit on Primary to PrimaryEditDialog (V1 Stage 2); other
+  // variance rows continue to use EventLinksEditDialog.
+  function handleEditClick(row: ReusableLinkRow) {
+    if (row.kind === "primary") {
+      setEditingPrimary(true);
+    } else {
+      setEditing(row);
+    }
+  }
 
   useEffect(() => {
     if (open) setMounted(true);
@@ -329,7 +341,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
               <EventLinksCard
                 key={r.key}
                 row={r}
-                onEdit={(row) => setEditing(row)}
+                onEdit={handleEditClick}
               />
             ))}
           </div>
@@ -506,7 +518,10 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
         </Link>
       </div>
 
-      {/* Edit dialog — anchored to the sheet so it overlays both groups. */}
+      {/* Edit dialogs — anchored to the sheet so they overlay both groups.
+          Primary uses the V1 Stage 2 posture editor (writes to
+          User.preferences + Apply-to-all flow); Office Hours uses the
+          existing rule-edit dialog. */}
       <EventLinksEditDialog
         row={editing}
         onSaved={() => {
@@ -514,6 +529,14 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
           refetchReusable();
         }}
         onDismiss={() => setEditing(null)}
+      />
+      <PrimaryEditDialog
+        open={editingPrimary}
+        onSaved={() => {
+          setReusableLoaded(false);
+          refetchReusable();
+        }}
+        onDismiss={() => setEditingPrimary(false)}
       />
     </div>
   );
