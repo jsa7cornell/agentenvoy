@@ -325,13 +325,11 @@ const singleSlotLockTemplate: GreetingTemplate = {
     const locPart = linkLocationForOpener ? ` at ${linkLocationForOpener}` : "";
     const durPart = durStr ? `${durStr}` : "some time";
     const slotStartIso = ((): string | null => {
-      const overrides = (linkRules?.slotOverrides ?? []) as Array<{
-        start?: unknown;
-        score?: unknown;
-      }>;
-      const hit = overrides.find(
-        (o) => typeof o.start === "string" && o.score === -2,
-      );
+      // 2026-05-01 — pinned exclusive slots now live in
+      // `availability.restrictToSlots` (replaces legacy `slotOverrides[-2]`).
+      const avail = (linkRules as { availability?: { restrictToSlots?: Array<{ start?: unknown }> } })?.availability;
+      const slots = (avail?.restrictToSlots ?? []) as Array<{ start?: unknown }>;
+      const hit = slots.find((s) => typeof s.start === "string");
       return hit && typeof hit.start === "string" ? hit.start : null;
     })();
     const whenPart = ((): string => {

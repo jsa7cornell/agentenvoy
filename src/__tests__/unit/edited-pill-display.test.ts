@@ -97,22 +97,22 @@ describe("computeEditedPillDisplay — field list", () => {
     expect(r?.fieldList).toBe("activity");
   });
 
-  it("dedupes time fields to a single 'hours' label", () => {
+  it("renders availability label", () => {
     const r = computeEditedPillDisplay(
       minutesAgo(1),
-      ["preferredTimeStart", "preferredTimeEnd", "preferredTimeWindows"],
+      ["availability"],
       opts(),
     );
-    expect(r?.fieldList).toBe("hours");
+    expect(r?.fieldList).toBe("availability");
   });
 
   it("preserves order across mixed fields with dedupe", () => {
     const r = computeEditedPillDisplay(
       minutesAgo(1),
-      ["activity", "preferredTimeStart", "preferredTimeEnd", "blockedRanges"],
+      ["activity", "availability", "blockedRanges"],
       opts(),
     );
-    expect(r?.fieldList).toBe("activity, hours, blocked time");
+    expect(r?.fieldList).toBe("activity, availability, blocked time");
   });
 
   it("humanizes inviteeNames as 'guests' and topic as 'title'", () => {
@@ -136,14 +136,13 @@ describe("computeEditedPillDisplay — field list", () => {
   it("the original Bug 2 reproducer renders correctly", () => {
     // After the host says "for drinks with pete - make my evenings available
     // for him, except for thursday evening", the patch touches
-    // preferredTimeStart, preferredTimeEnd, blockedRanges. The pill should
-    // collapse the time fields and add "blocked time".
+    // availability + blockedRanges (under the post-2026-05-01 schema).
     const r = computeEditedPillDisplay(
       minutesAgo(0),
-      ["preferredTimeStart", "preferredTimeEnd", "blockedRanges"],
+      ["availability", "blockedRanges"],
       opts(),
     );
     expect(r?.ageLabel).toBe("just now");
-    expect(r?.fieldList).toBe("hours, blocked time");
+    expect(r?.fieldList).toBe("availability, blocked time");
   });
 });

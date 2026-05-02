@@ -2,11 +2,25 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeDayName,
   normalizeLinkParameters,
-  applyEventOverrides,
-  getTimeWindows,
-  type ScoredSlot,
   type LinkParameters,
 } from "@/lib/scoring";
+
+/**
+ * Surviving tests after the 2026-05-01 schema rewrite (proposal:
+ * `event-availability-vs-preferred-vs-calendar-scoring`).
+ *
+ * Removed (covered by event-availability.test.ts now):
+ *   - applyEventOverrides + preferredDays
+ *   - applyEventOverrides + preferredTimeStart/End/Windows
+ *   - applyEventOverrides + slotOverrides
+ *   - applyEventOverrides + allowWeekends
+ *   - getTimeWindows (helper deleted)
+ *
+ * Kept here:
+ *   - normalizeDayName
+ *   - normalizeLinkParameters orthogonal fields (lastResort, dateRange,
+ *     guestGuidance.preferredFormat, format, duration, etc.)
+ */
 
 // ─── normalizeDayName ────────────────────────────────────────────────────────
 
@@ -41,37 +55,48 @@ describe("normalizeDayName", () => {
   });
 });
 
-// ─── normalizeLinkParameters ──────────────────────────────────────────────────────
+// ─── normalizeLinkParameters — surviving fields only ─────────────────────────
 
 describe("normalizeLinkParameters", () => {
-  it("coerces long day names to short form", () => {
+  it("coerces lastResort long day names to short form", () => {
     const out = normalizeLinkParameters({
-      preferredDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+      lastResort: ["Monday", "Friday"],
     });
-    expect(out.preferredDays).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri"]);
+    expect(out.lastResort).toEqual(["Mon", "Fri"]);
   });
 
-  it("passes short day names through unchanged", () => {
+  it("drops garbage day names from lastResort", () => {
     const out = normalizeLinkParameters({
-      preferredDays: ["Mon", "Tue"],
-      lastResort: ["Fri"],
+      lastResort: ["Monday", "Funday", "", null, "Tue"],
     });
-    expect(out.preferredDays).toEqual(["Mon", "Tue"]);
-    expect(out.lastResort).toEqual(["Fri"]);
+    expect(out.lastResort).toEqual(["Mon", "Tue"]);
   });
 
-  it("drops garbage day names", () => {
+  it("strips removed legacy fields (preferredDays, preferredTimeStart/End/Windows, allowWeekends, slotOverrides, exclusiveSlots)", () => {
+    // Per the 2026-05-01 hard cut: any legacy fields in the input are dropped
+    // by `normalizeLinkParameters`. Downstream Zod parse also catches these
+    // via `.passthrough()` not surfacing the typed shape.
     const out = normalizeLinkParameters({
-      preferredDays: ["Monday", "Funday", "", null, "Tue"],
+      preferredDays: ["Mon"],
+      preferredTimeStart: "07:00",
+      preferredTimeEnd: "10:00",
+      preferredTimeWindows: [{ start: "08:00", end: "10:00" }],
+      allowWeekends: true,
+      slotOverrides: [{ start: "x", end: "y", score: -2 }],
+      exclusiveSlots: true,
+      // Orthogonal fields preserved.
+      format: "video",
+      duration: 30,
     });
-    expect(out.preferredDays).toEqual(["Mon", "Tue"]);
-  });
-
-  it("de-dupes days", () => {
-    const out = normalizeLinkParameters({
-      preferredDays: ["Mon", "Monday", "MON", "mon"],
-    });
-    expect(out.preferredDays).toEqual(["Mon"]);
+    expect(out.preferredDays).toBeUndefined();
+    expect(out.preferredTimeStart).toBeUndefined();
+    expect(out.preferredTimeEnd).toBeUndefined();
+    expect(out.preferredTimeWindows).toBeUndefined();
+    expect(out.allowWeekends).toBeUndefined();
+    expect(out.slotOverrides).toBeUndefined();
+    expect(out.exclusiveSlots).toBeUndefined();
+    expect(out.format).toBe("video");
+    expect(out.duration).toBe(30);
   });
 
   it("preserves unknown keys unchanged", () => {
@@ -125,7 +150,7 @@ describe("normalizeLinkParameters", () => {
     expect(out.guestGuidance?.preferredFormat).toBe("in-person");
   });
 
-  it("drops 'in_person' (underscore — common LLM typo, same treatment as guestPicks.format)", () => {
+  it("drops 'in_person' (underscore — common LLM typo)", () => {
     const out = normalizeLinkParameters({
       guestGuidance: { preferredFormat: "in_person" as unknown as "in-person" },
     }) as LinkParameters;
@@ -152,414 +177,5 @@ describe("normalizeLinkParameters", () => {
       tone: "friendly",
       preferredFormat: "video",
     });
-  });
-});
-
-// ─── applyEventOverrides — preferredDays ─────────────────────────────────────
-
-/** Build a ScoredSlot for a given ISO datetime. */
-function slot(iso: string, score = 0): ScoredSlot {
-  const start = new Date(iso);
-  const end = new Date(start.getTime() + 30 * 60 * 1000);
-  return {
-    start: start.toISOString(),
-    end: end.toISOString(),
-    score,
-    confidence: "high",
-    reason: "open",
-  };
-}
-
-describe("applyEventOverrides — preferredDays (soft boost, not filter)", () => {
-  // 2026-04-20 is a Monday (Apr 14 2026 was a Tuesday).
-  const monday9pdt = "2026-04-20T16:00:00.000Z"; // 9 AM PDT
-  const tuesday9pdt = "2026-04-21T16:00:00.000Z";
-  const wednesday9pdt = "2026-04-22T16:00:00.000Z";
-  const thursday9pdt = "2026-04-23T16:00:00.000Z";
-  const saturday9pdt = "2026-04-18T16:00:00.000Z";
-
-  const base = [
-    slot(monday9pdt),
-    slot(tuesday9pdt),
-    slot(wednesday9pdt),
-    slot(saturday9pdt),
-  ];
-
-  // Post-2026-04-21: preferredDays is a soft boost, not a filter.
-  // All slots in `base` remain present; listed days are promoted to ★-tier
-  // (score ≤ -1), others keep their original score. Weekend filtering is
-  // handled by `allowWeekends`, not preferredDays.
-
-  it("boosts listed short-name days to ★ tier and leaves others alone", () => {
-    const rules: LinkParameters = { preferredDays: ["Mon", "Tue", "Wed", "Thu", "Fri"] };
-    const out = applyEventOverrides(base, rules, "America/Los_Angeles");
-    expect(out).toHaveLength(4); // all kept — including saturday
-    const byIso = new Map(out.map((s) => [s.start, s]));
-    expect(byIso.get(monday9pdt)!.score).toBeLessThanOrEqual(-1);
-    expect(byIso.get(tuesday9pdt)!.score).toBeLessThanOrEqual(-1);
-    expect(byIso.get(wednesday9pdt)!.score).toBeLessThanOrEqual(-1);
-    expect(byIso.get(saturday9pdt)!.score).toBe(0); // untouched
-  });
-
-  it("tolerates long day names at read time (back-compat)", () => {
-    const rules: LinkParameters = {
-      preferredDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-    };
-    const out = applyEventOverrides(base, rules, "America/Los_Angeles");
-    const byIso = new Map(out.map((s) => [s.start, s]));
-    expect(byIso.get(monday9pdt)!.score).toBeLessThanOrEqual(-1);
-    expect(byIso.get(saturday9pdt)!.score).toBe(0);
-  });
-
-  it("tolerates mixed day name shapes", () => {
-    const rules: LinkParameters = { preferredDays: ["Mon", "tuesday", "WED"] };
-    const out = applyEventOverrides(base, rules, "America/Los_Angeles");
-    const byIso = new Map(out.map((s) => [s.start, s]));
-    expect(byIso.get(monday9pdt)!.score).toBeLessThanOrEqual(-1);
-    expect(byIso.get(tuesday9pdt)!.score).toBeLessThanOrEqual(-1);
-    expect(byIso.get(wednesday9pdt)!.score).toBeLessThanOrEqual(-1);
-    expect(byIso.get(saturday9pdt)!.score).toBe(0);
-  });
-
-  it("does not promote slots with real conflicts (score ≥ 2)", () => {
-    // A Wed slot with a score-3 conflict (e.g., stretch/VIP-only) should stay
-    // at its conflict score even though Wed is preferred — day preference
-    // can't paper over an actual calendar issue.
-    const conflictedWed = slot(wednesday9pdt, 3);
-    const rules: LinkParameters = { preferredDays: ["Wed"] };
-    const out = applyEventOverrides([conflictedWed], rules, "America/Los_Angeles");
-    expect(out[0].score).toBe(3);
-  });
-
-  it("Katie regression (feedback cmo8d9eqs): dateRange Wed–Sat + preferredDays:[Wed] keeps Thu/Fri offerable", () => {
-    // Host said "tomorrow preferred, else later in the week" — LLM wrote
-    // dateRange: Wed–Sat + preferredDays:[Wed]. Before the fix, Thu/Fri/Sat
-    // were filtered out entirely and the guest could only book Wed.
-    const wed = slot(wednesday9pdt);
-    const thu = slot(thursday9pdt);
-    const rules: LinkParameters = {
-      preferredDays: ["Wed"],
-      dateRange: { start: "2026-04-22", end: "2026-04-25" },
-    };
-    const out = applyEventOverrides([wed, thu], rules, "America/Los_Angeles");
-    expect(out).toHaveLength(2); // both kept — Thu must remain offerable
-    const byIso = new Map(out.map((s) => [s.start, s]));
-    expect(byIso.get(wednesday9pdt)!.score).toBeLessThanOrEqual(-1); // ★
-    expect(byIso.get(thursday9pdt)!.score).toBe(0); // still offerable, no ★
-  });
-});
-
-// ─── applyEventOverrides — dateRange ─────────────────────────────────────────
-
-describe("applyEventOverrides — dateRange", () => {
-  // Use times deep inside each PT day to avoid midnight-boundary confusion.
-  const apr19 = "2026-04-19T18:00:00.000Z"; // Sun Apr 19 11 AM PDT
-  const apr20 = "2026-04-20T18:00:00.000Z"; // Mon
-  const apr22 = "2026-04-22T18:00:00.000Z"; // Wed
-  const apr24 = "2026-04-24T18:00:00.000Z"; // Fri
-  const apr25 = "2026-04-25T18:00:00.000Z"; // Sat (outside)
-
-  const base = [slot(apr19), slot(apr20), slot(apr22), slot(apr24), slot(apr25)];
-
-  it("filters to inclusive [start, end] window in host tz", () => {
-    const rules: LinkParameters = { dateRange: { start: "2026-04-20", end: "2026-04-24" } };
-    const out = applyEventOverrides(base, rules, "America/Los_Angeles");
-    expect(out.map((s) => s.start)).toEqual([apr20, apr22, apr24]);
-  });
-
-  it("applies only start when end is omitted", () => {
-    const rules: LinkParameters = { dateRange: { start: "2026-04-22" } };
-    const out = applyEventOverrides(base, rules, "America/Los_Angeles");
-    expect(out.map((s) => s.start)).toEqual([apr22, apr24, apr25]);
-  });
-
-  it("applies only end when start is omitted", () => {
-    const rules: LinkParameters = { dateRange: { end: "2026-04-20" } };
-    const out = applyEventOverrides(base, rules, "America/Los_Angeles");
-    expect(out.map((s) => s.start)).toEqual([apr19, apr20]);
-  });
-});
-
-// ─── Regression: eyajs5 reproduction ─────────────────────────────────────────
-
-describe("regression — eyajs5 preferredDays shape", () => {
-  it("filter no longer nukes every slot when short names are persisted", () => {
-    // This is the exact rules shape that caused Bryan's deal room to see
-    // "no offerable times" after the greeting showed plenty.
-    const rules: LinkParameters = {
-      format: "video",
-      preferredDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
-      dateRange: { start: "2026-04-20", end: "2026-04-24" },
-    };
-    const input = [
-      slot("2026-04-20T17:00:00.000Z"), // Mon 10 AM PDT
-      slot("2026-04-21T17:00:00.000Z"), // Tue 10 AM PDT
-      slot("2026-04-25T17:00:00.000Z"), // Sat 10 AM PDT (out of range)
-    ];
-    const out = applyEventOverrides(input, rules, "America/Los_Angeles");
-    expect(out.length).toBe(2);
-  });
-});
-
-// ─── preferredTimeWindows ────────────────────────────────────────────────────
-
-describe("preferredTimeWindows normalization", () => {
-  it("keeps well-formed windows and sorts them by start", () => {
-    const out = normalizeLinkParameters({
-      preferredTimeWindows: [
-        { start: "16:30", end: "18:00" },
-        { start: "12:00", end: "14:00" },
-      ],
-    });
-    expect(out.preferredTimeWindows).toEqual([
-      { start: "12:00", end: "14:00" },
-      { start: "16:30", end: "18:00" },
-    ]);
-  });
-
-  it("accepts 24:00 as an end-of-day sentinel", () => {
-    const out = normalizeLinkParameters({
-      preferredTimeWindows: [{ start: "20:00", end: "24:00" }],
-    });
-    expect(out.preferredTimeWindows).toEqual([{ start: "20:00", end: "24:00" }]);
-  });
-
-  it("drops entries with bad shape, non-HH:MM strings, or start >= end", () => {
-    const out = normalizeLinkParameters({
-      preferredTimeWindows: [
-        { start: "12:00", end: "14:00" }, // good
-        { start: "25:00", end: "26:00" }, // bad hour
-        { start: "12:60", end: "13:00" }, // bad minute
-        { start: "14:00", end: "12:00" }, // inverted
-        { start: "14:00", end: "14:00" }, // empty span
-        "not-an-object",
-        { start: 12, end: 14 },          // wrong types
-      ] as unknown as Array<{ start: string; end: string }>,
-    });
-    expect(out.preferredTimeWindows).toEqual([{ start: "12:00", end: "14:00" }]);
-  });
-
-  it("drops the field entirely when the array is non-array or cleans to empty", () => {
-    expect(normalizeLinkParameters({ preferredTimeWindows: "oops" }).preferredTimeWindows).toBeUndefined();
-    expect(normalizeLinkParameters({ preferredTimeWindows: [] }).preferredTimeWindows).toBeUndefined();
-    expect(
-      normalizeLinkParameters({
-        preferredTimeWindows: [{ start: "x", end: "y" }],
-      }).preferredTimeWindows,
-    ).toBeUndefined();
-  });
-});
-
-describe("getTimeWindows precedence", () => {
-  it("returns the multi-window array when present and non-empty", () => {
-    const rules: LinkParameters = {
-      preferredTimeStart: "09:00",
-      preferredTimeEnd: "17:00",
-      preferredTimeWindows: [
-        { start: "12:00", end: "14:00" },
-        { start: "16:30", end: "18:00" },
-      ],
-    };
-    expect(getTimeWindows(rules)).toEqual([
-      { start: "12:00", end: "14:00" },
-      { start: "16:30", end: "18:00" },
-    ]);
-  });
-
-  it("falls back to single-window pair when the array is absent", () => {
-    expect(
-      getTimeWindows({ preferredTimeStart: "09:00", preferredTimeEnd: "12:00" }),
-    ).toEqual([{ start: "09:00", end: "12:00" }]);
-  });
-
-  it("fills 00:00 / 24:00 when only one end of the single window is set", () => {
-    expect(getTimeWindows({ preferredTimeStart: "09:00" })).toEqual([
-      { start: "09:00", end: "24:00" },
-    ]);
-    expect(getTimeWindows({ preferredTimeEnd: "17:00" })).toEqual([
-      { start: "00:00", end: "17:00" },
-    ]);
-  });
-
-  it("returns [] when no window is set at all", () => {
-    expect(getTimeWindows({})).toEqual([]);
-  });
-});
-
-describe("applyEventOverrides filters on multi-window", () => {
-  const slot = (iso: string, duration = 30): ScoredSlot => ({
-    start: iso,
-    end: new Date(new Date(iso).getTime() + duration * 60_000).toISOString(),
-    score: 1,
-    reason: "biz hours",
-    kind: "open",
-    confidence: "high",
-    blockCost: "none",
-    firmness: "weak",
-  });
-
-  it("keeps slots inside ANY window and drops the gap between them", () => {
-    // All slots on Mon Apr 20, America/Los_Angeles (UTC-7 during PDT).
-    // 12:00 PDT = 19:00 UTC, 15:00 PDT = 22:00 UTC, 17:00 PDT = 00:00 UTC (+1d)
-    const rules: LinkParameters = {
-      preferredTimeWindows: [
-        { start: "12:00", end: "14:00" },
-        { start: "16:30", end: "18:00" },
-      ],
-      dateRange: { start: "2026-04-20", end: "2026-04-20" },
-    };
-    const input = [
-      slot("2026-04-20T19:00:00.000Z"), // 12:00 PDT — in window 1
-      slot("2026-04-20T22:00:00.000Z"), // 15:00 PDT — between windows (gap)
-      slot("2026-04-21T00:00:00.000Z"), // 17:00 PDT — in window 2
-      slot("2026-04-21T02:00:00.000Z"), // 19:00 PDT — after both
-    ];
-    const out = applyEventOverrides(input, rules, "America/Los_Angeles");
-    const hours = out.map((s) => new Date(s.start).toISOString()).sort();
-    expect(hours).toEqual([
-      "2026-04-20T19:00:00.000Z",
-      "2026-04-21T00:00:00.000Z",
-    ]);
-  });
-});
-
-// ─── applyEventOverrides — explicit-window unlock of off-hours ───────────────
-
-describe("applyEventOverrides — explicit-window unlock", () => {
-  // Host says "tonight" → preferredTimeStart=17:00, preferredTimeEnd=20:00.
-  // The scoring engine's base scoring marks 5pm-8pm slots as off_hours
-  // (score 2-3) because they fall outside default business hours. When the
-  // host explicitly sets a preferredTime window, those slots should be
-  // promoted to offerable (score 0) so downstream score ≤ 1 filters include
-  // them. Regression for 2026-04-21 q6vcyv "no open times" bug.
-
-  /** Slot at a given UTC iso with explicit score + kind. */
-  function offHoursSlot(iso: string, score: 2 | 3): ScoredSlot {
-    return {
-      start: iso,
-      end: new Date(new Date(iso).getTime() + 30 * 60_000).toISOString(),
-      score,
-      reason: score === 2 ? "just outside business hours" : "off hours",
-      kind: "off_hours",
-      confidence: "high",
-      blockCost: "preference",
-      firmness: score === 3 ? "strong" : "weak",
-    };
-  }
-
-  it("promotes score-3 off-hours slot inside preferredTime window to offerable (score 0)", () => {
-    // 2026-04-21T18:00Z = 11 AM PDT (daytime). For an evening case, use
-    // 2026-04-22T02:00Z = 19:00 PDT on Tue, which is off-hours by default.
-    const eveningSlot = offHoursSlot("2026-04-22T02:00:00.000Z", 3);
-    const rules: LinkParameters = {
-      preferredTimeStart: "17:00",
-      preferredTimeEnd: "20:00",
-    };
-    const out = applyEventOverrides([eveningSlot], rules, "America/Los_Angeles");
-    expect(out).toHaveLength(1);
-    expect(out[0].score).toBe(0);
-    expect(out[0].reason).toContain("host window");
-  });
-
-  it("promotes score-2 off-hours slot inside preferredTime window", () => {
-    const eveningSlot = offHoursSlot("2026-04-22T02:00:00.000Z", 2);
-    const rules: LinkParameters = {
-      preferredTimeStart: "17:00",
-      preferredTimeEnd: "20:00",
-    };
-    const out = applyEventOverrides([eveningSlot], rules, "America/Los_Angeles");
-    expect(out).toHaveLength(1);
-    expect(out[0].score).toBe(0);
-  });
-
-  it("leaves already-offerable slot (score ≤ 1) unchanged", () => {
-    const daytimeSlot: ScoredSlot = {
-      start: "2026-04-22T02:00:00.000Z", // 19:00 PDT Tue
-      end: "2026-04-22T02:30:00.000Z",
-      score: 0,
-      reason: "open",
-      kind: "open",
-      confidence: "high",
-      blockCost: "none",
-      firmness: "weak",
-    };
-    const rules: LinkParameters = {
-      preferredTimeStart: "17:00",
-      preferredTimeEnd: "20:00",
-    };
-    const out = applyEventOverrides([daytimeSlot], rules, "America/Los_Angeles");
-    expect(out).toHaveLength(1);
-    expect(out[0].score).toBe(0); // unchanged
-    expect(out[0].reason).toBe("open"); // unchanged
-  });
-
-  it("does NOT promote score-4 sleep-hours slot even if in window", () => {
-    // score 4 ("early morning / late evening") stays blocked. Host's explicit
-    // window can't unlock the deepest off-hours band — matches getTier's
-    // existing `score <= 3` gate.
-    const deepOffHours: ScoredSlot = {
-      start: "2026-04-22T02:00:00.000Z",
-      end: "2026-04-22T02:30:00.000Z",
-      score: 4,
-      reason: "early morning / late evening",
-      kind: "off_hours",
-      confidence: "high",
-      blockCost: "preference",
-      firmness: "strong",
-    };
-    const rules: LinkParameters = {
-      preferredTimeStart: "17:00",
-      preferredTimeEnd: "20:00",
-    };
-    const out = applyEventOverrides([deepOffHours], rules, "America/Los_Angeles");
-    expect(out).toHaveLength(1);
-    expect(out[0].score).toBe(4); // unchanged
-  });
-
-  it("does NOT promote weekend slot in window — allowWeekends handles that separately", () => {
-    // Saturday 7 PM PDT = 2026-04-25T02:00Z, kind "weekend".
-    // Even inside preferredTime window, weekend kind stays gated by allowWeekends.
-    const weekendSlot: ScoredSlot = {
-      start: "2026-04-25T02:00:00.000Z",
-      end: "2026-04-25T02:30:00.000Z",
-      score: 3,
-      reason: "weekend",
-      kind: "weekend",
-      confidence: "high",
-      blockCost: "preference",
-      firmness: "strong",
-    };
-    const rules: LinkParameters = {
-      preferredTimeStart: "17:00",
-      preferredTimeEnd: "20:00",
-    };
-    const out = applyEventOverrides([weekendSlot], rules, "America/Los_Angeles");
-    expect(out).toHaveLength(1);
-    expect(out[0].score).toBe(3); // unchanged
-  });
-
-  it("q6vcyv regression: evening window (17-20) unlocks tonight/tomorrow slots", () => {
-    // Mimics real q6vcyv rules. Mon 6 PM + Tue 6:30 PM should all end up
-    // offerable after applyEventOverrides — with or without the explicit
-    // window unlock, they'd be filtered in by dateRange but scored off-hours
-    // (score 3). Without the unlock, downstream score ≤ 1 filters drop them.
-    const slots: ScoredSlot[] = [
-      offHoursSlot("2026-04-22T01:30:00.000Z", 3), // Tue 6:30 PM PDT
-      offHoursSlot("2026-04-22T02:30:00.000Z", 3), // Tue 7:30 PM PDT
-    ];
-    const rules: LinkParameters = {
-      format: "phone",
-      duration: 30,
-      dateRange: { start: "2026-04-21", end: "2026-05-01" },
-      preferredDays: ["Tue", "Wed", "Mon"],
-      preferredTimeStart: "17:00",
-      preferredTimeEnd: "20:00",
-    };
-    const out = applyEventOverrides(slots, rules, "America/Los_Angeles");
-    // All slots should have score ≤ 0 now (preferredDays also boosts Tue → -1).
-    expect(out.length).toBe(2);
-    for (const s of out) {
-      expect(s.score).toBeLessThanOrEqual(0);
-    }
   });
 });

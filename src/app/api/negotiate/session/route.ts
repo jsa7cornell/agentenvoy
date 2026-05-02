@@ -722,7 +722,7 @@ export async function POST(req: NextRequest) {
     undefined;
   const effectiveMinDuration =
     (linkRules.minDuration as number | undefined) || undefined;
-  // Apply link-level rules (preferredDays, dateRange, lastResort, slot overrides)
+  // Apply link-level filters (availability, dateRange, blockedRanges, lastResort)
   // BEFORE formatting so the greeting shows the same set of times the LLM will
   // see in `formatOfferableSlots` on follow-up turns. Without this, the greeting
   // and the LLM disagree about availability and the agent contradicts itself.
@@ -934,7 +934,7 @@ export async function POST(req: NextRequest) {
     const effectiveSteering = storedSteering ?? deriveLegacy(linkRules);
     if (effectiveSteering === "exclusive" && !hasExclusiveOverride(linkRules)) {
       console.error(
-        `[greeting] intent=exclusive with no slotOverrides[-2] (sessionId=${session.id}, linkCode=${link.code ?? "?"})`,
+        `[greeting] intent=exclusive with no availability.restrictToSlots (sessionId=${session.id}, linkCode=${link.code ?? "?"})`,
       );
     }
     const isDirective =

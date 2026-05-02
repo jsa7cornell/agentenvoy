@@ -34,7 +34,7 @@ describe("playbook substitution — calendar-event-composer", () => {
   it("PR3 playbook additions are present", () => {
     // Time-of-day vocabulary table (proposal §3.A.1)
     expect(playbook).toContain("Time-of-day vocabulary");
-    expect(playbook).toMatch(/"evenings"\s*\/\s*"after 5pm"/);
+    expect(playbook).toMatch(/"open up evenings"\s*\/\s*"also after 5pm"/);
     // blockedRanges section (proposal §3.5)
     expect(playbook).toContain("blockedRanges");
     expect(playbook).toContain("One-off date-and-time exclusions");

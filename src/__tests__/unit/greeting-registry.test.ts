@@ -67,7 +67,7 @@ describe("selectGreeting — registry key resolution", () => {
     const input = baseInput({
       effectiveSteering: "exclusive",
       linkRules: {
-        slotOverrides: [{ start: "2026-05-01T16:00:00Z", score: -2 }],
+        availability: { restrictToSlots: [{ start: "2026-05-01T16:00:00Z", end: "2026-05-01T16:00:00Z" }] },
       },
     });
     expect(selectGreeting(input).key).toBe("single-slot-lock");
@@ -108,7 +108,7 @@ describe("selectGreeting — registry key resolution", () => {
       isAnonymousLink: true,
       effectiveSteering: "exclusive",
       linkRules: {
-        slotOverrides: [{ start: "2026-05-01T16:00:00Z", score: -2 }],
+        availability: { restrictToSlots: [{ start: "2026-05-01T16:00:00Z", end: "2026-05-01T16:00:00Z" }] },
       },
     });
     expect(selectGreeting(input).key).toBe("anonymous");
@@ -143,7 +143,7 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
       effectiveDuration: 30,
       hostTimezone: "America/Los_Angeles",
       linkRules: {
-        slotOverrides: [{ start: "2026-05-01T16:00:00Z", score: -2 }],
+        availability: { restrictToSlots: [{ start: "2026-05-01T16:00:00Z", end: "2026-05-01T16:00:00Z" }] },
       },
     });
     const out = GREETINGS["single-slot-lock"].render(input);
@@ -158,7 +158,7 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
       effectiveSteering: "exclusive",
       effectiveDuration: 60,
       durationForOpener: 60,
-      linkRules: { slotOverrides: [] }, // no -2 override → no whenPart
+      linkRules: { availability: { restrictToSlots: [] } }, // no -2 override → no whenPart
     });
     const out = GREETINGS["single-slot-lock"].render(input);
     expect(out).toBe(
@@ -171,7 +171,7 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
       greeteeName: "Sarah",
       effectiveSteering: "exclusive",
       activityText: "lunch",
-      linkRules: { slotOverrides: [] },
+      linkRules: { availability: { restrictToSlots: [] } },
     });
     const out = GREETINGS["single-slot-lock"].render(input);
     expect(out).toBe(

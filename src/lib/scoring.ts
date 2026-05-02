@@ -463,7 +463,7 @@ function getLocalDateStr(date: Date, tz: string): string {
  * Get local time parts for a Date in a specific IANA timezone.
  * Uses Intl so it works on UTC servers (Vercel).
  */
-function getLocalParts(date: Date, tz: string) {
+export function getLocalParts(date: Date, tz: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     hour12: false,
@@ -963,106 +963,136 @@ function hoursProtectionLayer(
  */
 export type OfferTier = "first-offer" | "stretch1" | "stretch2" | null;
 
-/**
- * Is this slot within the host's explicit preferredTimeStart/preferredTimeEnd
- * window on a weekday? Used by isFirstOffer to promote off-hours slots the
- * host has personally authorized ("I said 6 AM is fine for this link").
- */
-function inExplicitWindow(slot: ScoredSlot, rules: LinkParameters, tz: string): boolean {
-  const windows = getTimeWindows(rules);
-  if (windows.length === 0) return false;
-  const { hour, minute } = getLocalParts(new Date(slot.start), tz);
-  const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  return windows.some(
-    (w) => timeStr >= w.start && timeStr < w.end,
-  );
+// ---------------------------------------------------------------------------
+// Three-band model helpers (2026-05-01).
+//
+// Per proposal `2026-05-01_event-availability-vs-preferred-vs-calendar-
+// scoring`. Slot scores are per-host stable; per-link decisions are computed
+// via these helpers rather than mutated into the score. `getTier` reads the
+// unmutated score plus these helpers to assign the offer tier.
+// ---------------------------------------------------------------------------
+
+function localHHMM(date: Date, tz: string): string {
+  const { hour, minute } = getLocalParts(date, tz);
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function localDayName(date: Date, tz: string): string {
+  const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
+  return dayFmt.format(date);
+}
+
+function timeInWindow(
+  hhmm: string,
+  window: { start: string; end: string },
+): boolean {
+  return hhmm >= window.start && hhmm < window.end;
+}
+
+function slotMatchesInstance(
+  slot: ScoredSlot,
+  instance: { start: string; end: string },
+): boolean {
+  // Same start instant. End is informational; the start identifies the slot.
+  return new Date(slot.start).getTime() === new Date(instance.start).getTime();
 }
 
 /**
- * Canonical accessor for a link's offering-time windows.
+ * Is this slot covered by any `availability.expand` entry?
  *
- * Returns the effective list of `{start, end}` `HH:MM` windows that a slot
- * must fall within to be offerable. Precedence:
- *   1. `preferredTimeWindows` (multi-window) — returned as-is when present
- *      and non-empty.
- *   2. `preferredTimeStart` / `preferredTimeEnd` (single-window legacy) —
- *      returned as a one-element array with `00:00` / `24:00` bounds for
- *      whichever end the host left open.
- *   3. Neither set → empty array, i.e. no window constraint.
- *
- * All windowing consumers should use this helper rather than reading the
- * underlying fields directly, so that multi-window rows behave correctly
- * without per-site conditionals. Introduced 2026-04-20.
+ * Each expand entry can scope to specific days, a time window, or both. A
+ * slot matches when (days unset OR slot's day ∈ days) AND (window unset OR
+ * slot's local time ∈ window). Replaces the legacy `inExplicitWindow` (which
+ * only handled `preferredTimeStart/End`) AND the `allowWeekends` boolean
+ * (which is now expressed as `availability.expand: [{ days: ["Sat","Sun"] }]`).
  */
-export function getTimeWindows(
-  rules: LinkParameters,
-): Array<{ start: string; end: string }> {
-  if (Array.isArray(rules.preferredTimeWindows) && rules.preferredTimeWindows.length > 0) {
-    return rules.preferredTimeWindows;
-  }
-  if (rules.preferredTimeStart || rules.preferredTimeEnd) {
-    return [
-      {
-        start: rules.preferredTimeStart ?? "00:00",
-        end: rules.preferredTimeEnd ?? "24:00",
-      },
-    ];
-  }
-  return [];
+export function inExpansion(slot: ScoredSlot, rules: LinkParameters, tz: string): boolean {
+  const expand = rules.availability?.expand;
+  if (!expand?.length) return false;
+  const slotDate = new Date(slot.start);
+  const slotDay = localDayName(slotDate, tz);
+  const slotTime = localHHMM(slotDate, tz);
+  return expand.some((entry) => {
+    if (entry.days && entry.days.length > 0 && !entry.days.includes(slotDay as never)) return false;
+    if (entry.window && !timeInWindow(slotTime, entry.window)) return false;
+    return true;
+  });
 }
 
 /**
- * Classify a slot into an offerability tier for a given link. This is the
- * single source of truth the composer uses to build the three prompt blocks.
+ * Is this slot in `availability.restrictToSlots` (host-pinned exclusive)?
+ * Replaces the legacy `slotOverrides[score: -2]` + `exclusiveSlots` boolean.
+ * Pinned-exclusive slots are always first-offer at the tier level (the host
+ * explicitly selected them).
+ */
+export function inRestrictToSlots(slot: ScoredSlot, rules: LinkParameters): boolean {
+  const slots = rules.availability?.restrictToSlots;
+  if (!slots?.length) return false;
+  return slots.some((s) => slotMatchesInstance(slot, s));
+}
+
+/**
+ * Is this slot host-preferred under any of: `preferred.days`, `preferred.windows`,
+ * `preferred.slots`?
  *
- * Never returns a tier for:
- *   - score ≥ 4 (blocked band — real events, flights, blackouts, deep
- *     off-hours, sleep hours, tentative group meetings)
- *   - commitment:strong slots (hard by definition)
- *   - protected-band slots (score 2-3) on a non-VIP link
+ * Replaces the legacy `slot.score <= -1` derivation (which depended on score
+ * mutation in `applyEventOverrides`). Per B3 unification: pins-as-preference
+ * live in `preferred.slots`, so the predicate has no special cases.
+ */
+export function inPreferred(slot: ScoredSlot, rules: LinkParameters, tz: string): boolean {
+  const pref = rules.preferred;
+  if (!pref) return false;
+  const slotDate = new Date(slot.start);
+  if (pref.days?.length) {
+    const slotDay = localDayName(slotDate, tz);
+    if (pref.days.includes(slotDay as never)) return true;
+  }
+  if (pref.windows?.length) {
+    const slotTime = localHHMM(slotDate, tz);
+    if (pref.windows.some((w) => timeInWindow(slotTime, w))) return true;
+  }
+  if (pref.slots?.length) {
+    if (pref.slots.some((s) => slotMatchesInstance(slot, s))) return true;
+  }
+  return false;
+}
+
+/**
+ * Classify a slot into an offerability tier for a given link. Single source
+ * of truth the composer uses to build the prompt blocks (OFFERABLE SLOTS,
+ * STRETCH OPTIONS, DEEP STRETCH OPTIONS).
  *
- * First-offer promotion via explicit expansion:
- *   - If the host set preferredTimeStart/End, score 2-3 off-hours slots
- *     inside that window become first-offer (the host pre-authorized).
- *   - If allowWeekends, weekend daytime (score 3) becomes first-offer.
- *   - The original slot score and blockCost are unchanged — only tier
- *     classification is affected.
+ * Reads the **unmutated** slot score (per-host stable) plus per-link decisions
+ * via helpers. Never mutates anything.
+ *
+ * Tier rules:
+ *   - `first-offer`: host-pinned exclusive (`availability.restrictToSlots`),
+ *     OR score ≤ 1 (bookable band), OR score 2-3 slot inside an
+ *     `availability.expand` entry (host pre-authorized this stretch).
+ *   - `stretch1`: score-2 slots NOT in first-offer. VIP-only.
+ *   - `stretch2`: score-3 slots NOT in first-offer. VIP-only.
+ *   - `null`: score ≥ 4 (blocked), commitment:strong, or non-VIP score 2-3.
  */
 export function getTier(slot: ScoredSlot, rules: LinkParameters, tz: string): OfferTier {
-  // Host-explicit slot overrides (-1 preferred, -2 exclusive) are always
-  // first-offer regardless of tier logic.
-  if (slot.score < 0) return "first-offer";
+  // Host-pinned exclusive — always first-offer regardless of score.
+  if (inRestrictToSlots(slot, rules)) return "first-offer";
 
-  // Blocked band (4-5): never offered — not even to VIP. Real events,
-  // blackouts, confirmed meetings, deep off-hours, sleep hours.
+  // Blocked band: never offered — not even to VIP.
   if (slot.score >= 4) return null;
 
-  // Commitment:strong events are hard — the host must break them externally.
-  // Guards against anything in the protected band (2-3) that is a firm
-  // third-party commitment.
+  // Commitment:strong events are hard — host must break them externally.
   if (slot.blockCost === "commitment" && slot.firmness === "strong") return null;
 
-  // First-offer = bookable band (score ≤ 1). Score 2-3 slots can also
-  // land here IF the host pre-authorized the time window (preferredTime*
-  // or allowWeekends) — these are explicit off-hours invites the host
-  // has already blessed for this link.
+  // Bookable band — always first-offer.
   if (slot.score <= 1) return "first-offer";
-  if (slot.score <= 3 && inExplicitWindow(slot, rules, tz) && slot.kind === "off_hours") {
-    return "first-offer";
-  }
-  if (slot.score <= 3 && slot.kind === "weekend" && rules.allowWeekends) {
-    return "first-offer";
-  }
+
+  // Score 2-3 promotion via host expansion (off-hours OR weekend, both
+  // expressible via `availability.expand`).
+  if (slot.score <= 3 && inExpansion(slot, rules, tz)) return "first-offer";
 
   // Protected band (2-3) — VIP-only stretches.
   if (!rules.isVip) return null;
-
-  // Stretch 1: score-2 slots (preferred within the protected band).
-  // First VIP fallback — LLM-reachable after the first round of pushback.
   if (slot.score === 2) return "stretch1";
-
-  // Stretch 2: score-3 slots (deeper protected). LLM-reachable only after
-  // a second round of guest pushback, and only on VIP links.
   if (slot.score === 3) return "stretch2";
 
   return null;
@@ -1426,38 +1456,13 @@ export function computeInputHash(
 
 // --- Event-Level Override Application ---
 
-export interface SlotOverride {
-  start: string; // ISO datetime
-  end: string;
-  score: number; // -2 (exclusive), -1 (preferred), or 5 (locked out)
-  label?: string;
-}
+import type { AvailabilitySpec, PreferredSpec } from "./link-parameters";
 
 export interface LinkParameters {
   format?: string;
   conditionalRules?: Array<{ condition: string; rule: string }>;
-  /** Short day names: "Mon", "Tue", etc. `normalizeLinkParameters()` coerces any input shape. */
-  preferredDays?: string[];
   /** Short day names: "Mon", "Tue", etc. */
   lastResort?: string[];
-  preferredTimeStart?: string; // "09:00" — widens the daily offering window
-  preferredTimeEnd?: string; // "12:00"
-  /**
-   * Multi-window variant (2026-04-20). Array of disjoint `HH:MM` time
-   * windows applied uniformly across whatever `dateRange` / `preferredDays`
-   * the rule specifies. Use this when the host wants the meeting to fit
-   * into two+ separate spans on the same day — e.g. "12–2 PM OR 4:30–6 PM
-   * today." A slot passes if it falls within ANY window.
-   *
-   * Coexists with single-window `preferredTimeStart/End`: when the array
-   * is present and non-empty, it takes precedence; when absent, the
-   * single-window fields still apply. Callers should go through
-   * `getTimeWindows(rules)` rather than reading either field directly.
-   *
-   * Not intended for day-specific windows ("Mon 9–12, Tue 1–3"). If you
-   * need that, model the meeting as two links or fall back to hostNote.
-   */
-  preferredTimeWindows?: Array<{ start: string; end: string }>;
   /**
    * One-off datetime ranges to subtract from offerable slots for THIS link.
    * ISO 8601 with offset (host-local TZ). Subtractive against the slot grid
@@ -1465,14 +1470,15 @@ export interface LinkParameters {
    *
    * Used for "evenings work, except Thursday evening"-style exclusions
    * inside a bounded `dateRange`. NOT a recurring per-day-of-week pattern.
+   * Distinct from `availability.blockedSlots` (named singular slot
+   * exclusions, often pinned to specific 30-min slots) — `blockedRanges`
+   * is for arbitrary range subtraction.
+   *
    * See proposal 2026-04-28_event-edit-handler-and-composer §3.5.
    */
   blockedRanges?: Array<{ start: string; end: string }>;
   /** Inclusive date window in host's local calendar. "YYYY-MM-DD". */
   dateRange?: { start?: string; end?: string };
-  slotOverrides?: SlotOverride[];
-  /** @deprecated Use score -2 in slotOverrides instead. Kept for backward compat. */
-  exclusiveSlots?: boolean;
   /**
    * VIP flag — binary. When true, Envoy runs the accommodative flows:
    * proactive expansion question at creation, progressive stretch tiers
@@ -1483,17 +1489,31 @@ export interface LinkParameters {
    * `isVip` alone does NOT auto-unlock any protected slots — it unlocks
    * Envoy's *access* to the protected band (stretch1 = score 2, stretch2
    * = score 3) in her LLM prompt. The actual opening of weekend / off-
-   * hours slots for guest-facing offerings (promotion into first-offer)
-   * requires the explicit fields below.
+   * hours slots requires explicit `availability.expand`.
    */
   isVip?: boolean;
   /**
-   * Explicit host authorization to offer weekend slots for this link.
-   * When true, weekend `preference:strong` slots within the weekend
-   * biz-equivalent window become first-offer. When false/unset, weekends
-   * are at most a VIP stretch option.
+   * Event-availability layer (per-link). Defines what THIS link makes
+   * bookable, additively or restrictively relative to the host's calendar
+   * availability. Subject to real calendar conflicts.
+   *
+   * Replaces `preferredTimeStart/End`, `preferredTimeWindows`,
+   * `preferredDays` (in restrictive intent), `allowWeekends`,
+   * `slotOverrides` (`-2` exclusive + `5` blocked), `exclusiveSlots`.
+   *
+   * See proposal 2026-05-01_event-availability-vs-preferred-vs-calendar-scoring.
    */
-  allowWeekends?: boolean;
+  availability?: AvailabilitySpec;
+  /**
+   * Preferred layer (per-link). Decoration only — picker shows everything
+   * available; greeting + MCP `slot.preferred` flag indicate which subset
+   * the host most prefers. Slots NOT in `preferred` remain fully offerable.
+   *
+   * Replaces `preferredDays` (in soft intent), `preferredTimeStart/End`
+   * (in soft intent), `preferredTimeWindows` (in soft intent),
+   * `slotOverrides[score: -1]` (pinned-as-preference).
+   */
+  preferred?: PreferredSpec;
   /**
    * Preferred meeting duration in minutes. The ideal length the host wants.
    * When set, `filterByDuration` requires enough consecutive slots to fit
@@ -1652,11 +1672,21 @@ export function normalizeLinkParameters(
     return Array.from(new Set(cleaned));
   };
 
-  const pd = normalizeDayArray(input.preferredDays);
-  if (pd !== undefined) out.preferredDays = pd;
-
   const lr = normalizeDayArray(input.lastResort);
   if (lr !== undefined) out.lastResort = lr;
+
+  // Removed 2026-05-01 (proposal: event-availability-vs-preferred-vs-calendar-
+  // scoring): preferredDays / preferredTimeStart / preferredTimeEnd /
+  // preferredTimeWindows / allowWeekends / slotOverrides / exclusiveSlots.
+  // New shapes (`availability.*`, `preferred.*`) are validated by Zod via
+  // `linkParametersSchema` and pass through here unmodified.
+  delete out.preferredDays;
+  delete out.preferredTimeStart;
+  delete out.preferredTimeEnd;
+  delete out.preferredTimeWindows;
+  delete out.allowWeekends;
+  delete out.slotOverrides;
+  delete out.exclusiveSlots;
 
   // isVip: coerce to strict boolean. Strings ("true"/"false") and other
   // truthy/falsy values are rejected to avoid parser LLMs emitting strings
@@ -1676,14 +1706,6 @@ export function normalizeLinkParameters(
   // field and shouldn't persist alongside isVip.
   delete out.priority;
 
-  // allowWeekends: strict boolean. Non-boolean values get dropped even
-  // though the top-level spread copied them through.
-  if (typeof input.allowWeekends === "boolean") {
-    out.allowWeekends = input.allowWeekends;
-  } else {
-    delete out.allowWeekends;
-  }
-
   // duration / minDuration: must be positive integers. Drop non-numeric junk.
   if (typeof input.duration === "number" && input.duration > 0) {
     out.duration = Math.round(input.duration);
@@ -1694,36 +1716,6 @@ export function normalizeLinkParameters(
     out.minDuration = Math.round(input.minDuration);
   } else {
     delete out.minDuration;
-  }
-
-  // preferredTimeWindows: array of { start, end } HH:MM windows (2026-04-20).
-  // Validate each entry's shape, drop malformed entries, sort by start, and
-  // drop empty/inverted windows. Overlapping entries are kept as-authored —
-  // the filter's `.some(...)` makes them idempotent, and merging them would
-  // obscure what Envoy actually asked for in observability. A non-array or
-  // empty-after-cleanup value is deleted rather than stored as [].
-  const ptw = input.preferredTimeWindows;
-  if (Array.isArray(ptw)) {
-    const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/; // 00:00 – 23:59
-    const cleaned = ptw
-      .filter((w): w is { start: string; end: string } => {
-        if (!w || typeof w !== "object") return false;
-        const s = (w as Record<string, unknown>).start;
-        const e = (w as Record<string, unknown>).end;
-        if (typeof s !== "string" || typeof e !== "string") return false;
-        // Allow "24:00" as the canonical end-of-day sentinel even though
-        // HHMM regex rejects hour 24 — any earlier start still sorts
-        // before it.
-        const startOk = HHMM.test(s);
-        const endOk = HHMM.test(e) || e === "24:00";
-        return startOk && endOk && s < e;
-      })
-      .map((w) => ({ start: w.start, end: w.end }))
-      .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
-    if (cleaned.length > 0) out.preferredTimeWindows = cleaned;
-    else delete out.preferredTimeWindows;
-  } else {
-    delete out.preferredTimeWindows;
   }
 
   // blockedRanges: one-off datetime exclusions (proposal 2026-04-28 §3.5).
@@ -1877,89 +1869,33 @@ export function normalizeLinkParameters(
 }
 
 /**
- * Apply event-level overrides (from NegotiationLink.rules) to base scored slots.
- * Returns the filtered/adjusted slots for a specific thread.
+ * Apply event-level filters (from `NegotiationLink.parameters`) to base
+ * scored slots. Returns filtered slots — **never mutates `slot.score`**.
+ *
+ * Per proposal `2026-05-01_event-availability-vs-preferred-vs-calendar-
+ * scoring`. Slot scores are per-host stable. Per-link decisions
+ * (`expanded`, `preferred`, restriction membership) are read at tier-emit
+ * time via helpers (`inExpansion`, `inPreferred`, `inRestrictToSlots`)
+ * rather than mutated into the score.
+ *
+ * Filter order:
+ *   1. `dateRange` — inclusive host-local date window
+ *   2. `blockedRanges` — arbitrary range subtraction (host-tz ISO)
+ *   3. `availability.blockedSlots` — named singular slot exclusions
+ *   4. `availability.restrictToDays` — only these days
+ *   5. `availability.restrictToWindows` — only these per-day windows
+ *   6. `availability.restrictToSlots` — only these specific instances
+ *   7. `lastResort` — remove these days if non-lastResort slots exist
  */
 export function applyEventOverrides(
   baseSlots: ScoredSlot[],
   rules: LinkParameters,
-  tz: string
+  tz: string,
 ): ScoredSlot[] {
-  let slots = [...baseSlots];
+  let slots = baseSlots.slice();
 
-  // blockedRanges — one-off date+time exclusions for THIS link (proposal
-  // 2026-04-28 §3.5). Subtractive against the slot grid the same way
-  // calendar busy events are; drops any slot whose span overlaps any range.
-  // Stored as absolute ISO datetimes (host-local with offset) — the
-  // composer resolves "Thursday evening" against the link's dateRange and
-  // host TZ before emitting.
-  const blockedRanges = (rules as Record<string, unknown>).blockedRanges;
-  if (Array.isArray(blockedRanges) && blockedRanges.length > 0) {
-    const parsed = blockedRanges
-      .map((r) => {
-        const obj = r as Record<string, unknown>;
-        if (typeof obj.start !== "string" || typeof obj.end !== "string") return null;
-        const startMs = Date.parse(obj.start);
-        const endMs = Date.parse(obj.end);
-        if (Number.isNaN(startMs) || Number.isNaN(endMs) || startMs >= endMs) return null;
-        return { startMs, endMs };
-      })
-      .filter((r): r is { startMs: number; endMs: number } => r !== null);
-    if (parsed.length > 0) {
-      slots = slots.filter((slot) => {
-        const sStart = new Date(slot.start).getTime();
-        const sEnd = new Date(slot.end).getTime();
-        // Overlap iff sStart < blocked.end && sEnd > blocked.start
-        return !parsed.some((b) => sStart < b.endMs && sEnd > b.startMs);
-      });
-    }
-  }
-
-  // Exclusive mode: score -2 in overrides, or legacy exclusiveSlots boolean
-  const hasExclusive = rules.slotOverrides?.some((o) => o.score === -2);
-  const isExclusiveMode = hasExclusive || (rules.exclusiveSlots && rules.slotOverrides?.length);
-
-  if (isExclusiveMode && rules.slotOverrides?.length) {
-    // In exclusive mode, only keep slots matching -2 or -1 overrides
-    const exclusiveOverrides = rules.slotOverrides.filter((o) => o.score <= -1);
-    slots = slots.filter((slot) =>
-      exclusiveOverrides.some((o) => {
-        const oStart = new Date(o.start).getTime();
-        const oEnd = new Date(o.end).getTime();
-        const sStart = new Date(slot.start).getTime();
-        const sEnd = new Date(slot.end).getTime();
-        return sStart >= oStart && sEnd <= oEnd;
-      })
-    );
-    // Apply override scores: -2 for exclusive, -1 for preferred.
-    // Reset kind, blockCost, and firmness to open/none so the tier filter
-    // treats host-explicit picks as always-offerable (getTier also
-    // short-circuits on score < 0, but keeping the shape coherent helps
-    // downstream UI and the dashboard heatmap).
-    return slots.map((s) => {
-      const match = exclusiveOverrides.find((o) => {
-        const oStart = new Date(o.start).getTime();
-        const oEnd = new Date(o.end).getTime();
-        const sStart = new Date(s.start).getTime();
-        const sEnd = new Date(s.end).getTime();
-        return sStart >= oStart && sEnd <= oEnd;
-      });
-      // Legacy exclusiveSlots: treat -1 overrides as -2
-      const score = hasExclusive ? (match?.score ?? -1) : -2;
-      return {
-        ...s,
-        score,
-        reason: match?.label || (score === -2 ? "host exclusive" : "host preferred"),
-        confidence: "high" as const,
-        kind: "open" as const,
-        blockCost: "none" as const,
-        firmness: undefined,
-      };
-    });
-  }
-
-  // Apply dateRange filter (inclusive in host tz).
-  if (rules.dateRange && (rules.dateRange.start || rules.dateRange.end)) {
+  // dateRange (inclusive, host tz).
+  if (rules.dateRange?.start || rules.dateRange?.end) {
     const dateFmt = new Intl.DateTimeFormat("en-CA", {
       year: "numeric",
       month: "2-digit",
@@ -1968,156 +1904,90 @@ export function applyEventOverrides(
     });
     const { start, end } = rules.dateRange;
     slots = slots.filter((s) => {
-      const localDate = dateFmt.format(new Date(s.start)); // YYYY-MM-DD
+      const localDate = dateFmt.format(new Date(s.start));
       if (start && localDate < start) return false;
       if (end && localDate > end) return false;
       return true;
     });
   }
 
-  // Apply preferredDays — interpretation depends on `intent.steering`:
-  //
-  //   - intent.steering === "narrow" | "exclusive"  → HARD FILTER
-  //     The host directly narrowed to specific days ("any Wednesday",
-  //     "tomorrow or next Tuesday"). Drop slots on non-preferred days
-  //     entirely. The composer emits `intent.steering: "narrow"` in this
-  //     case (per calendar-event-composer.md §3 4-step discriminator).
-  //
-  //   - any other intent (soft / open / unset)      → SOFT BOOST
-  //     The host expressed a preference WITH fallback tolerance
-  //     ("Wed ideally, else Thu"), or no day preference at all. Keep the
-  //     non-preferred days offerable at base score; promote preferred
-  //     days into the ★ tier (score ≤ -1).
-  //
-  // History (2026-04-21 → 2026-05-01): pre-2026-04-21 the behavior was
-  // always-hard. 2026-04-21 changed it to always-soft to fix the
-  // "Wed preferred, Thu–Fri fallback" case (Katie link `aeetnc`,
-  // feedback cmo8d9eqs) — but that overcorrected by ignoring
-  // intent.steering, leaving narrow-intent links offering all days.
-  // Reported 2026-05-01 via feedback `cmon70ahd000g8cbbl2t821jk`
-  // (Josh J. coffee, "any Wednesday", showed every weekday). This
-  // re-introduces the hard filter ONLY when intent.steering signals
-  // narrow/exclusive — preserving the 2026-04-21 fix for soft-intent
-  // links while honoring narrow-intent host directives. See COMPOSER.md
-  // §2 catalogue F10.
-  //
-  // Weekend filtering remains separate via `allowWeekends`;
-  // `preferredDays` should never double-duty as a weekend exclusion.
-  //
-  // Tolerate any day-name shape on read via normalizeDayName.
-  if (rules.preferredDays && rules.preferredDays.length > 0) {
-    const allowed = new Set(
-      rules.preferredDays
-        .map((d) => normalizeDayName(d))
-        .filter((d): d is string => d !== null && SHORT_DAY_SET.has(d))
-    );
-    if (allowed.size > 0) {
-      const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
-      const steering = rules.intent?.steering;
-      const hardFilter = steering === "narrow" || steering === "exclusive";
-      if (hardFilter) {
-        // Hard filter — drop non-preferred days. Conflicts on preferred
-        // days are preserved (their score signals the conflict downstream).
-        slots = slots.filter((s) => {
-          const dayStr = dayFmt.format(new Date(s.start));
-          return allowed.has(dayStr);
-        });
-      } else {
-        // Soft boost — promote preferred-day slots into the ★ tier; leave
-        // other days alone. Only promote otherwise-offerable slots
-        // (score ≤ 1) — a stretch/conflict slot on a preferred day stays
-        // a stretch/conflict; the host's day preference can't paper over
-        // a real calendar issue.
-        slots = slots.map((s) => {
-          if (s.score > 1) return s;
-          const dayStr = dayFmt.format(new Date(s.start));
-          if (!allowed.has(dayStr)) return s;
-          return { ...s, score: Math.min(s.score, -1) };
-        });
-      }
+  // blockedRanges (range subtraction).
+  const blockedRanges = rules.blockedRanges;
+  if (Array.isArray(blockedRanges) && blockedRanges.length > 0) {
+    const parsed = blockedRanges
+      .map((r) => {
+        if (typeof r.start !== "string" || typeof r.end !== "string") return null;
+        const startMs = Date.parse(r.start);
+        const endMs = Date.parse(r.end);
+        if (Number.isNaN(startMs) || Number.isNaN(endMs) || startMs >= endMs) return null;
+        return { startMs, endMs };
+      })
+      .filter((r): r is { startMs: number; endMs: number } => r !== null);
+    if (parsed.length > 0) {
+      slots = slots.filter((slot) => {
+        const sStart = new Date(slot.start).getTime();
+        const sEnd = new Date(slot.end).getTime();
+        return !parsed.some((b) => sStart < b.endMs && sEnd > b.startMs);
+      });
     }
   }
 
-  // Apply lastResort filter (remove these days if other days have slots)
+  // availability.blockedSlots (named singular slot exclusions).
+  const blockedSlots = rules.availability?.blockedSlots;
+  if (blockedSlots?.length) {
+    slots = slots.filter((slot) => {
+      const sStart = new Date(slot.start).getTime();
+      return !blockedSlots.some((b) => new Date(b.start).getTime() === sStart);
+    });
+  }
+
+  // availability.restrictToDays.
+  const restrictToDays = rules.availability?.restrictToDays;
+  if (restrictToDays?.length) {
+    const allowed = new Set<string>(
+      (restrictToDays as readonly string[]).filter((d) => SHORT_DAY_SET.has(d)),
+    );
+    if (allowed.size > 0) {
+      const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
+      slots = slots.filter((s) => allowed.has(dayFmt.format(new Date(s.start))));
+    }
+  }
+
+  // availability.restrictToWindows.
+  const restrictToWindows = rules.availability?.restrictToWindows;
+  if (restrictToWindows?.length) {
+    slots = slots.filter((s) => {
+      const { hour, minute } = getLocalParts(new Date(s.start), tz);
+      const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      return restrictToWindows.some((w) => timeStr >= w.start && timeStr < w.end);
+    });
+  }
+
+  // availability.restrictToSlots — when present, ONLY these are bookable.
+  const restrictToSlots = rules.availability?.restrictToSlots;
+  if (restrictToSlots?.length) {
+    slots = slots.filter((s) => {
+      const sStart = new Date(s.start).getTime();
+      return restrictToSlots.some((r) => new Date(r.start).getTime() === sStart);
+    });
+  }
+
+  // lastResort (soft-filter: remove these days only if non-lastResort slots exist).
   if (rules.lastResort && rules.lastResort.length > 0) {
     const lastResortSet = new Set(
       rules.lastResort
         .map((d) => normalizeDayName(d))
-        .filter((d): d is string => d !== null && SHORT_DAY_SET.has(d))
+        .filter((d): d is string => d !== null && SHORT_DAY_SET.has(d)),
     );
     if (lastResortSet.size > 0) {
       const dayFmt = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: tz });
       const nonLastResort = slots.filter(
-        (s) => !lastResortSet.has(dayFmt.format(new Date(s.start)))
+        (s) => !lastResortSet.has(dayFmt.format(new Date(s.start))),
       );
-      // Only filter if there are non-last-resort options
       if (nonLastResort.length > 0) {
         slots = nonLastResort;
       }
     }
-  }
-
-  // Apply preferred time window(s). See `getTimeWindows` for the
-  // single-window vs multi-window precedence — callers must not read
-  // preferredTimeStart/End directly.
-  const timeWindows = getTimeWindows(rules);
-  if (timeWindows.length > 0) {
-    // Step 1 — filter to slots inside the explicit window.
-    slots = slots.filter((s) => {
-      const { hour, minute } = getLocalParts(new Date(s.start), tz);
-      const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-      return timeWindows.some((w) => timeStr >= w.start && timeStr < w.end);
-    });
-
-    // Step 2 — explicit-window unlock. Off-hours slots (score 2-3, kind
-    // "off_hours") that land inside the host's explicitly-set window get
-    // promoted to offerable (score 0). The host pre-authorized these
-    // hours, so the default off-hours penalty no longer applies.
-    //
-    // Pre-2026-04-21 this unlock only lived in `getTier()` (line ~1011),
-    // which runs AFTER the widget + greeting filters have already dropped
-    // score > 1 slots. Result: a "tonight 5–8pm" link had zero offerable
-    // slots on the guest side even though the host had clearly offered
-    // that window (bug reported 2026-04-21, link q6vcyv). By promoting
-    // the score at scoring time, every downstream score-based filter
-    // naturally includes these slots without having to know about
-    // explicit-window semantics.
-    //
-    // Guardrails:
-    //   - Only score 2-3 off_hours gets promoted. Score ≤ 1 stays as-is
-    //     (already offerable). Score ≥ 4 ("sleep hours", "early morning /
-    //     late evening") stays blocked — explicit window can't override
-    //     the deepest off-hours band, matching the existing getTier rule.
-    //   - Only `kind === "off_hours"` gets promoted. Weekend slots
-    //     (`kind === "weekend"`) stay gated by `allowWeekends`;
-    //     event-occupied slots stay blocked by their real conflict.
-    slots = slots.map((s) => {
-      if (s.score < 2 || s.score > 3) return s;
-      if (s.kind !== "off_hours") return s;
-      return { ...s, score: 0, reason: `${s.reason ?? "off-hours"} (host window)` };
-    });
-  }
-
-  // Apply individual slot overrides (non-exclusive mode)
-  if (rules.slotOverrides?.length) {
-    slots = slots.map((slot) => {
-      const override = rules.slotOverrides!.find((o) => {
-        const oStart = new Date(o.start).getTime();
-        const oEnd = new Date(o.end).getTime();
-        const sStart = new Date(slot.start).getTime();
-        const sEnd = new Date(slot.end).getTime();
-        return sStart >= oStart && sEnd <= oEnd;
-      });
-      if (override) {
-        return {
-          ...slot,
-          score: override.score,
-          reason: override.label || (override.score === -1 ? "host preferred" : "host locked"),
-          confidence: "high" as const,
-        };
-      }
-      return slot;
-    });
   }
 
   return slots;

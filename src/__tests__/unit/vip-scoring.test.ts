@@ -107,14 +107,17 @@ describe("getTier — VIP link without explicit expansion", () => {
 
 // ── Explicit pre-authorization promotes protected slots to first-offer ────
 
-describe("getTier — VIP with explicit preferredTimeStart", () => {
+describe("getTier — VIP with availability.expand window (replaces preferredTimeStart)", () => {
   // The slot is at 07:00 PT on a weekday, score 3 off_hours (2h edge).
-  // With preferredTimeStart: "06:00", that slot falls inside the widened
-  // window and is promoted to first-offer. Without pre-auth it's stretch2.
+  // With availability.expand window 06:00-10:00, the slot falls inside the
+  // expansion and is promoted to first-offer. Without expansion it's stretch2.
 
   // 2099-06-15 14:00 UTC = 2099-06-15 07:00 PDT
   const rulesNoAuth: LinkParameters = { isVip: true };
-  const rulesWithAuth: LinkParameters = { isVip: true, preferredTimeStart: "06:00" };
+  const rulesWithAuth: LinkParameters = {
+    isVip: true,
+    availability: { expand: [{ window: { start: "06:00", end: "10:00" } }] },
+  };
   const offHoursSlot = slotOf(
     3,
     { kind: "off_hours", blockCost: "preference", firmness: "strong" },
@@ -125,11 +128,11 @@ describe("getTier — VIP with explicit preferredTimeStart", () => {
     expect(getTier(offHoursSlot, rulesNoAuth, TZ)).toBe("stretch2");
   });
 
-  it("with preferredTimeStart: 06:00, 7 AM off-hours becomes first-offer", () => {
+  it("with availability.expand 06:00-10:00, 7 AM off-hours becomes first-offer", () => {
     expect(getTier(offHoursSlot, rulesWithAuth, TZ)).toBe("first-offer");
   });
 
-  it("score-4 slots stay blocked even inside the explicit window (blocked band is hard)", () => {
+  it("score-4 slots stay blocked even inside the expand window (blocked band is hard)", () => {
     const deepSlot = slotOf(
       4,
       { kind: "off_hours", blockCost: "preference", firmness: "strong" },
@@ -139,29 +142,44 @@ describe("getTier — VIP with explicit preferredTimeStart", () => {
   });
 });
 
-describe("getTier — VIP with allowWeekends", () => {
-  const rules: LinkParameters = { isVip: true, allowWeekends: true };
+describe("getTier — VIP with weekend expand (replaces allowWeekends)", () => {
+  const rules: LinkParameters = {
+    isVip: true,
+    availability: { expand: [{ days: ["Sat", "Sun"] }] },
+  };
+  // 2099-06-13 is a Saturday; 14:00 UTC = 07:00 PDT.
+  const SAT_07_PDT = "2099-06-13T14:00:00.000Z";
 
-  it("weekend daytime (score 3) promotes to first-offer", () => {
-    const slot = slotOf(3, { kind: "weekend", blockCost: "preference", firmness: "strong" });
+  it("weekend daytime (score 3) promotes to first-offer when in expand", () => {
+    const slot = slotOf(
+      3,
+      { kind: "weekend", blockCost: "preference", firmness: "strong" },
+      SAT_07_PDT,
+    );
     expect(getTier(slot, rules, TZ)).toBe("first-offer");
   });
 
-  it("weekend edge (score 4) stays blocked even under allowWeekends", () => {
-    const slot = slotOf(4, { kind: "weekend", blockCost: "preference", firmness: "strong" });
+  it("weekend edge (score 4) stays blocked even when expanded", () => {
+    const slot = slotOf(
+      4,
+      { kind: "weekend", blockCost: "preference", firmness: "strong" },
+      SAT_07_PDT,
+    );
     expect(getTier(slot, rules, TZ)).toBeNull();
   });
 });
 
-// ── Host explicit overrides (score < 0) always win ─────────────────────────
+// ── Host-pinned exclusive slots — always first-offer via availability.restrictToSlots
+//    (replaces legacy slotOverrides[score=-2] behavior)
 
-describe("getTier — host-explicit slot overrides", () => {
-  it("always first-offer regardless of VIP", () => {
-    const preferred = slotOf(-1, { kind: "open", blockCost: "none" });
-    const exclusive = slotOf(-2, { kind: "open", blockCost: "none" });
-    expect(getTier(preferred, {}, TZ)).toBe("first-offer");
-    expect(getTier(exclusive, {}, TZ)).toBe("first-offer");
-    expect(getTier(preferred, { isVip: true }, TZ)).toBe("first-offer");
+describe("getTier — host-pinned exclusive slots", () => {
+  it("availability.restrictToSlots → first-offer regardless of VIP/score", () => {
+    const slot = slotOf(2, { kind: "off_hours", blockCost: "preference", firmness: "weak" });
+    const rules: LinkParameters = {
+      availability: { restrictToSlots: [{ start: slot.start, end: slot.end }] },
+    };
+    expect(getTier(slot, rules, TZ)).toBe("first-offer");
+    expect(getTier(slot, { ...rules, isVip: true }, TZ)).toBe("first-offer");
   });
 });
 
@@ -225,13 +243,9 @@ describe("normalizeLinkParameters — VIP + legacy migration", () => {
     expect(out.priority).toBeUndefined();
   });
 
-  it("accepts allowWeekends as a boolean", () => {
-    expect(normalizeLinkParameters({ allowWeekends: true }).allowWeekends).toBe(true);
-    expect(normalizeLinkParameters({ allowWeekends: false }).allowWeekends).toBe(false);
-  });
-
-  it("rejects non-boolean allowWeekends", () => {
-    expect(normalizeLinkParameters({ allowWeekends: "yes" }).allowWeekends).toBeUndefined();
+  it("strips removed allowWeekends boolean (now expressed as availability.expand)", () => {
+    const out = normalizeLinkParameters({ allowWeekends: true });
+    expect(out.allowWeekends).toBeUndefined();
   });
 });
 

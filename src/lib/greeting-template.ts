@@ -1,9 +1,28 @@
 /**
  * Deterministic greeting template helpers.
  *
- * Used by `src/app/api/negotiate/session/route.ts` to build the first message
- * in a 1:1 deal room without calling an LLM. Exported as standalone functions
- * so they can be unit-tested in isolation.
+ * **DEAD CODE WARNING (2026-05-02):** five exported functions in this file
+ * (`formatAvailabilityWindows`, `formatAvailabilitySlotList`, `formatStretchDays`,
+ * `formatAvailabilityProse`, `buildOpenWindowGreeting`) have ZERO production
+ * callers. They were retired 2026-04-23 when the unified greeting framework
+ * shipped (see [`agent/greetings/registry.ts`](../agent/greetings/registry.ts)
+ * + the comment at `app/api/negotiate/session/route.ts:37-41`). The functions
+ * were retained so unit tests didn't break; production has been on the
+ * registry framework for 9+ days. **All five functions + their dedicated
+ * helpers (`fmtTimeShort`, `fmtTimeRange`, `Block`, `FormattedSlotList`,
+ * `fmtBlockLabel`, `FormattedProse`, `relativeDayLabel`, `joinWithOr`,
+ * `BuildOpenWindowOpts`, `articled`) are slated for deletion** in the
+ * greeting deep-analysis pass (queued 2026-05-02). The four `s.score <= -1`
+ * inline derivations the MCP-team grep flagged are all in this dead code —
+ * no production behavior is affected.
+ *
+ * **STILL-USED exports below the dead block:** `formatLabel`,
+ * `alternateFormatsLabel`, `formatHostNoteLine`, `computeCanonicalWeekLabel`,
+ * `humanTimezoneLabel` (re-export of longTimezoneLabel). Keep these.
+ *
+ * If you're reading this and about to add a new greeting helper, do NOT add
+ * it to this file. The unified framework is at `agent/greetings/registry.ts`
+ * — extend the templates there.
  */
 
 import type { ScoredSlot } from "@/lib/scoring";

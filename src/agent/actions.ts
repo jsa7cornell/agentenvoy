@@ -713,7 +713,7 @@ async function handleUpdateTime(
     return {
       success: false,
       message:
-        "This link has no engaged guest yet — use update_link (dateRange / preferredDays / duration) to adjust the offer on the link itself. update_time should only be used after a guest has engaged, to re-propose a specific slot.",
+        "This link has no engaged guest yet — use update_link (dateRange / availability / preferred / duration) to adjust the offer on the link itself. update_time should only be used after a guest has engaged, to re-propose a specific slot.",
     };
   }
 
@@ -998,7 +998,7 @@ export async function handleCreateLink(
     : null;
   // Timing label — free-form human phrase ("next week", "mid-May",
   // "this weekend"). Purely display; the scoring engine uses dateRange
-  // and preferredDays for actual filtering.
+  // and `availability.restrictToDays` for actual filtering.
   const rawTimingLabel = params.timingLabel;
   const timingLabel = typeof rawTimingLabel === "string" && rawTimingLabel.trim()
     ? rawTimingLabel.trim().slice(0, 80)
@@ -1069,67 +1069,75 @@ export async function handleCreateLink(
   // hostNote, that's a signal the LLM forgot to carry context through.
   // Warn-only — don't block link creation. Monitor Vercel logs; if this
   // fires on real "with narrative context" cases, revisit the playbook.
+  const rulesAvail = (rules as Record<string, unknown>).availability as
+    | { restrictToDays?: unknown[]; restrictToWindows?: unknown[]; restrictToSlots?: unknown[]; expand?: unknown[] }
+    | undefined;
+  const rulesPref = (rules as Record<string, unknown>).preferred as
+    | { days?: unknown[]; windows?: unknown[]; slots?: unknown[] }
+    | undefined;
+  const paramsAvail = (params as Record<string, unknown>).availability as typeof rulesAvail | undefined;
+  const paramsPref = (params as Record<string, unknown>).preferred as typeof rulesPref | undefined;
+  const nonEmpty = (a: unknown[] | undefined): boolean => Array.isArray(a) && a.length > 0;
   const hasStructuredConstraints =
-    Array.isArray(rules.preferredDays) ||
     !!rules.dateRange ||
-    !!rules.preferredTimeStart ||
-    !!rules.preferredTimeEnd ||
-    (Array.isArray(rules.preferredTimeWindows) && rules.preferredTimeWindows.length > 0) ||
-    !!params.preferredTimeStart ||
-    !!params.preferredTimeEnd ||
-    (Array.isArray(params.preferredTimeWindows) && params.preferredTimeWindows.length > 0);
+    nonEmpty(rulesAvail?.restrictToDays) ||
+    nonEmpty(rulesAvail?.restrictToWindows) ||
+    nonEmpty(rulesAvail?.restrictToSlots) ||
+    nonEmpty(rulesAvail?.expand) ||
+    nonEmpty(rulesPref?.days) ||
+    nonEmpty(rulesPref?.windows) ||
+    nonEmpty(rulesPref?.slots) ||
+    nonEmpty(paramsAvail?.restrictToDays) ||
+    nonEmpty(paramsAvail?.restrictToWindows) ||
+    nonEmpty(paramsAvail?.restrictToSlots) ||
+    nonEmpty(paramsAvail?.expand) ||
+    nonEmpty(paramsPref?.days) ||
+    nonEmpty(paramsPref?.windows) ||
+    nonEmpty(paramsPref?.slots);
   if (hasStructuredConstraints && !hostNote) {
     console.warn(
       `[create_link] hostNote missing for structured constraint — invitee=${inviteeName} rules=${JSON.stringify({
-        preferredDays: rules.preferredDays,
         dateRange: rules.dateRange,
-        preferredTimeStart: rules.preferredTimeStart ?? params.preferredTimeStart,
+        availability: rulesAvail ?? paramsAvail,
+        preferred: rulesPref ?? paramsPref,
       })}`,
     );
   }
 
-  // Merge format/duration/urgency/VIP/window into rules so they're available
-  // at greeting/composer time. isVip is a binary flag — it tells Envoy she
-  // may proactively ask the host about opening up stretch hours and may
-  // reach into stretch options on guest pushback (see getTier in scoring.ts).
-  // isVip alone does NOT auto-unlock protected hours; the host must still
-  // confirm specific hours via preferredTimeStart/End or allowWeekends.
-  // Normalize day-name arrays and dateRange shape — LLMs occasionally emit
-  // long day names ("Monday") or short ones ("Mon"); persist the canonical form.
+  // Merge format/duration/urgency/VIP/availability/preferred into rules.
+  // isVip is a binary flag — it tells Envoy she may proactively ask the host
+  // about opening up stretch hours and may reach into stretch options on
+  // guest pushback. isVip alone does NOT auto-unlock protected hours; the
+  // host must still confirm via `availability.expand` etc.
   const isVip = params.isVip === true;
-  const allowWeekends = params.allowWeekends === true;
   const isDateModeLink = (effectiveDurationParam ?? 0) >= 24 * 60;
-  // For date-mode links (duration ≥ 1440 min), preferredTimeStart/End express
-  // an event start time, not a daily slot filter. Storing them as a filter
-  // window produces start==end → zero-width → all slots dropped (bug: surf trip
-  // "noon to noon"). Promote to rules.startTime instead; drop the filter fields.
-  const rawPreferredTimeStart = typeof params.preferredTimeStart === "string" ? params.preferredTimeStart : undefined;
-  const rawPreferredTimeEnd = typeof params.preferredTimeEnd === "string" ? params.preferredTimeEnd : undefined;
-  const preferredTimeStart = isDateModeLink ? undefined : rawPreferredTimeStart;
-  const preferredTimeEnd = isDateModeLink ? undefined : rawPreferredTimeEnd;
-  const startTime = isDateModeLink ? (rawPreferredTimeStart ?? null) : undefined;
-  // preferredTimeWindows — multi-window variant for "two separate spans on
-  // the same day" cases (e.g. "12–2 PM OR 4:30–6 PM today"). Accepted at
-  // top-level; normalizeLinkParameters validates HH:MM shape and sorts.
-  const preferredTimeWindows = Array.isArray(params.preferredTimeWindows)
-    ? (params.preferredTimeWindows as Array<{ start: string; end: string }>)
-    : undefined;
+  // For date-mode links (duration ≥ 1440 min), `availability.restrictToWindows`
+  // would clamp the daily slot filter to a tiny window — wrong for an
+  // event-spanning concept (e.g. surf trip "noon to noon"). Drop the
+  // restrictToWindows when the link is date-mode, leaving the day-level
+  // `restrictToDays` and other restrictions intact.
+  const rawAvailability =
+    paramsAvail && typeof paramsAvail === "object" ? { ...paramsAvail } : undefined;
+  if (rawAvailability && isDateModeLink) {
+    delete (rawAvailability as Record<string, unknown>).restrictToWindows;
+  }
+  const availability = rawAvailability;
+  const preferred = paramsPref && typeof paramsPref === "object" ? paramsPref : undefined;
 
-  // Temporal constraints — previously these only came through if nested in
-  // params.rules. Promote them to top-level params so the LLM's "next Monday"
-  // intent actually lands in the link rules (and gets respected by the
-  // scoring engine's dateRange filter).
-  const preferredDays = Array.isArray(params.preferredDays) ? params.preferredDays : undefined;
+  // Temporal date range — previously could come nested in params.rules.
+  // Promote to top-level so the LLM's "next Monday" intent actually lands
+  // in link rules (respected by the scoring engine's dateRange filter).
   let dateRange: { start?: string; end?: string } | undefined =
     params.dateRange && typeof params.dateRange === "object" && !Array.isArray(params.dateRange)
       ? (params.dateRange as { start?: string; end?: string })
       : undefined;
 
   // Safety net: when the host signals urgency ("asap") with a specific day
-  // preference but the LLM didn't emit a concrete dateRange, constrain to the
-  // next 14 days in host timezone. This prevents "find time with X next Monday"
-  // from being interpreted as "all Mondays for the next 3 months."
-  if (!dateRange && urgency === "asap" && preferredDays && preferredDays.length > 0) {
+  // restriction but the LLM didn't emit a concrete dateRange, constrain to
+  // the next 14 days in host timezone. Prevents "find time with X next
+  // Monday" from being interpreted as "all Mondays for the next 3 months."
+  const restrictToDays = availability?.restrictToDays as string[] | undefined;
+  if (!dateRange && urgency === "asap" && Array.isArray(restrictToDays) && restrictToDays.length > 0) {
     const userRow2 = await prisma.user.findUnique({
       where: { id: userId },
       select: { preferences: true },
@@ -1273,12 +1281,8 @@ export async function handleCreateLink(
     ...(effectiveDurationParam != null ? { duration: effectiveDurationParam } : {}),
     ...(urgency ? { urgency } : {}),
     ...(isVip ? { isVip: true } : {}),
-    ...(allowWeekends ? { allowWeekends: true } : {}),
-    ...(preferredTimeStart ? { preferredTimeStart } : {}),
-    ...(preferredTimeEnd ? { preferredTimeEnd } : {}),
-    ...(startTime != null ? { startTime } : {}),
-    ...(preferredTimeWindows ? { preferredTimeWindows } : {}),
-    ...(preferredDays ? { preferredDays } : {}),
+    ...(availability ? { availability } : {}),
+    ...(preferred ? { preferred } : {}),
     ...(dateRange ? { dateRange } : {}),
     ...(location ? { location } : {}),
     ...(activity ? { activity } : {}),
@@ -1708,13 +1712,14 @@ async function handleSaveGuestInfo(
  *   - `isVip`: boolean — flag the link as a VIP meeting. Toggles Envoy's
  *     proactive expansion question, reactive stretch reach, and tentative
  *     hold mechanic. Does NOT auto-unlock protected hours on its own.
- *   - `preferredTimeStart` / `preferredTimeEnd`: "HH:MM" — widens the daily
- *     offering window. Score 3-4 off-hours slots inside this range become
- *     first-offer (explicit host authorization).
- *   - `allowWeekends`: boolean — explicitly allow weekend daytime slots in
- *     the first-offer set for this link.
+ *   - `availability`: AvailabilitySpec (per-link event availability layer).
+ *     `expand` adds offerable slots beyond calendar (off-hours, weekends).
+ *     `restrictToDays/Windows/Slots` narrows what's offerable.
+ *     `blockedSlots` excludes specific instances. See `link-parameters.ts`.
+ *   - `preferred`: PreferredSpec (decoration only — drives `slot.preferred`
+ *     flag and greeting copy, never hides slots). `days/windows/slots`.
  *   - `dateRange`: { start?, end? } — YYYY-MM-DD host-local inclusive.
- *   - `preferredDays`, `lastResort`: day-name arrays (normalized on write).
+ *   - `lastResort`: day-name array — soft-filter (drop only if other days exist).
  *
  * Supports both upgrade and downgrade. Rules merge — an explicit
  * `isVip: false` will overwrite an existing `true`.
@@ -1894,14 +1899,14 @@ async function handleExpandLink(
   const existingRules = parseLinkParameters(link.parameters);
   const patch: Record<string, unknown> = {};
   if (typeof params.isVip === "boolean") patch.isVip = params.isVip;
-  if (typeof params.allowWeekends === "boolean") patch.allowWeekends = params.allowWeekends;
-  if (params.preferredTimeStart !== undefined) patch.preferredTimeStart = params.preferredTimeStart;
-  if (params.preferredTimeEnd !== undefined) patch.preferredTimeEnd = params.preferredTimeEnd;
-  // Multi-window variant (2026-04-20). Pass `null` or `[]` to clear.
-  // normalizeLinkParameters validates each entry's HH:MM shape.
-  if (params.preferredTimeWindows !== undefined) {
-    patch.preferredTimeWindows = params.preferredTimeWindows;
-  }
+
+  // Three-band shape (2026-05-01 — proposal:
+  // event-availability-vs-preferred-vs-calendar-scoring).
+  // `availability` and `preferred` are merged-replace: caller passes the full
+  // shape (or omits to leave unchanged). To clear, pass `{}`.
+  if (params.availability !== undefined) patch.availability = params.availability;
+  if (params.preferred !== undefined) patch.preferred = params.preferred;
+
   // One-off blocked datetime ranges (2026-04-28 event-edit proposal §3.5).
   // Subtractive against the slot grid the same way calendar busy events
   // are. Validated structurally; LLM is responsible for resolving date
@@ -1916,17 +1921,6 @@ async function handleExpandLink(
       }
       patch.blockedRanges = result.ranges;
     }
-  }
-  // preferredDays accepts either short-name strings ("Mon","Tue") OR a
-  // numeric daysOfWeek array ([0..6], Sun=0). The LLM tends to reach for
-  // `daysOfWeek` when it thinks in calendar terms — accept both and
-  // normalize into preferredDays downstream via normalizeLinkParameters.
-  if (params.preferredDays !== undefined) patch.preferredDays = params.preferredDays;
-  else if (Array.isArray(params.daysOfWeek)) {
-    const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    patch.preferredDays = (params.daysOfWeek as unknown[])
-      .filter((d): d is number => typeof d === "number" && d >= 0 && d <= 6)
-      .map((d) => DAY_NAMES[d]);
   }
   if (params.lastResort !== undefined) patch.lastResort = params.lastResort;
   if (params.dateRange !== undefined) patch.dateRange = params.dateRange;
@@ -2020,7 +2014,7 @@ async function handleExpandLink(
   if (patchKeysForGate.length === 0 && inviteeNamesPatch === undefined) {
     return {
       success: false,
-      message: "update_link needs at least one field to change (isVip, allowWeekends, preferredTimeStart/End, preferredTimeWindows, preferredDays/daysOfWeek, lastResort, dateRange, blockedRanges, timingLabel, format, duration, activity, activityIcon, location, inviteeNames, guestPicks, guestGuidance)",
+      message: "update_link needs at least one field to change (isVip, availability, preferred, lastResort, dateRange, blockedRanges, timingLabel, format, duration, activity, activityIcon, location, inviteeNames, guestPicks, guestGuidance)",
     };
   }
 
@@ -2299,16 +2293,11 @@ async function handleExpandLink(
   if (patch.isVip !== undefined) {
     changedParts.push(`VIP: ${patch.isVip ? "on" : "off"}`);
   }
-  if (patch.allowWeekends !== undefined) {
-    changedParts.push(`weekends: ${patch.allowWeekends ? "allowed" : "off"}`);
+  if (patch.availability !== undefined) {
+    changedParts.push("availability updated");
   }
-  if (patch.preferredTimeStart !== undefined || patch.preferredTimeEnd !== undefined) {
-    const start = patch.preferredTimeStart ?? existingRules.preferredTimeStart ?? "—";
-    const end = patch.preferredTimeEnd ?? existingRules.preferredTimeEnd ?? "—";
-    changedParts.push(`window: ${start}–${end}`);
-  }
-  if (patch.preferredDays !== undefined) {
-    changedParts.push(`days: ${Array.isArray(patch.preferredDays) ? patch.preferredDays.join(",") : "updated"}`);
+  if (patch.preferred !== undefined) {
+    changedParts.push("preferences updated");
   }
   if (patch.dateRange !== undefined) {
     changedParts.push(`dateRange: updated`);
@@ -2389,9 +2378,11 @@ async function handleExpandLink(
         }
       };
       const followupParts: string[] = [];
-      if (changedAndDifferent("preferredDays") && Array.isArray(patch.preferredDays)) {
-        const days = (patch.preferredDays as string[]).join(", ");
-        followupParts.push(days ? `available days updated to ${days}` : "available days cleared");
+      if (changedAndDifferent("availability")) {
+        followupParts.push("availability updated");
+      }
+      if (changedAndDifferent("preferred")) {
+        followupParts.push("preferences updated");
       }
       if (changedAndDifferent("dateRange")) followupParts.push("date range updated");
       if (changedAndDifferent("timingLabel") && patch.timingLabel) {
@@ -2401,9 +2392,6 @@ async function handleExpandLink(
       if (changedAndDifferent("duration")) followupParts.push(`duration now ${formatDuration(patch.duration as number)}`);
       if (changedAndDifferent("activity") && patch.activity) followupParts.push(`activity now "${patch.activity}"`);
       if (changedAndDifferent("location") && patch.location) followupParts.push(`location now ${patch.location}`);
-      if (changedAndDifferent("preferredTimeStart") || changedAndDifferent("preferredTimeEnd") || changedAndDifferent("preferredTimeWindows")) {
-        followupParts.push("time window updated");
-      }
       if (changedAndDifferent("blockedRanges")) {
         followupParts.push("blocked time updated");
       }

@@ -1,12 +1,13 @@
 /**
- * Unit tests for the host-intent steering library (proposal 2026-04-21).
+ * Unit tests for the host-intent steering library (proposal 2026-04-21,
+ * with 2026-05-01 schema migration).
  *
- * Scope: the pure-function surface in `lib/intent.ts` — `validateIntent`
- * (§4.6), `deriveLegacy` (§4.2), `hasMaterialNarrowingChange` (§4.7),
- * `readStoredSteering`, `normalizeSteering`. The greeting renderer's
- * `useGenericBody` decision is a single enum read off the output of these
- * functions, so covering them at unit scope gets the refactor's whole
- * behavior under test without spinning up a server.
+ * Scope: pure-function surface in `lib/intent.ts` — `validateIntent` (§4.6),
+ * `deriveLegacy` (§4.2), `hasMaterialNarrowingChange` (§4.7),
+ * `readStoredSteering`, `normalizeSteering`. After the 2026-05-01 schema
+ * rewrite, the narrowing-field detection reads `availability.restrictTo*`
+ * and `preferred.*` instead of the legacy `preferredDays`,
+ * `preferredTimeStart/End`, `preferredTimeWindows`, `slotOverrides` fields.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -58,106 +59,97 @@ describe("dateRangeSpanDays", () => {
   });
 });
 
-describe("hasNarrowingField", () => {
+describe("hasNarrowingField (post-2026-05-01 schema)", () => {
   it("is false for empty rules (open case)", () => {
     expect(hasNarrowingField({})).toBe(false);
     expect(hasNarrowingField(null)).toBe(false);
   });
 
-  it("is false for a wide dateRange alone (PR #57 threshold)", () => {
+  it("is false for a wide dateRange alone (5+ days)", () => {
     expect(hasNarrowingField({ dateRange: { start: "2026-04-21", end: "2026-04-25" } })).toBe(false); // 5 days
     expect(hasNarrowingField({ dateRange: { start: "2026-04-21", end: "2026-05-05" } })).toBe(false); // 15 days
   });
 
   it("is true for a narrow dateRange (< 5 days)", () => {
-    expect(hasNarrowingField({ dateRange: { start: "2026-04-21", end: "2026-04-24" } })).toBe(true); // 4 days
+    expect(hasNarrowingField({ dateRange: { start: "2026-04-21", end: "2026-04-24" } })).toBe(true);
   });
 
-  it("is true when preferred-day or preferred-time fields are set", () => {
-    expect(hasNarrowingField({ preferredDays: ["Mon"] })).toBe(true);
-    expect(hasNarrowingField({ preferredTimeStart: "09:00" })).toBe(true);
-    expect(hasNarrowingField({ preferredTimeEnd: "17:00" })).toBe(true);
-    expect(hasNarrowingField({
-      preferredTimeWindows: [{ start: "12:00", end: "14:00" }],
-    })).toBe(true);
+  it("is true when availability.restrictTo* fields are set", () => {
+    expect(hasNarrowingField({ availability: { restrictToDays: ["Mon"] } })).toBe(true);
+    expect(hasNarrowingField({ availability: { restrictToWindows: [{ start: "12:00", end: "14:00" }] } })).toBe(true);
+    expect(hasNarrowingField({ availability: { restrictToSlots: [{ start: "x", end: "y" }] } })).toBe(true);
+  });
+
+  it("is true when preferred.* fields are set", () => {
+    expect(hasNarrowingField({ preferred: { days: ["Mon"] } })).toBe(true);
+    expect(hasNarrowingField({ preferred: { windows: [{ start: "12:00", end: "14:00" }] } })).toBe(true);
+    expect(hasNarrowingField({ preferred: { slots: [{ start: "x", end: "y" }] } })).toBe(true);
   });
 
   it("ignores empty arrays", () => {
-    expect(hasNarrowingField({ preferredDays: [] })).toBe(false);
-    expect(hasNarrowingField({ preferredTimeWindows: [] })).toBe(false);
-  });
-
-  it("is true for any slotOverrides entry", () => {
-    expect(hasNarrowingField({
-      slotOverrides: [{ start: "a", end: "b", score: -1 }],
-    })).toBe(true);
+    expect(hasNarrowingField({ availability: { restrictToDays: [] } })).toBe(false);
+    expect(hasNarrowingField({ preferred: { days: [] } })).toBe(false);
   });
 });
 
 describe("hasExclusiveOverride", () => {
-  it("requires a score === -2 entry", () => {
-    expect(hasExclusiveOverride({ slotOverrides: [{ start: "a", end: "b", score: -1 }] })).toBe(false);
-    expect(hasExclusiveOverride({ slotOverrides: [{ start: "a", end: "b", score: -2 }] })).toBe(true);
-    expect(hasExclusiveOverride({ slotOverrides: [] })).toBe(false);
+  it("requires availability.restrictToSlots to have at least one entry", () => {
+    expect(hasExclusiveOverride({ availability: { restrictToSlots: [{ start: "a", end: "b" }] } })).toBe(true);
+    expect(hasExclusiveOverride({ availability: { restrictToSlots: [] } })).toBe(false);
+    expect(hasExclusiveOverride({ availability: {} })).toBe(false);
     expect(hasExclusiveOverride({})).toBe(false);
+  });
+
+  it("returns false when only preferred.slots (-1 equivalent) is set", () => {
+    expect(hasExclusiveOverride({ preferred: { slots: [{ start: "a", end: "b" }] } })).toBe(false);
   });
 });
 
 describe("isSingleSlotExclusive", () => {
-  it("is true for exactly one slotOverrides[-2] entry", () => {
+  it("is true for exactly one availability.restrictToSlots entry", () => {
     expect(
       isSingleSlotExclusive({
-        slotOverrides: [
-          { start: "2026-04-21T17:15:00-07:00", end: "2026-04-21T19:00:00-07:00", score: -2 },
-        ],
+        availability: {
+          restrictToSlots: [
+            { start: "2026-04-21T17:15:00-07:00", end: "2026-04-21T19:00:00-07:00" },
+          ],
+        },
       }),
     ).toBe(true);
   });
 
-  it("is true when the single -2 is bracketed by a narrow dateRange / preferredTimeWindows", () => {
-    // The Katie case: one -2 slot + bracketing fields. Not multiple offers.
+  it("is true when the single restrictToSlots is bracketed by a narrow dateRange / restrictToWindows", () => {
+    // The Katie case: one pinned slot + bracketing fields. Not multiple offers.
     expect(
       isSingleSlotExclusive({
         dateRange: { start: "2026-04-21", end: "2026-04-21" },
-        preferredTimeWindows: [{ start: "17:15", end: "19:00" }],
-        slotOverrides: [
-          { start: "2026-04-21T17:15:00-07:00", end: "2026-04-21T19:00:00-07:00", score: -2 },
-        ],
+        availability: {
+          restrictToWindows: [{ start: "17:15", end: "19:00" }],
+          restrictToSlots: [
+            { start: "2026-04-21T17:15:00-07:00", end: "2026-04-21T19:00:00-07:00" },
+          ],
+        },
       }),
     ).toBe(true);
   });
 
-  it("is false for two or more -2 slots (multiple prescriptive offers)", () => {
+  it("is false for two or more restrictToSlots entries (multiple prescriptive offers)", () => {
     expect(
       isSingleSlotExclusive({
-        slotOverrides: [
-          { start: "a1", end: "a2", score: -2 },
-          { start: "b1", end: "b2", score: -2 },
-        ],
+        availability: {
+          restrictToSlots: [
+            { start: "a1", end: "a2" },
+            { start: "b1", end: "b2" },
+          ],
+        },
       }),
     ).toBe(false);
   });
 
-  it("is false with no -2 slots (not exclusive-shaped)", () => {
-    expect(
-      isSingleSlotExclusive({
-        slotOverrides: [{ start: "a", end: "b", score: -1 }],
-      }),
-    ).toBe(false);
+  it("is false with no restrictToSlots (not exclusive-shaped)", () => {
+    expect(isSingleSlotExclusive({ preferred: { slots: [{ start: "a", end: "b" }] } })).toBe(false);
     expect(isSingleSlotExclusive({})).toBe(false);
     expect(isSingleSlotExclusive(null)).toBe(false);
-  });
-
-  it("ignores -1 preferred slots alongside a single -2", () => {
-    // -1 is a nudge, not an additional offer. Still collapses to single-slot.
-    expect(
-      isSingleSlotExclusive({
-        slotOverrides: [
-          { start: "a1", end: "a2", score: -2 },
-          { start: "b1", end: "b2", score: -1 },
-        ],
-      }),
-    ).toBe(true);
   });
 });
 
@@ -173,7 +165,6 @@ describe("validateIntent (§4.6 asymmetric rule)", () => {
   });
 
   it("trusts intent when it under-narrows fields (the anytime-next-two-weeks case)", () => {
-    // intent=open + wide dateRange is the PRIMARY motivating case. Never step up.
     expect(validateIntent("open", { dateRange: { start: "2026-04-21", end: "2026-05-05" } })).toBe("open");
   });
 
@@ -187,15 +178,16 @@ describe("validateIntent (§4.6 asymmetric rule)", () => {
   });
 
   it("keeps narrow as-is when a narrowing field is present", () => {
-    expect(validateIntent("narrow", { preferredDays: ["Tue"] })).toBe("narrow");
+    expect(validateIntent("narrow", { availability: { restrictToDays: ["Tue"] } })).toBe("narrow");
+    expect(validateIntent("narrow", { preferred: { days: ["Tue"] } })).toBe("narrow");
     expect(validateIntent("narrow", { dateRange: { start: "2026-04-21", end: "2026-04-23" } })).toBe("narrow");
   });
 
-  it("steps exclusive → narrow when no score-(-2) override exists", () => {
+  it("steps exclusive → narrow when no availability.restrictToSlots exists", () => {
     expect(
       validateIntent("exclusive", {
-        slotOverrides: [{ start: "a", end: "b", score: -1 }],
-        preferredDays: ["Tue"],
+        preferred: { slots: [{ start: "a", end: "b" }] },
+        availability: { restrictToDays: ["Tue"] },
       }),
     ).toBe("narrow");
     expect(warnSpy).toHaveBeenCalled();
@@ -205,10 +197,10 @@ describe("validateIntent (§4.6 asymmetric rule)", () => {
     expect(validateIntent("exclusive", {})).toBe("soft");
   });
 
-  it("keeps exclusive when a score-(-2) override is present", () => {
+  it("keeps exclusive when availability.restrictToSlots is present", () => {
     expect(
       validateIntent("exclusive", {
-        slotOverrides: [{ start: "a", end: "b", score: -2 }],
+        availability: { restrictToSlots: [{ start: "a", end: "b" }] },
       }),
     ).toBe("exclusive");
   });
@@ -225,15 +217,15 @@ describe("deriveLegacy (back-compat shim)", () => {
   });
 
   it("returns narrow when narrowing fields are present", () => {
-    expect(deriveLegacy({ preferredDays: ["Tue"] })).toBe("narrow");
-    expect(deriveLegacy({ preferredTimeStart: "09:00" })).toBe("narrow");
+    expect(deriveLegacy({ availability: { restrictToDays: ["Tue"] } })).toBe("narrow");
+    expect(deriveLegacy({ preferred: { days: ["Tue"] } })).toBe("narrow");
     expect(deriveLegacy({ dateRange: { start: "2026-04-21", end: "2026-04-23" } })).toBe("narrow");
   });
 
-  it("returns exclusive when a score-(-2) override is present", () => {
+  it("returns exclusive when availability.restrictToSlots is present", () => {
     expect(
       deriveLegacy({
-        slotOverrides: [{ start: "a", end: "b", score: -2 }],
+        availability: { restrictToSlots: [{ start: "a", end: "b" }] },
       }),
     ).toBe("exclusive");
   });
@@ -253,13 +245,13 @@ describe("readStoredSteering", () => {
   });
 });
 
-describe("hasMaterialNarrowingChange (§4.7 split rule)", () => {
+describe("hasMaterialNarrowingChange (§4.7 split rule, post-2026-05-01)", () => {
   it("is false for no-op edits", () => {
     expect(hasMaterialNarrowingChange({}, {})).toBe(false);
     expect(
       hasMaterialNarrowingChange(
-        { preferredDays: ["Tue"] },
-        { preferredDays: ["Tue"] },
+        { availability: { restrictToDays: ["Tue"] } },
+        { availability: { restrictToDays: ["Tue"] } },
       ),
     ).toBe(false);
   });
@@ -282,50 +274,43 @@ describe("hasMaterialNarrowingChange (§4.7 split rule)", () => {
     ).toBe(false);
   });
 
-  it("flags preferredTimeStart/End added where none existed", () => {
-    expect(hasMaterialNarrowingChange({}, { preferredTimeStart: "09:00" })).toBe(true);
-    expect(hasMaterialNarrowingChange({}, { preferredTimeEnd: "17:00" })).toBe(true);
-  });
-
-  it("flags preferredDays added where none existed", () => {
-    expect(hasMaterialNarrowingChange({}, { preferredDays: ["Tue"] })).toBe(true);
-  });
-
-  it("flags preferredTimeWindows added where none existed", () => {
+  it("flags availability.restrictToWindows added where none existed", () => {
     expect(
-      hasMaterialNarrowingChange(
-        {},
-        { preferredTimeWindows: [{ start: "12:00", end: "14:00" }] },
-      ),
+      hasMaterialNarrowingChange({}, { availability: { restrictToWindows: [{ start: "12:00", end: "14:00" }] } }),
     ).toBe(true);
   });
 
-  it("flags adding a score-(-2) slotOverride where none existed", () => {
+  it("flags availability.restrictToDays added where none existed", () => {
+    expect(hasMaterialNarrowingChange({}, { availability: { restrictToDays: ["Tue"] } })).toBe(true);
+  });
+
+  it("flags preferred.days added where none existed", () => {
+    expect(hasMaterialNarrowingChange({}, { preferred: { days: ["Tue"] } })).toBe(true);
+  });
+
+  it("flags preferred.windows added where none existed", () => {
     expect(
-      hasMaterialNarrowingChange(
-        {},
-        { slotOverrides: [{ start: "a", end: "b", score: -2 }] },
-      ),
+      hasMaterialNarrowingChange({}, { preferred: { windows: [{ start: "12:00", end: "14:00" }] } }),
     ).toBe(true);
   });
 
-  it("does NOT flag trivial field tweaks that preserve the shape", () => {
-    // preferredTimeStart already set — changing its value is not a material
-    // shape change (still a single-window).
+  it("flags adding availability.restrictToSlots where none existed", () => {
+    expect(
+      hasMaterialNarrowingChange({}, { availability: { restrictToSlots: [{ start: "a", end: "b" }] } }),
+    ).toBe(true);
+  });
+
+  it("does NOT flag trivial value tweaks that preserve the shape", () => {
     expect(
       hasMaterialNarrowingChange(
-        { preferredTimeStart: "09:00" },
-        { preferredTimeStart: "10:00" },
+        { availability: { restrictToDays: ["Mon"] } },
+        { availability: { restrictToDays: ["Tue"] } },
       ),
     ).toBe(false);
   });
 });
 
 describe("greeting useGenericBody decision (integration shape)", () => {
-  // Documents the single enum read that replaces the 10+ conjunct
-  // predicate chain. The actual read happens in `session/route.ts`; this
-  // test asserts the mapping is stable so future refactors don't silently
-  // flip it.
   const useGenericBody = (steering: ReturnType<typeof deriveLegacy>) =>
     steering === "open" || steering === "soft";
 
@@ -337,26 +322,5 @@ describe("greeting useGenericBody decision (integration shape)", () => {
   it("narrow / exclusive render the bulleted body", () => {
     expect(useGenericBody("narrow")).toBe(false);
     expect(useGenericBody("exclusive")).toBe(false);
-  });
-
-  it("legacy fallback: wide dateRange alone renders generic body", () => {
-    const rules = { dateRange: { start: "2026-04-21", end: "2026-05-05" } };
-    expect(useGenericBody(readStoredSteering(rules) ?? deriveLegacy(rules))).toBe(true);
-  });
-
-  it("legacy fallback: narrowing field renders bulleted body", () => {
-    const rules = { preferredDays: ["Tue"] };
-    expect(useGenericBody(readStoredSteering(rules) ?? deriveLegacy(rules))).toBe(false);
-  });
-
-  it("stored intent overrides legacy predicate (the whole point)", () => {
-    // Rules shape looks like "narrow" to the legacy predicate, but the
-    // LLM said it's a bracket — trust intent.
-    const rules = {
-      preferredDays: ["Mon", "Tue", "Wed", "Thu", "Fri"],
-      dateRange: { start: "2026-04-21", end: "2026-05-05" },
-      intent: { steering: "open" as const },
-    };
-    expect(useGenericBody(readStoredSteering(rules) ?? deriveLegacy(rules))).toBe(true);
   });
 });

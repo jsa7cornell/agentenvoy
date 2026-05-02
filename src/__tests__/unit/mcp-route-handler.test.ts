@@ -140,7 +140,7 @@ describe("POST /api/mcp — get_meeting_parameters happy path", () => {
       link: {
         id: "link_1",
         userId: "user_1",
-        rules: { format: "video", duration: 30 },
+        parameters: { format: "video", duration: 30 },
       },
       parsed: { slug: "abc", code: null },
       rateLimit: { ok: true, result: {} },
@@ -231,7 +231,7 @@ describe("POST /api/mcp — get_availability happy path", () => {
       link: {
         id: "link_1",
         userId: "user_1",
-        rules: {}, // vanilla link → score ≤ 1 only
+        parameters: {}, // vanilla link → score ≤ 1 only
         recurringWindowId: null,
       },
       parsed: { slug: "abc", code: null },
@@ -276,7 +276,7 @@ describe("POST /api/mcp — get_availability happy path", () => {
   it("not-connected host → ok:true with empty slot list", async () => {
     mockAuthorize.mockResolvedValueOnce({
       ok: true,
-      link: { id: "link_2", userId: "user_2", rules: {}, recurringWindowId: null },
+      link: { id: "link_2", userId: "user_2", parameters: {}, recurringWindowId: null },
       parsed: { slug: "xyz", code: null },
       rateLimit: { ok: true, result: {} },
     });
@@ -316,7 +316,7 @@ describe("POST /api/mcp — get_session_status", () => {
   it("returns mapped status + agreedTime for an agreed session", async () => {
     mockAuthorize.mockResolvedValueOnce({
       ok: true,
-      link: { id: "link_1", userId: "u1", rules: {}, recurringWindowId: null },
+      link: { id: "link_1", userId: "u1", parameters: {}, recurringWindowId: null },
       parsed: { slug: "abc", code: null },
       rateLimit: { ok: true, result: {} },
     });
@@ -351,7 +351,7 @@ describe("POST /api/mcp — get_session_status", () => {
   it("maps internal 'escalated' → wire 'active'", async () => {
     mockAuthorize.mockResolvedValueOnce({
       ok: true,
-      link: { id: "link_1", userId: "u1", rules: {}, recurringWindowId: null },
+      link: { id: "link_1", userId: "u1", parameters: {}, recurringWindowId: null },
       parsed: { slug: "abc", code: null },
       rateLimit: { ok: true, result: {} },
     });
@@ -373,7 +373,7 @@ describe("POST /api/mcp — get_session_status", () => {
   it("no session on link → session_not_found refusal", async () => {
     mockAuthorize.mockResolvedValueOnce({
       ok: true,
-      link: { id: "link_1", userId: "u1", rules: {}, recurringWindowId: null },
+      link: { id: "link_1", userId: "u1", parameters: {}, recurringWindowId: null },
       parsed: { slug: "abc", code: null },
       rateLimit: { ok: true, result: {} },
     });
@@ -392,7 +392,7 @@ describe("POST /api/mcp — get_session_status", () => {
   it("surfaces pending consent requests with proposedValue", async () => {
     mockAuthorize.mockResolvedValueOnce({
       ok: true,
-      link: { id: "link_1", userId: "u1", rules: {}, recurringWindowId: null },
+      link: { id: "link_1", userId: "u1", parameters: {}, recurringWindowId: null },
       parsed: { slug: "abc", code: null },
       rateLimit: { ok: true, result: {} },
     });
@@ -442,7 +442,7 @@ describe("POST /api/mcp — post_message", () => {
   it("persists message + auto-bootstraps session on first contact", async () => {
     mockAuthorize.mockResolvedValueOnce({
       ok: true,
-      link: { id: "link_1", userId: "u1", rules: {}, recurringWindowId: null },
+      link: { id: "link_1", userId: "u1", parameters: {}, recurringWindowId: null },
       parsed: { slug: "abc", code: null },
       rateLimit: { ok: true, result: {} },
     });
@@ -478,7 +478,7 @@ describe("POST /api/mcp — post_message", () => {
   it("refuses session_terminal on cancelled session", async () => {
     mockAuthorize.mockResolvedValueOnce({
       ok: true,
-      link: { id: "link_1", userId: "u1", rules: {}, recurringWindowId: null },
+      link: { id: "link_1", userId: "u1", parameters: {}, recurringWindowId: null },
       parsed: { slug: "abc", code: null },
       rateLimit: { ok: true, result: {} },
     });
@@ -522,7 +522,7 @@ describe("POST /api/mcp — propose_parameters", () => {
         id: "link_1",
         userId: "u1",
         // format is locked (link rule); duration is open
-        rules: { format: "video" },
+        parameters: { format: "video" },
         recurringWindowId: null,
       },
       parsed: { slug: "abc", code: null },
@@ -567,7 +567,7 @@ describe("POST /api/mcp — propose_parameters", () => {
   it("action=defer_to_host_envoy short-circuits every field", async () => {
     mockAuthorize.mockResolvedValueOnce({
       ok: true,
-      link: { id: "link_1", userId: "u1", rules: {}, recurringWindowId: null },
+      link: { id: "link_1", userId: "u1", parameters: {}, recurringWindowId: null },
       parsed: { slug: "abc", code: null },
       rateLimit: { ok: true, result: {} },
     });
@@ -624,7 +624,7 @@ describe("POST /api/mcp — propose_lock", () => {
       link: {
         id: "link_1",
         userId: "u1",
-        rules: { duration: 30 },
+        parameters: { duration: 30 },
         recurringWindowId: null,
       },
       parsed: { slug: "abc", code: null },
@@ -684,7 +684,7 @@ describe("POST /api/mcp — propose_lock", () => {
   it("maps confirmBooking refusal (slot_mismatch) to wire refusal", async () => {
     mockAuthorize.mockResolvedValueOnce({
       ok: true,
-      link: { id: "link_1", userId: "u1", rules: {}, recurringWindowId: null },
+      link: { id: "link_1", userId: "u1", parameters: {}, recurringWindowId: null },
       parsed: { slug: "abc", code: null },
       rateLimit: { ok: true, result: {} },
     });

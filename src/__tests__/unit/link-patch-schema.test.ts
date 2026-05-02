@@ -92,8 +92,11 @@ describe("parseLinkPatch — update mode (the bug-fix surface)", () => {
     expect(r.ok).toBe(true);
   });
 
-  it("accepts daysOfWeek (legacy numeric form, normalized to preferredDays downstream)", () => {
-    const r = parseLinkPatch({ code: "abc", daysOfWeek: [1, 2] }, "update");
+  it("accepts availability.restrictToDays via the new schema", () => {
+    const r = parseLinkPatch(
+      { code: "abc", availability: { restrictToDays: ["Mon", "Tue"] } },
+      "update",
+    );
     expect(r.ok).toBe(true);
   });
 
@@ -132,17 +135,28 @@ describe("parseLinkPatch — field-shape validation", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("rejects malformed preferredTimeStart (HH:MM only)", () => {
-    const r = parseLinkPatch({ code: "abc", preferredTimeStart: "5pm" }, "update");
+  it("rejects malformed availability.expand window (HH:MM only)", () => {
+    const r = parseLinkPatch(
+      { code: "abc", availability: { expand: [{ window: { start: "5pm", end: "10pm" } }] } },
+      "update",
+    );
     expect(r.ok).toBe(false);
   });
 
-  it("accepts valid HH:MM preferredTimeStart", () => {
+  it("accepts valid HH:MM availability.expand window", () => {
     const r = parseLinkPatch(
-      { code: "abc", preferredTimeStart: "17:00", preferredTimeEnd: "22:00" },
+      { code: "abc", availability: { expand: [{ window: { start: "17:00", end: "22:00" } }] } },
       "update",
     );
     expect(r.ok).toBe(true);
+  });
+
+  it("rejects availability.expand entry with neither days nor window", () => {
+    const r = parseLinkPatch(
+      { code: "abc", availability: { expand: [{}] } },
+      "update",
+    );
+    expect(r.ok).toBe(false);
   });
 
   it("rejects unknown steering value", () => {

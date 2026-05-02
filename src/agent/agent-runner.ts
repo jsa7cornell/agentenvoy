@@ -281,36 +281,48 @@ export async function parsePreferences(
     maxOutputTokens: 512,
     system: `You parse natural language scheduling preferences into structured JSON for a meeting negotiation link. Extract ONLY these fields (never invent new ones — the downstream engine ignores unknown keys):
 
-- preferredDays: array of short day names (["Mon","Tue","Wed","Thu","Fri"]) or omit for "any"
-- preferredTimeStart: "HH:MM" 24-hour, earliest time in each day to offer (e.g. "09:00"). Omit unless the host names a concrete clock time.
-- preferredTimeEnd: "HH:MM" 24-hour, latest time in each day to offer. Omit unless the host names a concrete clock time.
+- availability: object with three optional sub-fields (the per-link event-availability layer):
+  - expand: array of { days?: ["Mon",...], window?: {start:"HH:MM", end:"HH:MM"} } — ADDITIVELY extends what's offerable beyond normal calendar availability. Use for "open up early mornings", "add Saturday", "include weekends", "also offer 7am". Each entry needs at least one of days or window.
+  - restrictToDays: array of short day names — ONLY these days are offerable. Use for "only Wednesdays", "Mondays only", "just weekdays".
+  - restrictToWindows: array of {start, end} — ONLY these per-day windows are offerable. Use for "only afternoons", "limit to 5-8pm", "just before noon".
+- preferred: object with three optional sub-fields (decoration only — never hides slots, just marks the host's favored subset for the greeting and ★ display):
+  - days: array of short day names — host prefers these days but other days are still bookable. Use for "prefer Wednesdays", "ideally Mondays", "Wed is best".
+  - windows: array of {start, end} — host prefers these times. Use for "prefer afternoons", "ideally before noon", "afternoons are best".
 - dateRange: { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } — inclusive host-local window. Omit if open-ended.
 - format: "phone" | "video" | "in-person" | "any". Aliases: "vc","video conference","videoconference","zoom","meet" → "video"; bare "call" → "phone"; "coffee","lunch","drinks" → "in-person".
 - duration: number in minutes (default 30)
 - isVip: boolean — see VIP RULES below. Omit entirely if not VIP.
 - inviteeEmail: string or null
 - inviteeName: string or null
-- inviteeTimezone: IANA timezone string when the host declares where the invitee is (e.g. "Sarah is on EST" → "America/New_York", "she's in Tokyo" → "Asia/Tokyo"). Omit if not explicitly stated. This is a seed for the deal-room greeting — wrong values produce wrong times, so only emit when the host names a concrete location or zone.
+- inviteeTimezone: IANA timezone string when the host declares where the invitee is (e.g. "Sarah is on EST" → "America/New_York", "she's in Tokyo" → "Asia/Tokyo"). Omit if not explicitly stated.
 - topic: string or null
 - notes: string or null
-- steering: "open" | "soft" | "narrow" | "exclusive" — host-intent tier (proposal 2026-04-21). Optional (omit if truly unclear; the downstream default is "open"). Apply the 4-step discriminator ladder:
-  1. Did the user name ANY preference? If no → "open" (e.g. "get time with X", "grab X", "anytime next two weeks", "whenever works").
-  2. Did they signal fallback (else/preferred/ideally/but/or)? If yes → "soft" (e.g. "Wed ideally else Thu", "afternoons preferred, morning is fine").
+- steering: "open" | "soft" | "narrow" | "exclusive" — host-intent classification (greeting tone only; does NOT affect slot scoring). Apply the 4-step discriminator ladder:
+  1. Did the user name ANY preference? If no → "open" (e.g. "get time with X", "anytime next two weeks").
+  2. Did they signal fallback (else/preferred/ideally/but/or)? If yes → "soft" (e.g. "Wed ideally else Thu").
   3. Did they name specific slots, not a window (2+ enumerated offerings)? If yes → "exclusive" (e.g. "3pm Tuesday or 4pm Wednesday").
-  4. Otherwise → "narrow" (e.g. "Tuesday afternoon only", "Mon-Wed next week", "5-8pm tonight").
-  Cost asymmetry — WHEN IN DOUBT, PICK OPEN. Narrow-side errors produce a verbose bulleted greeting for an offer the host didn't actually narrow; open-side errors degrade gracefully (widget + scoring still carry the narrowing via field presence).
+  4. Otherwise → "narrow" (e.g. "Tuesday afternoon only", "Mon-Wed next week").
+  Cost asymmetry — WHEN IN DOUBT, PICK OPEN.
+
+DISAMBIGUATION RULES — restrict vs. expand vs. prefer:
+- ADDITIVE language ("open up", "also", "add", "include", "throw in") → availability.expand
+- RESTRICTIVE language ("only", "just", "limit to", "Mondays only") → availability.restrictTo*
+- PREFERENCE language ("prefer", "ideally", "best", "favorite", "would love") → preferred.*
+- BARE AMBIGUOUS phrases ("afternoons", "Wednesdays") with no qualifier word — on FIRST-TURN link creation, ASK the host: "Do you want to restrict this link to {X} only, or just prefer {X} (other times still bookable)?". Do NOT emit immediately.
+- BARE AMBIGUOUS phrases on FOLLOW-UP turns — emit as preferred.* (default-soft); the host can correct in the next turn if they meant restrict.
 
 VIP RULES (critical — isVip is a single binary flag, not a tier ladder):
 - Default is NOT VIP. Emit isVip only when the host gives a clear signal.
-- Set isVip: true when the host says: "VIP", "important client", "high priority", "priority meeting", "make room for X", "clear my calendar", "drop everything", "CEO", "board member", "key account", "investor", "biggest deal", "most important meeting", or any equivalent.
-- International context ALONE ("she's in Europe", "he's in Tokyo") is ALSO a VIP signal — set isVip: true so Envoy will proactively ask the host about opening up stretch hours during the deal room conversation.
+- Set isVip: true when the host says: "VIP", "important client", "high priority", "make room for X", "clear my calendar", "CEO", "board member", "investor", "biggest deal", or equivalent.
+- International context ALONE ("she's in Europe", "he's in Tokyo") is ALSO a VIP signal — set isVip: true.
 - Never emit priority, high, low, vip as strings — isVip is always a boolean.
-- VIP does NOT automatically unlock any protected slots on its own. It signals Envoy that she may proactively ask the host about expansion, may reach into stretch options on guest pushback, and may propose tentative holds for specific stretch slots. The host still decides the actual expansion via preferredTimeStart/End or allowWeekends in a follow-up turn.
+- VIP does NOT automatically unlock any protected slots on its own. It signals Envoy that she may proactively ask about expansion. The host still decides actual expansion via availability.expand in a follow-up turn.
 
 IMPORTANT — separate the TWO kinds of signals:
 - "VIP" / urgency / international context → isVip: true
-- Concrete clock time the host said ("6 AM works", "offer until 9 PM") → preferredTimeStart / preferredTimeEnd
-- A vague "open it up" without a clock time → isVip: true ONLY. Do NOT guess a preferredTimeStart.
+- Concrete clock time the host said with additive intent ("6 AM works", "open up early mornings") → availability.expand
+- Concrete clock time with restrictive intent ("only mornings", "limit to 9-12") → availability.restrictToWindows
+- A vague "open it up" without a clock time → isVip: true ONLY. Do NOT guess a window.
 
 Return ONLY valid JSON, no markdown or explanation.`,
     prompt: userPrompt,

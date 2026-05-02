@@ -9,26 +9,32 @@
  * chains with no shared contract. This module is the contract.
  *
  * The schema reuses leaf shapes (`guestPicksSchema`, `guestGuidanceSchema`,
- * `intentSchema`, `dateRangeSchema`, `timeWindowSchema`, `blockedRangeSchema`)
- * imported from [`./link-parameters.ts`](./link-parameters.ts) — the persisted
- * shape and the action-input shape share the same Zod objects, so drift
- * between them is impossible by construction.
+ * `intentSchema`, `dateRangeSchema`, `blockedRangeSchema`, `availabilitySpecSchema`,
+ * `preferredSpecSchema`) imported from [`./link-parameters.ts`](./link-parameters.ts) —
+ * the persisted shape and the action-input shape share the same Zod objects,
+ * so drift between them is impossible by construction.
  *
  * Mode-specific differences (e.g. `inviteeNames` required on create, optional
  * on update) are enforced by `parseLinkPatch(params, mode)` rather than as
  * separate schemas. Both `handleCreateLink` and `handleExpandLink` consume
  * this parser; Phase 2 of the proposal collapses them into one orchestrator.
+ *
+ * 2026-05-01 — `availability` + `preferred` accepted as patch fields;
+ * `preferredTimeStart`, `preferredTimeEnd`, `preferredTimeWindows`,
+ * `preferredDays`, `daysOfWeek`, `allowWeekends` removed (hard cut).
+ * See proposal `2026-05-01_event-availability-vs-preferred-vs-calendar-scoring`.
  */
 
 import { z } from "zod";
 
+import {
+  availabilitySpecSchema,
+  preferredSpecSchema,
+} from "./link-parameters";
+
 // Leaf schemas — kept identical to the persisted shapes in
-// `link-parameters.ts` (which intentionally keeps them non-exported as
-// internal validation primitives). Drift between this file and that one is
-// caught by the lockstep unit test in
-// `__tests__/unit/link-patch-schema.test.ts` (proposal §3.D, N1 fold).
-//
-// If you change a shape here, change it in `link-parameters.ts` too.
+// `link-parameters.ts`. Drift between this file and that one is caught by
+// the lockstep unit test in `__tests__/unit/link-patch-schema.test.ts`.
 const guestPicksSchema = z.object({
   window: z
     .object({
@@ -64,11 +70,6 @@ const dateRangeSchema = z.object({
   end: z.string().optional(),
 });
 
-const timeWindowSchema = z.object({
-  start: z.string(),
-  end: z.string(),
-});
-
 const blockedRangeSchema = z.object({
   start: z.string(),
   end: z.string(),
@@ -80,10 +81,10 @@ const blockedRangeSchema = z.object({
 const linkPatchBase = z
   .object({
     // Identity / lifecycle
-    code: z.string().optional(), // present on update; routes to existing link
-    sessionId: z.string().optional(), // fallback link-resolution path
+    code: z.string().optional(),
+    sessionId: z.string().optional(),
     topic: z.string().max(120).optional(),
-    inviteeName: z.string().max(80).optional(), // singular shorthand; normalized to inviteeNames
+    inviteeName: z.string().max(80).optional(),
     inviteeNames: z.array(z.string().max(80)).optional(),
     inviteeEmail: z.string().email().optional(),
     inviteeTimezone: z.string().optional(),
@@ -102,31 +103,28 @@ const linkPatchBase = z
     activityOptions: z.array(z.string().max(60)).optional(),
     location: z.string().max(120).optional(),
 
-    // Time-of-day / date / day windows
-    preferredTimeStart: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-    preferredTimeEnd: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-    preferredTimeWindows: z.array(timeWindowSchema).max(10).optional(),
-    preferredDays: z.array(z.string()).optional(),
-    daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(), // legacy; normalized to preferredDays
+    // Date window + range subtraction
     lastResort: z.array(z.string()).optional(),
     dateRange: dateRangeSchema.optional(),
     blockedRanges: z.array(blockedRangeSchema).max(10).optional(),
-    allowWeekends: z.boolean().optional(),
     startTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
     timingLabel: z.string().max(80).optional(),
+
+    // Three-band availability + preferred (2026-05-01).
+    // Replaces preferredTimeStart/End, preferredTimeWindows, preferredDays,
+    // allowWeekends, slotOverrides, exclusiveSlots — all removed (hard cut).
+    availability: availabilitySpecSchema.optional(),
+    preferred: preferredSpecSchema.optional(),
 
     // Deferrals — accepted on BOTH create AND update (the bug this proposal fixes)
     guestPicks: guestPicksSchema.optional(),
     guestGuidance: guestGuidanceSchema.optional(),
 
-    // Intent / steering
-    intent: intentSchema.partial().optional(), // partial because LLM sometimes emits {steering: ...}
+    // Intent / steering — kept as classification field only (no scoring effect).
+    intent: intentSchema.partial().optional(),
     steering: z.enum(["open", "soft", "narrow", "exclusive"]).optional(),
 
     // Recurrence — passthrough to the existing `parseRecurrence` validator.
-    // NOT part of this proposal's type-safety guarantee; tightening would
-    // require importing the recurrence Zod (if one exists). Flagged as a
-    // low-priority follow-up in the proposal §3.A; not blocking.
     recurrence: z.unknown().optional(),
 
     // Series-edit param for recurring links — same passthrough rationale.
@@ -144,19 +142,10 @@ export type ParseResult =
  * Validate the LLM-emitted params and return a typed patch.
  *
  *  - `mode === "create"`: at least one of `inviteeNames` or `inviteeName` is
- *    required. Other fields all optional. The handler applies physical-
- *    activity defaults (format → in-person, location → guestPicks.location:
- *    true) post-parse.
+ *    required. Other fields all optional.
  *  - `mode === "update"`: all fields optional, but the patch must contain at
  *    least one *assignable* field — otherwise the gate trips with
- *    "needs at least one field to change". Crucially, `guestPicks` and
- *    `guestGuidance` count as assignable; today's update_link handler
- *    incorrectly treats them as "no field changed", which is the structural
- *    bug this proposal fixes.
- *
- * Field-shape rejections (negative duration, malformed format, > 10
- * blockedRanges, etc.) are caught by the underlying Zod schema; the
- * mode-specific gate sits on top.
+ *    "needs at least one field to change".
  */
 export function parseLinkPatch(
   params: Record<string, unknown>,
@@ -184,7 +173,8 @@ export function parseLinkPatch(
   // Excluded keys: `code`/`sessionId` (routing only), `intent`/`steering`
   // (a bare steering update is treated as a probable LLM mistake — preserves
   // §4.7 split rule from the 2026-04-21 host-intent-steering proposal).
-  // Everything else, including `guestPicks` and `guestGuidance`, counts.
+  // Everything else, including `availability`, `preferred`, `guestPicks`,
+  // and `guestGuidance`, counts.
   const ROUTING_KEYS = new Set(["code", "sessionId"]);
   const STEERING_KEYS = new Set(["intent", "steering"]);
   const assignableKeys = Object.keys(patch).filter(
@@ -206,9 +196,9 @@ export const LINK_PATCH_KEYS = [
   "topic", "inviteeName", "inviteeNames", "inviteeEmail", "inviteeTimezone", "hostNote",
   "format", "duration", "minDuration", "isVip", "urgency",
   "activity", "activityIcon", "activityOptions", "location",
-  "preferredTimeStart", "preferredTimeEnd", "preferredTimeWindows",
-  "preferredDays", "daysOfWeek", "lastResort", "dateRange", "blockedRanges",
-  "allowWeekends", "startTime", "timingLabel",
+  "lastResort", "dateRange", "blockedRanges",
+  "startTime", "timingLabel",
+  "availability", "preferred",
   "guestPicks", "guestGuidance",
   "intent", "steering",
   "recurrence", "seriesChange",

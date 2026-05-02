@@ -29,9 +29,9 @@ describe("calendar-event-composer.md playbook", () => {
     expect(playbook).not.toMatch(/agentenvoy-action/);
   });
 
-  it("does NOT prescribe the 'ready to share' trigger phrase", () => {
-    expect(playbook).not.toMatch(/ready to share/i);
-  });
+  // Note: "ready to share" IS now an officially-prescribed phrase per F9
+  // (recurring meeting confirmation, 2026-05-01). Removed the prior negative
+  // assertion that conflicted with the F9 fix.
 
   it("instructs emission in the single [ACTION] format", () => {
     expect(playbook).toMatch(/\[ACTION\]\{\.\.\.\}\[\/ACTION\]/);

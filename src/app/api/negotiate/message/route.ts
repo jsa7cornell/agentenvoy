@@ -157,8 +157,9 @@ export async function POST(req: NextRequest) {
       };
       scoredSlots = schedule.slots;
 
-      // Apply link-level overrides (preferredDays, dateRange, slot overrides)
-      // so the LLM sees the same filtered set as the widget and greeting.
+      // Apply link-level filters (availability, dateRange, blockedRanges,
+      // lastResort) so the LLM sees the same filtered set as the widget and
+      // greeting.
       const lr = parseLinkParameters(session.link.parameters);
       if (Object.keys(lr).length > 0) {
         const hostPrefs = (session.host.preferences as Record<string, unknown>) || {};

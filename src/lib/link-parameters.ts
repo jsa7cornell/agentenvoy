@@ -11,22 +11,117 @@
  * to the JSON without a schema change first; the type definition tightens
  * incrementally as fields stabilize.
  *
- * The `LinkParameters` TS interface in `scoring.ts:1426` remains the canonical
+ * The `LinkParameters` TS interface in `scoring.ts` remains the canonical
  * shape for *consumers* (it carries field-level JSDoc); this Zod schema is its
  * runtime validator. They must stay in sync — adding a field to the interface
- * means adding it here. CI grep for new `link.parameters` reads outside the
- * `parseLinkParameters()` callsite would be a future hardening (Rule 19-style).
+ * means adding it here.
+ *
+ * 2026-05-01 — `availability` + `preferred` introduced; `preferredTimeStart`,
+ * `preferredTimeEnd`, `preferredTimeWindows`, `preferredDays`, `allowWeekends`,
+ * `slotOverrides`, `exclusiveSlots` removed (hard cut). See proposal
+ * `2026-05-01_event-availability-vs-preferred-vs-calendar-scoring`.
  */
 
 import { z } from "zod";
 
-// Bare-leaf shapes used inside LinkParameters.
-const slotOverrideSchema = z.object({
-  start: z.string(),
+// ---------------------------------------------------------------------------
+// Reusable leaf shapes — exported so future User-level defaults and
+// guest-side composition surfaces can compose them without redesign.
+// (Per proposal §Architecture "Cross-surface reuse — why the standalone
+// types matter".)
+// ---------------------------------------------------------------------------
+
+export const dayNameSchema = z.enum([
+  "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
+]);
+export type DayName = z.infer<typeof dayNameSchema>;
+
+export const timeWindowSchema = z.object({
+  start: z.string().regex(/^\d{2}:\d{2}$/, "HH:MM 24-hour format"),
+  end: z.string().regex(/^\d{2}:\d{2}$/, "HH:MM 24-hour format"),
+});
+
+export const slotInstanceSchema = z.object({
+  start: z.string(), // ISO 8601 datetime with offset
   end: z.string(),
-  score: z.number(),
   label: z.string().optional(),
 });
+
+/**
+ * Event-availability layer — defines what THIS link makes bookable,
+ * additively or restrictively relative to the host's calendar
+ * availability. Can be ≥ or ≤ calendar availability.
+ */
+export const availabilitySpecSchema = z
+  .object({
+    /**
+     * Additively extends what's offerable beyond the host's normal
+     * calendar availability (off-hours, weekends, etc.). Each entry
+     * scopes to specific days, a time window, or both. At least one
+     * of `days` or `window` must be present per entry.
+     */
+    expand: z
+      .array(
+        z
+          .object({
+            days: z.array(dayNameSchema).optional(),
+            window: timeWindowSchema.optional(),
+          })
+          .refine((e) => !!e.days?.length || !!e.window, {
+            message: "expand entry needs at least one of `days` or `window`",
+          }),
+      )
+      .max(10)
+      .optional(),
+
+    /** Narrows the offerable set to ONLY these days. */
+    restrictToDays: z.array(dayNameSchema).optional(),
+
+    /** Narrows the offerable set to ONLY these per-day windows. */
+    restrictToWindows: z.array(timeWindowSchema).max(10).optional(),
+
+    /**
+     * Narrows the offerable set to ONLY these specific instances.
+     * Replaces legacy `slotOverrides[score: -2]` + `exclusiveSlots`.
+     */
+    restrictToSlots: z.array(slotInstanceSchema).max(50).optional(),
+
+    /**
+     * Excludes these specific instances from the offerable set.
+     * Replaces legacy `slotOverrides[score: 5]`. Composes with
+     * `blockedRanges` (range subtraction) — this is the named singular
+     * form for "this specific slot is out."
+     */
+    blockedSlots: z.array(slotInstanceSchema).max(50).optional(),
+  })
+  .strict();
+
+export type AvailabilitySpec = z.infer<typeof availabilitySpecSchema>;
+
+/**
+ * Preferred layer — decoration only. Picker shows everything available;
+ * greeting + MCP `slot.preferred` flag indicate which subset the host
+ * most prefers. Slots NOT in `preferred` remain fully offerable.
+ */
+export const preferredSpecSchema = z
+  .object({
+    days: z.array(dayNameSchema).optional(),
+    windows: z.array(timeWindowSchema).max(10).optional(),
+    /**
+     * Specific pinned instances. Replaces legacy `slotOverrides[score: -1]`.
+     * Pin-as-preference is structurally identical to pattern-as-preference;
+     * unifying here means the MCP `slot.preferred` derivation is one
+     * predicate over three sources, no special cases.
+     */
+    slots: z.array(slotInstanceSchema).max(50).optional(),
+  })
+  .strict();
+
+export type PreferredSpec = z.infer<typeof preferredSpecSchema>;
+
+// ---------------------------------------------------------------------------
+// Other leaf shapes (link-internal — not exported for cross-surface reuse).
+// ---------------------------------------------------------------------------
 
 const guestPicksSchema = z.object({
   window: z
@@ -68,11 +163,6 @@ const dateRangeSchema = z.object({
   end: z.string().optional(),
 });
 
-const timeWindowSchema = z.object({
-  start: z.string(),
-  end: z.string(),
-});
-
 /**
  * One-off datetime ranges to subtract from offerable slots for THIS link.
  *
@@ -82,12 +172,13 @@ const timeWindowSchema = z.object({
  * emits a single `blockedRanges` entry with absolute ISO datetimes (host TZ
  * with offset).
  *
- * NOT a recurring per-day-of-week pattern — that's a separate feature
- * (extending `preferredTimeWindows` with per-day scoping if real usage
- * demands it; out of scope for this proposal).
+ * NOT a recurring per-day-of-week pattern. NOT to be confused with
+ * `availability.blockedSlots` (named singular slot exclusions, often pinned
+ * to specific 30-min slots) — `blockedRanges` is for arbitrary range
+ * subtraction within a `dateRange`.
  *
  * The slot generation pipeline subtracts these in the same pass that
- * subtracts calendar busy events (see scoring / slots route).
+ * subtracts calendar busy events.
  */
 const blockedRangeSchema = z.object({
   start: z.string(), // ISO 8601 with offset, e.g. "2026-04-30T17:00:00-07:00"
@@ -95,25 +186,60 @@ const blockedRangeSchema = z.object({
 });
 
 /**
+ * V1.5 posture fields — see proposal
+ * `2026-05-02_per-link-config-storage-and-scoring-link-scope`. These move
+ * host-level scheduling posture (hours/days/buffer/compiled rules/evenings)
+ * onto the link itself, so each variance link is independently scored.
+ * All fields optional in the schema for backwards-compat during the
+ * deploy window; `getLinkPosture` (lib/links/posture.ts) validates
+ * completeness on read for variance links.
+ */
+
+/** Compiled-rule shapes mirror scoring.ts. No `.passthrough()` here —
+ * the outer `linkParametersSchema` already does that for the whole blob,
+ * and adding it on inner objects produces a type wider than Prisma's
+ * `InputJsonValue` accepts at write sites. */
+const compiledBufferSchema = z.object({
+  beforeMinutes: z.number(),
+  afterMinutes: z.number(),
+  eventFilter: z.string(),
+});
+
+const compiledPriorityBucketSchema = z.object({
+  level: z.enum(["high", "low"]),
+  keywords: z.array(z.string()),
+});
+
+const allowWindowSchema = z.object({
+  start: z.string(), // "HH:MM" 24-hour
+  end: z.string(),
+  days: z.array(z.string()).optional(),
+  label: z.string().optional(),
+  expires: z.string().optional(),
+});
+
+const compiledRulesSchema = z.object({
+  buffers: z.array(compiledBufferSchema).optional(),
+  priorityBuckets: z.array(compiledPriorityBucketSchema).optional(),
+  allowWindows: z.array(allowWindowSchema).optional(),
+  ambiguities: z.array(z.string()).optional(),
+});
+
+const eveningsPostureSchema = z.enum(["protected", "vip_only", "open"]);
+
+/**
  * Zod schema mirroring `LinkParameters` in `scoring.ts`. `.passthrough()`
- * preserves unknown fields so forward-compat changes (e.g. wishlist `slotGrain`)
- * don't require a schema bump before the value is persisted.
+ * preserves unknown fields so forward-compat changes don't require a
+ * schema bump before the value is persisted.
  */
 export const linkParametersSchema = z
   .object({
     format: z.string().optional(),
     conditionalRules: z.array(conditionalRuleSchema).optional(),
-    preferredDays: z.array(z.string()).optional(),
     lastResort: z.array(z.string()).optional(),
-    preferredTimeStart: z.string().optional(),
-    preferredTimeEnd: z.string().optional(),
-    preferredTimeWindows: z.array(timeWindowSchema).optional(),
     blockedRanges: z.array(blockedRangeSchema).max(10).optional(),
     dateRange: dateRangeSchema.optional(),
-    slotOverrides: z.array(slotOverrideSchema).optional(),
-    exclusiveSlots: z.boolean().optional(),
     isVip: z.boolean().optional(),
-    allowWeekends: z.boolean().optional(),
     duration: z.number().optional(),
     minDuration: z.number().optional(),
     guestPicks: guestPicksSchema.optional(),
@@ -124,6 +250,20 @@ export const linkParametersSchema = z
     activityOptions: z.array(z.string()).optional(),
     timingLabel: z.string().optional(),
     intent: intentSchema.optional(),
+
+    // 2026-05-01 — three-band model. See proposal
+    // 2026-05-01_event-availability-vs-preferred-vs-calendar-scoring.
+    availability: availabilitySpecSchema.optional(),
+    preferred: preferredSpecSchema.optional(),
+
+    // 2026-05-02 — V1.5 per-link posture fields. See proposal
+    // 2026-05-02_per-link-config-storage-and-scoring-link-scope.
+    hoursStartMinutes: z.number().int().min(0).max(1440).optional(),
+    hoursEndMinutes: z.number().int().min(0).max(1440).optional(),
+    daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
+    bufferMinutes: z.number().int().min(0).optional(),
+    eveningsPosture: eveningsPostureSchema.optional(),
+    compiled: compiledRulesSchema.optional(),
   })
   .passthrough();
 
@@ -142,9 +282,6 @@ export function parseLinkParameters(input: unknown): ParsedLinkParameters {
   if (input == null || typeof input !== "object") return {};
   const result = linkParametersSchema.safeParse(input);
   if (result.success) return result.data;
-  // Log + return the partial-coerced result. .passthrough() means the success
-  // path is the common case; failures here are genuinely-malformed rows and
-  // we want to know about them.
   console.warn("[link-parameters] schema parse failed", {
     issues: result.error.flatten(),
   });

@@ -9,11 +9,17 @@
  *   — §4.6 asymmetric validator (step down, never step up)
  *   — §4.7 update-link split (LLM-driven edits always reclassify; direct-UI
  *     edits keep intent unless the rule shape materially narrowed)
- *   — §4.8 exclusive cross-layer invariant (`exclusive` requires a score -2
- *     slotOverride; otherwise step down to `narrow`)
+ *   — §4.8 exclusive cross-layer invariant (`exclusive` requires a host-pinned
+ *     exclusive slot; otherwise step down to `narrow`)
  *   — §4.9 misclassification cost asymmetry (open-side errors degrade
  *     gracefully; narrow-side errors produce the verbose-body failure mode
  *     that motivated this proposal).
+ *
+ * 2026-05-01 — narrowing-field detection rewritten to read the new
+ * `availability.*` / `preferred.*` schema. The §4.8 exclusive invariant now
+ * requires `availability.restrictToSlots.length > 0` (replacing the legacy
+ * `slotOverrides[score=-2]` check). Per proposal
+ * `2026-05-01_event-availability-vs-preferred-vs-calendar-scoring`.
  *
  * This module is pure (no I/O, no Prisma). Everything it reads comes in as
  * plain data so it can be unit-tested without the DB.
@@ -67,64 +73,81 @@ export function dateRangeSpanDays(rules: MaybeRules): number {
  * use the same predicate so the shim's behavior matches "the LLM said
  * narrow and also set a narrowing field" exactly.
  *
- * Narrowing fields (any one of):
- *   - `preferredDays` present and non-empty
- *   - `preferredTimeStart` / `preferredTimeEnd` set (single contiguous window)
- *   - `preferredTimeWindows` present and non-empty (multi-window)
- *   - `dateRange` span < 5 calendar days (PR #57 threshold — wider is a
- *     bracket, not a narrowing)
- *   - `slotOverrides` present and non-empty (includes both -2 exclusive and
- *     -1 preferred)
+ * Narrowing fields (any one of, per the 2026-05-01 schema rewrite):
+ *   - `availability.restrictToDays` present and non-empty
+ *   - `availability.restrictToWindows` present and non-empty
+ *   - `availability.restrictToSlots` present and non-empty
+ *   - `preferred.days` present and non-empty
+ *   - `preferred.windows` present and non-empty
+ *   - `preferred.slots` present and non-empty
+ *   - `dateRange` span < 5 calendar days (wider is a bracket, not a narrowing)
  */
 export function hasNarrowingField(rules: MaybeRules): boolean {
   if (!rules) return false;
-  const preferredDays = rules.preferredDays;
-  if (Array.isArray(preferredDays) && preferredDays.length > 0) return true;
-  if (typeof rules.preferredTimeStart === "string" && rules.preferredTimeStart) return true;
-  if (typeof rules.preferredTimeEnd === "string" && rules.preferredTimeEnd) return true;
-  const ptw = rules.preferredTimeWindows;
-  if (Array.isArray(ptw) && ptw.length > 0) return true;
+  const availability = rules.availability as
+    | {
+        restrictToDays?: unknown;
+        restrictToWindows?: unknown;
+        restrictToSlots?: unknown;
+      }
+    | undefined;
+  const restrictDays = availability?.restrictToDays;
+  if (Array.isArray(restrictDays) && restrictDays.length > 0) return true;
+  const restrictWindows = availability?.restrictToWindows;
+  if (Array.isArray(restrictWindows) && restrictWindows.length > 0) return true;
+  const restrictSlots = availability?.restrictToSlots;
+  if (Array.isArray(restrictSlots) && restrictSlots.length > 0) return true;
+
+  const preferred = rules.preferred as
+    | { days?: unknown; windows?: unknown; slots?: unknown }
+    | undefined;
+  const prefDays = preferred?.days;
+  if (Array.isArray(prefDays) && prefDays.length > 0) return true;
+  const prefWindows = preferred?.windows;
+  if (Array.isArray(prefWindows) && prefWindows.length > 0) return true;
+  const prefSlots = preferred?.slots;
+  if (Array.isArray(prefSlots) && prefSlots.length > 0) return true;
+
   if (dateRangeSpanDays(rules) < 5) return true;
-  const overrides = rules.slotOverrides;
-  if (Array.isArray(overrides) && overrides.length > 0) return true;
   return false;
 }
 
 /**
- * Does the rules blob have at least one `slotOverrides` entry with the
- * exclusive-tier score (-2)? Enforces the §4.8 cross-layer invariant:
- * `exclusive` is a scoring-level semantic, not just a presentation label.
+ * Does the rules blob have at least one `availability.restrictToSlots`
+ * entry? Enforces the §4.8 cross-layer invariant: `exclusive` is a
+ * scoring-level semantic, not just a presentation label.
+ *
+ * 2026-05-01 — replaces the legacy `slotOverrides[score=-2]` check.
  */
 export function hasExclusiveOverride(rules: MaybeRules): boolean {
   if (!rules) return false;
-  const overrides = rules.slotOverrides;
-  if (!Array.isArray(overrides)) return false;
-  return overrides.some((o) => {
-    if (!o || typeof o !== "object") return false;
-    return (o as { score?: unknown }).score === -2;
-  });
+  const availability = rules.availability as
+    | { restrictToSlots?: unknown }
+    | undefined;
+  const slots = availability?.restrictToSlots;
+  return Array.isArray(slots) && slots.length > 0;
 }
 
 /**
  * Is this an `exclusive`-tier link that collapses to a single prescriptive
- * offer — one `slotOverrides[score=-2]` entry, no other -2 alternatives?
+ * offer — exactly one `availability.restrictToSlots` entry?
+ *
  * The greeting renderer uses this to skip the bulleted schedule body and
  * render a one-liner ("We're proposing X. Confirmation below."); the
- * calendar widget already highlights the single -2 slot as the offer.
+ * calendar widget already highlights the single restricted slot as the offer.
  *
- * Deliberately permissive on non-slotOverride fields: dateRange /
- * preferredTimeWindows narrowing is EXPECTED for exclusive (they bracket
- * the one slot), not evidence of multiple alternatives.
+ * Deliberately permissive on other fields: dateRange / restrictToWindows
+ * narrowing is EXPECTED for exclusive (they bracket the one slot), not
+ * evidence of multiple alternatives.
  */
 export function isSingleSlotExclusive(rules: MaybeRules): boolean {
   if (!rules) return false;
-  const overrides = rules.slotOverrides;
-  if (!Array.isArray(overrides)) return false;
-  const exclusiveSlots = overrides.filter((o) => {
-    if (!o || typeof o !== "object") return false;
-    return (o as { score?: unknown }).score === -2;
-  });
-  return exclusiveSlots.length === 1;
+  const availability = rules.availability as
+    | { restrictToSlots?: unknown }
+    | undefined;
+  const slots = availability?.restrictToSlots;
+  if (!Array.isArray(slots)) return false;
+  return slots.length === 1;
 }
 
 /**
@@ -198,12 +221,15 @@ export function deriveLegacy(rules: MaybeRules): Steering {
  * doesn't use this helper); direct-UI edits keep the prior intent UNLESS
  * one of the material thresholds below trips.
  *
- * Material changes (any one of, prev → next):
+ * Material changes (any one of, prev → next, per the 2026-05-01 schema):
  *   - dateRange collapsed from ≥ 5 days to < 5 days
- *   - preferredTimeStart or preferredTimeEnd added where neither was set
- *   - preferredTimeWindows added where none was set
- *   - preferredDays added where none was set
- *   - slotOverrides added with score -2 where none was set
+ *   - `availability.restrictToDays` added where none was set
+ *   - `availability.restrictToWindows` added where none was set
+ *   - `availability.restrictToSlots` added where none was set (the new
+ *     §4.8 exclusive trigger)
+ *   - `preferred.days` added where none was set
+ *   - `preferred.windows` added where none was set
+ *   - `preferred.slots` added where none was set
  *
  * Returning `true` means the caller should re-run the classifier (or, for
  * non-LLM code paths, apply `deriveLegacy` + `validateIntent`). Returning
@@ -217,24 +243,26 @@ export function hasMaterialNarrowingChange(
   const nextSpan = dateRangeSpanDays(next);
   if (prevSpan >= 5 && nextSpan < 5) return true;
 
-  const prevTimeStart = typeof prev?.preferredTimeStart === "string" && prev.preferredTimeStart;
-  const nextTimeStart = typeof next?.preferredTimeStart === "string" && next.preferredTimeStart;
-  if (!prevTimeStart && nextTimeStart) return true;
-  const prevTimeEnd = typeof prev?.preferredTimeEnd === "string" && prev.preferredTimeEnd;
-  const nextTimeEnd = typeof next?.preferredTimeEnd === "string" && next.preferredTimeEnd;
-  if (!prevTimeEnd && nextTimeEnd) return true;
+  const addedNonEmpty = (
+    prevPath: unknown,
+    nextPath: unknown,
+  ): boolean => {
+    const prevArr = Array.isArray(prevPath) ? prevPath : [];
+    const nextArr = Array.isArray(nextPath) ? nextPath : [];
+    return prevArr.length === 0 && nextArr.length > 0;
+  };
 
-  const prevPtw = Array.isArray(prev?.preferredTimeWindows) ? prev!.preferredTimeWindows : [];
-  const nextPtw = Array.isArray(next?.preferredTimeWindows) ? next!.preferredTimeWindows : [];
-  if (prevPtw.length === 0 && nextPtw.length > 0) return true;
+  const prevAvail = (prev?.availability ?? {}) as Record<string, unknown>;
+  const nextAvail = (next?.availability ?? {}) as Record<string, unknown>;
+  if (addedNonEmpty(prevAvail.restrictToDays, nextAvail.restrictToDays)) return true;
+  if (addedNonEmpty(prevAvail.restrictToWindows, nextAvail.restrictToWindows)) return true;
+  if (addedNonEmpty(prevAvail.restrictToSlots, nextAvail.restrictToSlots)) return true;
 
-  const prevDays = Array.isArray(prev?.preferredDays) ? prev!.preferredDays : [];
-  const nextDays = Array.isArray(next?.preferredDays) ? next!.preferredDays : [];
-  if (prevDays.length === 0 && nextDays.length > 0) return true;
-
-  const prevHasExclusive = hasExclusiveOverride(prev);
-  const nextHasExclusive = hasExclusiveOverride(next);
-  if (!prevHasExclusive && nextHasExclusive) return true;
+  const prevPref = (prev?.preferred ?? {}) as Record<string, unknown>;
+  const nextPref = (next?.preferred ?? {}) as Record<string, unknown>;
+  if (addedNonEmpty(prevPref.days, nextPref.days)) return true;
+  if (addedNonEmpty(prevPref.windows, nextPref.windows)) return true;
+  if (addedNonEmpty(prevPref.slots, nextPref.slots)) return true;
 
   return false;
 }

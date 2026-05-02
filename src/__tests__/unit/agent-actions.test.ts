@@ -261,6 +261,9 @@ const mockPrisma = vi.hoisted(() => ({
   user: {
     findUnique: vi.fn(),
   },
+  account: {
+    findFirst: vi.fn(),
+  },
   hold: {
     create: vi.fn(),
     findFirst: vi.fn(),
@@ -314,7 +317,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
       type: "contextual",
       inviteeName: "Sarah",
       topic: "Q2 Planning",
-      rules: { format: "video", duration: 30 },
+      parameters: { format: "video", duration: 30 },
     },
     ...overrides,
   };
@@ -324,9 +327,13 @@ describe("executeActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPrisma.negotiationSession.update.mockResolvedValue({});
+    mockPrisma.negotiationSession.findMany.mockResolvedValue([]);
     mockPrisma.message.create.mockResolvedValue({});
     mockPrisma.message.count.mockResolvedValue(1);
     mockPrisma.sessionInvitee.createMany.mockResolvedValue({ count: 0 });
+    // Default: calendar connected — create_link gates on this. Tests that
+    // exercise the not-connected path override this.
+    mockPrisma.account.findFirst.mockResolvedValue({ scope: "calendar" });
   });
 
   // --- Archive ---
@@ -723,7 +730,7 @@ describe("executeActions", () => {
       // Link rules mirrored — this was the missing piece
       expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
         where: { id: "link-1" },
-        data: { rules: expect.objectContaining({ format: "in-person" }) },
+        data: { parameters: expect.objectContaining({ format: "in-person" }) },
       });
       // Thread system message so deal-room history reflects the change
       expect(mockPrisma.message.create).toHaveBeenCalledWith({
@@ -743,7 +750,7 @@ describe("executeActions", () => {
             type: "primary",
             inviteeName: null,
             topic: null,
-            rules: { format: "video" },
+            parameters: { format: "video" },
           },
         })
       );
@@ -823,7 +830,7 @@ describe("executeActions", () => {
       });
       expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
         where: { id: "link-1" },
-        data: { rules: expect.objectContaining({ duration: 50 }) },
+        data: { parameters: expect.objectContaining({ duration: 50 }) },
       });
     });
 
@@ -863,7 +870,7 @@ describe("executeActions", () => {
             type: "contextual",
             inviteeName: "Bob",
             topic: null,
-            rules: {
+            parameters: {
               format: "phone",
               duration: 30,
               dateRange: { start: "2026-04-20", end: "2026-04-20" },
@@ -887,7 +894,7 @@ describe("executeActions", () => {
       expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
         where: { id: "link-1" },
         data: {
-          rules: expect.objectContaining({
+          parameters: expect.objectContaining({
             dateRange: { start: "2026-04-20", end: "2026-04-22" },
           }),
         },
@@ -928,7 +935,7 @@ describe("executeActions", () => {
       expect(results[0].success).toBe(true);
       expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
         where: { id: "link-1" },
-        data: { rules: expect.objectContaining({ duration: 45 }) },
+        data: { parameters: expect.objectContaining({ duration: 45 }) },
       });
     });
   });
@@ -971,7 +978,7 @@ describe("executeActions", () => {
       // link.parameters mirror still happens
       expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
         where: { id: "link-1" },
-        data: { rules: expect.objectContaining({ location: "Café Nero" }) },
+        data: { parameters: expect.objectContaining({ location: "Café Nero" }) },
       });
       // statusLabel write is skipped
       expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
@@ -1004,7 +1011,7 @@ describe("executeActions", () => {
       expect(results[0].success).toBe(true);
       expect(mockPrisma.negotiationLink.update).toHaveBeenCalledWith({
         where: { id: "link-1" },
-        data: { rules: expect.objectContaining({ location: "Blue Bottle, Palo Alto" }) },
+        data: { parameters: expect.objectContaining({ location: "Blue Bottle, Palo Alto" }) },
       });
     });
   });
@@ -1299,7 +1306,11 @@ describe("executeActions", () => {
       userId: HOST_USER_ID,
       code: "hhkkkw",
       inviteeName: "Katherine",
-      rules: { format: "video", duration: 30, preferredDays: ["Mon", "Tue"] },
+      parameters: {
+        format: "video",
+        duration: 30,
+        availability: { restrictToDays: ["Mon", "Tue"] },
+      },
     };
 
     it("flags as VIP by code", async () => {
@@ -1319,7 +1330,7 @@ describe("executeActions", () => {
       expect(call.data.parameters).toMatchObject({
         format: "video",
         duration: 30,
-        preferredDays: ["Mon", "Tue"],
+        availability: { restrictToDays: ["Mon", "Tue"] },
         isVip: true,
       });
     });
@@ -1327,7 +1338,7 @@ describe("executeActions", () => {
     it("downgrades isVip (merge, not replace)", async () => {
       mockPrisma.negotiationLink.findFirst.mockResolvedValue({
         ...existingLink,
-        rules: { ...existingLink.rules, isVip: true },
+        parameters: { ...existingLink.parameters, isVip: true },
       });
       mockPrisma.negotiationLink.update.mockResolvedValue({ id: "link-1" });
 
@@ -1339,10 +1350,10 @@ describe("executeActions", () => {
       const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
       expect(call.data.parameters.isVip).toBe(false);
       // Other fields preserved
-      expect(call.data.parameters.preferredDays).toEqual(["Mon", "Tue"]);
+      expect(call.data.parameters.availability).toEqual({ restrictToDays: ["Mon", "Tue"] });
     });
 
-    it("unlocks weekends with explicit allowWeekends", async () => {
+    it("opens up early mornings via availability.expand (replaces preferredTimeStart)", async () => {
       mockPrisma.negotiationLink.findFirst.mockResolvedValue(existingLink);
       mockPrisma.negotiationLink.update.mockResolvedValue({ id: "link-1" });
 
@@ -1350,15 +1361,21 @@ describe("executeActions", () => {
         [
           {
             action: "expand_link",
-            params: { code: "hhkkkw", allowWeekends: true, preferredTimeStart: "06:00" },
+            params: {
+              code: "hhkkkw",
+              availability: {
+                expand: [{ window: { start: "06:00", end: "10:00" } }],
+              },
+            },
           },
         ],
         HOST_USER_ID
       );
 
       const call = mockPrisma.negotiationLink.update.mock.calls[0][0];
-      expect(call.data.parameters.allowWeekends).toBe(true);
-      expect(call.data.parameters.preferredTimeStart).toBe("06:00");
+      expect(call.data.parameters.availability).toEqual({
+        expand: [{ window: { start: "06:00", end: "10:00" } }],
+      });
     });
 
     it("rejects when no identifying code or sessionId provided (and no recent drafts)", async () => {
@@ -1383,7 +1400,7 @@ describe("executeActions", () => {
         id: "link-recent",
         code: "sfldk9",
         userId: HOST_USER_ID,
-        rules: { format: "video", duration: 30 },
+        parameters: { format: "video", duration: 30 },
         inviteeName: "Suzie",
       };
       mockPrisma.negotiationLink.findMany.mockResolvedValue([
@@ -1393,7 +1410,7 @@ describe("executeActions", () => {
       mockPrisma.negotiationSession.findFirst.mockResolvedValue({ id: "session-recent" });
       mockPrisma.negotiationLink.update.mockResolvedValue({
         ...recentLink,
-        rules: { format: "video", duration: 60 },
+        parameters: { format: "video", duration: 60 },
       });
 
       const results = await executeActions(
@@ -1493,7 +1510,7 @@ describe("executeActions", () => {
       userId: HOST_USER_ID,
       code: "yaeeds",
       inviteeName: "Ginger",
-      rules: { format: "video", duration: 60 },
+      parameters: { format: "video", duration: 60 },
     };
 
     it("skips follow-up on pre-engagement sessions (no greeting yet)", async () => {

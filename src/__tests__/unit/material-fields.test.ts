@@ -7,13 +7,13 @@ import {
 } from "@/lib/material-fields";
 
 describe("material-fields — module shape", () => {
-  it("MATERIAL_FIELDS is the canonical set the proposal §3.C names", () => {
+  it("MATERIAL_FIELDS includes the post-2026-05-01 set (availability + preferred replace legacy time/day fields)", () => {
     expect(MATERIAL_FIELDS).toEqual([
       "activity", "format", "duration", "location",
-      "dateRange", "preferredTimeStart", "preferredTimeEnd",
-      "preferredTimeWindows", "preferredDays", "blockedRanges",
+      "dateRange",
+      "availability", "preferred",
+      "blockedRanges",
       "inviteeNames", "topic",
-      // Added in proposal 2026-04-29_link-handler-consolidation §3.F.4.
       "guestPicks", "guestGuidance",
     ]);
   });
@@ -29,7 +29,8 @@ describe("material-fields — module shape", () => {
 describe("isMaterialField", () => {
   it("returns true for canonical entries", () => {
     expect(isMaterialField("activity")).toBe(true);
-    expect(isMaterialField("preferredTimeStart")).toBe(true);
+    expect(isMaterialField("availability")).toBe(true);
+    expect(isMaterialField("preferred")).toBe(true);
     expect(isMaterialField("blockedRanges")).toBe(true);
   });
 
@@ -39,6 +40,11 @@ describe("isMaterialField", () => {
     expect(isMaterialField("isVip")).toBe(false);
     expect(isMaterialField("activityIcon")).toBe(false);
     expect(isMaterialField("nope")).toBe(false);
+    // Removed legacy fields no longer count as material.
+    expect(isMaterialField("preferredDays")).toBe(false);
+    expect(isMaterialField("preferredTimeStart")).toBe(false);
+    expect(isMaterialField("allowWeekends")).toBe(false);
+    expect(isMaterialField("slotOverrides")).toBe(false);
   });
 });
 
@@ -47,20 +53,22 @@ describe("humanizeFieldList", () => {
     expect(humanizeFieldList(["activity", "duration"])).toEqual(["activity", "duration"]);
   });
 
-  it("dedupes preserving first-seen order — multiple time fields collapse to 'hours'", () => {
-    expect(humanizeFieldList(["preferredTimeStart", "preferredTimeEnd"])).toEqual(["hours"]);
-    expect(humanizeFieldList(["preferredTimeStart", "preferredTimeEnd", "preferredTimeWindows"]))
-      .toEqual(["hours"]);
+  it("availability and preferred each have their own pill label", () => {
+    expect(humanizeFieldList(["availability"])).toEqual(["availability"]);
+    expect(humanizeFieldList(["preferred"])).toEqual(["preferences"]);
+    expect(humanizeFieldList(["availability", "preferred"])).toEqual(["availability", "preferences"]);
   });
 
   it("preserves first-seen order across mixed fields with dedupe", () => {
     expect(
-      humanizeFieldList(["activity", "preferredTimeStart", "preferredTimeEnd", "blockedRanges"]),
-    ).toEqual(["activity", "hours", "blocked time"]);
+      humanizeFieldList(["activity", "availability", "blockedRanges"]),
+    ).toEqual(["activity", "availability", "blocked time"]);
   });
 
-  it("drops non-material entries silently", () => {
+  it("drops non-material entries silently (including removed legacy fields)", () => {
     expect(humanizeFieldList(["activity", "lastResort", "isVip", "duration"]))
+      .toEqual(["activity", "duration"]);
+    expect(humanizeFieldList(["activity", "preferredDays", "duration"]))
       .toEqual(["activity", "duration"]);
   });
 

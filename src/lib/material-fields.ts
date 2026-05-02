@@ -20,10 +20,11 @@ export const MATERIAL_FIELDS = [
   "duration",
   "location",
   "dateRange",
-  "preferredTimeStart",
-  "preferredTimeEnd",
-  "preferredTimeWindows",
-  "preferredDays",
+  // 2026-05-01 — three-band schema. `availability.{expand|restrictTo*|
+  // blockedSlots}` and `preferred.{days|windows|slots}` replace the legacy
+  // preferredTimeStart/End/Windows/Days and slotOverrides fields.
+  "availability",
+  "preferred",
   "blockedRanges",
   "inviteeNames",
   "topic",
@@ -40,8 +41,7 @@ export type MaterialField = typeof MATERIAL_FIELDS[number];
 
 /**
  * Humanizer for the pill label. Keeps display copy stable when codebase
- * field names drift. Several timing fields collapse to a single label
- * ("hours") so the pill says "activity, hours" not "activity, hours, hours".
+ * field names drift.
  *
  * Pill render dedupes the output of mapping fields through this map — see
  * humanizeFieldList below.
@@ -52,10 +52,8 @@ export const FIELD_LABEL: Record<MaterialField, string> = {
   duration: "duration",
   location: "location",
   dateRange: "dates",
-  preferredTimeStart: "hours",
-  preferredTimeEnd: "hours",
-  preferredTimeWindows: "hours",
-  preferredDays: "days",
+  availability: "availability",
+  preferred: "preferences",
   blockedRanges: "blocked time",
   inviteeNames: "guests",
   topic: "title",
@@ -75,8 +73,7 @@ export function isMaterialField(field: string): field is MaterialField {
  * preserving first-seen order. Used by the pill render so callers don't have
  * to repeat the dedupe logic.
  *
- * Example: ["preferredTimeStart","preferredTimeEnd","blockedRanges"]
- *   → ["hours","blocked time"]
+ * Example: ["availability","blockedRanges"] → ["availability","blocked time"]
  */
 export function humanizeFieldList(fields: readonly string[]): string[] {
   const seen = new Set<string>();
