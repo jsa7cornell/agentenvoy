@@ -291,14 +291,16 @@ describe("POST /api/mcp/host — get_my_availability (PR-2)", () => {
     const parsed = JSON.parse(text!);
     expect(parsed.ok).toBe(true);
     expect(parsed.timezone).toBe("America/Los_Angeles");
-    // Best-first: -1 (preferred) before 0
+    // Best-first: -1 (lower score) before 0
     expect(parsed.slots[0].score).toBe(-1);
-    expect(parsed.slots[0].preferred).toBe(true);
     expect(parsed.slots[1].score).toBe(0);
+    // 2026-05-01 event-availability rewrite: host-side `get_my_availability`
+    // is called with empty rules (no per-link availability/preferred fields,
+    // because there's no link — the principal is the host directly). Under
+    // the new scoring-emit derivation, `preferred` is membership-based, so
+    // both slots emit `preferred: undefined` regardless of score. SPEC §8.
+    expect(parsed.slots[0].preferred).toBeUndefined();
     expect(parsed.slots[1].preferred).toBeUndefined();
-    // localStart is host-TZ formatted, no offset
-    expect(parsed.slots[0].localStart).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
-    expect(parsed.slots[0].localStart).not.toMatch(/Z|[+-]\d{2}:\d{2}/);
   });
 
   it("disconnected calendar returns calendar_not_connected refusal", async () => {

@@ -81,22 +81,46 @@ describe("buildAgentSnapshot — shape", () => {
     expect(snap.slots).toHaveLength(1);
     const s = snap.slots[0];
     expect(s.start).toBe(future);
-    expect(s.localStart).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
-    // localStart is offset-less, so it should NOT contain Z or +/-NN:NN
-    expect(s.localStart).not.toMatch(/Z|[+-]\d{2}:\d{2}/);
+    // 2026-05-01 — localStart now carries an explicit offset suffix
+    // (e.g. "2026-05-04T09:30:00-07:00") to disambiguate per FEEDBACK.md.
+    expect(s.localStart).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
   });
 
-  it("preferred slots (score <= -1) get preferred:true", async () => {
+  it("preferred is derived from rule membership, not from score", async () => {
+    // Behavior change as of 2026-05-01 event-availability rewrite: a slot
+    // with score -1 alone is NOT preferred — preferred requires membership
+    // in `availability.restrictToSlots` or `preferred.{days|windows|slots}`.
+    // Documented per SPEC §8 + scoring-emit.ts derivation rules.
     const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     mockSchedule.mockResolvedValueOnce({
       connected: true,
       slots: [mkSlot(future, -1), mkSlot(future, 0)],
     });
     const snap = await buildAgentSnapshot(mkLink(), mkHost());
-    const preferred = snap.slots.find((s) => s.score === -1);
-    const unpreferred = snap.slots.find((s) => s.score === 0);
-    expect(preferred?.preferred).toBe(true);
-    expect(unpreferred?.preferred).toBeUndefined();
+    // Empty rules → no preferred flag on any slot, regardless of score
+    expect(snap.slots.every((s) => s.preferred === undefined)).toBe(true);
+  });
+
+  it("preferred:true emitted when slot is in preferred.days rule", async () => {
+    // Wed 2026-05-06 09:00 PT = 16:00 UTC. mkSlot's start is the input;
+    // we use a fixed Wed timestamp so timezone-day classification is stable.
+    const wedSlot = {
+      start: "2026-05-06T16:00:00.000Z",
+      end: "2026-05-06T16:30:00.000Z",
+      score: 0,
+    };
+    mockSchedule.mockResolvedValueOnce({
+      connected: true,
+      slots: [wedSlot],
+    });
+    const snap = await buildAgentSnapshot(
+      mkLink({ parameters: { format: "video", duration: 30, preferred: { days: ["Wed"] } } }),
+      mkHost(),
+    );
+    expect(snap.slots).toHaveLength(1);
+    expect(snap.slots[0].preferred).toBe(true);
+    // deriveEmittedScore promotes preferred slots to -1.
+    expect(snap.slots[0].score).toBe(-1);
   });
 
   it("default limit is 20 (aligned with get_availability)", async () => {

@@ -47,6 +47,10 @@ import { resolveParameters } from "@/lib/mcp/parameter-resolver";
 import { confirmBooking } from "@/lib/confirm-pipeline";
 import { cancelSession } from "@/lib/cancel-pipeline";
 import { rescheduleSession } from "@/lib/reschedule-pipeline";
+import {
+  deriveEmittedScore,
+  deriveEmittedPreferred,
+} from "@/lib/scoring-emit";
 import { handleLockActivityLocation as lockActivityLocationCore } from "@/agent/actions";
 import { writeMcpCallLog } from "@/lib/mcp/call-log";
 import {
@@ -312,6 +316,12 @@ export async function handleGetAvailability(
 
   // Score filter — mirrors slots-route. Exclusive overrides win; VIP links
   // permit protected-band stretches; everyone else gets score ≤ 1.
+  //
+  // IMPORTANT (Round 2 MCP-N3 of the 2026-05-01 event-availability proposal):
+  // these filters read the UNMUTATED host-stable `s.score` from `scoreSlot`.
+  // The wire-emit integer is derived per-slot at the wire-emit step below
+  // (`deriveEmittedScore`) and does NOT feed back into this filter — same
+  // host-stable score in, derived integer out at emit time only.
   const isVip = !!(rules as Record<string, unknown>).isVip;
   const hasExclusive = slots.some((s) => s.score === -2);
   if (hasExclusive) {
@@ -389,7 +399,15 @@ export async function handleGetAvailability(
 
   // Emit wire shape. Map "first-offer" (internal) → "first_offer" (schema).
   // localStart is full ISO 8601 with TZ offset (e.g., "2026-05-05T09:00:00-07:00").
-  // Updated 2026-05-01 — was offset-less; friend's FEEDBACK.md flagged ambiguity.
+  //
+  // Score + preferred derivation routed through `scoring-emit.ts` (the
+  // single source of truth for wire-emit derivation per the 2026-05-01
+  // event-availability proposal). This handles the new three-band model:
+  // calendar-availability per-host stable, event-availability per-link
+  // (expand/restrict), preferred per-link (decoration only). The host-stable
+  // `s.score` from `scoreSlot` is read by the band filters above (lines
+  // ~315-323) and is NOT mutated; the wire-emit integer + boolean below
+  // are derived per-call.
   const wireSlots = slots.map((s) => {
     const tier = getTier(s, rules, timezone);
     const wireTier =
@@ -400,16 +418,14 @@ export async function handleGetAvailability(
           : tier === "stretch2"
             ? "stretch2"
             : undefined;
-    // `preferred` mirrors the web greeting's `isPreferred` predicate
-    // (`score <= -1`) so guest agents get the same star-worthiness signal
-    // without hardcoding the threshold. SPEC invariant #9.
-    const preferred = s.score <= -1;
+    const emittedScore = deriveEmittedScore(s, rules, timezone);
+    const preferred = deriveEmittedPreferred(s, rules, timezone);
     const localStart = formatIsoWithOffset(new Date(s.start), timezone);
     return {
       start: s.start,
       end: s.end,
       localStart,
-      score: s.score,
+      score: emittedScore,
       ...(wireTier ? { tier: wireTier } : {}),
       ...(preferred ? { preferred: true } : {}),
     };

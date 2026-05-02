@@ -32,6 +32,10 @@ import { prisma } from "@/lib/prisma";
 import { getUserTimezone } from "@/lib/timezone";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { getTier, type ScoredSlot, type LinkParameters } from "@/lib/scoring";
+import {
+  deriveEmittedScore,
+  deriveEmittedPreferred,
+} from "@/lib/scoring-emit";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -173,7 +177,13 @@ async function handleGetMyAvailabilityTool(
   });
 
   // No link rules to drive tier/VIP semantics → emit the bookable-band tier
-  // for everything. Empty rules object passed to getTier; preferred from score.
+  // for everything. Empty rules passed to the shared derivation helpers;
+  // with no per-link expansion / restriction / preferred fields, both
+  // helpers fall through to identity (`emittedScore === s.score`,
+  // `preferred: false`) — same observable output as the prior inline
+  // derivation. The fold is structural: future User-level
+  // `availability.*` / `preferred.*` defaults will route through the
+  // same helper. MCP-B1 fold of the 2026-05-01 event-availability proposal.
   const emptyRules = {} as LinkParameters;
   const wireSlots = slots.map((s) => {
     const tier = getTier(s, emptyRules, hostTimezone);
@@ -182,13 +192,14 @@ async function handleGetMyAvailabilityTool(
       : tier === "stretch1" ? "stretch1"
       : tier === "stretch2" ? "stretch2"
       : undefined;
-    const preferred = s.score <= -1;
+    const emittedScore = deriveEmittedScore(s, emptyRules, hostTimezone);
+    const preferred = deriveEmittedPreferred(s, emptyRules, hostTimezone);
     const localStart = localFmt.format(new Date(s.start)).replace(" ", "T");
     return {
       start: s.start,
       end: s.end,
       localStart,
-      score: s.score,
+      score: emittedScore,
       ...(wireTier ? { tier: wireTier } : {}),
       ...(preferred ? { preferred: true } : {}),
     };

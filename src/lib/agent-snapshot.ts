@@ -30,6 +30,10 @@ import type { NegotiationLink } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getUserTimezone, formatIsoWithOffset } from "@/lib/timezone";
 import {
+  deriveEmittedScore,
+  deriveEmittedPreferred,
+} from "@/lib/scoring-emit";
+import {
   applyEventOverrides,
   filterByDuration,
   getTier,
@@ -220,6 +224,11 @@ export async function buildAgentSnapshot(
 
   // Score filter — exclusive overrides win; VIP gets stretches; everyone
   // else is bookable-band only. Mirrors `tools.ts` ~315.
+  //
+  // IMPORTANT (Round 2 MCP-N3 of the 2026-05-01 event-availability proposal):
+  // these filters read the UNMUTATED host-stable `s.score` from `scoreSlot`.
+  // The wire-emit integer is derived per-slot at the wire-emit step below
+  // (`deriveEmittedScore`) and does NOT feed back into this filter.
   const isVip = !!(rules as Record<string, unknown>).isVip;
   const hasExclusive = slots.some((s) => s.score === -2);
   if (hasExclusive) {
@@ -290,6 +299,13 @@ export async function buildAgentSnapshot(
   // Format localStart in host TZ as full ISO 8601 with offset suffix
   // (e.g. "2026-05-04T09:30:00-07:00"). Friend's FEEDBACK.md 2026-05-01:
   // earlier offset-less format ("2026-05-04T09:30:00") was ambiguous.
+  //
+  // Score + preferred derivation routed through `scoring-emit.ts` (the
+  // single source of truth for wire-emit derivation per the 2026-05-01
+  // event-availability proposal). Both /agent.json (this code path) and
+  // /api/mcp `get_availability` (tools.ts) call the same helpers — they
+  // can't drift on what `slot.preferred` means. The handoff originally
+  // missed this site; flagged + folded same day.
   const wireSlots: WireSlot[] = slots.map((s) => {
     const tier = getTier(s, rules, timezone);
     const wireTier =
@@ -300,13 +316,14 @@ export async function buildAgentSnapshot(
           : tier === "stretch2"
             ? ("stretch2" as const)
             : undefined;
-    const preferred = s.score <= -1;
+    const emittedScore = deriveEmittedScore(s, rules, timezone);
+    const preferred = deriveEmittedPreferred(s, rules, timezone);
     const localStart = formatIsoWithOffset(new Date(s.start), timezone);
     return {
       start: s.start,
       end: s.end,
       localStart,
-      score: s.score,
+      score: emittedScore,
       ...(wireTier ? { tier: wireTier } : {}),
       ...(preferred ? { preferred: true as const } : {}),
     };
