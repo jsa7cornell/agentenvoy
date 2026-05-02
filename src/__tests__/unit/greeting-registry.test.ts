@@ -56,6 +56,8 @@ function baseInput(overrides: Partial<GreetingInput> = {}): GreetingInput {
     deferralFieldsList: null,
     calendarPitch: null,
     toneLine: null,
+    recurrence: null,
+    occurrenceIndex: null,
     ...overrides,
   };
 }
@@ -468,6 +470,136 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
         "Excited to chat!",
         "Let me know how long works for you.",
         "Pick a time below. Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
+      ].join("\n\n"),
+    );
+  });
+});
+
+// ─── Recurring templates (2026-05-01 recurring-meeting proposal) ─────────────
+
+const weeklyCountRec = {
+  v: "1" as const,
+  pattern: "weekly" as const,
+  timezone: "America/Los_Angeles",
+  anchor: { firstDateLocal: "2026-06-02", timeLocal: "15:00", durationMin: 30 },
+  endBy: { count: 10 },
+};
+
+const biweeklyUntilRec = {
+  v: "1" as const,
+  pattern: "biweekly" as const,
+  timezone: "America/Los_Angeles",
+  anchor: { firstDateLocal: "2026-06-02", timeLocal: "15:00", durationMin: 45 },
+  endBy: { until: "2026-08-30T00:00:00Z" },
+};
+
+describe("selectGreeting — recurring templates take priority over anonymous", () => {
+  it("routes recurring-with-null-occurrenceIndex to recurring-meeting-anchor", () => {
+    const input = baseInput({ recurrence: weeklyCountRec, occurrenceIndex: null });
+    expect(selectGreeting(input).key).toBe("recurring-meeting-anchor");
+  });
+
+  it("routes recurring-with-occurrenceIndex-0 to recurring-meeting-anchor (0 = anchor session view, not followup)", () => {
+    // occurrenceIndex 0 means anchor committed but still the anchor occurrence
+    // The followup template only fires for ≥1
+    const input = baseInput({ recurrence: weeklyCountRec, occurrenceIndex: 0 });
+    expect(selectGreeting(input).key).toBe("recurring-meeting-anchor");
+  });
+
+  it("routes recurring-with-occurrenceIndex-1 to recurring-meeting-followup", () => {
+    const input = baseInput({ recurrence: weeklyCountRec, occurrenceIndex: 1 });
+    expect(selectGreeting(input).key).toBe("recurring-meeting-followup");
+  });
+
+  it("routes recurring anonymous (office-hours-with-series) to recurring-anchor over anonymous", () => {
+    // An office-hours-with-series child is BOTH isAnonymousLink=true AND has recurrence.
+    // Recurring takes priority.
+    const input = baseInput({
+      isAnonymousLink: true,
+      isOfficeHoursLink: true,
+      recurrence: weeklyCountRec,
+      occurrenceIndex: null,
+    });
+    expect(selectGreeting(input).key).toBe("recurring-meeting-anchor");
+  });
+});
+
+describe("greeting registry — recurring-meeting-anchor render", () => {
+  it("renders named anchor with count: 30 min, weekly, 10 sessions", () => {
+    const input = baseInput({
+      greeteeName: "Pat",
+      rawTopic: "piano lesson",
+      recurrence: weeklyCountRec,
+      occurrenceIndex: null,
+    });
+    const out = GREETINGS["recurring-meeting-anchor"].render(input);
+    expect(out).toBe(
+      [
+        "👋 Pat! I'm here to help you set up your piano lesson sessions with John.",
+        "Please pick from any of the slots below — they are 30 min long, recurring weekly at the same time (10 sessions).",
+        "If you need to change anything, I can help you make adjustments at any time.",
+      ].join("\n\n"),
+    );
+  });
+
+  it("renders anonymous anchor (office-hours-with-series) — greeteeName 'there', no count suffix for until-date", () => {
+    const input = baseInput({
+      greeteeName: "there",
+      isAnonymousLink: true,
+      isOfficeHoursLink: true,
+      rawTopic: "coaching",
+      recurrence: biweeklyUntilRec,
+      occurrenceIndex: null,
+    });
+    const out = GREETINGS["recurring-meeting-anchor"].render(input);
+    expect(out).toBe(
+      [
+        "👋 there! I'm here to help you set up your coaching sessions with John.",
+        "Please pick from any of the slots below — they are 45 min long, recurring every other week at the same time.",
+        "If you need to change anything, I can help you make adjustments at any time.",
+      ].join("\n\n"),
+    );
+  });
+
+  it("falls back to 'meeting' topic when rawTopic is null", () => {
+    const input = baseInput({
+      greeteeName: "Alex",
+      rawTopic: null,
+      recurrence: weeklyCountRec,
+      occurrenceIndex: null,
+    });
+    const out = GREETINGS["recurring-meeting-anchor"].render(input);
+    expect(out).toContain("your meeting sessions with John");
+  });
+});
+
+describe("greeting registry — recurring-meeting-followup render", () => {
+  it("renders session N of total for count-based endBy", () => {
+    const input = baseInput({
+      greeteeName: "Pat",
+      recurrence: weeklyCountRec,
+      occurrenceIndex: 2, // 3rd session (0-based), display as "Session 3 of 10"
+    });
+    const out = GREETINGS["recurring-meeting-followup"].render(input);
+    expect(out).toBe(
+      [
+        "👋 Pat! Session 3 of 10 with John is coming up.",
+        "This is your recurring weekly slot — confirm below or let me know if anything needs to shift.",
+      ].join("\n\n"),
+    );
+  });
+
+  it("renders session N without total for until-date endBy", () => {
+    const input = baseInput({
+      greeteeName: "Pat",
+      recurrence: biweeklyUntilRec,
+      occurrenceIndex: 1,
+    });
+    const out = GREETINGS["recurring-meeting-followup"].render(input);
+    expect(out).toBe(
+      [
+        "👋 Pat! Session 2 with John is coming up.",
+        "This is your recurring every other week slot — confirm below or let me know if anything needs to shift.",
       ].join("\n\n"),
     );
   });

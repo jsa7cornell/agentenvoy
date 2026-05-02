@@ -34,6 +34,7 @@ import {
   type GreetingInput,
   type DeferralFieldNoun,
 } from "@/agent/greetings/registry";
+import { readRecurrence } from "@/lib/recurrence";
 // formatAvailabilitySlotList / formatAvailabilityProse / formatStretchDays /
 // buildOpenWindowGreeting removed 2026-04-23 when the bulleted schedule body
 // and guestPicks open-window template were folded into the unified greeting
@@ -1064,6 +1065,12 @@ export async function POST(req: NextRequest) {
       deferralFieldsList,
       calendarPitch,
       toneLine: guestGuidance?.tone ? guestGuidance.tone : null,
+      // Recurring-meeting fields (§5.6 of the 2026-05-01 recurring proposal).
+      // `recurrence` is parsed from the Prisma JsonValue; null for non-recurring links.
+      // `occurrenceIndex` is null until the LinkOccurrence table lookup is wired —
+      // the recurring-anchor template handles this correctly (null = first-pick visit).
+      recurrence: readRecurrence(link.recurrence),
+      occurrenceIndex: null,
     };
     greeting = selectGreeting(greetingInput).render(greetingInput);
   }

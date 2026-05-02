@@ -58,9 +58,11 @@
  */
 
 import { formatDuration } from "@/lib/format-duration";
+import { formatCadenceWord, formatEndByLabel } from "@/lib/format-recurrence";
 import { formatLabel } from "@/lib/greeting-template";
 import { isSingleSlotExclusive } from "@/lib/intent";
 import type { Steering } from "@/lib/intent";
+import type { LinkRecurrence } from "@/lib/recurrence";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,8 @@ import type { Steering } from "@/lib/intent";
  */
 export const GREETING_KEYS = [
   "single-slot-lock",
+  "recurring-meeting-anchor",
+  "recurring-meeting-followup",
   "anonymous",
   "proposal",
   "find-time",
@@ -219,6 +223,38 @@ export interface GreetingInput {
 
   /** Sanitized host tone string from guidance, surfaced verbatim. May be null. */
   toneLine: string | null;
+
+  /**
+   * Recurrence config copied from `link.recurrence` via `readRecurrence()`.
+   * Null for single (non-recurring) meetings.
+   *
+   * Present for both creation paths that produce a recurring meeting:
+   *   - Direct contextual: `handleCreateLink` with `recurrence` populated
+   *     ("10 weekly piano lessons with Pat").
+   *   - Office-hours-with-series: materialized child link where
+   *     `buildRecurrenceFromSeries(oh.series)` was copied into `link.recurrence`
+   *     at visit time.
+   *
+   * When non-null, drives the recurring-meeting-anchor / recurring-meeting-followup
+   * template selection. Other templates ignore this field.
+   */
+  recurrence: LinkRecurrence | null;
+
+  /**
+   * Which occurrence this session represents, 0-based. Null at the
+   * anchor-pick visit (guest hasn't committed to a first slot yet).
+   * 0 = anchor occurrence; ≥1 = follow-up occurrence.
+   *
+   * Drives the anchor vs. followup template split:
+   *   null → recurring-meeting-anchor (guest picks the first slot)
+   *   ≥1   → recurring-meeting-followup (subsequent session reminder)
+   *
+   * NOTE: wired from `LinkOccurrence.occurrenceIndex` once that lookup is
+   * added to the session/route.ts assembly. Pass null for all sessions
+   * until then — the anchor template fires correctly for the current
+   * first-visit use case.
+   */
+  occurrenceIndex: number | null;
 }
 
 export interface GreetingTemplate {
@@ -352,6 +388,107 @@ const singleSlotLockTemplate: GreetingTemplate = {
     })();
     const proposal = `${durPart}${activityPart}${locPart}${whenPart}`;
     return `👋 ${greeteeName}! Envoy lined up a time — ${proposal}. Confirm below, or let me know if anything needs to shift.`;
+  },
+};
+
+// ─── Branch R-anchor: recurring meeting, first-slot-pick visit ───────────────
+
+/**
+ * "👋 {Name}! I'm here to help you set up your {topic} sessions with {Host}.
+ *  Please pick from any of the slots below — they are {dur} long, recurring
+ *  {cadence} at the same time{count suffix}.
+ *  If you need to change anything, I can help you make adjustments at any time."
+ *
+ * Fires when `link.recurrence` is set AND `occurrenceIndex` is null — the
+ * guest hasn't committed to an anchor slot yet. This is the first (and usually
+ * only) thing they see when opening a recurring-meeting link.
+ *
+ * Covers both creation paths:
+ *   - Named / direct-contextual: greeteeName is "Pat" (set at create time)
+ *   - Anonymous / office-hours-with-series: greeteeName is "there" (no inviteeName)
+ *
+ * The render is identical for both voice modes because the user's copy is
+ * greeting-first ("I'm here to help you set up…") rather than introducing
+ * the agent. If anonymous-specific framing is needed in future, add an
+ * `isAnonymousLink` branch here.
+ */
+const recurringAnchorTemplate: GreetingTemplate = {
+  key: "recurring-meeting-anchor",
+  description:
+    "First-slot-pick greeting for a recurring meeting series. " +
+    "Fires when link.recurrence is set and occurrenceIndex is null.",
+  // Anchor: fires for null (pre-commitment first visit) OR 0 (the anchor
+  // occurrence itself). Both represent "the first session." Occurrence ≥1 is
+  // the followup template's domain.
+  match: (input) =>
+    !!input.recurrence &&
+    (input.occurrenceIndex == null || input.occurrenceIndex === 0),
+  render: (input) => {
+    const { greeteeName, hostFirstName, recurrence, rawTopic } = input;
+    const rec = recurrence!;
+
+    const durStr = formatDuration(rec.anchor.durationMin);
+    const cadence = formatCadenceWord(rec);
+    const topicNoun = rawTopic ?? "meeting";
+
+    // Optional session count — appended in parens when endBy.count is set.
+    // Omitted for until-date endBy (less intuitive inline; card subtitle covers it).
+    const countSuffix =
+      "count" in rec.endBy
+        ? ` (${rec.endBy.count} session${rec.endBy.count === 1 ? "" : "s"})`
+        : "";
+
+    return [
+      `👋 ${greeteeName}! I'm here to help you set up your ${topicNoun} sessions with ${hostFirstName}.`,
+      `Please pick from any of the slots below — they are ${durStr} long, recurring ${cadence} at the same time${countSuffix}.`,
+      `If you need to change anything, I can help you make adjustments at any time.`,
+    ].join("\n\n");
+  },
+};
+
+// ─── Branch R-followup: recurring meeting, subsequent occurrence ──────────────
+
+/**
+ * "👋 {Name}! Session {N} of {total} with {Host} is coming up.
+ *  This is your recurring {cadence} slot — confirm below or let me know if
+ *  anything needs to shift."
+ *
+ * Fires when `link.recurrence` is set AND `occurrenceIndex` ≥ 1 —
+ * a follow-up occurrence after the anchor slot is committed.
+ *
+ * NOTE: `occurrenceIndex` is not yet wired from the `LinkOccurrence` table in
+ * `session/route.ts`. Until that lookup lands, this template is unreachable
+ * (all sessions pass `occurrenceIndex: null` → anchor template fires). It's
+ * registered here so the selector priority and key are in place for when
+ * the wiring ships.
+ */
+const recurringFollowupTemplate: GreetingTemplate = {
+  key: "recurring-meeting-followup",
+  description:
+    "Follow-up occurrence greeting for a committed recurring series. " +
+    "Fires when link.recurrence is set and occurrenceIndex >= 1. " +
+    "Not yet reachable — occurrenceIndex wiring in session/route.ts is pending.",
+  match: (input) =>
+    !!input.recurrence &&
+    input.occurrenceIndex != null &&
+    input.occurrenceIndex >= 1,
+  render: (input) => {
+    const { greeteeName, hostFirstName, recurrence, occurrenceIndex } = input;
+    const rec = recurrence!;
+
+    // 1-based session number for display ("Session 3 of 10")
+    const sessionNum = (occurrenceIndex ?? 0) + 1;
+    const totalSuffix =
+      "count" in rec.endBy ? ` of ${rec.endBy.count}` : "";
+
+    const cadence = formatCadenceWord(rec);
+    const endLabel = formatEndByLabel(rec);
+    void endLabel; // available for future copy variants
+
+    return [
+      `👋 ${greeteeName}! Session ${sessionNum}${totalSuffix} with ${hostFirstName} is coming up.`,
+      `This is your recurring ${cadence} slot — confirm below or let me know if anything needs to shift.`,
+    ].join("\n\n");
   },
 };
 
@@ -501,6 +638,8 @@ const findTimeTemplate: GreetingTemplate = {
  */
 export const GREETINGS: Record<GreetingKey, GreetingTemplate> = {
   "single-slot-lock": singleSlotLockTemplate,
+  "recurring-meeting-anchor": recurringAnchorTemplate,
+  "recurring-meeting-followup": recurringFollowupTemplate,
   anonymous: anonymousTemplate,
   proposal: proposalTemplate,
   "find-time": findTimeTemplate,
@@ -508,16 +647,24 @@ export const GREETINGS: Record<GreetingKey, GreetingTemplate> = {
 
 /**
  * Resolve which template renders this input. Priority:
- *   1. single-slot-lock (most specific — exclusive + single override)
- *   2. anonymous (link.type / recurringWindowId)
- *   3. proposal (named + has structural fields)
- *   4. find-time (named + no structural fields — final fallback)
+ *   1. single-slot-lock      (most specific — exclusive + single slot override)
+ *   2. recurring-followup    (recurring series, occurrenceIndex ≥ 1)
+ *   3. recurring-anchor      (recurring series, first-slot pick — occurrenceIndex null)
+ *   4. anonymous             (link.type=primary OR recurringWindowId != null)
+ *   5. proposal              (named + has structural fields)
+ *   6. find-time             (named + no structural fields — universal fallback)
  *
- * The resolver always returns a template — `find-time` is the universal
- * fallback for any non-anonymous personalized link.
+ * Recurring checks precede anonymous because an office-hours-with-series child
+ * link is BOTH isAnonymousLink=true AND recurrence!=null — the recurring
+ * templates take priority to surface the series framing.
+ *
+ * The resolver always returns a template — `find-time` is the final fallback
+ * for any non-anonymous, non-recurring personalized link.
  */
 export function selectGreeting(input: GreetingInput): GreetingTemplate {
   if (singleSlotLockTemplate.match(input)) return singleSlotLockTemplate;
+  if (recurringFollowupTemplate.match(input)) return recurringFollowupTemplate;
+  if (recurringAnchorTemplate.match(input)) return recurringAnchorTemplate;
   if (anonymousTemplate.match(input)) return anonymousTemplate;
   if (proposalTemplate.match(input)) return proposalTemplate;
   return findTimeTemplate;
