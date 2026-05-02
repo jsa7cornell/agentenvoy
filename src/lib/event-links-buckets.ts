@@ -1,17 +1,22 @@
 /**
- * Filter-bucket classifier for the mobile Event Links sheet.
+ * Filter-bucket classifier for the Event Links page (desktop + mobile sheet).
  *
- * The sheet's "Upcoming events" group filters sessions into five buckets per
- * PROJECT-PLAN line 112: All / Coordinating / Confirmed / Needs you / Past.
- * The classifier is pure (status + agreedTime + clock → bucket) so it can be
- * unit-tested without rendering React, and so the sheet and any future
- * desktop equivalent (Phase 2) share the same canonical mapping.
+ * The page's "Upcoming events" group filters sessions into four buckets:
+ * All / Coordinating / Confirmed / Complete / Cancelled. The classifier is
+ * pure (status + agreedTime + clock → bucket) so it can be unit-tested
+ * without rendering React, and so desktop + mobile share the same canonical
+ * mapping.
+ *
+ * **2026-05-02 V1 redesign change** — `needs_you` was retired (no such
+ * state exists in product) and `past` was split into `complete` (agreed,
+ * time elapsed) vs `cancelled` (status terminated). Per V1 mockups
+ * (`previews/event-links-page-redesign.html`) and SPEC §2.6.
  *
  * Status values come from `NegotiationSession.status` — same shape returned
  * by `/api/negotiate/sessions?archived=false`. Vocabulary follows
  * `SPEC.md §2.6` (Coordination, not Negotiation; user-facing pills only).
  */
-export type EventBucket = "coordinating" | "confirmed" | "needs_you" | "past";
+export type EventBucket = "coordinating" | "confirmed" | "complete" | "cancelled";
 export type EventFilter = "all" | EventBucket;
 
 /** All filter chip ids in display order. */
@@ -19,27 +24,27 @@ export const EVENT_FILTERS: readonly EventFilter[] = [
   "all",
   "coordinating",
   "confirmed",
-  "needs_you",
-  "past",
+  "complete",
+  "cancelled",
 ] as const;
 
-/** Filter-chip labels exactly as they render on the sheet. The classifier
+/** Filter-chip labels exactly as they render on the page. The classifier
  *  doesn't read these; they live here so the component imports a single
  *  source of truth. */
 export const EVENT_FILTER_LABELS: Record<EventFilter, string> = {
   all: "All",
-  coordinating: "Coord.",
+  coordinating: "Coordinating",
   confirmed: "Confirmed",
-  needs_you: "Needs you",
-  past: "Past",
+  complete: "Complete",
+  cancelled: "Cancelled",
 };
 
 /** Pill labels — what renders on each event row's status pill. */
 export const EVENT_PILL_LABELS: Record<EventBucket, string> = {
-  coordinating: "Coord.",
+  coordinating: "Coordinating",
   confirmed: "Confirmed",
-  needs_you: "Needs you",
-  past: "Past",
+  complete: "Complete",
+  cancelled: "Cancelled",
 };
 
 export interface SessionLike {
@@ -47,44 +52,41 @@ export interface SessionLike {
   status: string;
   /** ISO datetime of the agreed slot, when the session has reached agreed. */
   agreedTime?: string | null;
-  /** Optional pre-shaped statusLabel — when present and the status is
-   *  "escalated"/"awaiting_ack_self", the session falls into "needs_you". */
+  /** Optional pre-shaped statusLabel — currently unused by the classifier
+   *  but kept on the type so callers can pass it through without losing it. */
   statusLabel?: string | null;
 }
 
 /**
- * Classify a session into one of the four event buckets. Past wins over
- * Confirmed: an agreed meeting whose time has already elapsed renders as
- * Past, matching the auto-archive heuristic on the existing meetings page
- * (`app/src/app/dashboard/meetings/page.tsx:94-100`).
+ * Classify a session into one of the four event buckets.
  *
- * `now` is parameterized so tests can pin the clock; production calls pass
+ * Priority:
+ *  1. **Cancelled** — explicit terminal status (`expired` or `cancelled`)
+ *     wins over everything; an agreedTime in the past doesn't matter once
+ *     the session is killed.
+ *  2. **Complete** — agreedTime has elapsed and status isn't terminal —
+ *     the meeting actually happened (or its time has passed without a
+ *     cancel).
+ *  3. **Confirmed** — status `agreed` and the time is still in the future.
+ *  4. **Coordinating** — every other live session.
+ *
+ * `now` is parameterized so tests can pin the clock; production passes
  * `Date.now()`.
  */
 export function classifySession(s: SessionLike, now: number = Date.now()): EventBucket {
-  // Past — agreedTime has elapsed, OR the session expired/cancelled.
-  if (s.status === "expired" || s.status === "cancelled") return "past";
+  // Cancelled — terminal status takes priority.
+  if (s.status === "expired" || s.status === "cancelled") return "cancelled";
+
+  // Complete — agreed time has elapsed (and not cancelled).
   if (s.agreedTime) {
     const t = Date.parse(s.agreedTime);
-    if (Number.isFinite(t) && t < now) return "past";
+    if (Number.isFinite(t) && t < now) return "complete";
   }
 
-  // Needs-you — anything explicitly flagged as awaiting host action. The
-  // negotiate/sessions endpoint surfaces this through `statusLabel` text;
-  // we also catch the canonical "escalated" status which always means
-  // host attention required.
-  if (s.status === "escalated") return "needs_you";
-  if (s.status === "active" && typeof s.statusLabel === "string") {
-    const label = s.statusLabel.toLowerCase();
-    if (label.includes("needs you") || label.includes("waiting for you") || label.includes("you to confirm")) {
-      return "needs_you";
-    }
-  }
-
-  // Confirmed — agreed but not yet past.
+  // Confirmed — agreed and still in the future.
   if (s.status === "agreed") return "confirmed";
 
-  // Default — every other live session is mid-coordination.
+  // Coordinating — every other live session.
   return "coordinating";
 }
 

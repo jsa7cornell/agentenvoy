@@ -1,36 +1,36 @@
 "use client";
 
 /**
- * Event Links — desktop full-page body.
+ * Event Links — desktop full-page body. **V1 redesign (2026-05-02).**
  *
- * **Two-group layout (PR 3 of Phase 2):**
+ * Visual contract: `previews/event-links-page-redesign.html`. Three sections:
  *
- *  1. **Reusable links** — Primary pinned at top, then Office Hours
- *     variants. Each card carries an inline URL + Copy chip and an Edit
- *     affordance. A "Create a reusable link" tile prefills the chat
- *     composer at the bottom (and routes home so the composer is
- *     visible).
- *  2. **Upcoming events** — filterable chips (All / Coordinating /
- *     Confirmed / Needs you / Past). Each row: title + via-link sub-line
- *     + status pill + Cancel + Archive affordances. No row icon.
+ *  1. **Your reusable links** — 3-up grid of compact cards (Primary
+ *     pinned first, then Office Hours / other variants). Each card carries
+ *     a host-prefixed name, a config sub-line, a URL+Copy chip, and an
+ *     Edit text-link at the bottom.
+ *  2. **Create a reusable link** — three colored type cards (Bookable
+ *     Hours · Recurring Sessions · Group Meeting), each with four starter
+ *     scenarios. Starters prefill the chat composer. Lives in
+ *     `create-link-picker.tsx` so mobile can reuse the data.
+ *  3. **Upcoming events** — filterable chips (All / Coordinating /
+ *     Confirmed / Complete / Cancelled). Table-like layout with EVENT /
+ *     GUEST / WHEN / STATUS columns + per-row actions (Google Calendar
+ *     link on Confirmed, Cancel on live, Open on cancelled).
  *
- * Reuses the mobile sheet's `EventLinksCard` and `EventLinksEditDialog`
- * components verbatim — they're presentational + edit-flow logic that
- * doesn't depend on the slide-up chrome. Test IDs keep their `mobile-`
- * prefix because they originated mobile-side; the desktop wrapper adds
- * its own `desktop-event-links-*` IDs for top-level chrome (filter
- * chips, event rows).
+ * **2026-05-02 changes vs PR-3:**
+ *  - Reusable list: 1-col → 3-up grid.
+ *  - Create flow: dashed-tile → CreateLinkPicker (3 type cards).
+ *  - Bucket update: `needs_you` retired, `past` split into `complete`/`cancelled`.
+ *  - Event row: row-click opens deal-room; Confirmed shows date+time inline +
+ *    Google Calendar link; Cancelled rows dimmed.
  *
- * Vocabulary discipline: "Primary link" (capitalized — SPEC §2.2,
- * not "Standard link" despite the mockup string). "Office Hours"
- * (capitalized — feature name). "Event Links" (plural — page title).
- *
- * Mockup ref: `mockups/desktop-v2.html` §5
- * lines 700-770 (light + dark parity).
+ * Vocabulary discipline: "Primary link" (capitalized — SPEC §2.2). "Office
+ * Hours" (capitalized — feature name). "Event Links" (page title — plural).
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { AvailabilityPreference } from "@/lib/availability-rules";
 import { getOfficeHoursDisplayName } from "@/lib/availability-rules";
 import {
@@ -39,21 +39,24 @@ import {
   EVENT_FILTERS,
   EVENT_FILTER_LABELS,
   EVENT_PILL_LABELS,
+  type EventBucket,
   type EventFilter,
   type SessionLike,
 } from "@/lib/event-links-buckets";
-import {
-  EventLinksCard,
-  type ReusableLinkRow,
-} from "@/components/mobile/event-links-card";
+import { type ReusableLinkRow } from "@/components/mobile/event-links-card";
 import { EventLinksEditDialog } from "@/components/mobile/event-links-edit-dialog";
+import { CreateLinkPicker } from "@/components/desktop/create-link-picker";
 
 interface UpcomingEventRow extends SessionLike {
   id: string;
   title?: string | null;
   guestName?: string | null;
   guestEmail?: string | null;
+  /** Meeting length in minutes — used to derive the end time on Confirmed
+   *  rows. Null on sessions whose duration was never locked. */
+  duration?: number | null;
   createdAt: string;
+  cancelledAt?: string | null;
   link?: {
     type?: string | null;
     slug?: string | null;
@@ -69,17 +72,9 @@ const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 function formatDayList(days: number[] | undefined): string {
   if (!days || days.length === 0) return "Every day";
   if (days.length === 7) return "Every day";
-  if (days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d))) {
-    return "Mon–Fri";
-  }
-  if (days.length === 2 && days.includes(0) && days.includes(6)) {
-    return "Sat–Sun";
-  }
-  return days
-    .slice()
-    .sort((a, b) => a - b)
-    .map((d) => DAY_SHORT[d])
-    .join(", ");
+  if (days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d))) return "Mon–Fri";
+  if (days.length === 2 && days.includes(0) && days.includes(6)) return "Sat–Sun";
+  return days.slice().sort((a, b) => a - b).map((d) => DAY_SHORT[d]).join(", ");
 }
 
 function format12h(hhmm: string | undefined): string {
@@ -101,48 +96,191 @@ function buildOfficeHoursSub(rule: AvailabilityPreference): string {
   const end = format12h(rule.timeEnd);
   const window = start && end ? `${start}–${end}` : "";
   const dur = `${oh.durationMinutes} min`;
-  const parts = [days, window, dur].filter(Boolean);
-  return parts.join(" · ");
+  return [dur, days, window].filter(Boolean).join(" · ");
 }
 
 function buildEventSub(s: UpcomingEventRow): string {
-  if (s.link?.type === "primary") return "via Primary link";
-  if (s.link?.type === "office_hours") return "via Office Hours";
+  const linkType = s.link?.type;
+  if (linkType === "primary") return "via primary link";
+  if (linkType === "office_hours" && s.link?.slug && s.link?.code) {
+    return `via /meet/${s.link.slug}/${s.link.code}`;
+  }
+  if (linkType === "office_hours") return "via Office Hours";
   if (s.link?.topic) return s.link.topic;
   if (s.link?.inviteeName) return `with ${s.link.inviteeName}`;
   return "";
 }
 
-function statusPillColor(bucket: string): { bg: string; text: string } {
-  // Each pill carries a soft tinted background plus a saturated text color.
-  // Light + dark variants pair a darker text-700 against the same -500/10 wash
-  // (legible on a white surface) with the lighter dark-mode -400 (legible on
-  // a near-black surface). See `mockups/desktop-v2.html` light + dark token
-  // blocks; these reuse Tailwind palette steps that match the mockup hexes.
-  switch (bucket) {
-    case "confirmed":
-      return { bg: "bg-green-500/10", text: "text-green-700 dark:text-green-400" };
-    case "needs_you":
-      return { bg: "bg-amber-500/10", text: "text-amber-700 dark:text-amber-400" };
-    case "past":
-      return { bg: "bg-zinc-500/10", text: "text-zinc-600 dark:text-zinc-400" };
-    case "coordinating":
-    default:
-      return { bg: "bg-indigo-500/10", text: "text-indigo-700 dark:text-indigo-400" };
+function getDealRoomUrl(s: UpcomingEventRow): string | null {
+  if (!s.link?.slug) return null;
+  return s.link.code ? `/meet/${s.link.slug}/${s.link.code}` : `/meet/${s.link.slug}`;
+}
+
+/** Pretty-print an ISO datetime as "Fri, May 3" — matches the mockup. */
+function formatDayLabel(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  } catch {
+    return "";
   }
 }
 
+/** "10:00 AM – 11:00 AM PT" — agreed start + duration. Uses local TZ. */
+function formatTimeRange(iso: string, durationMinutes: number | null | undefined): string {
+  try {
+    const start = new Date(iso);
+    const dur = durationMinutes ?? 30;
+    const end = new Date(start.getTime() + dur * 60_000);
+    const fmtTime = (d: Date) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const tz = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+      .formatToParts(start)
+      .find((p) => p.type === "timeZoneName")?.value ?? "";
+    return `${fmtTime(start)} – ${fmtTime(end)} ${tz}`.trim();
+  } catch {
+    return "";
+  }
+}
+
+/** Build a Google Calendar day-view URL for the agreed time. We don't have
+ *  enough context to deep-link the specific event here (would need the
+ *  calendarId + base64-encoded eventId pair); landing on the day view is
+ *  the V1 compromise. */
+function buildGcalDayUrl(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `https://calendar.google.com/calendar/u/0/r/day/${yyyy}/${mm}/${dd}`;
+  } catch {
+    return "https://calendar.google.com/calendar/u/0/r";
+  }
+}
+
+interface PillStyle {
+  dot: string;
+  text: string;
+  bg: string;
+}
+
+function statusPillStyle(bucket: EventBucket): PillStyle {
+  switch (bucket) {
+    case "confirmed":
+      return {
+        dot: "bg-green-500",
+        text: "text-green-700 dark:text-green-400",
+        bg: "bg-green-500/10",
+      };
+    case "complete":
+      return {
+        dot: "bg-zinc-400",
+        text: "text-zinc-600 dark:text-zinc-400",
+        bg: "bg-zinc-500/10",
+      };
+    case "cancelled":
+      return {
+        dot: "bg-red-500",
+        text: "text-red-700 dark:text-red-400",
+        bg: "bg-red-500/10",
+      };
+    case "coordinating":
+    default:
+      return {
+        dot: "bg-indigo-500",
+        text: "text-indigo-700 dark:text-indigo-400",
+        bg: "bg-indigo-500/10",
+      };
+  }
+}
+
+interface ReusableCardGridProps {
+  row: ReusableLinkRow;
+  onEdit: (row: ReusableLinkRow) => void;
+}
+
+/**
+ * Compact 3-up reusable card. Different layout from the mobile-stacked
+ * `EventLinksCard` — vertical title block, URL chip in the middle, Edit
+ * text-link at the bottom. See `previews/event-links-page-redesign.html`
+ * `.rcard` styling.
+ */
+function ReusableCardGrid({ row, onEdit }: ReusableCardGridProps) {
+  const [copied, setCopied] = useState(false);
+  const isPrimary = row.kind === "primary";
+
+  function copy() {
+    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+    navigator.clipboard.writeText(row.url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div
+      className={`rounded-xl border p-4 flex flex-col gap-3 min-h-[160px] ${
+        isPrimary
+          ? "border-accent/40 bg-accent-surface/30"
+          : "border-secondary bg-surface-secondary/40"
+      }`}
+      data-testid={`desktop-reusable-card-${row.kind}`}
+    >
+      <div className="flex items-start gap-2">
+        <div
+          className="w-7 h-7 rounded-md bg-surface/80 flex items-center justify-center text-sm flex-shrink-0"
+          aria-hidden
+        >
+          {row.icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-primary truncate">{row.name}</div>
+          <div className="text-[11px] text-muted truncate leading-snug mt-0.5">{row.sub}</div>
+        </div>
+        {isPrimary && (
+          <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/10 text-accent flex-shrink-0">
+            Default
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 rounded-lg bg-surface/60 border border-secondary/60 px-2.5 py-1.5">
+        <span className="text-[11px] font-mono text-secondary truncate flex-1 min-w-0">
+          {row.url.replace(/^https?:\/\//, "")}
+        </span>
+        <button
+          type="button"
+          onClick={copy}
+          className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-surface-secondary/80 hover:bg-surface-tertiary text-secondary hover:text-accent transition flex-shrink-0"
+          data-testid={`desktop-reusable-copy-${row.kind}`}
+          aria-label={`Copy ${row.name} URL`}
+        >
+          {copied ? <span className="text-emerald-500">Copied</span> : "Copy"}
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onEdit(row)}
+        className="text-[12px] text-secondary hover:text-accent transition self-start mt-auto"
+        data-testid={`desktop-reusable-edit-${row.kind}`}
+        aria-label={`Edit ${row.name}`}
+      >
+        Edit
+      </button>
+    </div>
+  );
+}
+
 export function EventLinksPageContent() {
-  const router = useRouter();
   const [reusableRows, setReusableRows] = useState<ReusableLinkRow[]>([]);
   const [reusableLoaded, setReusableLoaded] = useState(false);
   const [events, setEvents] = useState<UpcomingEventRow[]>([]);
   const [eventsLoaded, setEventsLoaded] = useState(false);
   const [filter, setFilter] = useState<EventFilter>("all");
   const [editing, setEditing] = useState<ReusableLinkRow | null>(null);
-  const [archiving, setArchiving] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  const [hostFirstName, setHostFirstName] = useState<string>("");
 
   function refetchReusable() {
     fetch("/api/tuner/preferences")
@@ -152,15 +290,19 @@ export function EventLinksPageContent() {
         const origin = typeof window !== "undefined" ? window.location.origin : "";
         const slug = data.meetSlug as string | null | undefined;
         const out: ReusableLinkRow[] = [];
+        // Host first name for the "John's Primary Link" label pattern.
+        const fullName = (data.name as string | undefined) ?? "";
+        const first = fullName.split(/\s+/)[0] ?? "";
+        if (first) setHostFirstName(first);
         if (slug) {
-          const primaryName = (data.generalLinkName as string) || "Primary link";
+          const primaryName = (data.generalLinkName as string) || (first ? `${first}'s Primary Link` : "Primary link");
           const defaultDur =
             typeof data.defaultMeetingMinutes === "number" ? data.defaultMeetingMinutes : 30;
           out.push({
             key: "primary",
             kind: "primary",
             name: primaryName,
-            sub: `default ${defaultDur} min · video`,
+            sub: `${defaultDur} min · video`,
             url: `${origin}/meet/${slug}`,
             icon: "🔗",
           });
@@ -213,48 +355,28 @@ export function EventLinksPageContent() {
     refetchEvents();
   }, []);
 
+  // Counts per bucket — surface them on each filter chip per the mockup
+  // (`All · 4`, `Coordinating · 2`, etc.).
+  const bucketCounts = useMemo(() => {
+    const now = Date.now();
+    const counts: Record<EventBucket, number> = {
+      coordinating: 0,
+      confirmed: 0,
+      complete: 0,
+      cancelled: 0,
+    };
+    for (const s of events) {
+      const b = classifySession(s, now);
+      counts[b] += 1;
+    }
+    return counts;
+  }, [events]);
+
   const filteredEvents = useMemo(() => {
     if (filter === "all") return events;
     const now = Date.now();
     return events.filter((s) => matchesFilter(s, filter, now));
   }, [events, filter]);
-
-  function handleCreateReusable() {
-    // Composer lives on /dashboard. We can't dispatch a CustomEvent here
-    // because Feed isn't mounted yet — the listener attaches *after*
-    // navigation completes, racing the dispatch and losing the prefill.
-    // Stash the prefill in sessionStorage; Feed consumes + clears it on
-    // mount. Same one-shot semantics as the event bus, navigation-safe.
-    if (typeof window !== "undefined") {
-      try {
-        sessionStorage.setItem(
-          "envoy:pending-prefill",
-          "Create a new Office Hours link for ",
-        );
-      } catch {
-        // sessionStorage can throw in private-mode browsers.
-      }
-    }
-    router.push("/dashboard");
-  }
-
-  async function handleArchive(sessionId: string) {
-    setArchiving(sessionId);
-    try {
-      const res = await fetch("/api/negotiate/archive", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, archived: true }),
-      });
-      if (res.ok) {
-        setEvents((prev) => prev.filter((s) => s.id !== sessionId));
-      }
-    } catch {
-      // silent — surface comes from network panel during dev
-    } finally {
-      setArchiving(null);
-    }
-  }
 
   async function handleCancel(sessionId: string) {
     setCancelling(sessionId);
@@ -265,7 +387,9 @@ export function EventLinksPageContent() {
         body: JSON.stringify({ sessionId }),
       });
       if (res.ok) {
-        setEvents((prev) => prev.filter((s) => s.id !== sessionId));
+        // Refetch to pull updated cancelled status (and let the row drift
+        // into the "cancelled" bucket where it stays visible, dimmed).
+        refetchEvents();
       }
     } catch {
       // silent
@@ -277,46 +401,35 @@ export function EventLinksPageContent() {
 
   return (
     <div
-      className="hidden md:block min-h-[720px] mx-auto max-w-[1120px] px-12 py-8"
+      className="hidden md:block min-h-[720px] mx-auto max-w-[1280px] px-12 py-8"
       data-testid="desktop-event-links-page"
     >
-      <div className="grid grid-cols-1 gap-8">
-        {/* GROUP 1 — Reusable links */}
+      <div className="flex flex-col gap-10">
+        {/* GROUP 1 — Reusable links (3-up grid) */}
         <section aria-labelledby="reusable-links-heading">
           <h2
             id="reusable-links-heading"
             className="text-[11px] font-semibold tracking-wider uppercase text-muted mb-3"
           >
-            Reusable links
+            Your reusable links
           </h2>
           {!reusableLoaded ? (
             <div className="px-3 py-2 text-sm text-muted">Loading…</div>
           ) : reusableRows.length === 0 ? (
             <div className="px-3 py-2 text-sm text-muted">No links yet.</div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {reusableRows.map((r) => (
-                <EventLinksCard
-                  key={r.key}
-                  row={r}
-                  onEdit={(row) => setEditing(row)}
-                />
+                <ReusableCardGrid key={r.key} row={r} onEdit={(row) => setEditing(row)} />
               ))}
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={handleCreateReusable}
-            className="mt-3 w-full p-3.5 rounded-xl border border-dashed border-secondary text-secondary hover:border-accent hover:text-accent transition flex items-center justify-center gap-2 text-sm font-medium"
-            data-testid="desktop-event-links-create-reusable"
-          >
-            <span aria-hidden>+</span>
-            <span>Create a reusable link</span>
-          </button>
         </section>
 
-        {/* GROUP 2 — Upcoming events */}
+        {/* GROUP 2 — Create a reusable link (3 type cards) */}
+        <CreateLinkPicker />
+
+        {/* GROUP 3 — Upcoming events */}
         <section aria-labelledby="upcoming-events-heading">
           <h2
             id="upcoming-events-heading"
@@ -325,15 +438,16 @@ export function EventLinksPageContent() {
             Upcoming events
           </h2>
 
-          {/* Filter chips */}
+          {/* Filter chips (with counts) */}
           <div
-            className="flex gap-1.5 mb-3"
+            className="flex gap-1.5 mb-3 flex-wrap"
             role="tablist"
             aria-label="Filter upcoming events"
             data-testid="desktop-event-links-filter-chips"
           >
             {EVENT_FILTERS.map((f) => {
               const active = f === filter;
+              const count = f === "all" ? events.length : bucketCounts[f as EventBucket];
               return (
                 <button
                   key={f}
@@ -341,14 +455,14 @@ export function EventLinksPageContent() {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setFilter(f)}
-                  className={`px-3 py-1 rounded-full text-[11px] font-medium border transition ${
+                  className={`px-3 py-1 rounded-full text-[11.5px] font-medium border transition ${
                     active
                       ? "border-accent text-accent bg-accent/10"
                       : "border-secondary text-secondary hover:border-accent/40"
                   }`}
                   data-testid={`desktop-event-links-filter-${f}`}
                 >
-                  {EVENT_FILTER_LABELS[f]}
+                  {EVENT_FILTER_LABELS[f]} · {count}
                 </button>
               );
             })}
@@ -357,130 +471,187 @@ export function EventLinksPageContent() {
           {!eventsLoaded ? (
             <div className="px-3 py-2 text-sm text-muted">Loading…</div>
           ) : filteredEvents.length === 0 ? (
-            <div className="px-3 py-4 text-sm text-muted text-center">
+            <div className="px-3 py-6 text-sm text-muted text-center border border-secondary rounded-xl">
               {filter === "all" ? "No upcoming events." : "Nothing in this filter."}
             </div>
           ) : (
-            <ul className="flex flex-col gap-1.5">
-              {filteredEvents.map((s) => {
-                const bucket = classifySession(s, Date.now());
-                const pill = statusPillColor(bucket);
-                const guestLabel =
-                  s.guestName ||
-                  s.link?.inviteeName ||
-                  s.guestEmail ||
-                  s.link?.inviteeEmail ||
-                  "Guest";
-                const title = s.title || s.link?.topic || `Meeting with ${guestLabel}`;
-                const sub = buildEventSub(s);
-                const isCancellable = bucket !== "past";
+            <div
+              className="rounded-xl border border-secondary overflow-hidden"
+              data-testid="desktop-event-links-table"
+            >
+              {/* Table header (desktop only — mobile-narrow viewports get
+                  the stacked sheet via the topbar pill). */}
+              <div
+                className="grid grid-cols-[2.5fr_1.2fr_1.6fr_1fr_1.2fr] gap-3 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted bg-surface-secondary/40 border-b border-secondary"
+                role="row"
+              >
+                <div>Event</div>
+                <div>Guest</div>
+                <div>When</div>
+                <div>Status</div>
+                <div className="text-right" />
+              </div>
 
-                if (confirmCancelId === s.id) {
+              <ul role="list">
+                {filteredEvents.map((s, idx) => {
+                  const bucket = classifySession(s, Date.now());
+                  const pill = statusPillStyle(bucket);
+                  const guestLabel =
+                    s.guestName ||
+                    s.link?.inviteeName ||
+                    s.guestEmail ||
+                    s.link?.inviteeEmail ||
+                    "Guest";
+                  const title = s.title || s.link?.topic || `Meeting with ${guestLabel}`;
+                  const sub = buildEventSub(s);
+                  const dealUrl = getDealRoomUrl(s);
+                  const isCoordinating = bucket === "coordinating";
+                  const isConfirmed = bucket === "confirmed";
+                  const isCancelled = bucket === "cancelled";
+                  const isComplete = bucket === "complete";
+
+                  // Inline cancel-confirm state
+                  if (confirmCancelId === s.id) {
+                    return (
+                      <li
+                        key={s.id}
+                        className="grid grid-cols-[1fr_auto_auto] gap-2 items-center px-4 py-3 border-t border-red-500/30 bg-red-50 dark:bg-red-950/20"
+                        data-testid="desktop-event-links-cancel-confirm"
+                      >
+                        <span className="text-sm text-secondary">
+                          {isConfirmed ? "Cancel this meeting?" : "Stop coordinating this event?"}
+                        </span>
+                        <button
+                          onClick={() => setConfirmCancelId(null)}
+                          className="text-xs text-muted hover:text-secondary transition px-3 py-1.5"
+                        >
+                          Keep
+                        </button>
+                        <button
+                          onClick={() => handleCancel(s.id)}
+                          disabled={cancelling === s.id}
+                          className="text-xs font-medium text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 border border-red-500/30 rounded px-3 py-1.5 transition disabled:opacity-50"
+                        >
+                          {cancelling === s.id ? "…" : "Yes"}
+                        </button>
+                      </li>
+                    );
+                  }
+
+                  // Date+time cell content
+                  let whenContent: React.ReactNode = (
+                    <span className="text-[12px] italic text-muted">Negotiating times…</span>
+                  );
+                  if (isConfirmed && s.agreedTime) {
+                    whenContent = (
+                      <div className="flex flex-col">
+                        <span className="text-[12.5px] font-semibold text-primary">
+                          {formatDayLabel(s.agreedTime)}
+                        </span>
+                        <span className="text-[11px] text-muted">
+                          {formatTimeRange(s.agreedTime, s.duration ?? undefined)}
+                        </span>
+                      </div>
+                    );
+                  } else if (isComplete && s.agreedTime) {
+                    whenContent = (
+                      <span className="text-[12px] text-muted">{formatDayLabel(s.agreedTime)}</span>
+                    );
+                  } else if (isCancelled) {
+                    const stamp = s.cancelledAt ? formatDayLabel(s.cancelledAt) : "";
+                    whenContent = (
+                      <span className="text-[12px] text-muted">{stamp ? `Cancelled ${stamp}` : "—"}</span>
+                    );
+                  }
+
                   return (
                     <li
                       key={s.id}
-                      className="flex items-center gap-3 px-4 py-3 rounded-xl border border-red-500/30 bg-red-50 dark:bg-red-950/20"
-                      data-testid="desktop-event-links-cancel-confirm"
+                      className={`grid grid-cols-[2.5fr_1.2fr_1.6fr_1fr_1.2fr] gap-3 items-center px-4 py-3 ${
+                        idx > 0 ? "border-t border-secondary" : ""
+                      } ${isCancelled ? "opacity-60" : "hover:bg-surface-secondary/30"} transition-colors`}
+                      data-testid={`desktop-event-links-row-${bucket}`}
                     >
-                      <span className="text-sm text-secondary flex-1">
-                        {bucket === "confirmed"
-                          ? "Cancel this meeting?"
-                          : "Stop coordinating this event?"}
-                      </span>
-                      <button
-                        onClick={() => setConfirmCancelId(null)}
-                        className="text-xs text-muted hover:text-secondary transition px-3 py-1.5"
-                      >
-                        Keep
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (bucket === "confirmed") handleCancel(s.id);
-                          else {
-                            handleArchive(s.id);
-                            setConfirmCancelId(null);
-                          }
-                        }}
-                        disabled={cancelling === s.id || archiving === s.id}
-                        className="text-xs font-medium text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 border border-red-500/30 rounded px-3 py-1.5 transition disabled:opacity-50"
-                      >
-                        {cancelling === s.id || archiving === s.id ? "…" : "Yes"}
-                      </button>
+                      {/* Event title + sub (linked to deal-room) */}
+                      <div className="min-w-0">
+                        {dealUrl ? (
+                          <Link
+                            href={dealUrl}
+                            className={`text-[13px] font-medium truncate block hover:text-accent transition-colors ${
+                              isCancelled ? "text-secondary line-through decoration-1" : "text-primary"
+                            }`}
+                            data-testid={`desktop-event-links-title-${s.id}`}
+                          >
+                            {title}
+                          </Link>
+                        ) : (
+                          <div className="text-[13px] font-medium text-primary truncate">{title}</div>
+                        )}
+                        {sub && <div className="text-[11px] text-muted truncate mt-0.5">{sub}</div>}
+                      </div>
+
+                      {/* Guest */}
+                      <div className="text-[12px] text-secondary truncate">{guestLabel}</div>
+
+                      {/* When */}
+                      <div className="min-w-0">{whenContent}</div>
+
+                      {/* Status pill */}
+                      <div>
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${pill.bg} ${pill.text}`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${pill.dot}`} aria-hidden />
+                          {EVENT_PILL_LABELS[bucket]}
+                        </span>
+                      </div>
+
+                      {/* Action column — Google Cal link on Confirmed,
+                          Cancel on live, Open on cancelled. */}
+                      <div className="flex items-center justify-end gap-3 text-[12px]">
+                        {isConfirmed && s.agreedTime && (
+                          <a
+                            href={buildGcalDayUrl(s.agreedTime)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-accent hover:text-accent/80 transition-colors flex items-center gap-1"
+                            data-testid={`desktop-event-links-gcal-${s.id}`}
+                          >
+                            Google Calendar <span aria-hidden>↗</span>
+                          </a>
+                        )}
+                        {(isConfirmed || isCoordinating) && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmCancelId(s.id)}
+                            className="text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 transition"
+                            data-testid={`desktop-event-links-cancel-${s.id}`}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        {isCancelled && dealUrl && (
+                          <Link
+                            href={dealUrl}
+                            className="text-secondary hover:text-accent transition"
+                            data-testid={`desktop-event-links-open-${s.id}`}
+                          >
+                            Open
+                          </Link>
+                        )}
+                      </div>
                     </li>
                   );
-                }
-
-                return (
-                  <li
-                    key={s.id}
-                    className="flex items-center gap-3 px-4 py-3.5 rounded-xl border border-secondary bg-surface-secondary/40"
-                    data-testid={`desktop-event-links-row-${bucket}`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-primary truncate">
-                        {title}
-                      </div>
-                      {sub && (
-                        <div className="text-xs text-muted truncate leading-snug mt-0.5">
-                          {sub}
-                        </div>
-                      )}
-                    </div>
-                    <span
-                      className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${pill.bg} ${pill.text}`}
-                    >
-                      {EVENT_PILL_LABELS[bucket]}
-                    </span>
-                    {isCancellable && (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmCancelId(s.id)}
-                        className="flex-shrink-0 text-xs text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 transition px-2"
-                        data-testid={`desktop-event-links-cancel-${s.id}`}
-                        title="Cancel"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleArchive(s.id)}
-                      disabled={archiving === s.id}
-                      className="flex-shrink-0 p-1.5 rounded-md text-zinc-500 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
-                      data-testid={`desktop-event-links-archive-${s.id}`}
-                      title="Archive"
-                      aria-label={`Archive ${title}`}
-                    >
-                      {archiving === s.id ? (
-                        <span className="text-xs text-muted">…</span>
-                      ) : (
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M5 8a2 2 0 012-2h10a2 2 0 012 2v2H5V8zm0 4h14v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6zm5 2h4"
-                          />
-                        </svg>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                })}
+              </ul>
+            </div>
           )}
         </section>
       </div>
 
       {/* Edit dialog — reuses the mobile dialog component (chrome-neutral
-          modal that overlays the page). Desktop-specific edit chrome can
-          be a follow-up if/when the bottom-sheet feel reads wrong on
-          wide viewports. */}
+          modal that overlays the page). Desktop-specific edit chrome is
+          a follow-up. */}
       <EventLinksEditDialog
         row={editing}
         onSaved={() => {
@@ -489,6 +660,9 @@ export function EventLinksPageContent() {
         }}
         onDismiss={() => setEditing(null)}
       />
+      {/* hostFirstName reserved for header chrome refactor; suppress unused
+          state warning until that lands. */}
+      <span className="hidden">{hostFirstName}</span>
     </div>
   );
 }

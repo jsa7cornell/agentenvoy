@@ -1,14 +1,16 @@
 /**
- * Phase 1 PR 7 — Event Links sheet bucket classifier.
+ * Event Links page bucket classifier — V1 redesign (2026-05-02).
  *
  * Pure function under test: `classifySession` / `matchesFilter` from
- * `src/lib/event-links-buckets.ts`. The mobile sheet's "Upcoming events"
- * group filters sessions into All / Coordinating / Confirmed / Needs you /
- * Past per `PROJECT-PLAN.md` line 112; this classifier is the canonical
- * mapping (so the future Phase 2 desktop equivalent shares it).
+ * `src/lib/event-links-buckets.ts`. The page's "Upcoming events" group
+ * filters sessions into All / Coordinating / Confirmed / Complete /
+ * Cancelled. The classifier is the canonical mapping (desktop + mobile
+ * sheet share it).
  *
- * Vocabulary: pill labels follow SPEC §2.6 — "Coordination" not
- * "Negotiation", abbreviated "Coord." on the chip.
+ * **2026-05-02 V1 redesign change** — the prior `needs_you` bucket and
+ * the `past` catch-all were retired. `past` was split into `complete`
+ * (agreed time elapsed) vs `cancelled` (terminal status). Per
+ * `previews/event-links-page-redesign.html` and SPEC §2.6.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -25,19 +27,26 @@ const FUTURE = "2026-04-27T12:00:00Z";
 const PAST = "2026-04-25T12:00:00Z";
 
 describe("classifySession", () => {
-  it("expired session → past", () => {
+  it("expired session → cancelled", () => {
     const s: SessionLike = { status: "expired" };
-    expect(classifySession(s, NOW)).toBe("past");
+    expect(classifySession(s, NOW)).toBe("cancelled");
   });
 
-  it("cancelled session → past", () => {
+  it("cancelled session → cancelled", () => {
     const s: SessionLike = { status: "cancelled" };
-    expect(classifySession(s, NOW)).toBe("past");
+    expect(classifySession(s, NOW)).toBe("cancelled");
   });
 
-  it("agreed-but-elapsed → past (past beats confirmed)", () => {
+  it("cancelled wins over a past agreedTime", () => {
+    // A session that was scheduled for past time but got cancelled is
+    // categorized as cancelled, not complete.
+    const s: SessionLike = { status: "cancelled", agreedTime: PAST };
+    expect(classifySession(s, NOW)).toBe("cancelled");
+  });
+
+  it("agreed-but-elapsed → complete", () => {
     const s: SessionLike = { status: "agreed", agreedTime: PAST };
-    expect(classifySession(s, NOW)).toBe("past");
+    expect(classifySession(s, NOW)).toBe("complete");
   });
 
   it("agreed-and-future → confirmed", () => {
@@ -45,31 +54,23 @@ describe("classifySession", () => {
     expect(classifySession(s, NOW)).toBe("confirmed");
   });
 
-  it("escalated → needs_you", () => {
-    const s: SessionLike = { status: "escalated" };
-    expect(classifySession(s, NOW)).toBe("needs_you");
-  });
-
-  it('active + statusLabel "needs you" → needs_you', () => {
-    const s: SessionLike = { status: "active", statusLabel: "Needs You: confirm slot" };
-    expect(classifySession(s, NOW)).toBe("needs_you");
-  });
-
-  it('active + statusLabel "Waiting for you" → needs_you', () => {
-    const s: SessionLike = { status: "active", statusLabel: "Waiting for you to respond" };
-    expect(classifySession(s, NOW)).toBe("needs_you");
-  });
-
-  it("active without needs-you label → coordinating", () => {
-    const s: SessionLike = {
-      status: "active",
-      statusLabel: "Waiting for guest",
-    };
+  it("active without agreedTime → coordinating", () => {
+    const s: SessionLike = { status: "active" };
     expect(classifySession(s, NOW)).toBe("coordinating");
   });
 
-  it("active with no label → coordinating", () => {
-    const s: SessionLike = { status: "active" };
+  it("escalated → coordinating (no longer routed to needs_you)", () => {
+    // 2026-05-02 redesign: needs_you bucket retired. Escalated sessions
+    // surface in coordinating until they're agreed/cancelled.
+    const s: SessionLike = { status: "escalated" };
+    expect(classifySession(s, NOW)).toBe("coordinating");
+  });
+
+  it("statusLabel text no longer affects bucketing", () => {
+    // Pre-redesign, "Needs you" / "Waiting for you" labels routed to
+    // needs_you. Post-redesign, only the canonical status fields drive
+    // bucketing.
+    const s: SessionLike = { status: "active", statusLabel: "Waiting for you to respond" };
     expect(classifySession(s, NOW)).toBe("coordinating");
   });
 
@@ -81,31 +82,33 @@ describe("classifySession", () => {
 
 describe("matchesFilter", () => {
   const confirmed: SessionLike = { status: "agreed", agreedTime: FUTURE };
-  const past: SessionLike = { status: "expired" };
-  const needsYou: SessionLike = { status: "escalated" };
+  const cancelled: SessionLike = { status: "expired" };
+  const complete: SessionLike = { status: "agreed", agreedTime: PAST };
   const coord: SessionLike = { status: "active" };
 
   it('"all" admits every bucket', () => {
-    for (const s of [confirmed, past, needsYou, coord]) {
+    for (const s of [confirmed, cancelled, complete, coord]) {
       expect(matchesFilter(s, "all", NOW)).toBe(true);
     }
   });
 
   it("filters confirmed only", () => {
     expect(matchesFilter(confirmed, "confirmed", NOW)).toBe(true);
-    expect(matchesFilter(past, "confirmed", NOW)).toBe(false);
-    expect(matchesFilter(needsYou, "confirmed", NOW)).toBe(false);
+    expect(matchesFilter(cancelled, "confirmed", NOW)).toBe(false);
+    expect(matchesFilter(complete, "confirmed", NOW)).toBe(false);
     expect(matchesFilter(coord, "confirmed", NOW)).toBe(false);
   });
 
-  it("filters past only", () => {
-    expect(matchesFilter(past, "past", NOW)).toBe(true);
-    expect(matchesFilter(confirmed, "past", NOW)).toBe(false);
+  it("filters cancelled only", () => {
+    expect(matchesFilter(cancelled, "cancelled", NOW)).toBe(true);
+    expect(matchesFilter(confirmed, "cancelled", NOW)).toBe(false);
+    expect(matchesFilter(complete, "cancelled", NOW)).toBe(false);
   });
 
-  it("filters needs_you only", () => {
-    expect(matchesFilter(needsYou, "needs_you", NOW)).toBe(true);
-    expect(matchesFilter(coord, "needs_you", NOW)).toBe(false);
+  it("filters complete only", () => {
+    expect(matchesFilter(complete, "complete", NOW)).toBe(true);
+    expect(matchesFilter(cancelled, "complete", NOW)).toBe(false);
+    expect(matchesFilter(confirmed, "complete", NOW)).toBe(false);
   });
 
   it("filters coordinating only", () => {
@@ -115,13 +118,13 @@ describe("matchesFilter", () => {
 });
 
 describe("filter constants", () => {
-  it("EVENT_FILTERS matches the PROJECT-PLAN ordering", () => {
+  it("EVENT_FILTERS matches the V1 redesign ordering", () => {
     expect(EVENT_FILTERS).toEqual([
       "all",
       "coordinating",
       "confirmed",
-      "needs_you",
-      "past",
+      "complete",
+      "cancelled",
     ]);
   });
 
@@ -131,14 +134,17 @@ describe("filter constants", () => {
     }
   });
 
-  it('uses "Coord." (per SPEC §2.6) for the coordinating chip', () => {
-    expect(EVENT_FILTER_LABELS.coordinating).toBe("Coord.");
+  it("uses full word labels (not abbreviated)", () => {
+    expect(EVENT_FILTER_LABELS.coordinating).toBe("Coordinating");
+    expect(EVENT_FILTER_LABELS.confirmed).toBe("Confirmed");
+    expect(EVENT_FILTER_LABELS.complete).toBe("Complete");
+    expect(EVENT_FILTER_LABELS.cancelled).toBe("Cancelled");
   });
 
   it("each non-all bucket has a pill label", () => {
-    expect(EVENT_PILL_LABELS.coordinating).toBe("Coord.");
+    expect(EVENT_PILL_LABELS.coordinating).toBe("Coordinating");
     expect(EVENT_PILL_LABELS.confirmed).toBe("Confirmed");
-    expect(EVENT_PILL_LABELS.needs_you).toBe("Needs you");
-    expect(EVENT_PILL_LABELS.past).toBe("Past");
+    expect(EVENT_PILL_LABELS.complete).toBe("Complete");
+    expect(EVENT_PILL_LABELS.cancelled).toBe("Cancelled");
   });
 });

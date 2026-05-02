@@ -39,6 +39,7 @@ import {
 } from "@/lib/event-links-buckets";
 import { EventLinksCard, type ReusableLinkRow } from "./event-links-card";
 import { EventLinksEditDialog } from "./event-links-edit-dialog";
+import { CreateLinkPickerMobile } from "@/components/desktop/create-link-picker";
 
 interface EventLinksSheetProps {
   open: boolean;
@@ -59,13 +60,6 @@ interface UpcomingEventRow extends SessionLike {
     inviteeEmail?: string | null;
     topic?: string | null;
   } | null;
-}
-
-function dispatchPrefill(text: string) {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent("envoy:prefill-composer", { detail: text }),
-  );
 }
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -120,13 +114,16 @@ function buildEventSub(s: UpcomingEventRow): string {
 }
 
 function statusPillColor(bucket: string): { bg: string; text: string } {
+  // Updated 2026-05-02 V1 redesign: needs_you retired, past split into
+  // complete/cancelled. See `event-links-buckets.ts` for the canonical
+  // bucket list.
   switch (bucket) {
     case "confirmed":
       return { bg: "bg-green-500/10", text: "text-green-400" };
-    case "needs_you":
-      return { bg: "bg-amber-500/10", text: "text-amber-400" };
-    case "past":
+    case "complete":
       return { bg: "bg-zinc-500/10", text: "text-zinc-400" };
+    case "cancelled":
+      return { bg: "bg-red-500/10", text: "text-red-400" };
     case "coordinating":
     default:
       return { bg: "bg-indigo-500/10", text: "text-indigo-400" };
@@ -338,19 +335,12 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
           </div>
         )}
 
-        {/* Create-a-reusable-link tile — prefills the chat composer */}
-        <button
-          type="button"
-          onClick={() => {
-            dispatchPrefill("Create a new Office Hours link for ");
-            onClose();
-          }}
-          className="mt-2 w-full p-3 rounded-xl border border-dashed border-secondary text-secondary hover:border-accent hover:text-accent transition flex items-center justify-center gap-2 text-xs font-medium"
-          data-testid="mobile-event-links-create-reusable"
-        >
-          <span aria-hidden>+</span>
-          <span>Create a reusable link</span>
-        </button>
+        {/* Create-a-reusable-link — H-scroll suggestion cards (3 type cards).
+            V1 design (2026-05-02). The picker dispatches its own prefill +
+            navigates home; sheet closes via the route change. */}
+        <div className="-mx-4 mt-3" data-testid="mobile-event-links-create-section">
+          <CreateLinkPickerMobile />
+        </div>
 
         {/* GROUP 2 — Upcoming events */}
         <div className="text-[10px] font-semibold tracking-wider uppercase text-muted mt-5 mb-2 px-1">
@@ -405,7 +395,9 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                 "Guest";
               const title = s.title || s.link?.topic || `Meeting with ${guestLabel}`;
               const sub = buildEventSub(s);
-              const isCancellable = bucket !== "past";
+              // Cancellable: only live sessions (coordinating / confirmed).
+              // Complete + cancelled rows are terminal — no cancel action.
+              const isCancellable = bucket === "coordinating" || bucket === "confirmed";
 
               if (confirmCancelId === s.id) {
                 return (
