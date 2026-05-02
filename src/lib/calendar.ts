@@ -873,9 +873,10 @@ export async function getOrComputeSchedule(
   // For Primary links only: check DB cache. Variance links always recompute
   // (low-traffic; avoids composite-key schema change — deferred to a future PR).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const prismaUntyped = prisma as any;
   const computedRecord = isVarianceLink
     ? null
-    : await (prisma as any).computedSchedule.findUnique({ where: { userId } });
+    : await prismaUntyped.computedSchedule.findUnique({ where: { userId } });
 
   if (!user) throw new Error("User not found");
 
