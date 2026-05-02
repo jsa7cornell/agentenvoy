@@ -35,6 +35,9 @@ export async function GET(req: NextRequest) {
   let prefs: Record<string, unknown>;
   let linkRules: LinkParameters = {};
   let recurringWindowId: string | null = null;
+  // Link context for per-link posture scoring (V1.5). Set when the request
+  // has a session; null for self-mode (Primary posture).
+  let scheduleLink: import("@/lib/links/posture").LinkContext | null = null;
   // guestId is set only when the session has a logged-in guest (bilateral path).
   // Anonymous guests stay null → bilateral compute is skipped and the response
   // falls back to today's host-only shape.
@@ -73,7 +76,7 @@ export async function GET(req: NextRequest) {
         // path — see proposal §3.6, decided 2026-04-28).
         negotiatedDuration: true,
         host: { select: { preferences: true } },
-        link: { select: { parameters: true, recurringWindowId: true } },
+        link: { select: { type: true, parameters: true, recurringWindowId: true } },
       },
     });
     if (!session) {
@@ -84,6 +87,7 @@ export async function GET(req: NextRequest) {
     prefs = (session.host.preferences as Record<string, unknown>) || {};
     linkRules = parseLinkParameters(session.link?.parameters);
     recurringWindowId = session.link?.recurringWindowId ?? null;
+    scheduleLink = session.link ? { type: session.link.type ?? undefined, parameters: session.link.parameters } : null;
     partialSessionId = sessionId;
     negotiatedDuration = session.negotiatedDuration ?? null;
   } else {
@@ -140,7 +144,7 @@ export async function GET(req: NextRequest) {
   let computeFailed = false;
 
   try {
-    const schedule = await getOrComputeSchedule(hostId);
+    const schedule = await getOrComputeSchedule(hostId, { link: scheduleLink });
 
     // Widget display: combine both signals — active location rule + Google workingLocation.
     // The host's private defaultLocation is NEVER surfaced here (guest-facing widget).

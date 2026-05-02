@@ -826,12 +826,30 @@ export async function getCachedCalendarContext(
 
 import { computeSchedule, computeInputHash, type ScoredSlot, type UserPreferences } from "./scoring";
 import { safeTimezone } from "./timezone";
+import { getLinkPosture, type LinkContext } from "./links/posture";
 
 /**
  * Get the computed schedule for a user, recomputing only if inputs changed.
  * This is the main entry point for both the slots endpoint and LLM prompts.
+ *
+ * When `options.link` is provided and is a variance link (type !== "primary"),
+ * the schedule is scored using that link's posture (hours, days, buffer,
+ * compiled rules) rather than the host's global Primary posture. Per-link
+ * schedules are not cached in the DB — they're computed fresh each request
+ * because variance links are low-traffic and caching would require a schema
+ * change to support a composite (userId, linkId) key. Primary schedules
+ * retain the existing hash-based DB cache.
+ *
+ * See proposal 2026-05-02_per-link-config-storage-and-scoring-link-scope §2.2.
  */
-export async function getOrComputeSchedule(userId: string, options?: { forceRefresh?: boolean }): Promise<{
+export async function getOrComputeSchedule(
+  userId: string,
+  options?: {
+    forceRefresh?: boolean;
+    /** Link context for per-link posture scoring. Pass null or omit for Primary. */
+    link?: LinkContext | null;
+  }
+): Promise<{
   slots: ScoredSlot[];
   events: CalendarEvent[];
   timezone: string;
@@ -848,17 +866,50 @@ export async function getOrComputeSchedule(userId: string, options?: { forceRefr
       upcomingSchedulePreferences: true,
     },
   });
-  // computedSchedule is a separate model pending prisma client regen
+
+  const link = options?.link ?? null;
+  const isVarianceLink = !!link && link.type && link.type !== "primary";
+
+  // For Primary links only: check DB cache. Variance links always recompute
+  // (low-traffic; avoids composite-key schema change — deferred to a future PR).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const computedRecord = await (prisma as any).computedSchedule.findUnique({ where: { userId } });
+  const computedRecord = isVarianceLink
+    ? null
+    : await (prisma as any).computedSchedule.findUnique({ where: { userId } });
 
   if (!user) throw new Error("User not found");
 
-  const prefs = (user.preferences as UserPreferences) || {};
-  const tz = safeTimezone(prefs.explicit?.timezone);
+  const rawPrefs = (user.preferences as UserPreferences) || {};
+  const tz = safeTimezone(rawPrefs.explicit?.timezone);
 
-  // Location expiry is handled by the availability rule lifecycle
-  // (expireRules() runs on GET /api/tuner/preferences) — no cleanup needed here.
+  // For variance links, resolve posture from the link's stored parameters
+  // rather than the host's global User.preferences. getLinkPosture throws if
+  // the link is missing required fields — caller's try/catch surfaces this as
+  // scheduling-unavailable. Once the backfill script runs, all variance links
+  // will have complete posture; until then, Primary scheduling is unchanged.
+  let prefs = rawPrefs;
+  if (isVarianceLink) {
+    const posture = getLinkPosture(link, { preferences: rawPrefs as UserPreferences });
+    // Overlay posture values onto a synthetic preferences object so
+    // computeSchedule (which reads preferences.*) works without changes.
+    prefs = {
+      ...rawPrefs,
+      explicit: {
+        ...rawPrefs.explicit,
+        businessHoursStartMinutes: posture.hoursStartMinutes,
+        businessHoursEndMinutes: posture.hoursEndMinutes,
+        // Keep legacy hour fields consistent for code paths that haven't
+        // migrated to *Minutes yet.
+        businessHoursStart: Math.floor(posture.hoursStartMinutes / 60),
+        businessHoursEnd: Math.ceil(posture.hoursEndMinutes / 60),
+        bufferMinutes: posture.bufferMinutes,
+        blackoutDays: posture.blackoutDays,
+        defaultDuration: posture.defaultDuration,
+      },
+      // Replace compiled rules with link-level rules.
+      compiled: posture.compiled,
+    } as UserPreferences;
+  }
 
   // Force-clear calendar cache if requested (e.g., host said "check again")
   if (options?.forceRefresh) {
@@ -881,7 +932,8 @@ export async function getOrComputeSchedule(userId: string, options?: { forceRefr
     };
   }
 
-  // Check if recomputation is needed (includes internal calendar fields)
+  // Check if recomputation is needed. Variance links always recompute
+  // (computedRecord is null), so this check only matters for Primary.
   const inputHash = computeInputHash(calCtx.events, prefs, user.persistentKnowledge, user.upcomingSchedulePreferences);
   const existing = computedRecord as { inputHash?: string; slots?: ScoredSlot[] } | null;
 
@@ -901,22 +953,24 @@ export async function getOrComputeSchedule(userId: string, options?: { forceRefr
   // Recompute
   const slots = computeSchedule(calCtx.events, prefs, user.persistentKnowledge, user.upcomingSchedulePreferences);
 
-  // Store computed schedule
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (prisma as any).computedSchedule.upsert({
-    where: { userId },
-    create: {
-      userId,
-      slots: slots as unknown as Prisma.InputJsonValue,
-      computedAt: new Date(),
-      inputHash,
-    },
-    update: {
-      slots: slots as unknown as Prisma.InputJsonValue,
-      computedAt: new Date(),
-      inputHash,
-    },
-  });
+  // Persist to DB cache for Primary links only.
+  if (!isVarianceLink) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (prisma as any).computedSchedule.upsert({
+      where: { userId },
+      create: {
+        userId,
+        slots: slots as unknown as Prisma.InputJsonValue,
+        computedAt: new Date(),
+        inputHash,
+      },
+      update: {
+        slots: slots as unknown as Prisma.InputJsonValue,
+        computedAt: new Date(),
+        inputHash,
+      },
+    });
+  }
 
   return {
     slots,

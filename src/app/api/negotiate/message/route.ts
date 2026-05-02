@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
   let calendarContext: CalendarContext | undefined;
   let scoredSlots: ScoredSlot[] = [];
   try {
-    const schedule = await getOrComputeSchedule(session.hostId);
+    const schedule = await getOrComputeSchedule(session.hostId, { link: session.link ?? null });
     if (schedule.connected) {
       calendarContext = {
         connected: true,

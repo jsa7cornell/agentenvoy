@@ -44,6 +44,7 @@ import {
   type AuthorizeResult,
 } from "@/lib/mcp/auth";
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
+import { getLinkPosture } from "@/lib/links/posture";
 import { confirmBooking } from "@/lib/confirm-pipeline";
 import { cancelSession } from "@/lib/cancel-pipeline";
 import { rescheduleSession } from "@/lib/reschedule-pipeline";
@@ -162,12 +163,20 @@ export async function handleGetMeetingParameters(
   const rules = (link.parameters ?? {}) as LinkParameters;
   const slotStart = args.slotStart ? new Date(args.slotStart) : undefined;
 
+  // V1.5: resolve link posture for duration/location defaults. Graceful
+  // fallback to null when backfill hasn't populated variance posture yet.
+  let linkPosture: import("@/lib/links/posture").ResolvedPosture | null = null;
+  try {
+    linkPosture = getLinkPosture(link, { preferences: hostPreferences });
+  } catch { /* variance link missing fields — use hostPreferences fallback */ }
+
   const parameters = resolveParameters({
     rules,
     hostPreferences,
     hostTimezone,
     slotStart,
     compiledRules,
+    posture: linkPosture,
   });
 
   return asCallResult({
@@ -262,16 +271,24 @@ export async function handleGetAvailability(
   const compiledRules =
     ((hostPreferences?.explicit as Record<string, unknown> | undefined)
       ?.compiled as CompiledRules | undefined) ?? null;
+
+  // V1.5: per-link posture for resolver defaults + per-link schedule scoring.
+  let availPosture: import("@/lib/links/posture").ResolvedPosture | null = null;
+  try {
+    availPosture = getLinkPosture(link, { preferences: hostPreferences });
+  } catch { /* variance link missing fields — use hostPreferences fallback */ }
+
   const parameters = resolveParameters({
     rules,
     hostPreferences,
     hostTimezone: timezone,
     compiledRules,
+    posture: availPosture,
   });
   const rulesPassthrough = buildRulesPassthrough(rules);
 
-  // Pull the host's global scored schedule.
-  const schedule = await getOrComputeSchedule(link.userId);
+  // Pull the host's scored schedule, using link-level posture for variance links.
+  const schedule = await getOrComputeSchedule(link.userId, { link });
   if (!schedule.connected) {
     return asCallResult({ ok: true, timezone, slots: [], parameters, rules: rulesPassthrough });
   }
@@ -753,11 +770,19 @@ export async function handleProposeParameters(
   const compiledRules =
     ((hostPreferences?.explicit as Record<string, unknown> | undefined)
       ?.compiled as CompiledRules | undefined) ?? null;
+
+  // V1.5: per-link posture for resolver defaults.
+  let proposePosture: import("@/lib/links/posture").ResolvedPosture | null = null;
+  try {
+    proposePosture = getLinkPosture(link, { preferences: hostPreferences });
+  } catch { /* variance link missing fields — use hostPreferences fallback */ }
+
   const envelopes = resolveParameters({
     rules,
     hostPreferences,
     hostTimezone,
     compiledRules,
+    posture: proposePosture,
   });
 
   const proposal = args.proposal;

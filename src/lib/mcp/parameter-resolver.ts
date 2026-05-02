@@ -32,6 +32,7 @@
  * test (`src/__tests__/unit/parameter-resolver.test.ts`) enforces this at CI.
  */
 import type { LinkParameters, UserPreferences, CompiledRules } from "@/lib/scoring";
+import type { ResolvedPosture } from "@/lib/links/posture";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,6 +100,15 @@ export interface ResolveInput {
    * happens.
    */
   compiledRules?: CompiledRules | null;
+  /**
+   * Optional: resolved posture for the link being booked (V1.5). When
+   * present, `defaultDuration` and `defaultLocation` fall back to posture
+   * values rather than `hostPreferences.explicit.*`. Variance links supply
+   * this; Primary uses the existing `hostPreferences` path.
+   *
+   * See proposal 2026-05-02_per-link-config-storage-and-scoring-link-scope §2.2.
+   */
+  posture?: ResolvedPosture | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -350,11 +360,12 @@ function resolveDuration(input: ResolveInput): ParameterEnvelope<number> {
     };
   }
 
-  // 4. Host-profile default. UserPreferences has two paths (historical):
-  //    top-level `defaultDuration` and `explicit.defaultDuration`.
-  //    Precedence matches the rest of the codebase (agent/composer.ts:208).
+  // 4. Host-profile default. V1.5: prefer resolved posture (link-level or
+  //    Primary) when supplied; fall back to legacy UserPreferences paths.
   const profileDefault =
-    hostPreferences?.defaultDuration ?? hostPreferences?.explicit?.defaultDuration;
+    input.posture?.defaultDuration ??
+    hostPreferences?.defaultDuration ??
+    hostPreferences?.explicit?.defaultDuration;
   if (typeof profileDefault === "number" && profileDefault > 0) {
     return {
       value: profileDefault,
@@ -410,8 +421,10 @@ function resolveLocation(
   }
 
   // 3. Host-profile default (`explicit.defaultLocation`). Per §2.3 principle,
-  //    this is silent (`host-filled`), never delegated.
-  const defaultLocation = hostPreferences?.explicit?.defaultLocation;
+  //    this is silent (`host-filled`), never delegated. V1.5: prefer resolved
+  //    posture when supplied (carries link-level or Primary default location).
+  const defaultLocation =
+    input.posture?.defaultLocation ?? hostPreferences?.explicit?.defaultLocation;
   if (typeof defaultLocation === "string" && defaultLocation.trim()) {
     return {
       value: defaultLocation,

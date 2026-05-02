@@ -642,13 +642,13 @@ export async function POST(req: NextRequest) {
   let scheduleSlots: ScoredSlot[] = [];
   let hostTimezone = "America/Los_Angeles";
   try {
-    let schedule = await getOrComputeSchedule(user.id);
+    let schedule = await getOrComputeSchedule(user.id, { link });
     // If the calendar is connected but returned zero events, the sync may
     // have been cold or failed silently — force a fresh pull before
     // generating the greeting so we don't offer times that are actually blocked.
     if (schedule.connected && schedule.events.length === 0) {
       console.warn(`[session/greeting] connected calendar returned 0 events (userId=${user.id}) — forcing refresh`);
-      schedule = await getOrComputeSchedule(user.id, { forceRefresh: true });
+      schedule = await getOrComputeSchedule(user.id, { forceRefresh: true, link });
     }
     if (schedule.connected) {
       calendarContext = {

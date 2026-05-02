@@ -53,6 +53,7 @@ import {
 } from "@/lib/office-hours";
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
 import { buildRulesPassthrough } from "@/lib/mcp/tools";
+import { getLinkPosture } from "@/lib/links/posture";
 
 /**
  * The wire shape consumed by external agents. `application/agent+json`
@@ -144,11 +145,23 @@ export async function buildAgentSnapshot(
     ((hostPreferences?.explicit as Record<string, unknown> | undefined)
       ?.compiled as CompiledRules | undefined) ?? null;
 
+  // V1.5: resolve link-specific posture (or Primary posture for primary links).
+  // getLinkPosture throws for variance links that are missing required fields —
+  // we catch and fall back to null so snapshots degrade gracefully until backfill.
+  let resolvedPosture: import("@/lib/links/posture").ResolvedPosture | null = null;
+  try {
+    resolvedPosture = getLinkPosture(link, { preferences: hostPreferences });
+  } catch {
+    // Variance link missing posture fields — backfill hasn't run yet.
+    // Fall back to hostPreferences paths in the resolver.
+  }
+
   const parameters = resolveParameters({
     rules,
     hostPreferences,
     hostTimezone: timezone,
     compiledRules,
+    posture: resolvedPosture,
   });
   const rulesPassthrough = buildRulesPassthrough(rules);
 

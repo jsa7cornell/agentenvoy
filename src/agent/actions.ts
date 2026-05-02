@@ -2784,6 +2784,27 @@ async function handleUpdateBusinessHours(
     data: { preferences: nextPrefs as unknown as Prisma.InputJsonValue },
   });
 
+  // V1.5: fan-out changed posture fields to all variance links so they stay
+  // in sync when the host edits business hours globally. scope "all" re-writes
+  // User.preferences with the same values (idempotent, harmless double-write)
+  // AND writes to every variance link. Fan-out failure is non-fatal — Primary
+  // was already written; log and continue so the agent response isn't blocked.
+  const postureUpdate: Record<string, unknown> = {};
+  if (start !== undefined) postureUpdate.hoursStartMinutes = start * 60;
+  if (end !== undefined) postureUpdate.hoursEndMinutes = end * 60;
+  if (buffer !== undefined) postureUpdate.bufferMinutes = buffer;
+
+  if (Object.keys(postureUpdate).length > 0) {
+    const { applyPostureToScope } = await import("@/lib/links/scope");
+    await applyPostureToScope(
+      postureUpdate as import("@/lib/links/scope").PostureUpdate,
+      "all",
+      userId
+    ).catch((err) => {
+      console.error("[handleUpdateBusinessHours] variance fan-out failed", err);
+    });
+  }
+
   const { invalidateSchedule } = await import("@/lib/calendar");
   await invalidateSchedule(userId);
   invalidateBehaviorSnapshot(userId);
