@@ -29,7 +29,8 @@ export type PresetName =
   | "host-with-named-links"
   | "host-general-only"
   | "host-katie-bike-ride"
-  | "host-recurring-piano-lessons";
+  | "host-recurring-piano-lessons"
+  | "host-iterates-office-hours";
 
 export interface Fixture {
   host: string;
@@ -116,6 +117,23 @@ const PRESETS: Record<PresetName, Fixture> = {
     priorEnvoyTurn: undefined,
     recap:
       "Fresh host context for recurring-meeting-create; 'set up weekly piano lessons with Pat' must classify as create_link in one turn (F8 hard-pass).",
+    isHost: true,
+  },
+  // Iterative-blabbering office hours — covers the chat-driven reshape's
+  // multi-turn config tracking. Per proposal `2026-05-03_recurring-and-
+  // office-hours-widgets` §3.14: composer must (i) emit the initial
+  // office_hours add as `update_availability_rule` create_link-equivalent,
+  // (ii) emit `update` operations on follow-up tweaks ("actually 45 min" /
+  // "also Thursdays"), (iii) handle "what's it set to now" as a query
+  // intent that reads live state without emitting an action. Prior turn
+  // context simulates a freshly-created Sales pitch link.
+  "host-iterates-office-hours": {
+    host: "John Anderson",
+    activeSessionsSummary: "",
+    priorEnvoyTurn:
+      "Set up — guests can book 30-minute video meetings on Tuesdays from 2 to 4 PM. I'll drop the URL in once it saves. Let me know if you want to change anything.",
+    recap:
+      "John just created Sales pitch office hours (Tue 2-4pm, 30-min video). Iterative tweaks ('actually 45 min', 'also Thursdays', 'what's it set to now') must route to update_availability_rule patches OR to a state-of-record narration without an action.",
     isHost: true,
   },
 };
