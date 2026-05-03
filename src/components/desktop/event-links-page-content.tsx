@@ -117,27 +117,26 @@ function getDealRoomUrl(s: UpcomingEventRow): string | null {
   return s.link.code ? `/meet/${s.link.slug}/${s.link.code}` : `/meet/${s.link.slug}`;
 }
 
-/** Pretty-print an ISO datetime as "Fri, May 3" — matches the mockup. */
-function formatDayLabel(iso: string): string {
+/** Compact date cell: "May 3" (no year in current year, "May 3 '24" otherwise). */
+function formatCompactDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
   try {
     const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    const thisYear = new Date().getFullYear();
+    if (d.getFullYear() === thisYear) {
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
   } catch {
-    return "";
+    return "—";
   }
 }
 
-/** "10:00 AM – 11:00 AM PT" — agreed start + duration. Uses local TZ. */
-function formatTimeRange(iso: string, durationMinutes: number | null | undefined): string {
+/** Compact time: "10:00 AM" with no leading zero on hour. */
+function formatCompactTime(iso: string | null | undefined): string {
+  if (!iso) return "";
   try {
-    const start = new Date(iso);
-    const dur = durationMinutes ?? 30;
-    const end = new Date(start.getTime() + dur * 60_000);
-    const fmtTime = (d: Date) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-    const tz = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
-      .formatToParts(start)
-      .find((p) => p.type === "timeZoneName")?.value ?? "";
-    return `${fmtTime(start)} – ${fmtTime(end)} ${tz}`.trim();
+    return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   } catch {
     return "";
   }
@@ -496,14 +495,17 @@ export function EventLinksPageContent() {
               data-testid="desktop-event-links-table"
             >
               {/* Table header (desktop only — mobile-narrow viewports get
-                  the stacked sheet via the topbar pill). */}
+                  the stacked sheet via the topbar pill).
+                  Columns: Event · Guest · Created · Confirmed · Meeting · Status · Actions */}
               <div
-                className="grid grid-cols-[2.5fr_1.2fr_1.6fr_1fr_1.2fr] gap-3 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted bg-surface-secondary/40 border-b border-secondary"
+                className="grid grid-cols-[2fr_1fr_0.85fr_0.85fr_1.1fr_0.9fr_1fr] gap-3 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted bg-surface-secondary/40 border-b border-secondary"
                 role="row"
               >
                 <div>Event</div>
                 <div>Guest</div>
-                <div>When</div>
+                <div>Created</div>
+                <div>Confirmed</div>
+                <div>Meeting</div>
                 <div>Status</div>
                 <div className="text-right" />
               </div>
@@ -524,7 +526,6 @@ export function EventLinksPageContent() {
                   const isCoordinating = bucket === "coordinating";
                   const isConfirmed = bucket === "confirmed";
                   const isCancelled = bucket === "cancelled";
-                  const isComplete = bucket === "complete";
 
                   // Inline cancel-confirm state
                   if (confirmCancelId === s.id) {
@@ -554,36 +555,10 @@ export function EventLinksPageContent() {
                     );
                   }
 
-                  // Date+time cell content
-                  let whenContent: React.ReactNode = (
-                    <span className="text-[12px] italic text-muted">Negotiating times…</span>
-                  );
-                  if (isConfirmed && s.agreedTime) {
-                    whenContent = (
-                      <div className="flex flex-col">
-                        <span className="text-[12.5px] font-semibold text-primary">
-                          {formatDayLabel(s.agreedTime)}
-                        </span>
-                        <span className="text-[11px] text-muted">
-                          {formatTimeRange(s.agreedTime, s.duration ?? undefined)}
-                        </span>
-                      </div>
-                    );
-                  } else if (isComplete && s.agreedTime) {
-                    whenContent = (
-                      <span className="text-[12px] text-muted">{formatDayLabel(s.agreedTime)}</span>
-                    );
-                  } else if (isCancelled) {
-                    const stamp = s.cancelledAt ? formatDayLabel(s.cancelledAt) : "";
-                    whenContent = (
-                      <span className="text-[12px] text-muted">{stamp ? `Cancelled ${stamp}` : "—"}</span>
-                    );
-                  }
-
                   return (
                     <li
                       key={s.id}
-                      className={`grid grid-cols-[2.5fr_1.2fr_1.6fr_1fr_1.2fr] gap-3 items-center px-4 py-3 ${
+                      className={`grid grid-cols-[2fr_1fr_0.85fr_0.85fr_1.1fr_0.9fr_1fr] gap-3 items-center px-4 py-3 ${
                         idx > 0 ? "border-t border-secondary" : ""
                       } ${isCancelled ? "opacity-60" : "hover:bg-surface-secondary/30"} transition-colors`}
                       data-testid={`desktop-event-links-row-${bucket}`}
@@ -620,8 +595,31 @@ export function EventLinksPageContent() {
                       {/* Guest */}
                       <div className="text-[12px] text-secondary truncate">{guestLabel}</div>
 
-                      {/* When */}
-                      <div className="min-w-0">{whenContent}</div>
+                      {/* Created */}
+                      <div className="text-[12px] text-secondary tabular-nums">
+                        {formatCompactDate(s.createdAt)}
+                      </div>
+
+                      {/* Confirmed — date agreedTime was set; "-" while still coordinating */}
+                      <div className="text-[12px] text-secondary tabular-nums">
+                        {formatCompactDate(s.agreedTime ?? null)}
+                      </div>
+
+                      {/* Meeting — date + time of the agreed slot */}
+                      <div className="min-w-0">
+                        {s.agreedTime ? (
+                          <div className="flex flex-col">
+                            <span className="text-[12px] font-medium text-primary tabular-nums">
+                              {formatCompactDate(s.agreedTime)}
+                            </span>
+                            <span className="text-[11px] text-muted tabular-nums">
+                              {formatCompactTime(s.agreedTime)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[12px] text-muted">—</span>
+                        )}
+                      </div>
 
                       {/* Status pill */}
                       <div>
