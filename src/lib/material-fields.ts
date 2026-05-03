@@ -35,6 +35,10 @@ export const MATERIAL_FIELDS = [
   // the change to the host.
   "guestPicks",
   "guestGuidance",
+  // Added in proposal 2026-05-03_recurring-and-office-hours-widgets §3.3.
+  // Host edits that change cadence / count / anchor on a recurring meeting
+  // (e.g. "actually let's do biweekly", "end after 12 weeks") are material.
+  "recurrence",
 ] as const;
 
 export type MaterialField = typeof MATERIAL_FIELDS[number];
@@ -61,6 +65,7 @@ export const FIELD_LABEL: Record<MaterialField, string> = {
   // guestPicks sub-keys at once sees one pill label, not two.
   guestPicks: "deferrals",
   guestGuidance: "deferrals",
+  recurrence: "cadence",
 };
 
 /** True if `field` is one of the canonical material fields. */

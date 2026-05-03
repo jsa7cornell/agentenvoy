@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
@@ -21,7 +21,7 @@ import { formatDuration } from "@/lib/format-duration";
 import { writeProfileField } from "@/lib/profile-fields";
 import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
 import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
-import { parseRecurrence, type LinkRecurrence } from "@/lib/recurrence";
+import { parseRecurrence, readRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { UserPreferences } from "@/lib/scoring";
 import { parseLinkParameters } from "@/lib/link-parameters";
 import { snapshotPostureFromUser } from "@/lib/links/create";
@@ -1836,6 +1836,7 @@ async function handleExpandLink(
     code: string | null;
     topic: string | null;
     topicSource: string | null;
+    recurrence: unknown;
   } | null = null;
   let resolvedSessionIdForLink: string | null = sessionId || null;
 
@@ -1844,7 +1845,7 @@ async function handleExpandLink(
   if (inferredLinkId) {
     link = await prisma.negotiationLink.findUnique({
       where: { id: inferredLinkId },
-      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true },
+      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, recurrence: true },
     });
     if (link) {
       const latest = await prisma.negotiationSession.findFirst({
@@ -1857,7 +1858,7 @@ async function handleExpandLink(
   } else if (code) {
     link = await prisma.negotiationLink.findFirst({
       where: { code, userId },
-      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true },
+      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, recurrence: true },
     });
     // For "View it here" threading: find the most recent session on this link.
     if (link) {
@@ -1881,7 +1882,7 @@ async function handleExpandLink(
           where: { id: fallbackSessionId },
           select: {
             hostId: true,
-            link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true } },
+            link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, recurrence: true } },
           },
         });
         if (fallbackSession && fallbackSession.hostId === userId && fallbackSession.link) {
@@ -1897,7 +1898,7 @@ async function handleExpandLink(
       select: {
         hostId: true,
         linkId: true,
-        link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true } },
+        link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, recurrence: true } },
       },
     });
     if (!session) {
@@ -2030,14 +2031,19 @@ async function handleExpandLink(
   }
 
   // Guard: only `intent`/`steering` alone doesn't count as a meaningful
-  // update — every other field does.
+  // update — every other field does. Recurrence is handled below as a
+  // non-parameters-merge write (it lands on `link.recurrence`, not
+  // `link.parameters`), so the gate also counts a recurrence-only emit
+  // as a meaningful update — per proposal §3.3 (2026-05-03), this is
+  // the load-bearing fix that makes "change to biweekly" work.
   const patchKeysForGate = Object.keys(patch).filter(
     (k) => k !== "intent" && k !== "steering",
   );
-  if (patchKeysForGate.length === 0 && inviteeNamesPatch === undefined) {
+  const hasRecurrencePatch = "recurrence" in params;
+  if (patchKeysForGate.length === 0 && inviteeNamesPatch === undefined && !hasRecurrencePatch) {
     return {
       success: false,
-      message: "update_link needs at least one field to change (isVip, availability, preferred, lastResort, dateRange, blockedRanges, timingLabel, format, duration, activity, activityIcon, location, inviteeNames, guestPicks, guestGuidance)",
+      message: "update_link needs at least one field to change (isVip, availability, preferred, lastResort, dateRange, blockedRanges, timingLabel, format, duration, activity, activityIcon, location, inviteeNames, guestPicks, guestGuidance, recurrence)",
     };
   }
 
@@ -2100,6 +2106,50 @@ async function handleExpandLink(
     }
   }
 
+  // Recurrence patch (proposal `2026-05-03_recurring-and-office-hours-widgets`
+  // §3.3 — closes the Rule 21(c) drift latent since the parent recurring-
+  // meeting proposal's PR-A shipped 2026-04-23). The composer playbook at
+  // `calendar-event-composer.md:178` says series-level edits go through
+  // `update_link` with a `recurrence` param; until this lands the handler
+  // silently ignored that emit. Now: validate the patch via the canonical
+  // `parseRecurrence`, persist on `link.recurrence`, track as a material edit.
+  //
+  // Edge cases handled:
+  //   - host explicitly clears recurrence by emitting `recurrence: null` →
+  //     write null (link reverts to one-off; greeting falls back).
+  //   - patch validates: full shape replaces existing (host-driven authoritative
+  //     edit; partial-merge would conflict with the pre-anchor / post-anchor
+  //     state machine).
+  //   - patch malformed: clean error returned; existing recurrence preserved.
+  //   - host omitted recurrence: noop (existing recurrence preserved).
+  let recurrencePatchWrite:
+    | { recurrence: Prisma.InputJsonValue | typeof Prisma.JsonNull }
+    | null = null;
+  let recurrencePatchEdited = false;
+  if ("recurrence" in params) {
+    const rawRec = params.recurrence;
+    if (rawRec === null) {
+      // Host explicitly cleared recurrence — write Prisma.JsonNull (the SQL
+      // NULL sentinel for nullable Json columns) rather than `null` directly.
+      recurrencePatchWrite = { recurrence: Prisma.JsonNull };
+      recurrencePatchEdited = true;
+    } else if (rawRec !== undefined) {
+      try {
+        const parsed = parseRecurrence(rawRec);
+        recurrencePatchWrite = { recurrence: parsed as unknown as Prisma.InputJsonValue };
+        // Compare against existing to avoid spurious edit-tracking.
+        const priorRec = readRecurrence(link.recurrence as Prisma.JsonValue);
+        const changed = JSON.stringify(priorRec) !== JSON.stringify(parsed);
+        if (changed) recurrencePatchEdited = true;
+      } catch (e) {
+        return {
+          success: false,
+          message: `update_link: invalid recurrence — ${(e as Error).message}`,
+        };
+      }
+    }
+  }
+
   // Material-edit tracking (proposal §3.C, decided 2026-04-28). Diff the
   // pre/post rules — plus the inviteeNames column write, plus the topic
   // clear-on-activity-change path — to compute which canonical material
@@ -2119,6 +2169,9 @@ async function handleExpandLink(
   if (topicClearUpdate) {
     if (!editedFields.includes("topic")) editedFields.push("topic");
   }
+  if (recurrencePatchEdited) {
+    if (!editedFields.includes("recurrence")) editedFields.push("recurrence");
+  }
   const materialEditWrite =
     editedFields.length > 0
       ? { lastMaterialEditAt: new Date(), lastEditedFields: editedFields }
@@ -2135,6 +2188,7 @@ async function handleExpandLink(
           }
         : {}),
       ...(topicClearUpdate ?? {}),
+      ...(recurrencePatchWrite ?? {}),
       ...materialEditWrite,
     },
   });

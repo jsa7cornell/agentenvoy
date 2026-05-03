@@ -7,7 +7,7 @@ import {
 } from "@/lib/material-fields";
 
 describe("material-fields — module shape", () => {
-  it("MATERIAL_FIELDS includes the post-2026-05-01 set (availability + preferred replace legacy time/day fields)", () => {
+  it("MATERIAL_FIELDS includes the post-2026-05-01 set + recurrence (added 2026-05-03)", () => {
     expect(MATERIAL_FIELDS).toEqual([
       "activity", "format", "duration", "location",
       "dateRange",
@@ -15,6 +15,7 @@ describe("material-fields — module shape", () => {
       "blockedRanges",
       "inviteeNames", "topic",
       "guestPicks", "guestGuidance",
+      "recurrence",
     ]);
   });
 
