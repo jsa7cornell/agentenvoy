@@ -775,6 +775,39 @@ export function formatComputedSchedule(
 }
 
 /**
+ * Determine human-readable availability categories from VIP stretch slots,
+ * used to populate the first-message tease ("early mornings or weekends").
+ * Returns up to three labels, ordered: early mornings → evenings → weekends.
+ */
+function computeStretchTeaseCategories(slots: ScoredSlot[], tz: string): string[] {
+  let hasEarlyMorning = false;
+  let hasEvening = false;
+  let hasWeekend = false;
+
+  for (const slot of slots) {
+    const d = new Date(slot.start);
+    const parts = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      weekday: "short",
+      hour12: false,
+      timeZone: tz,
+    }).formatToParts(d);
+    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "12", 10);
+    const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+
+    if (hour < 9) hasEarlyMorning = true;
+    if (hour >= 18) hasEvening = true;
+    if (weekday === "Sat" || weekday === "Sun") hasWeekend = true;
+  }
+
+  const categories: string[] = [];
+  if (hasEarlyMorning) categories.push("early mornings");
+  if (hasEvening) categories.push("evenings");
+  if (hasWeekend) categories.push("weekends");
+  return categories;
+}
+
+/**
  * Format pre-computed offerable time blocks for the LLM prompt.
  * The LLM can ONLY suggest times from this list — no raw events, no score interpretation.
  * Groups consecutive 30-min slots into contiguous blocks labeled by tier.
@@ -958,6 +991,32 @@ export function formatOfferableSlots(
     );
     lines.push(...renderTier(stretch2Slots));
     lines.push(``);
+  }
+
+  // VIP FIRST-MESSAGE TEASE — inject when stretch slots exist so the LLM
+  // knows to mention extra availability exactly once in its opening reply.
+  // Categories are computed deterministically from the stretch slot pool so
+  // the LLM doesn't have to infer them (reducing hallucination risk).
+  //
+  // NOTE: the LLM fires this tease in its FIRST reply to the guest (typically
+  // the response to the guest's first scheduling question). It checks its own
+  // message history — if it has already replied once in this session it skips
+  // the tease. The greeting is template-generated before this; the tease
+  // rides the first LLM-generated follow-up.
+  if (rules.isVip && (stretch1Slots.length > 0 || stretch2Slots.length > 0)) {
+    const stretchPool = [...stretch1Slots, ...stretch2Slots];
+    const teaseCategories = computeStretchTeaseCategories(stretchPool, tz);
+    const categoryPhrase = teaseCategories.length > 0
+      ? ` — ${teaseCategories.join(" or ")}`
+      : "";
+    lines.push(``);
+    lines.push(
+      `VIP AVAILABILITY TEASE (include ONCE in your first reply in this session, skip on later turns):` +
+      ` After addressing the guest's request, add ONE short sentence: ` +
+      `"If those don't work, there are a few other slots I could open up for you${categoryPhrase}." ` +
+      `Only send this once — if any prior Envoy turn exists, omit it. ` +
+      `Do NOT mention VIP or explain why more slots exist — just surface the hint naturally.`
+    );
   }
 
   lines.push(`Legend: ★ = host's preferred times. All listed times are safe to propose within their tier — do not combine or promote between tiers without guest pushback.`);

@@ -2265,6 +2265,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               return null;
             }
 
+            // activity_location_lock system messages: emitted when the guest
+            // locks an activity or location via lock_activity_location. The
+            // Envoy's prose already acknowledges the lock ("Got it — Coupa Cafe
+            // near Stanford it is!"), so the chip is redundant. Suppress in
+            // all views; the DB row is retained for audit.
+            if (msg.role === "system" && (msg.metadata as Record<string, unknown> | null)?.kind === "activity_location_lock") {
+              return null;
+            }
+
             // host_update system messages: internal accounting when the host
             // changes meeting params via dashboard. The guest has no context
             // for "Format updated to phone" (they never saw the previous
