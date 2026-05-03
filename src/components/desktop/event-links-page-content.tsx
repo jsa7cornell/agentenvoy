@@ -713,9 +713,7 @@ export function EventLinksPageContent() {
                         active ? "text-accent" : ""
                       }`}
                       data-testid={`desktop-event-links-sort-${key}`}
-                      aria-sort={
-                        active ? (sortDir === "asc" ? "ascending" : "descending") : "none"
-                      }
+                      aria-label={`Sort by ${label}${active ? `, currently ${sortDir}ending` : ""}`}
                     >
                       {label}
                       {arrow}
