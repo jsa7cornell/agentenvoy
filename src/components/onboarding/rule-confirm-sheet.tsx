@@ -26,7 +26,7 @@
  */
 
 import { useState } from "react";
-import { RuleFormFields, type OfficeHoursProposal } from "./rule-form-fields";
+import { RuleFormFields, type BookableLinkProposal } from "./rule-form-fields";
 
 export interface RuleConfirmSheetProps {
   /** ChannelMessage.id of the system row carrying this proposal — sent to
@@ -34,7 +34,7 @@ export interface RuleConfirmSheetProps {
    *  matches the body the client is asking to commit. */
   proposalMessageId: string;
   /** Initial proposal (what Envoy parsed). */
-  initialProposal: OfficeHoursProposal;
+  initialProposal: BookableLinkProposal;
   /** Whether the sheet is currently visible. Parent owns this state. */
   open: boolean;
   /** Fired after a successful confirm. */
@@ -50,7 +50,7 @@ export function RuleConfirmSheet({
   onConfirmed,
   onDismiss,
 }: RuleConfirmSheetProps) {
-  const [proposal, setProposal] = useState<OfficeHoursProposal>(initialProposal);
+  const [proposal, setProposal] = useState<BookableLinkProposal>(initialProposal);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,7 +91,7 @@ export function RuleConfirmSheet({
       className="fixed inset-0 z-50 flex flex-col justify-end"
       role="dialog"
       aria-modal="true"
-      aria-label="Create Office Hours link"
+      aria-label="Create Bookable Link"
     >
       {/* Backdrop */}
       <button
@@ -111,7 +111,7 @@ export function RuleConfirmSheet({
         {/* Header */}
         <div className="flex items-center justify-between px-4 pt-1 pb-2">
           <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-indigo-500">
-            🕐 New Office Hours rule
+            🕐 New Bookable Link
           </span>
           <button
             type="button"

@@ -32,43 +32,44 @@ import { narrateFailures, narrateTimeout, narrateFinalizeError } from "@/agent/a
 import { loadPlaybook, voicePlaybook } from "./playbooks/index";
 
 /**
- * Detect the Office Hours **create** intent inside an LLM-emitted action.
+ * Detect the Bookable Link **create** intent inside an LLM-emitted action.
  *
  * Shape produced by `rule.md`'s ladder (see playbooks/rule.md, examples
- * "Create an Office Hours link" / "Create an office hours link for 30-min
+ * "Create a Bookable Link" / "Create a bookable link for 30-min
  * video calls on Tuesdays"):
  *
  *   { action: "update_availability_rule",
- *     params: { operation: "add", rule: { action: "office_hours", ... } } }
+ *     params: { operation: "add", rule: { action: "bookable", ... } } }
  *
- * We intercept ONLY the `add` case for `office_hours` — `update` /
- * `remove` / `rename_general` and non-Office-Hours rule actions
+ * We intercept ONLY the `add` case for `bookable` — `update` /
+ * `remove` / `rename_general` and non-Bookable rule actions
  * (`block` / `allow` / `buffer` / `prefer` / `limit` / `location` /
  * `no_in_person`) still flow through `actions.ts` unchanged. The
- * `action.params.rule.action === "office_hours"` discriminator is
+ * `action.params.rule.action === "bookable"` discriminator is
  * sufficient — see the brief §7.3.
  *
- * Vocabulary discipline: `r.action === "office_hours"` is the snake-case
- * **wire keyword** for the **Office Hours** feature (capitalized in copy).
+ * Vocabulary discipline: `r.action === "bookable"` is the snake-case
+ * **wire keyword** for the **Bookable Link** feature (capitalized in copy).
  * It is unrelated to `User.preferences.explicit.businessHoursStart` /
  * `businessHoursEnd` (the host's daily window — "Business hours") which
  * is touched only by `handleUpdateBusinessHours` and is NOT in scope here.
  */
-export function isOfficeHoursAddAction(action: ActionRequest): boolean {
+export function isBookableAction(action: ActionRequest): boolean {
   if (action.action !== "update_availability_rule") return false;
   const params = action.params as Record<string, unknown>;
   if (params.operation !== "add") return false;
   const rule = params.rule as Record<string, unknown> | undefined;
   if (!rule) return false;
-  return rule.action === "office_hours";
+  // TODO(vocab-cleanup): remove || "office_hours" after migration
+  return rule.action === "bookable" || rule.action === "office_hours";
 }
 
 /**
- * Project an LLM-emitted office_hours rule onto the `OfficeHoursProposal`
+ * Project an LLM-emitted bookable rule onto the `BookableLinkProposalPayload`
  * shape consumed by the confirmation card/sheet. Defensive against partial
  * LLM payloads — fields the LLM omitted are filled with sensible defaults.
  */
-export interface OfficeHoursProposalPayload {
+export interface BookableLinkProposalPayload {
   originalText: string;
   title: string;
   format: "video" | "phone" | "in-person";
@@ -80,19 +81,25 @@ export interface OfficeHoursProposalPayload {
   expiryDate?: string;
 }
 
-export function projectProposal(action: ActionRequest): OfficeHoursProposalPayload {
+/** @deprecated use BookableLinkProposalPayload. Alias kept for import compatibility. */
+export type OfficeHoursProposalPayload = BookableLinkProposalPayload;
+
+export function projectProposal(action: ActionRequest): BookableLinkProposalPayload {
   const params = action.params as Record<string, unknown>;
   const rule = (params.rule as Record<string, unknown> | undefined) ?? {};
-  const officeHours = (rule.officeHours as Record<string, unknown> | undefined) ?? {};
+  // Support both new field name (bookable) and legacy (officeHours) for one deploy cycle
+  // TODO(vocab-cleanup): remove officeHours fallback after migration
+  const bookableData = (rule.bookable as Record<string, unknown> | undefined) ??
+    (rule.officeHours as Record<string, unknown> | undefined) ?? {};
 
   const titleRaw =
-    (typeof officeHours.name === "string" && officeHours.name.trim()) ||
-    (typeof officeHours.title === "string" && officeHours.title.trim()) ||
-    "Office Hours";
-  const formatRaw = officeHours.format;
-  const format: OfficeHoursProposalPayload["format"] =
+    (typeof bookableData.name === "string" && bookableData.name.trim()) ||
+    (typeof bookableData.title === "string" && bookableData.title.trim()) ||
+    "Drop-in Hours";
+  const formatRaw = bookableData.format;
+  const format: BookableLinkProposalPayload["format"] =
     formatRaw === "phone" || formatRaw === "in-person" ? formatRaw : "video";
-  const durRaw = officeHours.durationMinutes;
+  const durRaw = bookableData.durationMinutes;
   const durationMinutes =
     typeof durRaw === "number" && [15, 20, 30, 45, 60, 90].includes(durRaw) ? durRaw : 30;
 
@@ -257,18 +264,18 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
   const fullText = first.text;
   const allActions = parseActions(fullText);
 
-  // Office-hours create flow: as of the 2026-05-03 chat-driven narration
+  // Bookable Link create flow: as of the 2026-05-03 chat-driven narration
   // reshape (proposal `2026-05-03_recurring-and-office-hours-widgets` §3.8),
-  // office_hours actions now flow through executeActions like every other
+  // bookable actions now flow through executeActions like every other
   // rule action. The host iterates via natural-language chat
   // ("actually 45 min" / "also Thursdays") with the composer emitting
   // `update_availability_rule` patches per turn. The rule lives on the
   // Event Links page; the chat thread is pure prose narration.
   //
-  // Pre-2026-05-03: an `office_hours` `add` action was intercepted and
-  // persisted as a `kind: "rule_proposal"` system message that mounted
-  // RuleConfirmCard (desktop) / RuleConfirmSheet (mobile). The host
-  // confirmed via POST /api/availability-rules/confirm before the rule
+  // Pre-2026-05-03: a `bookable` (then `office_hours`) `add` action was
+  // intercepted and persisted as a `kind: "rule_proposal"` system message
+  // that mounted RuleConfirmCard (desktop) / RuleConfirmSheet (mobile). The
+  // host confirmed via POST /api/availability-rules/confirm before the rule
   // was written. That propose-then-confirm flow is retired; the
   // confirm endpoint stays alive for any in-flight rule_proposal rows
   // that predate the deploy.

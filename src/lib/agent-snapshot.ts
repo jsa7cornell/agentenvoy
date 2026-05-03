@@ -44,13 +44,13 @@ import {
 } from "@/lib/scoring";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import {
-  compileOfficeHoursLinks,
+  compileBookableLinks,
   type AvailabilityPreference,
 } from "@/lib/availability-rules";
 import {
-  applyOfficeHoursWindow,
+  applyBookableWindow,
   type ConfirmedBooking,
-} from "@/lib/office-hours";
+} from "@/lib/bookable-links";
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
 import { buildRulesPassthrough } from "@/lib/mcp/tools";
 import { getLinkPosture } from "@/lib/links/posture";
@@ -220,7 +220,7 @@ export async function buildAgentSnapshot(
     const explicit = prefsRecord.explicit as Record<string, unknown> | undefined;
     const allRules =
       (explicit?.structuredRules as AvailabilityPreference[] | undefined) ?? [];
-    const compiledLinks = compileOfficeHoursLinks(allRules);
+    const compiledLinks = compileBookableLinks(allRules);
     const compiled = compiledLinks.find((l) => l.ruleId === link.recurringWindowId);
     if (compiled) {
       const siblings = await prisma.negotiationSession.findMany({
@@ -239,7 +239,7 @@ export async function buildAgentSnapshot(
             s.agreedTime!.getTime() + (s.duration || compiled.durationMinutes) * 60_000,
           ).toISOString(),
         }));
-      slots = applyOfficeHoursWindow({
+      slots = applyBookableWindow({
         rule: compiled,
         slots,
         timezone,

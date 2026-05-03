@@ -898,7 +898,7 @@ export async function POST(req: NextRequest) {
             contextParts.push(`Host directives (highest priority):\n${(user.hostDirectives as string[]).map(d => `- ${d}`).join("\n")}`);
           }
 
-          // Reusable links — General + all active office-hours rules — so the
+          // Reusable links — Primary + all active Bookable Link rules — so the
           // inquire tier can answer recall questions ("what's my sales pitch link")
           // and the schedule tier can reference them. Per reusable-links proposal §4.
           {
@@ -907,22 +907,30 @@ export async function POST(req: NextRequest) {
               (explicitPrefs.structuredRules as Array<{
                 action?: string;
                 status?: string;
+                // TODO(vocab-cleanup): remove officeHours fallback after migration
+                bookable?: { name?: string; title?: string; linkSlug?: string; linkCode?: string };
                 officeHours?: { name?: string; title?: string; linkSlug?: string; linkCode?: string };
               }> | undefined) ?? [];
-            const generalLinkName =
-              typeof explicitPrefs.generalLinkName === "string" && explicitPrefs.generalLinkName.trim()
-                ? explicitPrefs.generalLinkName
-                : "Primary link";
+            // TODO(vocab-cleanup): remove generalLinkName fallback after migration
+            const primaryLinkName =
+              typeof explicitPrefs.primaryLinkName === "string" && (explicitPrefs.primaryLinkName as string).trim()
+                ? explicitPrefs.primaryLinkName as string
+                : typeof explicitPrefs.generalLinkName === "string" && (explicitPrefs.generalLinkName as string).trim()
+                  ? explicitPrefs.generalLinkName as string
+                  : "Primary link";
             const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
             const lines: string[] = [];
             if (safeUser.meetSlug) {
-              lines.push(`- "${generalLinkName}" (default): ${origin}/meet/${safeUser.meetSlug}`);
+              lines.push(`- "${primaryLinkName}" (default): ${origin}/meet/${safeUser.meetSlug}`);
             }
             for (const r of structuredRules) {
-              if (r.action !== "office_hours" || r.status !== "active" || !r.officeHours) continue;
-              const name = r.officeHours.name ?? r.officeHours.title ?? "Office Hours";
-              const url = r.officeHours.linkSlug && r.officeHours.linkCode
-                ? `${origin}/meet/${r.officeHours.linkSlug}/${r.officeHours.linkCode}`
+              // TODO(vocab-cleanup): remove || "office_hours" after migration
+              if ((r.action !== "bookable" && r.action !== "office_hours") || r.status !== "active") continue;
+              const linkData = r.bookable ?? r.officeHours;
+              if (!linkData) continue;
+              const name = linkData.name ?? linkData.title ?? "Drop-in Hours";
+              const url = linkData.linkSlug && linkData.linkCode
+                ? `${origin}/meet/${linkData.linkSlug}/${linkData.linkCode}`
                 : "(url unavailable)";
               lines.push(`- "${name}": ${url}`);
             }

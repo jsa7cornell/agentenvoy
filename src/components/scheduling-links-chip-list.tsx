@@ -33,7 +33,7 @@ type LinkEntry =
       slug: string;
     }
   | {
-      kind: "office_hours";
+      kind: "bookable";
       title: string;
       url: string;
       slug: string;
@@ -45,7 +45,7 @@ type LinkEntry =
       expiryDate: string | null;
     }
   | {
-      kind: "contextual";
+      kind: "personalized";
       title: string;
       url: string;
       slug: string;
@@ -63,13 +63,13 @@ const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function kindIcon(kind: LinkEntry["kind"]): string {
   if (kind === "standard") return "🔗";
-  if (kind === "office_hours") return "🕐";
+  if (kind === "bookable") return "🕐";
   return "🎉";
 }
 
 function shortSubtitle(l: LinkEntry): string {
   if (l.kind === "standard") return "share with anyone";
-  if (l.kind === "office_hours") {
+  if (l.kind === "bookable") {
     const days =
       l.daysOfWeek.length === 0
         ? "every day"
@@ -145,7 +145,7 @@ export function SchedulingLinksChipList() {
                 <span className="truncate text-muted tabular-nums">
                   {shortSubtitle(l)}
                 </span>
-                {l.kind === "contextual" && (
+                {l.kind === "personalized" && (
                   <EditedPill
                     lastMaterialEditAt={l.lastMaterialEditAt}
                     lastEditedFields={l.lastEditedFields}

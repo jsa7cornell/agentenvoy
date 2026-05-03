@@ -6,7 +6,7 @@ import { invalidateSchedule } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
 import { compileStructuredRules, expireRules } from "@/lib/availability-rules";
 import type { AvailabilityPreference } from "@/lib/availability-rules";
-import { generateOfficeHoursLinkCode } from "@/lib/office-hours";
+import { generateBookableLinkCode } from "@/lib/bookable-links";
 import { getUserTimezone } from "@/lib/timezone";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
 import { readProfileField } from "@/lib/profile-fields";
@@ -42,19 +42,21 @@ export async function GET() {
   // Auto-expire rules on read
   const { rules: expiredCleaned, changed: expiryChanged } = expireRules(structuredRules);
 
-  // Backfill office_hours linkSlug/linkCode for any rule missing them
+  // Backfill bookable linkSlug/linkCode for any rule missing them
+  // TODO(vocab-cleanup): remove || "office_hours" check after migration
   let linksChanged = false;
   const cleanedRules = expiredCleaned.map((rule) => {
-    if (rule.action !== "office_hours" || !rule.officeHours) return rule;
-    const oh = rule.officeHours;
-    if (oh.linkCode && oh.linkSlug) return rule;
+    const isBookable = rule.action === "bookable" || rule.action === ("office_hours" as string);
+    const bookableData = rule.bookable ?? (rule as unknown as { officeHours?: typeof rule.bookable }).officeHours;
+    if (!isBookable || !bookableData) return rule;
+    if (bookableData.linkCode && bookableData.linkSlug) return rule;
     linksChanged = true;
     return {
       ...rule,
-      officeHours: {
-        ...oh,
-        linkSlug: oh.linkSlug || user.meetSlug || "",
-        linkCode: oh.linkCode || generateOfficeHoursLinkCode(),
+      bookable: {
+        ...bookableData,
+        linkSlug: bookableData.linkSlug || user.meetSlug || "",
+        linkCode: bookableData.linkCode || generateBookableLinkCode(),
       },
     };
   });
@@ -95,7 +97,7 @@ export async function GET() {
     structuredRules: cleanedRules,
     videoProvider: readProfileField(prefs as UserPreferences, "videoProvider") || "google-meet",
     meetSlug: user.meetSlug,
-    generalLinkName: typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : "Primary link",
+    primaryLinkName: typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName : (typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : "Primary link"),
   });
 }
 
@@ -138,19 +140,21 @@ export async function PUT(req: NextRequest) {
   if (blockedWindows !== undefined) newExplicit.blockedWindows = blockedWindows;
   if (blackoutDays !== undefined) newExplicit.blackoutDays = blackoutDays;
   if (structuredRules !== undefined) {
-    // Hydrate office_hours rules with linkSlug + linkCode if missing (first save).
+    // Hydrate bookable rules with linkSlug + linkCode if missing (first save).
     // The slug is denormalized from user.meetSlug; the code is generated once
     // and frozen for the life of the rule.
+    // TODO(vocab-cleanup): remove || "office_hours" check after migration
     const hydrated = (structuredRules as AvailabilityPreference[]).map((rule) => {
-      if (rule.action !== "office_hours" || !rule.officeHours) return rule;
-      const oh = rule.officeHours;
-      if (oh.linkCode && oh.linkSlug) return rule;
+      const isBookable = rule.action === "bookable" || rule.action === ("office_hours" as string);
+      const bookableData = rule.bookable ?? (rule as unknown as { officeHours?: typeof rule.bookable }).officeHours;
+      if (!isBookable || !bookableData) return rule;
+      if (bookableData.linkCode && bookableData.linkSlug) return rule;
       return {
         ...rule,
-        officeHours: {
-          ...oh,
-          linkSlug: oh.linkSlug || user.meetSlug || "",
-          linkCode: oh.linkCode || generateOfficeHoursLinkCode(),
+        bookable: {
+          ...bookableData,
+          linkSlug: bookableData.linkSlug || user.meetSlug || "",
+          linkCode: bookableData.linkCode || generateBookableLinkCode(),
         },
       };
     });

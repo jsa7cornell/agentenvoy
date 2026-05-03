@@ -113,7 +113,7 @@ export function buildGuestPickHint(input: {
  *
  * Gated on:
  *   - non-directive steering (skipped for narrow / exclusive)
- *   - non-office-hours (anonymous reusable links use a separate seeded
+ *   - non-bookable-child (anonymous bookable child links use a separate seeded
  *     follow-up message — see 2026-04-28 reusable-link guest-picks proposal)
  *   - at least one of `guestPicks.format` or `guestPicks.duration` opt-in
  *
@@ -126,10 +126,10 @@ export function buildGuestPickHint(input: {
 export function buildSuggestAltClause(input: {
   guestPicks: GuestPicksConfig | null;
   isDirective: boolean;
-  isOfficeHoursLink: boolean;
+  isBookableChildLink: boolean;
 }): string | null {
-  const { guestPicks, isDirective, isOfficeHoursLink } = input;
-  if (isDirective || isOfficeHoursLink) return null;
+  const { guestPicks, isDirective, isBookableChildLink } = input;
+  if (isDirective || isBookableChildLink) return null;
   if (!guestPicks) return null;
   const fmtPick = !!guestPicks.format;
   const durPick = isDuration(guestPicks.duration);
@@ -160,10 +160,10 @@ export function buildSuggestAltClause(input: {
 export function buildDeferralFieldsList(input: {
   guestPicks: GuestPicksConfig | null;
   isDirective: boolean;
-  isOfficeHoursLink: boolean;
+  isBookableChildLink: boolean;
 }): string | null {
-  const { guestPicks, isDirective, isOfficeHoursLink } = input;
-  if (isDirective || isOfficeHoursLink) return null;
+  const { guestPicks, isDirective, isBookableChildLink } = input;
+  if (isDirective || isBookableChildLink) return null;
   const deferred: DeferralFieldNoun[] = [];
   if (guestPicks?.location === true) deferred.push("location");
   if (isDuration(guestPicks?.duration)) deferred.push("length");

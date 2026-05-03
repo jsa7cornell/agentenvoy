@@ -3,13 +3,13 @@
  *
  * Companion to the `rule_proposal` system message persisted by
  * `dispatch-handler.ts` when an LLM-emitted `update_availability_rule`
- * action with `params.rule.action === "office_hours"` and
- * `operation === "add"` is intercepted. The desktop card / mobile sheet
+ * action with `params.rule.action === "bookable"` (or legacy `"office_hours"`)
+ * and `operation === "add"` is intercepted. The desktop card / mobile sheet
  * surfaces the prefilled fields; clicking "Looks good" POSTs here.
  *
  * Defense-in-depth shape:
  *   1. Authn — host must own the channel that holds the proposal row.
- *   2. Body shape — validated against the OfficeHoursProposal contract.
+ *   2. Body shape — validated against the BookableLinkProposal contract.
  *   3. Cross-check — the persisted proposal metadata must match the body
  *      on the *immutable* fields (`originalText`). The host CAN edit
  *      `title` / `format` / `durationMinutes` / `daysOfWeek` / `timeStart`
@@ -19,7 +19,7 @@
  *
  * On success we write the rule to `User.preferences.explicit.structuredRules[]`
  * mirroring the shape produced by `handleUpdateAvailabilityRule` (operation:
- * "add", action: "office_hours") at `app/src/agent/actions.ts:2401`. We do
+ * "add", action: "bookable") at `app/src/agent/actions.ts:2401`. We do
  * NOT call into actions.ts directly — keeping the writer here is intentional
  * (Phase 1 scope: no mutations to actions.ts beyond what dispatch-handler
  * needs). When Phase 5 converges the composer surface, this endpoint can be
@@ -69,7 +69,7 @@ const VALID_FORMATS: ReadonlyArray<OfficeHoursProposalBody["format"]> = [
 ];
 const VALID_DURATIONS = new Set([15, 20, 30, 45, 60, 90]);
 
-function buildOfficeHoursUrl(slug: string, code: string): string {
+function buildBookableLinkUrl(slug: string, code: string): string {
   const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
   return `${origin}/meet/${slug}/${code}`;
 }
@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Load user prefs for the actual rule write — mirrors the shape produced
-  // by handleUpdateAvailabilityRule (operation: "add", action: "office_hours")
+  // by handleUpdateAvailabilityRule (operation: "add", action: "bookable")
   // at app/src/agent/actions.ts:2401. Keep these two writers in sync.
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -229,14 +229,18 @@ export async function POST(req: NextRequest) {
     ((explicit as Record<string, unknown>).structuredRules as
       | AvailabilityPreference[]
       | undefined) ?? [];
+  // TODO(vocab-cleanup): remove generalLinkName fallback after migration
   const generalLinkName =
-    typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined;
+    typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName :
+    (typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined);
 
   // Per-host name uniqueness — same guard as handleUpdateAvailabilityRule.
   const taken = new Set<string>();
   for (const r of existingRules) {
-    if (r.action !== "office_hours" || !r.officeHours) continue;
-    const n = (r.officeHours.name ?? r.officeHours.title ?? "").trim();
+    // TODO(vocab-cleanup): remove || "office_hours" after migration
+    const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
+    if ((r.action !== "bookable" && r.action !== ("office_hours" as string)) || !bookableData) continue;
+    const n = (bookableData.name ?? bookableData.title ?? "").trim();
     if (n) taken.add(normalizeLinkName(n));
   }
   taken.add(
@@ -259,13 +263,13 @@ export async function POST(req: NextRequest) {
     id: newRuleId,
     originalText: parsed.originalText.trim() || "(no description)",
     type: "recurring",
-    action: "office_hours",
+    action: "bookable",
     timeStart: parsed.timeStart,
     timeEnd: parsed.timeEnd,
     daysOfWeek: parsed.daysOfWeek,
     effectiveDate: parsed.effectiveDate,
     expiryDate: parsed.expiryDate,
-    officeHours: {
+    bookable: {
       name: parsed.title,
       title: parsed.title,
       format: parsed.format,
@@ -304,7 +308,7 @@ export async function POST(req: NextRequest) {
   // Append a confirmation row in the channel so the feed renders the
   // shipped Event Links update inline (matches mockups/mobile-v2.html §2
   // frame 3 and the item-20 confirmation contract).
-  const linkUrl = buildOfficeHoursUrl(user.meetSlug, linkCode);
+  const linkUrl = buildBookableLinkUrl(user.meetSlug, linkCode);
   await prisma.channelMessage.create({
     data: {
       channelId: (await prisma.channel.findUnique({

@@ -1039,7 +1039,7 @@ describe("executeActions", () => {
       expect(mockPrisma.negotiationLink.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           userId: HOST_USER_ID,
-          type: "contextual",
+          type: "personalized",
           slug: "john",
           code: "test-code-123",
           inviteeName: "Sarah",

@@ -1,16 +1,15 @@
 "use client";
 
 /**
- * Shared form fields for the Office Hours create flow's confirmation UI.
+ * Shared form fields for the Bookable Link create flow's confirmation UI.
  *
  * Used by both the desktop in-thread card (`rule-confirm-card.tsx`) and
  * the mobile bottom sheet (`rule-confirm-sheet.tsx`). Identical field
  * shape and editing behavior — only the surrounding chrome differs.
  *
- * Vocabulary: this component renders an **Office Hours** confirmation
- * (capitalized — feature name). The lowercase phrase "office hours" only
- * appears inside the override-semantics helper sentence per SPEC
- * §3.4.2 step 5, which describes the *behavior* in plain English.
+ * Vocabulary: this component renders a **Bookable Link** confirmation
+ * (capitalized — feature name). The lowercase phrase "drop-in hours" only
+ * appears as user-facing flavor when describing what the host told Envoy.
  *
  * "Business hours" is a separate, unrelated concept (`businessHoursStart`
  * / `businessHoursEnd` — the host's daily window) and is NOT touched here.
@@ -18,7 +17,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-export interface OfficeHoursProposal {
+/** @deprecated use BookableLinkProposal. Alias kept for import compatibility. */
+export type OfficeHoursProposal = BookableLinkProposal;
+
+export interface BookableLinkProposal {
   /** The original utterance that produced this proposal — shown as quoted
    *  context in the card/sheet header so the host sees what Envoy parsed. */
   originalText: string;
@@ -48,7 +50,7 @@ export interface OfficeHoursProposal {
 }
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const FORMAT_OPTIONS: Array<{ value: OfficeHoursProposal["format"]; label: string }> = [
+const FORMAT_OPTIONS: Array<{ value: BookableLinkProposal["format"]; label: string }> = [
   { value: "video", label: "Video" },
   { value: "phone", label: "Phone" },
   { value: "in-person", label: "In-person" },
@@ -102,9 +104,9 @@ function formatDateUS(iso: string): string {
 
 interface RuleFormFieldsProps {
   /** Mutable proposal — caller owns the state, this component renders + edits it. */
-  value: OfficeHoursProposal;
+  value: BookableLinkProposal;
   /** Fired on any field change. */
-  onChange: (next: OfficeHoursProposal) => void;
+  onChange: (next: BookableLinkProposal) => void;
   /** When true, fields render disabled (during submit). */
   disabled?: boolean;
 }
@@ -153,12 +155,12 @@ export function RuleFormFields({ value, onChange, disabled }: RuleFormFieldsProp
         </div>
       )}
 
-      {/* Type — display-only, always Office Hours */}
+      {/* Type — display-only, always Bookable Link */}
       <div className="grid grid-cols-[60px_1fr] items-center gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-foreground/50">
           Type
         </span>
-        <span className="text-xs text-foreground">Office Hours</span>
+        <span className="text-xs text-foreground">Bookable Link</span>
       </div>
 
       {/* Title */}
@@ -183,7 +185,7 @@ export function RuleFormFields({ value, onChange, disabled }: RuleFormFieldsProp
           className="w-full rounded-md bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 px-2.5 py-1.5 text-[11.5px] text-foreground outline-none focus:border-indigo-500"
           value={value.format}
           onChange={(e) =>
-            onChange({ ...value, format: e.target.value as OfficeHoursProposal["format"] })
+            onChange({ ...value, format: e.target.value as BookableLinkProposal["format"] })
           }
           disabled={disabled}
         >
@@ -335,11 +337,10 @@ export function RuleFormFields({ value, onChange, disabled }: RuleFormFieldsProp
       </div>
 
       {/* Override-semantics helper text — preserved verbatim from SPEC
-          §3.4.2 step 5. The lowercase "office hours" inside this sentence
-          describes the *feature behavior* in plain English; surrounding
-          product copy capitalizes Office Hours as the feature name. */}
+          §3.4.2 step 5. Bookable Links override soft blocks so guest-facing
+          schedules always show the declared window as available. */}
       <p className="text-[10.5px] leading-snug text-foreground/60 bg-black/5 dark:bg-white/5 border-l-2 border-indigo-500 pl-2.5 pr-3 py-2 rounded-md">
-        Office hours override other soft blocks. Envoy will offer these slots
+        Bookable Links override other soft blocks. Envoy will offer these slots
         even if your schedule shows them protected — real calendar events and
         blackout days stay blocked.
       </p>

@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { applyOfficeHoursWindow, generateOfficeHoursLinkCode } from "@/lib/office-hours";
-import { compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
+import { applyBookableWindow, generateBookableLinkCode } from "@/lib/bookable-links";
+import { compileBookableLinks, type AvailabilityPreference } from "@/lib/availability-rules";
 import type { ScoredSlot, SlotKind } from "@/lib/scoring";
-import type { CompiledOfficeHoursLink } from "@/lib/availability-rules";
+import type { CompiledBookableLink } from "@/lib/availability-rules";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
  * Build a ScoredSlot at a specific UTC datetime.
- * Default duration: 20 minutes (matches our canonical office-hours duration).
+ * Default duration: 20 minutes (matches our canonical bookable-link duration).
  */
 function slotAt(
   isoStart: string,
@@ -29,15 +29,15 @@ function slotAt(
 }
 
 /**
- * Canonical office-hours rule: Tue 2–4pm Pacific, 20-min video calls.
+ * Canonical bookable-link rule: Tue 2–4pm Pacific, 20-min video calls.
  * daysOfWeek: [2] = Tuesday only.
  */
-function oh(overrides: Partial<CompiledOfficeHoursLink> = {}): CompiledOfficeHoursLink {
+function bl(overrides: Partial<CompiledBookableLink> = {}): CompiledBookableLink {
   return {
     ruleId: "rule-test",
     linkCode: "abc12345",
     linkSlug: "john",
-    title: "Office Hours",
+    title: "Drop-in Hours",
     format: "video",
     durationMinutes: 20,
     windowStart: "14:00",
@@ -58,14 +58,14 @@ const TUE_400_PT_UTC = "2026-04-21T23:00:00.000Z";  // Tue 4pm PT (outside windo
 const TUE_130_PT_UTC = "2026-04-21T20:30:00.000Z";  // Tue 1:30pm PT (before window)
 const MON_2PM_PT_UTC = "2026-04-20T21:00:00.000Z";  // Mon 2pm PT (wrong day)
 
-describe("applyOfficeHoursWindow — day + window filter", () => {
+describe("applyBookableWindow — day + window filter", () => {
   it("drops slots outside the rule's daysOfWeek", () => {
     const slots = [
       slotAt(MON_2PM_PT_UTC, "open", 0),
       slotAt(TUE_2PM_PT_UTC, "open", 0),
     ];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -75,8 +75,8 @@ describe("applyOfficeHoursWindow — day + window filter", () => {
 
   it("drops slots before the window start", () => {
     const slots = [slotAt(TUE_130_PT_UTC, "open", 0), slotAt(TUE_2PM_PT_UTC, "open", 0)];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -86,8 +86,8 @@ describe("applyOfficeHoursWindow — day + window filter", () => {
 
   it("drops slots at/after the window end (end-exclusive)", () => {
     const slots = [slotAt(TUE_340_PT_UTC, "open", 0), slotAt(TUE_400_PT_UTC, "open", 0)];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -103,8 +103,8 @@ describe("applyOfficeHoursWindow — day + window filter", () => {
       slotAt(TUE_300_PT_UTC, "open", 0),
       slotAt(TUE_340_PT_UTC, "open", 0),
     ];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -113,8 +113,8 @@ describe("applyOfficeHoursWindow — day + window filter", () => {
 
   it("empty daysOfWeek means every day is allowed", () => {
     const slots = [slotAt(MON_2PM_PT_UTC, "open", 0), slotAt(TUE_2PM_PT_UTC, "open", 0)];
-    const out = applyOfficeHoursWindow({
-      rule: oh({ daysOfWeek: [] }),
+    const out = applyBookableWindow({
+      rule: bl({ daysOfWeek: [] }),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -122,13 +122,13 @@ describe("applyOfficeHoursWindow — day + window filter", () => {
   });
 });
 
-describe("applyOfficeHoursWindow — soft protection override", () => {
-  it("overrides blocked_window inside the office-hours window (score → 0)", () => {
+describe("applyBookableWindow — soft protection override", () => {
+  it("overrides blocked_window inside the bookable window (score → 0)", () => {
     const slots = [
       slotAt(TUE_2PM_PT_UTC, "blocked_window", 2),  // Focus Time at 2pm
     ];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -140,8 +140,8 @@ describe("applyOfficeHoursWindow — soft protection override", () => {
 
   it("overrides off_hours (weekday outside business hours) inside the window", () => {
     const slots = [slotAt(TUE_2PM_PT_UTC, "off_hours", 1)];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -150,11 +150,11 @@ describe("applyOfficeHoursWindow — soft protection override", () => {
   });
 
   it("overrides weekend protection inside the window", () => {
-    // A Saturday office-hours rule with a weekend-protected slot inside.
+    // A Saturday bookable rule with a weekend-protected slot inside.
     const SAT_2PM_PT_UTC = "2026-04-25T21:00:00.000Z"; // Sat Apr 25
     const slots = [slotAt(SAT_2PM_PT_UTC, "weekend", 1)];
-    const out = applyOfficeHoursWindow({
-      rule: oh({ daysOfWeek: [6] }), // Sat
+    const out = applyBookableWindow({
+      rule: bl({ daysOfWeek: [6] }), // Sat
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -164,14 +164,14 @@ describe("applyOfficeHoursWindow — soft protection override", () => {
   });
 });
 
-describe("applyOfficeHoursWindow — hard protection preserved", () => {
+describe("applyBookableWindow — hard protection preserved", () => {
   it("preserves real calendar events at their original score (never double-books)", () => {
     const slots = [
       slotAt(TUE_2PM_PT_UTC, "event", 4),         // real meeting at 2pm
       slotAt(TUE_220_PT_UTC, "open", 0),           // free at 2:20
     ];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -184,8 +184,8 @@ describe("applyOfficeHoursWindow — hard protection preserved", () => {
 
   it("preserves blackout days at their original score", () => {
     const slots = [slotAt(TUE_2PM_PT_UTC, "blackout", 4)];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -194,14 +194,14 @@ describe("applyOfficeHoursWindow — hard protection preserved", () => {
   });
 });
 
-describe("applyOfficeHoursWindow — confirmed booking subtraction", () => {
+describe("applyBookableWindow — confirmed booking subtraction", () => {
   it("drops a slot that starts exactly on a confirmed booking", () => {
     const slots = [
       slotAt(TUE_2PM_PT_UTC, "open", 0),
       slotAt(TUE_220_PT_UTC, "open", 0),
     ];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
       confirmedBookings: [
@@ -224,8 +224,8 @@ describe("applyOfficeHoursWindow — confirmed booking subtraction", () => {
       slotAt(TUE_220_PT_UTC, "open", 0),           // starts at 2:20, ends 2:40 — overlaps 2:20–2:30
       slotAt(TUE_240_PT_UTC, "open", 0),           // starts at 2:40 — no overlap
     ];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
       confirmedBookings: [{ start: bookingStart, end: bookingEnd }],
@@ -242,8 +242,8 @@ describe("applyOfficeHoursWindow — confirmed booking subtraction", () => {
       slotAt(TUE_2PM_PT_UTC, "open", 0),
       slotAt(TUE_300_PT_UTC, "open", 0),
     ];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
       confirmedBookings: [
@@ -264,8 +264,8 @@ describe("applyOfficeHoursWindow — confirmed booking subtraction", () => {
       slotAt(TUE_300_PT_UTC, "open", 0),
       slotAt(TUE_340_PT_UTC, "open", 0),
     ];
-    const out = applyOfficeHoursWindow({
-      rule: oh(),
+    const out = applyBookableWindow({
+      rule: bl(),
       slots,
       timezone: "America/Los_Angeles",
       confirmedBookings: [
@@ -285,11 +285,11 @@ describe("applyOfficeHoursWindow — confirmed booking subtraction", () => {
   });
 });
 
-describe("applyOfficeHoursWindow — expiry", () => {
+describe("applyBookableWindow — expiry", () => {
   it("drops slots after the rule's expiry date", () => {
     const slots = [slotAt(TUE_2PM_PT_UTC, "open", 0)];  // Apr 21
-    const out = applyOfficeHoursWindow({
-      rule: oh({ expiryDate: "2026-04-20" }),  // expired before Apr 21
+    const out = applyBookableWindow({
+      rule: bl({ expiryDate: "2026-04-20" }),  // expired before Apr 21
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -298,8 +298,8 @@ describe("applyOfficeHoursWindow — expiry", () => {
 
   it("keeps slots on or before the expiry date", () => {
     const slots = [slotAt(TUE_2PM_PT_UTC, "open", 0)];
-    const out = applyOfficeHoursWindow({
-      rule: oh({ expiryDate: "2026-04-21" }),
+    const out = applyBookableWindow({
+      rule: bl({ expiryDate: "2026-04-21" }),
       slots,
       timezone: "America/Los_Angeles",
     });
@@ -307,21 +307,21 @@ describe("applyOfficeHoursWindow — expiry", () => {
   });
 });
 
-describe("compileOfficeHoursLinks", () => {
+describe("compileBookableLinks", () => {
   function ruleOf(overrides: Partial<AvailabilityPreference> = {}): AvailabilityPreference {
     return {
       id: "r1",
       originalText: "office hours Tue 2-4pm",
       type: "recurring",
-      action: "office_hours",
+      action: "bookable",
       timeStart: "14:00",
       timeEnd: "16:00",
       daysOfWeek: [2],
       status: "active",
       priority: 3,
       createdAt: "2026-04-14T00:00:00.000Z",
-      officeHours: {
-        title: "Office Hours",
+      bookable: {
+        title: "Drop-in Hours",
         format: "video",
         durationMinutes: 20,
         linkSlug: "john",
@@ -331,10 +331,10 @@ describe("compileOfficeHoursLinks", () => {
     };
   }
 
-  it("emits one entry per active office_hours rule", () => {
-    const out = compileOfficeHoursLinks([
+  it("emits one entry per active bookable rule", () => {
+    const out = compileBookableLinks([
       ruleOf({ id: "r1" }),
-      ruleOf({ id: "r2", officeHours: { title: "Sales Intro", format: "phone", durationMinutes: 15, linkSlug: "john", linkCode: "def99999" } }),
+      ruleOf({ id: "r2", bookable: { title: "Sales Intro", format: "phone", durationMinutes: 15, linkSlug: "john", linkCode: "def99999" } }),
     ]);
     expect(out).toHaveLength(2);
     expect(out[0].linkCode).toBe("abc12345");
@@ -343,16 +343,16 @@ describe("compileOfficeHoursLinks", () => {
   });
 
   it("skips paused rules", () => {
-    const out = compileOfficeHoursLinks([ruleOf({ status: "paused" })]);
+    const out = compileBookableLinks([ruleOf({ status: "paused" })]);
     expect(out).toHaveLength(0);
   });
 
   it("skips expired rules (expiryDate in the past)", () => {
-    const out = compileOfficeHoursLinks([ruleOf({ expiryDate: "2020-01-01" })]);
+    const out = compileBookableLinks([ruleOf({ expiryDate: "2020-01-01" })]);
     expect(out).toHaveLength(0);
   });
 
-  it("skips non-office_hours rules", () => {
+  it("skips non-bookable rules", () => {
     const blockRule: AvailabilityPreference = {
       id: "b1",
       originalText: "no meetings before 10am",
@@ -364,29 +364,29 @@ describe("compileOfficeHoursLinks", () => {
       priority: 3,
       createdAt: "2026-04-14T00:00:00.000Z",
     };
-    const out = compileOfficeHoursLinks([blockRule]);
+    const out = compileBookableLinks([blockRule]);
     expect(out).toHaveLength(0);
   });
 
-  it("skips office_hours rules with no officeHours payload (malformed)", () => {
+  it("skips bookable rules with no bookable payload (malformed)", () => {
     const bad = ruleOf();
-    delete bad.officeHours;
-    const out = compileOfficeHoursLinks([bad]);
+    delete bad.bookable;
+    const out = compileBookableLinks([bad]);
     expect(out).toHaveLength(0);
   });
 });
 
-describe("generateOfficeHoursLinkCode", () => {
+describe("generateBookableLinkCode", () => {
   it("returns an 8-character lowercase alphanumeric string", () => {
     for (let i = 0; i < 20; i++) {
-      const code = generateOfficeHoursLinkCode();
+      const code = generateBookableLinkCode();
       expect(code).toMatch(/^[a-z0-9]{8}$/);
     }
   });
 
   it("returns different codes on repeated calls (not deterministic)", () => {
     const codes = new Set<string>();
-    for (let i = 0; i < 100; i++) codes.add(generateOfficeHoursLinkCode());
+    for (let i = 0; i < 100; i++) codes.add(generateBookableLinkCode());
     // With 36^8 space and 100 samples, collisions are vanishingly unlikely.
     expect(codes.size).toBe(100);
   });

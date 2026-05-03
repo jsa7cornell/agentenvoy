@@ -3,8 +3,8 @@
  *
  * Three sections:
  *   - Primary link (agentenvoy.ai/meet/{slug}) with copy + share affordances
- *   - Office hours links (from preferences.explicit.structuredRules)
- *   - Contextual links (NegotiationLink rows, type=contextual, not expired)
+ *   - Bookable links (from preferences.explicit.structuredRules)
+ *   - Personalized links (NegotiationLink rows, type=personalized, not expired)
  *
  * Stats are computed inline against NegotiationSession — no new tables, and
  * the queries are cheap because hostId is indexed. "Stalled" is approximated
@@ -16,7 +16,7 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
+import { compileBookableLinks, type AvailabilityPreference } from "@/lib/availability-rules";
 import { CopyLinkButton } from "./copy-link-button";
 import { PrimaryLinkSettings } from "@/components/dashboard/primary-link-settings";
 import type { UserPreferences } from "@/lib/scoring";
@@ -94,18 +94,19 @@ export default async function MyLinksPage() {
     }),
   ]);
 
-  // ── Office hours links (from structured rules) ──────────────────────────
+  // ── Bookable links (from structured rules) ─────────────────────────────
   const prefs = (user.preferences as Record<string, unknown> | null) || {};
   const explicit = (prefs.explicit as Record<string, unknown> | undefined) || {};
   const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
-  const officeHours = compileOfficeHoursLinks(rules);
+  const officeHours = compileBookableLinks(rules);
 
-  // ── Contextual links ────────────────────────────────────────────────────
+  // ── Personalized links ──────────────────────────────────────────────────
   const now = new Date();
-  const contextualLinks = await prisma.negotiationLink.findMany({
+  // TODO(vocab-cleanup): remove || "contextual" after migration
+  const personalizedLinks = await prisma.negotiationLink.findMany({
     where: {
       userId: user.id,
-      type: "contextual",
+      type: { in: ["personalized", "contextual"] },
       OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
     },
     select: {
@@ -201,14 +202,14 @@ export default async function MyLinksPage() {
           </div>
           {officeHours.length === 0 ? (
             <div className="rounded-lg border border-DEFAULT bg-surface-secondary/40 p-4 text-xs text-secondary">
-              No office-hours links yet. You can declare one in{" "}
+              No Bookable Links yet. You can create one in{" "}
               <Link
                 href="/dashboard/availability"
                 className="text-indigo-400 hover:text-indigo-300 underline"
               >
                 availability
               </Link>{" "}
-              with something like &ldquo;office hours Tuesdays 2–4pm, 20-min video calls.&rdquo;
+              with something like &ldquo;drop-in hours Tuesdays 2–4pm, 20-min video calls.&rdquo;
             </div>
           ) : (
             <div className="space-y-2">
@@ -251,7 +252,7 @@ export default async function MyLinksPage() {
           <h2 className="text-[11px] font-bold uppercase tracking-widest text-muted mb-2">
             Per-invite links
           </h2>
-          {contextualLinks.length === 0 ? (
+          {personalizedLinks.length === 0 ? (
             <div className="rounded-lg border border-DEFAULT bg-surface-secondary/40 p-4 text-xs text-secondary">
               Per-invite links are created when you ask Envoy to set up a meeting
               with a specific person (e.g. &ldquo;set up a 30-min intro with sarah@acme.com about the
@@ -259,7 +260,7 @@ export default async function MyLinksPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {contextualLinks.map((link) => {
+              {personalizedLinks.map((link) => {
                 const url = `${baseUrl}/meet/${link.slug}/${link.code ?? ""}`;
                 const active = link.sessions.filter((s) => s.status === "active").length;
                 const agreed = link.sessions.filter((s) => s.status === "agreed").length;

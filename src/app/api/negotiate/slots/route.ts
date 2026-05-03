@@ -5,10 +5,10 @@ import { applyEventOverrides, type LinkParameters, type ScoredSlot } from "@/lib
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserTimezone } from "@/lib/timezone";
-import { getActiveLocationRule, compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
+import { getActiveLocationRule, compileBookableLinks, type AvailabilityPreference } from "@/lib/availability-rules";
 import { computeDensityHorizon } from "@/lib/availability-density";
 import { getSchedulingMode } from "@/lib/scheduling-mode";
-import { applyOfficeHoursWindow, type ConfirmedBooking } from "@/lib/office-hours";
+import { applyBookableWindow, type ConfirmedBooking } from "@/lib/bookable-links";
 import { parseLinkParameters } from "@/lib/link-parameters";
 import {
   computeBilateralAvailability,
@@ -181,12 +181,12 @@ export async function GET(req: NextRequest) {
     // Apply event-level overrides from link rules
     let slots: ScoredSlot[] = applyEventOverrides(schedule.slots, linkRules, timezone);
 
-    // Office-hours transform: if this session was spawned from an office_hours
+    // Bookable-link transform: if this session was spawned from a bookable
     // rule, filter slots through the rule's window + days, override soft
     // protection, and subtract already-booked sibling sessions for the same rule.
     if (recurringWindowId) {
       const allRules = (explicit?.structuredRules as AvailabilityPreference[] | undefined) ?? [];
-      const compiledLinks = compileOfficeHoursLinks(allRules);
+      const compiledLinks = compileBookableLinks(allRules);
       const compiled = compiledLinks.find((l) => l.ruleId === recurringWindowId);
       if (compiled) {
         // Sibling confirmed bookings — any other session spawned from the same
@@ -211,7 +211,7 @@ export async function GET(req: NextRequest) {
               end: new Date(start.getTime() + durationMin * 60 * 1000).toISOString(),
             };
           });
-        slots = applyOfficeHoursWindow({
+        slots = applyBookableWindow({
           rule: compiled,
           slots,
           timezone,

@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * Create-a-reusable-link suggestion picker — three type cards with
+ * Create-a-bookable-link suggestion picker — three type cards with
  * Calendly-influenced starter scenarios.
  *
  * Visual contract: `previews/event-links-page-redesign.html` lines 449–540.
- * Three colored cards (Bookable Hours · Recurring Sessions · Group Meeting)
+ * Three colored cards (Drop-in Hours · Recurring Sessions · Group Meeting)
  * each carry a small illustration, a short pitch, and four starter
  * scenarios. Clicking a starter prefills the chat composer with a typed
  * prompt that the agent's intent classifier routes to the right create
@@ -13,7 +13,7 @@
  *
  * **V1 honesty note** — Recurring Sessions and Group Meeting are forward-
  * looking framings. Today the agent only fully implements Office Hours
- * (Bookable Hours). Starters from the other two cards still prefill the
+ * (Drop-in Hours / Bookable Links). Starters from the other two cards still prefill the
  * composer — the agent will respond with what it can do today and won't
  * silently produce a wrong link. Treating the cards as IDEA carriers, not
  * type contracts.
@@ -83,12 +83,12 @@ const GroupIcon = (
 export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
   {
     kind: "bookable",
-    title: "Bookable Hours Links",
+    title: "Drop-in Hours",
     pitch:
-      "Purpose-built links for specific meetings with specific hours or preferences — share once, people pick a slot, Envoy books it.",
+      "Purpose-built bookable links for specific meeting types — share once, guests pick a slot, Envoy books it.",
     starters: [
       { label: "Sales discovery", meta: "30m", prefill: "Create a sales discovery link — 30 min slots, weekday afternoons" },
-      { label: "Customer office hours", meta: "30m", prefill: "Create a customer office hours link — 30 min slots, weekly" },
+      { label: "Customer drop-in hours", meta: "30m", prefill: "Create a customer office hours link — 30 min slots, weekly" },
       { label: "Mentor / advisor sessions", meta: "45m", prefill: "Create a mentor sessions link — 45 min slots" },
       { label: "Candidate screens", meta: "30m", prefill: "Create a candidate screen link — 30 min slots, weekday mornings" },
     ],
@@ -99,7 +99,7 @@ export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
       starterHover: "hover:bg-cyan-50 dark:hover:bg-cyan-950/30",
     },
     icon: ClockIcon,
-    scratchPrefill: "Create a reusable link — ",
+    scratchPrefill: "Create a bookable link — ",
   },
   {
     kind: "recurring",
@@ -180,7 +180,7 @@ export function CreateLinkPicker({ className = "" }: CreateLinkPickerProps) {
           className="text-[11px] font-semibold tracking-wider uppercase text-muted mb-1"
           id="create-link-eyebrow"
         >
-          Create a reusable link
+          Create a bookable link
         </h3>
         <h2
           id="create-link-heading"
@@ -189,7 +189,7 @@ export function CreateLinkPicker({ className = "" }: CreateLinkPickerProps) {
           What kind of meeting do you want a link for?
         </h2>
         <p className="text-xs text-muted mt-1 max-w-2xl">
-          Reusable links carry your hours, duration, and rules — share once and
+          Bookable links carry your hours, duration, and rules — share once and
           Envoy handles every booking. Pick a starter or customize.
         </p>
       </div>
@@ -276,7 +276,7 @@ export function CreateLinkPickerMobile({ className = "" }: CreateLinkPickerProps
         id="create-link-mobile-heading"
         className="text-[10px] font-semibold tracking-wider uppercase text-muted px-4 mb-2"
       >
-        Create a reusable link
+        Create a bookable link
       </h3>
 
       <div

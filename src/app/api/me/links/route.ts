@@ -4,9 +4,13 @@
  * §3.2 pattern (b)). Returns a denormalized view of every way someone
  * can book time with the host:
  *
- *   - `standard`  — the user's generic share-everywhere link (meetSlug)
- *   - `office_hours` — per-rule links compiled from structuredRules
- *   - `contextual` — unarchived, unexpired negotiationLinks
+ *   - `standard`   — the user's generic share-everywhere link (meetSlug)
+ *   - `bookable`   — per-rule links compiled from structuredRules (was `office_hours`)
+ *   - `personalized` — unarchived, unexpired negotiationLinks (was `contextual`)
+ *
+ * NOTE: `kind: "standard"` and `kind: "bookable"` are the new wire values.
+ * Consumers reading `kind: "office_hours"` or `kind: "contextual"` should
+ * migrate to the new values. TODO(vocab-cleanup): remove old kind values.
  *
  * The chip list is read-only today; creation still goes through
  * /dashboard/my-links. When `/api/me/scheduling-state` ships, this
@@ -17,7 +21,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { compileOfficeHoursLinks } from "@/lib/availability-rules";
+import { compileBookableLinks } from "@/lib/availability-rules";
 import type { AvailabilityPreference } from "@/lib/availability-rules";
 
 type LinkEntry =
@@ -28,7 +32,7 @@ type LinkEntry =
       slug: string;
     }
   | {
-      kind: "office_hours";
+      kind: "bookable";
       title: string;
       url: string;
       slug: string;
@@ -40,7 +44,7 @@ type LinkEntry =
       expiryDate: string | null;
     }
   | {
-      kind: "contextual";
+      kind: "personalized";
       title: string;
       url: string;
       slug: string;
@@ -87,15 +91,15 @@ export async function GET() {
     });
   }
 
-  // Office-hours links — compiled from structuredRules.
+  // Bookable links — compiled from structuredRules.
   const prefs = (user.preferences as Record<string, unknown> | null) || {};
   const explicit = (prefs.explicit as Record<string, unknown> | undefined) || {};
   const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
-  const officeHours = compileOfficeHoursLinks(rules);
-  for (const oh of officeHours) {
+  const bookableLinks = compileBookableLinks(rules);
+  for (const oh of bookableLinks) {
     links.push({
-      kind: "office_hours",
-      title: oh.title || "Office hours",
+      kind: "bookable",
+      title: oh.title || "Drop-in Hours",
       url: `${baseUrl}/meet/${oh.linkSlug}/${oh.linkCode}`,
       slug: oh.linkSlug,
       code: oh.linkCode,
@@ -107,12 +111,13 @@ export async function GET() {
     });
   }
 
-  // Contextual links — unarchived, unexpired.
+  // Personalized links — unarchived, unexpired.
+  // TODO(vocab-cleanup): remove || "contextual" after migration
   const now = new Date();
-  const contextual = await prisma.negotiationLink.findMany({
+  const personalized = await prisma.negotiationLink.findMany({
     where: {
       userId: session.user.id,
-      type: "contextual",
+      type: { in: ["personalized", "contextual"] },
       OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
     },
     select: {
@@ -128,12 +133,12 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
     take: 30,
   });
-  for (const c of contextual) {
-    // `code` is nullable in schema, but contextual links always have one.
+  for (const c of personalized) {
+    // `code` is nullable in schema, but personalized links always have one.
     // Skip any row that somehow doesn't (defensive, shouldn't happen).
     if (!c.code) continue;
     links.push({
-      kind: "contextual",
+      kind: "personalized",
       title: c.topic || c.inviteeName || "Single-use link",
       url: `${baseUrl}/meet/${c.slug}/${c.code}`,
       slug: c.slug,

@@ -312,7 +312,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   // filter). If the requested slot isn't in the derived set anymore, the
   // guest is trying to confirm a slot the host has since pulled — either
   // via a link edit, a calendar change, or a racing confirm that consumed
-  // the slot (for office_hours + primary). Return 409 so the client can
+  // the slot (for bookable + primary). Return 409 so the client can
   // narrate "that time isn't available anymore" and transition the widget
   // from `offer` to `negotiate`.
   //

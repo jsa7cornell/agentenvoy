@@ -411,7 +411,7 @@ async function resolveSessionId(
 }
 
 /**
- * Patch link.parameters with a partial change — ONLY for contextual links
+ * Patch link.parameters with a partial change — ONLY for personalized links
  * (one link = one session, so the update is intent-aligned). For primary
  * links (one link, many sessions) we skip the write so a dashboard tweak
  * for one guest doesn't retroactively change every future guest's
@@ -428,7 +428,8 @@ async function patchLinkRulesForContextual(
   link: { id: string; type: string; parameters: unknown },
   changes: Record<string, unknown>,
 ): Promise<void> {
-  if (link.type !== "contextual") return;
+  // TODO(vocab-cleanup): remove || "contextual" after migration
+  if (link.type !== "personalized" && link.type !== "contextual") return;
   const existing = parseLinkParameters(link.parameters);
   const next: Record<string, unknown> = { ...existing };
   for (const [k, v] of Object.entries(changes)) {
@@ -615,7 +616,7 @@ async function handleUpdateFormat(
   }
 
   // Dual-write: session.format for parity with the existing session row,
-  // AND link.parameters.format (for contextual links) so the greeting template
+  // AND link.parameters.format (for personalized links) so the greeting template
   // and confirm route actually see the change. See patchLinkRulesForContextual
   // for the historical bug this fixes.
   await prisma.negotiationSession.update({
@@ -744,7 +745,7 @@ async function handleUpdateTime(
     where: { id: session.id },
     data: updateData as Parameters<typeof prisma.negotiationSession.update>[0]["data"],
   });
-  // Mirror duration into link.parameters.duration for contextual links so the
+  // Mirror duration into link.parameters.duration for personalized links so the
   // greeting template + confirm card reflect it. Same reason as format /
   // location — link.parameters wins the precedence chain.
   if (duration !== undefined) {
@@ -827,7 +828,7 @@ async function handleUpdateLocation(
   }
 
   // Dual-write: statusLabel for the host-facing dashboard and a system
-  // message for the thread history, AND link.parameters.location for contextual
+  // message for the thread history, AND link.parameters.location for personalized
   // links so the confirm card + GCal event actually use the new location.
   // Previously this only wrote statusLabel + a system message, leaving
   // link.parameters.location untouched — the confirm route reads link.parameters.location
@@ -1348,7 +1349,7 @@ export async function handleCreateLink(
   const link = await prisma.negotiationLink.create({
     data: {
       userId,
-      type: "contextual",
+      type: "personalized",
       slug: meetSlug,
       code,
       inviteeName,
@@ -1639,7 +1640,7 @@ async function handleUpdateMeetingSettings(
   // Clear-on-edit invariant for primary-link defaults: when the host changes
   // `defaultDuration`, every active primary-link session that locked a guest-
   // proposed value resets so the host's new default wins. Mirrors the
-  // contextual-link path in handleUpdateLinkRules and the Office Hours path
+  // personalized-link path in handleUpdateLinkRules and the Bookable Link path
   // in availability-rules/edit/route.ts. Only runs when the value actually
   // changed (not on no-op writes). Reusable-link guest-picks proposal,
   // decided 2026-04-28.
@@ -2902,18 +2903,18 @@ async function handleUpdateBusinessHours(
  * `invalidateSchedule` so stale compiled output is discarded.
  */
 /**
- * Build the public shareable URL for an office-hours link.
+ * Build the public shareable URL for a bookable link.
  * Format: https://agentenvoy.ai/meet/{slug}/{code} — matches the deal-room link pattern.
  * Host kept consistent with elsewhere; caller can swap origin for staging.
  */
-function buildOfficeHoursUrl(slug: string, code: string): string {
+function buildBookableLinkUrl(slug: string, code: string): string {
   const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
   return `${origin}/meet/${slug}/${code}`;
 }
 
 /**
- * Collect normalized reusable-link names for a host — all active office-hours
- * rules plus the generalLinkName (defaulting to "Primary link"). Used for the
+ * Collect normalized bookable-link names for a host — all active bookable
+ * rules plus the primaryLinkName (defaulting to "Primary link"). Used for the
  * per-host uniqueness guard. Optional `exceptRuleId` excludes one rule from
  * the check (so renaming a rule doesn't collide with its own prior name).
  */
@@ -2923,21 +2924,24 @@ function normalizeNameForGuard(name: string): string {
 
 function collectNormalizedLinkNames(
   existing: AvailabilityPreference[],
-  generalLinkName: string | undefined,
+  primaryLinkName: string | undefined,
   opts: { exceptRuleId?: string; includeGeneral?: boolean } = {},
 ): Set<string> {
   const { exceptRuleId, includeGeneral = true } = opts;
   const out = new Set<string>();
   for (const r of existing) {
-    if (r.action !== "office_hours" || !r.officeHours) continue;
+    // TODO(vocab-cleanup): remove || "office_hours" after migration
+    if ((r.action !== "bookable" && r.action !== ("office_hours" as string))) continue;
+    const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
+    if (!bookableData) continue;
     if (exceptRuleId && r.id === exceptRuleId) continue;
-    const name = (r.officeHours.name ?? r.officeHours.title ?? "").trim();
+    const name = (bookableData.name ?? bookableData.title ?? "").trim();
     if (name) out.add(normalizeNameForGuard(name));
   }
   if (includeGeneral) {
     out.add(
       normalizeNameForGuard(
-        generalLinkName && generalLinkName.trim() ? generalLinkName : "Primary link",
+        primaryLinkName && primaryLinkName.trim() ? primaryLinkName : "Primary link",
       ),
     );
   }
@@ -2981,7 +2985,9 @@ async function handleUpdateAvailabilityRule(
   const existing =
     ((explicit as Record<string, unknown>).structuredRules as AvailabilityPreference[] | undefined) ?? [];
   const currentGeneralName =
-    typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined;
+    typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName :
+    typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : // TODO(vocab-cleanup): remove generalLinkName fallback after migration
+    undefined;
 
   let nextRules: AvailabilityPreference[] = existing;
   let summary: string;
@@ -3004,8 +3010,9 @@ async function handleUpdateAvailabilityRule(
         message: `You already have a link named "${newName}". Pick a different name.`,
       };
     }
-    explicit.generalLinkName = newName;
-    summary = `Renamed general link to "${newName}"`;
+    explicit.primaryLinkName = newName;
+    delete (explicit as Record<string, unknown>).generalLinkName; // TODO(vocab-cleanup): remove after migration
+    summary = `Renamed primary link to "${newName}"`;
     // Return the primary /meet/{slug} URL so the channel reply can display it.
     if (user?.meetSlug) {
       const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
@@ -3016,17 +3023,20 @@ async function handleUpdateAvailabilityRule(
     const nowIso = new Date().toISOString();
     const action = (ruleInput!.action as AvailabilityPreference["action"]) ?? "block";
 
-    // Office-hours-specific validation + population (R1, R4 folds).
-    let officeHours: AvailabilityPreference["officeHours"] | undefined;
-    if (action === "office_hours") {
-      const ohInput =
-        (ruleInput!.officeHours as Partial<NonNullable<AvailabilityPreference["officeHours"]>> | undefined) ??
+    // Bookable-link-specific validation + population (R1, R4 folds).
+    let bookable: AvailabilityPreference["bookable"] | undefined;
+    // TODO(vocab-cleanup): remove || "office_hours" after migration
+    if (action === "bookable" || action === ("office_hours" as string)) {
+      const bookableInput =
+        (ruleInput!.bookable as Partial<NonNullable<AvailabilityPreference["bookable"]>> | undefined) ??
+        // Legacy field name fallback for one deploy cycle
+        ((ruleInput as unknown as { officeHours?: unknown }).officeHours as Partial<NonNullable<AvailabilityPreference["bookable"]>> | undefined) ??
         {};
-      const nameRaw = typeof ohInput.name === "string" ? ohInput.name.trim() : "";
+      const nameRaw = typeof bookableInput.name === "string" ? bookableInput.name.trim() : "";
       if (!nameRaw) {
         return {
           success: false,
-          message: `Office hours rules require a name (e.g. "Sales pitch"). Ask the host what to call it.`,
+          message: `Bookable Link rules require a name (e.g. "Sales pitch"). Ask the host what to call it.`,
         };
       }
       const taken = collectNormalizedLinkNames(existing, currentGeneralName);
@@ -3039,27 +3049,27 @@ async function handleUpdateAvailabilityRule(
       if (!user?.meetSlug) {
         return {
           success: false,
-          message: `Can't create an office-hours link — your meeting slug isn't set up yet.`,
+          message: `Can't create a Bookable Link — your meeting slug isn't set up yet.`,
         };
       }
       const linkCode = generateCode(8);
-      const title = typeof ohInput.title === "string" && ohInput.title.trim() ? ohInput.title.trim() : nameRaw;
-      officeHours = {
+      const title = typeof bookableInput.title === "string" && bookableInput.title.trim() ? bookableInput.title.trim() : nameRaw;
+      bookable = {
         name: nameRaw,
         title,
-        format: (ohInput.format as "video" | "phone" | "in-person" | undefined) ?? "video",
-        durationMinutes: typeof ohInput.durationMinutes === "number" ? ohInput.durationMinutes : 30,
+        format: (bookableInput.format as "video" | "phone" | "in-person" | undefined) ?? "video",
+        durationMinutes: typeof bookableInput.durationMinutes === "number" ? bookableInput.durationMinutes : 30,
         linkSlug: user.meetSlug,
         linkCode,
       };
-      linkUrl = buildOfficeHoursUrl(user.meetSlug, linkCode);
+      linkUrl = buildBookableLinkUrl(user.meetSlug, linkCode);
     }
 
     const rule: AvailabilityPreference = {
       id: newId,
       originalText: String(ruleInput!.originalText ?? "").trim() || "(no description)",
       type: (ruleInput!.type as AvailabilityPreference["type"]) ?? "recurring",
-      action,
+      action: action === ("office_hours" as string) ? "bookable" : action, // TODO(vocab-cleanup): normalize legacy action
       timeStart: ruleInput!.timeStart,
       timeEnd: ruleInput!.timeEnd,
       allDay: ruleInput!.allDay,
@@ -3070,7 +3080,7 @@ async function handleUpdateAvailabilityRule(
       bufferMinutesAfter: ruleInput!.bufferMinutesAfter,
       bufferAppliesTo: ruleInput!.bufferAppliesTo,
       locationLabel: ruleInput!.locationLabel,
-      officeHours,
+      bookable,
       status: "active",
       priority: typeof ruleInput!.priority === "number" ? ruleInput!.priority : 3,
       createdAt: nowIso,
@@ -3078,20 +3088,25 @@ async function handleUpdateAvailabilityRule(
     nextRules = [...existing, rule];
     addedRuleId = newId;
     summary =
-      action === "office_hours" && officeHours
-        ? `Your "${officeHours.name}" link is ready: ${linkUrl}`
+      (action === "bookable" || action === ("office_hours" as string)) && bookable
+        ? `Your "${bookable.name}" Bookable Link is ready: ${linkUrl}`
         : `Added rule ${newId}`;
   } else if (operation === "update") {
     const idx = existing.findIndex((r) => r.id === id);
     if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
     const prior = existing[idx];
-    // Office-hours rename: enforce uniqueness on name change.
+    // Bookable link rename: enforce uniqueness on name change.
+    // TODO(vocab-cleanup): remove || "office_hours" check after migration
+    const priorIsBookable = prior.action === "bookable" || prior.action === ("office_hours" as string);
+    const _ruleInput = ruleInput!;
+    const ruleBookableInput = _ruleInput.bookable ??
+      (_ruleInput as unknown as { officeHours?: typeof _ruleInput.bookable }).officeHours;
     if (
-      prior.action === "office_hours" &&
-      ruleInput!.officeHours &&
-      typeof (ruleInput!.officeHours as { name?: string }).name === "string"
+      priorIsBookable &&
+      ruleBookableInput &&
+      typeof (ruleBookableInput as { name?: string }).name === "string"
     ) {
-      const newName = ((ruleInput!.officeHours as { name?: string }).name ?? "").trim();
+      const newName = ((ruleBookableInput as { name?: string }).name ?? "").trim();
       if (newName) {
         const taken = collectNormalizedLinkNames(existing, currentGeneralName, {
           exceptRuleId: prior.id,
@@ -3104,22 +3119,25 @@ async function handleUpdateAvailabilityRule(
         }
       }
     }
-    // Merge: shallow-merge top-level, deep-merge officeHours so partial edits
-    // (e.g. { officeHours: { name: "X" } }) don't drop linkSlug/linkCode.
-    const mergedOH = ruleInput!.officeHours
-      ? { ...(prior.officeHours ?? {}), ...(ruleInput!.officeHours as object) }
-      : prior.officeHours;
+    // Merge: shallow-merge top-level, deep-merge bookable so partial edits
+    // (e.g. { bookable: { name: "X" } }) don't drop linkSlug/linkCode.
+    const priorBookable = prior.bookable ??
+      (prior as unknown as { officeHours?: typeof prior.bookable }).officeHours;
+    const mergedBookable = ruleBookableInput
+      ? { ...(priorBookable ?? {}), ...(ruleBookableInput as object) }
+      : prior.bookable;
     const merged: AvailabilityPreference = {
       ...prior,
       ...ruleInput,
       id: prior.id,
-      officeHours: mergedOH as AvailabilityPreference["officeHours"],
+      bookable: mergedBookable as AvailabilityPreference["bookable"],
     };
     nextRules = [...existing];
     nextRules[idx] = merged;
     summary = `Updated rule ${id}`;
-    if (merged.action === "office_hours" && merged.officeHours) {
-      linkUrl = buildOfficeHoursUrl(merged.officeHours.linkSlug, merged.officeHours.linkCode);
+    // TODO(vocab-cleanup): remove || "office_hours" after migration
+    if ((merged.action === "bookable" || merged.action === ("office_hours" as string)) && merged.bookable) {
+      linkUrl = buildBookableLinkUrl(merged.bookable.linkSlug, merged.bookable.linkCode);
     }
   } else {
     // remove
@@ -3127,9 +3145,12 @@ async function handleUpdateAvailabilityRule(
     if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
     const removed = existing[idx];
     nextRules = existing.filter((r) => r.id !== id);
+    const removedBookable = removed.bookable ??
+      (removed as unknown as { officeHours?: typeof removed.bookable }).officeHours;
+    // TODO(vocab-cleanup): remove || "office_hours" after migration
     summary =
-      removed.action === "office_hours" && removed.officeHours
-        ? `Removed "${removed.officeHours.name ?? removed.officeHours.title}".`
+      (removed.action === "bookable" || removed.action === ("office_hours" as string)) && removedBookable
+        ? `Removed "${removedBookable.name ?? removedBookable.title}".`
         : `Removed rule ${id}`;
   }
 

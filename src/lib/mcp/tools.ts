@@ -30,13 +30,13 @@ import {
 } from "@/lib/scoring";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import {
-  compileOfficeHoursLinks,
+  compileBookableLinks,
   type AvailabilityPreference,
 } from "@/lib/availability-rules";
 import {
-  applyOfficeHoursWindow,
+  applyBookableWindow,
   type ConfirmedBooking,
-} from "@/lib/office-hours";
+} from "@/lib/bookable-links";
 import {
   authorizeMcpCall,
   parseMeetingUrl,
@@ -296,12 +296,12 @@ export async function handleGetAvailability(
   // Event-level overrides from link rules (dateRange, preferredDays, etc).
   let slots: ScoredSlot[] = applyEventOverrides(schedule.slots, rules, timezone);
 
-  // Office-hours transform if the link was spawned from a rule.
+  // Bookable-link transform if the link was spawned from a rule.
   if (link.recurringWindowId) {
     const explicit = prefs.explicit as Record<string, unknown> | undefined;
     const allRules =
       (explicit?.structuredRules as AvailabilityPreference[] | undefined) ?? [];
-    const compiledLinks = compileOfficeHoursLinks(allRules);
+    const compiledLinks = compileBookableLinks(allRules);
     const compiled = compiledLinks.find((l) => l.ruleId === link.recurringWindowId);
     if (compiled) {
       const siblings = await prisma.negotiationSession.findMany({
@@ -322,7 +322,7 @@ export async function handleGetAvailability(
             end: new Date(start.getTime() + durationMin * 60 * 1000).toISOString(),
           };
         });
-      slots = applyOfficeHoursWindow({
+      slots = applyBookableWindow({
         rule: compiled,
         slots,
         timezone,

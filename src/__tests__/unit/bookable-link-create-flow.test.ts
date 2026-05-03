@@ -1,22 +1,22 @@
 /**
- * Phase 1 PR 5 — Office Hours create flow data path.
+ * Bookable Link create flow data path.
  *
  * Covers the interception → proposal → confirm round-trip:
  *
  *   1. Dispatch-handler classifies an LLM-emitted `update_availability_rule`
- *      action with `params.rule.action === "office_hours"` and
- *      `operation === "add"` as an Office Hours proposal (no rule write
- *      yet); other rule actions (block, location, remove, …) and
- *      non-Office-Hours rule actions still flow through executeActions.
- *   2. The projected payload matches the OfficeHoursProposal contract
+ *      action with `params.rule.action === "bookable"` (or legacy
+ *      `"office_hours"`) and `operation === "add"` as a Bookable Link proposal
+ *      (no rule write yet); other rule actions (block, location, remove, …)
+ *      and non-Bookable rule actions still flow through executeActions.
+ *   2. The projected payload matches the BookableLinkProposalPayload contract
  *      consumed by the confirmation card / sheet.
  *   3. POST /api/availability-rules/confirm validates auth + the
  *      persisted proposal row + the immutable originalText cross-check,
  *      then writes the rule into `User.preferences.explicit.structuredRules[]`
  *      with the same shape `handleUpdateAvailabilityRule` produces.
  *
- * Vocabulary: this test exercises the **Office Hours** feature — code
- * keyword `r.action === "office_hours"`. It does NOT touch
+ * Vocabulary: this test exercises the **Bookable Link** feature — code
+ * keyword `r.action === "bookable"`. It does NOT touch
  * `User.preferences.explicit.businessHoursStart` / `businessHoursEnd`,
  * which are the host's daily window (**Business hours**) and unrelated.
  */
@@ -60,9 +60,9 @@ vi.mock("@/lib/profile-gaps", () => ({
 }));
 
 import {
-  isOfficeHoursAddAction,
+  isBookableAction,
   projectProposal,
-  type OfficeHoursProposalPayload,
+  type BookableLinkProposalPayload,
 } from "@/agent/dispatch-handler";
 import { POST as confirmPOST } from "@/app/api/availability-rules/confirm/route";
 import { getServerSession } from "next-auth";
@@ -99,10 +99,19 @@ beforeEach(() => {
 
 // ─── Interception classifier ────────────────────────────────────────────────
 
-describe("isOfficeHoursAddAction", () => {
-  it("classifies update_availability_rule + office_hours + add as intercepted", () => {
+describe("isBookableAction", () => {
+  it("classifies update_availability_rule + bookable + add as intercepted", () => {
     expect(
-      isOfficeHoursAddAction({
+      isBookableAction({
+        action: "update_availability_rule",
+        params: { operation: "add", rule: { action: "bookable" } },
+      }),
+    ).toBe(true);
+  });
+
+  it("also classifies legacy office_hours + add as intercepted (dual-read)", () => {
+    expect(
+      isBookableAction({
         action: "update_availability_rule",
         params: { operation: "add", rule: { action: "office_hours" } },
       }),
@@ -111,7 +120,7 @@ describe("isOfficeHoursAddAction", () => {
 
   it("does NOT intercept update_availability_rule with action=block", () => {
     expect(
-      isOfficeHoursAddAction({
+      isBookableAction({
         action: "update_availability_rule",
         params: {
           operation: "add",
@@ -123,25 +132,25 @@ describe("isOfficeHoursAddAction", () => {
 
   it("does NOT intercept update_availability_rule with action=location", () => {
     expect(
-      isOfficeHoursAddAction({
+      isBookableAction({
         action: "update_availability_rule",
         params: { operation: "add", rule: { action: "location", locationLabel: "Baja" } },
       }),
     ).toBe(false);
   });
 
-  it("does NOT intercept office_hours UPDATE (only ADD is intercepted)", () => {
+  it("does NOT intercept bookable UPDATE (only ADD is intercepted)", () => {
     expect(
-      isOfficeHoursAddAction({
+      isBookableAction({
         action: "update_availability_rule",
-        params: { operation: "update", id: "rule_xyz", rule: { action: "office_hours" } },
+        params: { operation: "update", id: "rule_xyz", rule: { action: "bookable" } },
       }),
     ).toBe(false);
   });
 
   it("does NOT intercept rename_general", () => {
     expect(
-      isOfficeHoursAddAction({
+      isBookableAction({
         action: "update_availability_rule",
         params: { operation: "rename_general", name: "Main" },
       }),
@@ -150,16 +159,16 @@ describe("isOfficeHoursAddAction", () => {
 
   it("does NOT intercept other action types (archive, create_link, …)", () => {
     expect(
-      isOfficeHoursAddAction({ action: "archive", params: { sessionId: "sess1" } }),
+      isBookableAction({ action: "archive", params: { sessionId: "sess1" } }),
     ).toBe(false);
     expect(
-      isOfficeHoursAddAction({
+      isBookableAction({
         action: "create_link",
         params: { inviteeName: "Bryan" },
       }),
     ).toBe(false);
     expect(
-      isOfficeHoursAddAction({
+      isBookableAction({
         action: "update_business_hours",
         params: { businessHoursStart: 9, businessHoursEnd: 17 },
       }),
@@ -168,8 +177,38 @@ describe("isOfficeHoursAddAction", () => {
 });
 
 describe("projectProposal", () => {
-  it("projects all fields when the LLM emits a complete payload", () => {
-    const out: OfficeHoursProposalPayload = projectProposal({
+  it("projects all fields when the LLM emits a complete payload (new bookable field)", () => {
+    const out: BookableLinkProposalPayload = projectProposal({
+      action: "update_availability_rule",
+      params: {
+        operation: "add",
+        rule: {
+          originalText: "Tennis team drop-in hours — weekdays 8–10am, 30-min video",
+          type: "recurring",
+          action: "bookable",
+          daysOfWeek: [1, 2, 3, 4, 5],
+          timeStart: "08:00",
+          timeEnd: "10:00",
+          bookable: {
+            name: "Tennis team",
+            format: "video",
+            durationMinutes: 30,
+          },
+          priority: 3,
+        },
+      },
+    });
+    expect(out.title).toBe("Tennis team");
+    expect(out.format).toBe("video");
+    expect(out.durationMinutes).toBe(30);
+    expect(out.daysOfWeek).toEqual([1, 2, 3, 4, 5]);
+    expect(out.timeStart).toBe("08:00");
+    expect(out.timeEnd).toBe("10:00");
+    expect(out.originalText).toContain("Tennis team");
+  });
+
+  it("also projects from legacy officeHours field (dual-read backward compat)", () => {
+    const out: BookableLinkProposalPayload = projectProposal({
       action: "update_availability_rule",
       params: {
         operation: "add",
@@ -192,18 +231,14 @@ describe("projectProposal", () => {
     expect(out.title).toBe("Tennis team");
     expect(out.format).toBe("video");
     expect(out.durationMinutes).toBe(30);
-    expect(out.daysOfWeek).toEqual([1, 2, 3, 4, 5]);
-    expect(out.timeStart).toBe("08:00");
-    expect(out.timeEnd).toBe("10:00");
-    expect(out.originalText).toContain("Tennis team");
   });
 
   it("falls back to safe defaults on partial payloads", () => {
     const out = projectProposal({
       action: "update_availability_rule",
-      params: { operation: "add", rule: { action: "office_hours" } },
+      params: { operation: "add", rule: { action: "bookable" } },
     });
-    expect(out.title).toBe("Office Hours");
+    expect(out.title).toBe("Drop-in Hours");
     expect(out.format).toBe("video");
     expect(out.durationMinutes).toBe(30);
     expect(out.daysOfWeek).toEqual([0, 1, 2, 3, 4, 5, 6]);
@@ -217,9 +252,9 @@ describe("projectProposal", () => {
       params: {
         operation: "add",
         rule: {
-          action: "office_hours",
+          action: "bookable",
           daysOfWeek: [-1, 7, 8, "monday"],
-          officeHours: { name: "Coaching" },
+          bookable: { name: "Coaching" },
         },
       },
     });
@@ -233,8 +268,8 @@ describe("projectProposal", () => {
       params: {
         operation: "add",
         rule: {
-          action: "office_hours",
-          officeHours: {
+          action: "bookable",
+          bookable: {
             name: "Sales pitch",
             // bogus values — should normalize back to defaults
             format: "carrier-pigeon",
@@ -365,7 +400,7 @@ describe("POST /api/availability-rules/confirm", () => {
     expect(res.status).toBe(409);
   });
 
-  it("writes the office_hours rule into preferences.explicit.structuredRules[] on success", async () => {
+  it("writes the bookable rule into preferences.explicit.structuredRules[] on success", async () => {
     (getServerSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { id: USER_ID },
     });
@@ -409,19 +444,19 @@ describe("POST /api/availability-rules/confirm", () => {
       .structuredRules;
     expect(rules).toHaveLength(1);
     const rule = rules[0] as Record<string, unknown>;
-    expect(rule.action).toBe("office_hours");
+    expect(rule.action).toBe("bookable");
     expect(rule.type).toBe("recurring");
     expect(rule.timeStart).toBe("14:00");
     expect(rule.timeEnd).toBe("17:00");
     expect(rule.daysOfWeek).toEqual([0, 1, 2, 3, 4, 5, 6]);
     expect(rule.status).toBe("active");
-    const oh = rule.officeHours as Record<string, unknown>;
-    expect(oh.name).toBe("Guitar students");
-    expect(oh.title).toBe("Guitar students");
-    expect(oh.format).toBe("video");
-    expect(oh.durationMinutes).toBe(30);
-    expect(oh.linkSlug).toBe(MEET_SLUG);
-    expect(typeof oh.linkCode).toBe("string");
+    const bl = rule.bookable as Record<string, unknown>;
+    expect(bl.name).toBe("Guitar students");
+    expect(bl.title).toBe("Guitar students");
+    expect(bl.format).toBe("video");
+    expect(bl.durationMinutes).toBe(30);
+    expect(bl.linkSlug).toBe(MEET_SLUG);
+    expect(typeof bl.linkCode).toBe("string");
 
     // Verify side-effects: schedule invalidated + behavior snapshot bumped +
     // proposal row marked confirmed + confirmation row appended.
@@ -450,9 +485,9 @@ describe("POST /api/availability-rules/confirm", () => {
           structuredRules: [
             {
               id: "rule_existing",
-              action: "office_hours",
+              action: "bookable",
               status: "active",
-              officeHours: {
+              bookable: {
                 name: "Guitar students",
                 title: "Guitar students",
                 format: "video",

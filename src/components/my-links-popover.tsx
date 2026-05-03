@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import type { AvailabilityPreference } from "@/lib/availability-rules";
-import { getOfficeHoursDisplayName } from "@/lib/availability-rules";
+import { getBookableLinkDisplayName } from "@/lib/availability-rules";
 
 type LinkRow = {
   key: string;
-  kind: "general" | "office_hours";
+  kind: "primary" | "bookable";
   name: string;
   url: string;
   ruleId?: string;
@@ -43,20 +43,23 @@ export function MyLinksPopover() {
         if (!slug) return;
         const out: LinkRow[] = [];
         out.push({
-          key: "general",
-          kind: "general",
-          name: (data.generalLinkName as string) || "Primary link",
+          key: "primary",
+          kind: "primary",
+          // TODO(vocab-cleanup): remove primaryLinkName || generalLinkName fallback after migration
+          name: (data.primaryLinkName as string) || (data.generalLinkName as string) || "Primary link",
           url: `${origin}/meet/${slug}`,
         });
         const structured = (data.structuredRules as AvailabilityPreference[]) ?? [];
         for (const r of structured) {
-          if (r.action !== "office_hours" || r.status !== "active" || !r.officeHours) continue;
-          const oh = r.officeHours;
+          // TODO(vocab-cleanup): remove || "office_hours" after migration
+          const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
+          if ((r.action !== "bookable" && r.action !== ("office_hours" as string)) || r.status !== "active" || !bookableData) continue;
+          const oh = bookableData;
           if (!oh.linkCode || !oh.linkSlug) continue;
           out.push({
             key: r.id,
-            kind: "office_hours",
-            name: getOfficeHoursDisplayName(oh),
+            kind: "bookable",
+            name: getBookableLinkDisplayName(oh),
             url: `${origin}/meet/${oh.linkSlug}/${oh.linkCode}`,
             ruleId: r.id,
           });
@@ -92,7 +95,7 @@ export function MyLinksPopover() {
   }
 
   function editName(row: LinkRow) {
-    const text = row.kind === "general"
+    const text = row.kind === "primary"
       ? `Rename my Primary link to `
       : `Rename my "${row.name}" link to `;
     setOpen(false);
@@ -102,16 +105,16 @@ export function MyLinksPopover() {
     setTimeout(() => prefillComposer(text), 60);
   }
 
-  function createOfficeHours() {
+  function createBookableLink() {
     setOpen(false);
     if (pathname !== "/dashboard" && pathname !== "/dashboard/") {
       router.push("/dashboard");
     }
-    setTimeout(() => prefillComposer("Create an office hours link"), 60);
+    setTimeout(() => prefillComposer("Create a drop-in hours link"), 60);
   }
 
-  const general = rows.find((r) => r.kind === "general");
-  const label = general?.name || "Links";
+  const primaryRow = rows.find((r) => r.kind === "primary");
+  const label = primaryRow?.name || "Links";
 
   return (
     <div className="relative" ref={rootRef}>
@@ -160,7 +163,7 @@ export function MyLinksPopover() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-medium text-primary truncate">{r.name}</span>
-                      {r.kind === "general" && (
+                      {r.kind === "primary" && (
                         <span className="text-[9px] uppercase tracking-wide text-muted">default</span>
                       )}
                     </div>
@@ -189,10 +192,10 @@ export function MyLinksPopover() {
           )}
           <div className="border-t border-surface-tertiary/50 mt-1 pt-1 px-1">
             <button
-              onClick={createOfficeHours}
+              onClick={createBookableLink}
               className="w-full text-left px-2 py-1.5 text-xs text-secondary hover:bg-surface-secondary/60 rounded-md flex items-center gap-2"
             >
-              <span className="text-purple-400">+</span> Create office hours link
+              <span className="text-purple-400">+</span> Create Drop-in Hours link
             </button>
             <Link
               href="/dashboard/my-links"
