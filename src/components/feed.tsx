@@ -13,10 +13,10 @@ import { PreferencesExtendedFlow } from "./onboarding/preferences-extended-flow"
 import { shortTimezoneLabel } from "@/lib/timezone";
 import { GcalUpdateCard } from "./gcal-update-card";
 // RuleConfirmCard / RuleConfirmSheet imports retired 2026-05-03 — the
-// office-hours create flow is now chat-driven (proposal §3.8). The
-// `OfficeHoursProposal` type is still imported because legacy
+// bookable-link create flow is now chat-driven (proposal §3.8). The
+// `BookableLinkProposal` type is still imported because legacy
 // `rule_proposal` system messages pre-deploy use it for display.
-import type { OfficeHoursProposal } from "./onboarding/rule-form-fields";
+import type { BookableLinkProposal } from "./onboarding/rule-form-fields";
 import { SendFeedbackLink } from "./send-feedback";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { canNativeShare, shareInvite } from "@/lib/share-invite";
@@ -1845,7 +1845,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
             // follows the action result already carries the link).
             if (msg.metadata?.kind === "rule_proposal") {
               const meta = msg.metadata as Record<string, unknown>;
-              const proposal = meta.proposal as OfficeHoursProposal | undefined;
+              const proposal = meta.proposal as BookableLinkProposal | undefined;
               const alreadyConfirmed = meta.confirmed === true;
               if (alreadyConfirmed && proposal) {
                 return (
@@ -1853,7 +1853,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     key={msg.id}
                     className="self-start w-[92%] max-w-[480px] rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2.5 text-[12px] text-emerald-700 dark:text-emerald-300"
                   >
-                    ✓ Created Office Hours link · {proposal.title}
+                    ✓ Created Bookable Link · {proposal.title}
                   </div>
                 );
               }

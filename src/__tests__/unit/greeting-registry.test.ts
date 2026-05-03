@@ -41,7 +41,8 @@ function baseInput(overrides: Partial<GreetingInput> = {}): GreetingInput {
     inviteeCount: 1,
     linkRules: {},
     isAnonymousLink: false,
-    isOfficeHoursLink: false,
+    isPrimaryLink: false,
+    isBookableChildLink: false,
     effectiveSteering: "open",
     activityText: null,
     linkLocationForOpener: null,
@@ -81,10 +82,10 @@ describe("selectGreeting — registry key resolution", () => {
     expect(selectGreeting(input).key).toBe("anonymous");
   });
 
-  it("routes anonymous links to anonymous (office-hours child)", () => {
+  it("routes anonymous links to anonymous (bookable-link child)", () => {
     const input = baseInput({
       isAnonymousLink: true,
-      isOfficeHoursLink: true,
+      isBookableChildLink: true,
       rawTopic: "Coaching hours",
     });
     expect(selectGreeting(input).key).toBe("anonymous");
@@ -195,10 +196,10 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
     );
   });
 
-  it("Branch C: office-hours child surfaces topic with possessive plural body", () => {
+  it("Branch C: bookable-link child surfaces topic with possessive plural body", () => {
     const input = baseInput({
       isAnonymousLink: true,
-      isOfficeHoursLink: true,
+      isBookableChildLink: true,
       rawTopic: "Coaching hours",
       meetingDescShort: "20-min video call",
     });
@@ -489,12 +490,12 @@ describe("selectGreeting — recurring templates take priority over anonymous", 
     expect(selectGreeting(input).key).toBe("recurring-meeting-followup");
   });
 
-  it("routes recurring anonymous (office-hours-with-series) to recurring-anchor over anonymous", () => {
-    // An office-hours-with-series child is BOTH isAnonymousLink=true AND has recurrence.
+  it("routes recurring anonymous (bookable-link-with-series) to recurring-anchor over anonymous", () => {
+    // A bookable-link-with-series child is BOTH isAnonymousLink=true AND has recurrence.
     // Recurring takes priority.
     const input = baseInput({
       isAnonymousLink: true,
-      isOfficeHoursLink: true,
+      isBookableChildLink: true,
       recurrence: weeklyCountRec,
       occurrenceIndex: null,
     });
@@ -520,11 +521,11 @@ describe("greeting registry — recurring-meeting-anchor render", () => {
     );
   });
 
-  it("renders anonymous anchor (office-hours-with-series) — greeteeName 'there', no count suffix for until-date", () => {
+  it("renders anonymous anchor (bookable-link-with-series) — greeteeName 'there', no count suffix for until-date", () => {
     const input = baseInput({
       greeteeName: "there",
       isAnonymousLink: true,
-      isOfficeHoursLink: true,
+      isBookableChildLink: true,
       rawTopic: "coaching",
       recurrence: biweeklyUntilRec,
       occurrenceIndex: null,

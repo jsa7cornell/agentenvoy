@@ -37,7 +37,13 @@ export const createLinkInput = z
   .object({
     topic: z.string().min(1).max(200).optional(),
     inviteeNames: z.array(z.string().min(1).max(200)).max(20).optional(),
-    kind: z.enum(["reusable", "contextual"]).optional().default("contextual"),
+    // Accepts both old ("reusable"/"contextual") and new ("bookable"/"personalized") enum values.
+    // TODO(vocab-cleanup): remove old aliases after 2026-05-17 (1-week window)
+    kind: z.union([
+      z.enum(["bookable", "personalized"]),
+      z.literal("reusable").transform(() => { console.warn("[MCP] deprecated kind='reusable', use 'bookable'"); return "bookable" as const; }),
+      z.literal("contextual").transform(() => { console.warn("[MCP] deprecated kind='contextual', use 'personalized'"); return "personalized" as const; }),
+    ]).optional().default("personalized"),
     format: formatSchema.optional(),
     durationMinutes: z.number().int().min(5).max(480).optional(),
     activity: z.string().min(1).max(80).optional(),

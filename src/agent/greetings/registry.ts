@@ -51,10 +51,11 @@
  * ────────────────────────────────────────────────────────────────────────────
  *
  *   isAnonymousLink = link.type === "primary" || !!link.recurringWindowId
+ *   (both isPrimaryLink=true and isBookableChildLink=true fire anonymous voice)
  *
- * Anonymous voice fires on the primary link AND on reusables backed by a
- * recurring window (Office-Hours-style). All other reusable variants and
- * single-use links use personalized voice. See [SPEC.md §2.5.4 + §3.6].
+ * Anonymous voice fires on the primary link AND on bookable links backed by a
+ * recurring window. All other bookable variants and single-use links use
+ * personalized voice. See [SPEC.md §2.5.4 + §3.6].
  */
 
 import { formatDuration } from "@/lib/format-duration";
@@ -157,8 +158,10 @@ export interface GreetingInput {
 
   /** True iff `link.type === "primary" || !!link.recurringWindowId`. */
   isAnonymousLink: boolean;
-  /** True iff `link.recurringWindowId != null`. Office-hours children only. */
-  isOfficeHoursLink: boolean;
+  /** True iff `link.type === "primary"`. */
+  isPrimaryLink: boolean;
+  /** True iff `link.recurringWindowId != null` (recurring-window-backed bookable child link). */
+  isBookableChildLink: boolean;
 
   /** Host-classified steering tier (open / soft / narrow / exclusive). */
   effectiveSteering: Steering;
@@ -508,23 +511,23 @@ const recurringFollowupTemplate: GreetingTemplate = {
 /**
  * "👋 I'm {Host}'s scheduling agent.\n{body}"
  *
- * Fires on the primary link OR an Office-Hours-style child link
- * (`recurringWindowId != null`). Office-hours surface `topic` inline; bare
+ * Fires on the primary link OR a bookable child link
+ * (`recurringWindowId != null`). Bookable child links surface `topic` inline; bare
  * primaries fall back to the default-format pitch.
  */
 const anonymousTemplate: GreetingTemplate = {
   key: "anonymous",
   description:
     "Agent-voice self-intro for anonymous visitors. Fires on type=primary " +
-    "and on reusables backed by a recurring window (Office Hours).",
+    "and on bookable links backed by a recurring window.",
   match: (input) => input.isAnonymousLink,
   render: (input) => {
-    const { hostFirstName, isOfficeHoursLink, rawTopic, meetingDescShort } = input;
+    const { hostFirstName, isBookableChildLink, rawTopic, meetingDescShort } = input;
     const calendarPitch = buildCalendarPitch(input);
-    // Office-hours children carry a `topic` (e.g. "Coaching hours"). Bare
+    // Bookable child links carry a `topic` (e.g. "Coaching hours"). Bare
     // primary links don't — render the default offer instead.
     const hostTopic =
-      isOfficeHoursLink && rawTopic ? rawTopic : null;
+      isBookableChildLink && rawTopic ? rawTopic : null;
     const pitch = calendarPitch ? ` ${calendarPitch}` : "";
     const body = hostTopic
       ? `These are ${hostFirstName}'s ${hostTopic} — ${meetingDescShort}s within the available windows below.${pitch}`
@@ -549,7 +552,7 @@ const proposalTemplate: GreetingTemplate = {
     "(format / duration / activity / location).",
   match: (input) => !input.isAnonymousLink && hasProposalSubstance(input),
   render: (input) => {
-    const { greeteeName, hostFirstName, toneLine, guestPicks, guestGuidance, isDirective, isOfficeHoursLink } = input;
+    const { greeteeName, hostFirstName, toneLine, guestPicks, guestGuidance, isDirective, isBookableChildLink } = input;
     const withClause = buildWithClause(input);
     const proposalPhrase = buildProposalPhrase(input);
 
@@ -559,10 +562,10 @@ const proposalTemplate: GreetingTemplate = {
     // when `deferralFieldsList` is set, it suppresses tone, guestPickHint,
     // and the standalone suggest-alt — those become redundant with the
     // unified opener+closing.
-    const deferralFieldsList = buildDeferralFieldsList({ guestPicks, isDirective, isOfficeHoursLink });
+    const deferralFieldsList = buildDeferralFieldsList({ guestPicks, isDirective, isBookableChildLink });
     const calendarPitch = buildCalendarPitch(input);
     const guestPickHint = deferralFieldsList ? null : buildGuestPickHint({ guestPicks, guestGuidance, hostFirstName });
-    const suggestAltClause = deferralFieldsList ? null : buildSuggestAltClause({ guestPicks, isDirective, isOfficeHoursLink });
+    const suggestAltClause = deferralFieldsList ? null : buildSuggestAltClause({ guestPicks, isDirective, isBookableChildLink });
 
     // Unified opener — when fields are deferred, append "but wanted to
     // check if you had preferences in terms of {list}".
@@ -616,14 +619,14 @@ const findTimeTemplate: GreetingTemplate = {
     "deferred format / duration / activity / location to the guest.",
   match: (input) => !input.isAnonymousLink && !hasProposalSubstance(input),
   render: (input) => {
-    const { greeteeName, hostFirstName, timingLabel, toneLine, guestPicks, guestGuidance, isDirective, isOfficeHoursLink } = input;
+    const { greeteeName, hostFirstName, timingLabel, toneLine, guestPicks, guestGuidance, isDirective, isBookableChildLink } = input;
     const findTimeWithClause = buildFindTimeWithClause(input);
 
     // Same clause-composition + suppression pattern as proposalTemplate.
-    const deferralFieldsList = buildDeferralFieldsList({ guestPicks, isDirective, isOfficeHoursLink });
+    const deferralFieldsList = buildDeferralFieldsList({ guestPicks, isDirective, isBookableChildLink });
     const calendarPitch = buildCalendarPitch(input);
     const guestPickHint = deferralFieldsList ? null : buildGuestPickHint({ guestPicks, guestGuidance, hostFirstName });
-    const suggestAltClause = deferralFieldsList ? null : buildSuggestAltClause({ guestPicks, isDirective, isOfficeHoursLink });
+    const suggestAltClause = deferralFieldsList ? null : buildSuggestAltClause({ guestPicks, isDirective, isBookableChildLink });
 
     // Find-time greeting fires when no structural fields are set — the
     // host has effectively deferred everything. The opener already says

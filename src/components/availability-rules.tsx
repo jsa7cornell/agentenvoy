@@ -14,7 +14,7 @@ import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
 interface ParsedRule {
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location" | "office_hours" | "no_in_person";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "business_hours" | "location" | "bookable" | "no_in_person";
   timeStart?: string;
   timeEnd?: string;
   allDay?: boolean;
@@ -27,9 +27,9 @@ interface ParsedRule {
   businessHoursStart?: number;
   businessHoursEnd?: number;
   locationLabel?: string;
-  officeHoursTitle?: string;
-  officeHoursFormat?: "video" | "phone" | "in-person";
-  officeHoursDurationMinutes?: number;
+  bookableTitle?: string;
+  bookableFormat?: "video" | "phone" | "in-person";
+  bookableDurationMinutes?: number;
   priority: number;
   ambiguous?: boolean;
   interpretations?: string[];
@@ -112,7 +112,7 @@ const ACTION_LABELS: Record<string, string> = {
   limit: "Limit",
   business_hours: "Business Hours",
   location: "Location",
-  office_hours: "Office Hours",
+  bookable: "Bookable Link",
   no_in_person: "No in-person",
 };
 
@@ -123,7 +123,7 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> 
   prefer: Star,
   limit: Lock,
   location: MapPin,
-  office_hours: Megaphone,
+  bookable: Megaphone,
   no_in_person: UserX,
 };
 
@@ -252,21 +252,21 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
       timeStart: pendingRule.timeStart,
       timeEnd: pendingRule.timeEnd,
       allDay: pendingRule.allDay,
-      // Office hours defaults to every day (all 7) when the parser didn't
+      // Bookable link defaults to every day (all 7) when the parser didn't
       // capture a specific set — matches the "every day" chooser behavior.
-      daysOfWeek: pendingRule.daysOfWeek ?? (pendingRule.action === "office_hours" ? [0, 1, 2, 3, 4, 5, 6] : undefined),
+      daysOfWeek: pendingRule.daysOfWeek ?? (pendingRule.action === "bookable" ? [0, 1, 2, 3, 4, 5, 6] : undefined),
       effectiveDate: pendingRule.effectiveDate,
       expiryDate: pendingRule.expiryDate,
       bufferMinutesBefore: pendingRule.bufferMinutesBefore,
       bufferMinutesAfter: pendingRule.bufferMinutesAfter,
       bufferAppliesTo: pendingRule.bufferAppliesTo,
       locationLabel: pendingRule.locationLabel,
-      officeHours: pendingRule.action === "office_hours" ? {
-        title: pendingRule.officeHoursTitle?.trim() || "Office Hours",
-        format: pendingRule.officeHoursFormat || "video",
-        durationMinutes: pendingRule.officeHoursDurationMinutes || 30,
+      bookable: pendingRule.action === "bookable" ? {
+        title: pendingRule.bookableTitle?.trim() || "Drop-in Hours",
+        format: pendingRule.bookableFormat || "video",
+        durationMinutes: pendingRule.bookableDurationMinutes || 30,
         linkSlug: "", // server hydrates from user.meetSlug
-        linkCode: "", // server hydrates via generateOfficeHoursLinkCode
+        linkCode: "", // server hydrates via generateBookableLinkCode
       } : undefined,
       status: "active",
       priority: pendingRule.priority,
@@ -694,10 +694,10 @@ function ConfirmationCard({
   onCancel: () => void;
   onUpdateRule: (updates: Partial<ParsedRule>) => void;
 }) {
-  // For office_hours rules, fields are always directly editable (no toggle).
+  // For bookable rules, fields are always directly editable (no toggle).
   // For other rule types, keep the existing edit/view toggle.
   const [isEditing, setIsEditing] = useState(false);
-  const alwaysEdit = rule.action === "office_hours";
+  const alwaysEdit = rule.action === "bookable";
   const editing = alwaysEdit || isEditing;
   const videoProviderLabel = videoProvider === "zoom" ? "Zoom" : "Google Meet";
 
@@ -767,20 +767,20 @@ function ConfirmationCard({
               ) : null
             )}
             {/* Office hours — title / format / duration */}
-            {rule.action === "office_hours" && (
+            {rule.action === "bookable" && (
               <>
                 <span className="text-muted">Title</span>
                 <input
                   type="text"
-                  value={rule.officeHoursTitle ?? "Office Hours"}
-                  onChange={(e) => onUpdateRule({ officeHoursTitle: e.target.value })}
-                  placeholder="Office Hours"
+                  value={rule.bookableTitle ?? "Drop-in Hours"}
+                  onChange={(e) => onUpdateRule({ bookableTitle: e.target.value })}
+                  placeholder="Drop-in Hours"
                   className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
                 />
                 <span className="text-muted">Format</span>
                 <select
-                  value={rule.officeHoursFormat ?? ""}
-                  onChange={(e) => onUpdateRule({ officeHoursFormat: (e.target.value || undefined) as ParsedRule["officeHoursFormat"] })}
+                  value={rule.bookableFormat ?? ""}
+                  onChange={(e) => onUpdateRule({ bookableFormat: (e.target.value || undefined) as ParsedRule["bookableFormat"] })}
                   className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
                 >
                   <option value="">Choose…</option>
@@ -790,8 +790,8 @@ function ConfirmationCard({
                 </select>
                 <span className="text-muted">Duration</span>
                 <select
-                  value={rule.officeHoursDurationMinutes ?? ""}
-                  onChange={(e) => onUpdateRule({ officeHoursDurationMinutes: e.target.value ? Number(e.target.value) : undefined })}
+                  value={rule.bookableDurationMinutes ?? ""}
+                  onChange={(e) => onUpdateRule({ bookableDurationMinutes: e.target.value ? Number(e.target.value) : undefined })}
                   className="bg-surface border border-DEFAULT rounded px-1.5 py-0.5 text-primary text-xs"
                 >
                   <option value="">Choose…</option>
@@ -841,7 +841,7 @@ function ConfirmationCard({
             )}
             {/* When — days of week. Office hours always shows the chooser,
                 defaulting to all 7 days when the parser didn't specify any. */}
-            {(rule.daysOfWeek || rule.action === "office_hours") && (
+            {(rule.daysOfWeek || rule.action === "bookable") && (
               editing ? (
                 <>
                   <span className="text-muted">When</span>
@@ -882,10 +882,10 @@ function ConfirmationCard({
             )}
             {/* Recurring toggle — lets the user flip a parsed rule between
                 one-time ("block Thursday") and weekly ("every Thursday").
-                Only shown for editable day-scoped rules (not office_hours,
+                Only shown for editable day-scoped rules (not bookable,
                 which has its own start/end date pickers). */}
             {editing
-              && rule.action !== "office_hours"
+              && rule.action !== "bookable"
               && rule.daysOfWeek && rule.daysOfWeek.length > 0 && (
               <>
                 <span className="text-muted">Repeats</span>
@@ -912,7 +912,7 @@ function ConfirmationCard({
               </>
             )}
             {/* Office hours: always-visible start/end date fields */}
-            {rule.action === "office_hours" ? (
+            {rule.action === "bookable" ? (
               <>
                 <span className="text-muted">Starts</span>
                 <input
@@ -1097,10 +1097,10 @@ function ConfirmationCard({
         </div>
       )}
 
-      {/* Office-hours override warning */}
-      {rule.action === "office_hours" && (
+      {/* Bookable link override warning */}
+      {rule.action === "bookable" && (
         <div className="bg-surface border border-DEFAULT rounded-lg px-3 py-2 text-[11px] text-muted leading-relaxed">
-          Office hours override other soft blocks. Envoy will offer these slots even if your schedule shows them protected &mdash; real calendar events and blackout days stay blocked.
+          Bookable Links override other soft blocks. Envoy will offer these slots even if your schedule shows them protected &mdash; real calendar events and blackout days stay blocked.
         </div>
       )}
 
@@ -1108,7 +1108,7 @@ function ConfirmationCard({
       <div className="flex items-center gap-2 pt-1">
         <button
           onClick={onConfirm}
-          disabled={rule.action === "office_hours" && (!rule.officeHoursFormat || !rule.officeHoursDurationMinutes)}
+          disabled={rule.action === "bookable" && (!rule.bookableFormat || !rule.bookableDurationMinutes)}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Check className="w-4 h-4" />
@@ -1183,12 +1183,12 @@ function RuleCard({
   } else if (rule.action === "location" && rule.locationLabel) {
     summary = `Currently in ${rule.locationLabel}`;
     if (rule.expiryDate) summary += ` until ${formatDate(rule.expiryDate)}`;
-  } else if (rule.action === "office_hours" && rule.officeHours) {
+  } else if (rule.action === "bookable" && rule.bookable) {
     const days = rule.daysOfWeek && rule.daysOfWeek.length > 0 ? daysLabel(rule.daysOfWeek) : "Every day";
     const window = rule.timeStart && rule.timeEnd
       ? `${formatTime24to12(rule.timeStart)}\u2013${formatTime24to12(rule.timeEnd)}`
       : "";
-    summary = `${rule.officeHours.title} · ${days} ${window} · ${formatDurationCompact(rule.officeHours.durationMinutes)} ${rule.officeHours.format}`.trim();
+    summary = `${rule.bookable.title} · ${days} ${window} · ${formatDurationCompact(rule.bookable.durationMinutes)} ${rule.bookable.format}`.trim();
   } else {
     summary = rule.originalText;
   }
@@ -1236,18 +1236,18 @@ function RuleCard({
         )}
       </div>
 
-      {/* Office hours link — always visible (not gated on expand) */}
-      {rule.action === "office_hours" && rule.officeHours && !isExpired && (
+      {/* Bookable link URL — always visible (not gated on expand) */}
+      {rule.action === "bookable" && rule.bookable && !isExpired && (
         <div className="px-3 pb-2 flex items-center gap-2 text-xs">
-          {rule.officeHours.linkSlug && rule.officeHours.linkCode ? (
+          {rule.bookable.linkSlug && rule.bookable.linkCode ? (
             <>
               <code className="flex-1 min-w-0 truncate bg-surface border border-DEFAULT rounded px-2 py-1 text-secondary">
-                {`/meet/${rule.officeHours.linkSlug}/${rule.officeHours.linkCode}`}
+                {`/meet/${rule.bookable.linkSlug}/${rule.bookable.linkCode}`}
               </code>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  const url = `${window.location.origin}/meet/${rule.officeHours!.linkSlug}/${rule.officeHours!.linkCode}`;
+                  const url = `${window.location.origin}/meet/${rule.bookable!.linkSlug}/${rule.bookable!.linkCode}`;
                   navigator.clipboard.writeText(url);
                 }}
                 className="flex items-center gap-1 px-2 py-1 text-muted hover:text-secondary border border-DEFAULT rounded transition"
@@ -1473,17 +1473,17 @@ function RuleCard({
                     <span className="text-primary">{formatDate(rule.expiryDate)}</span>
                   </>
                 )}
-                {/* Office hours fields */}
-                {rule.action === "office_hours" && rule.officeHours && (
+                {/* Bookable link fields */}
+                {rule.action === "bookable" && rule.bookable && (
                   <>
                     <span className="text-muted">Title</span>
-                    <span className="text-primary">{rule.officeHours.title}</span>
+                    <span className="text-primary">{rule.bookable.title}</span>
                     <span className="text-muted">Format</span>
                     <span className="text-primary">
-                      {rule.officeHours.format === "video" ? "Video" : rule.officeHours.format === "phone" ? "Phone" : "In-person"}
+                      {rule.bookable.format === "video" ? "Video" : rule.bookable.format === "phone" ? "Phone" : "In-person"}
                     </span>
                     <span className="text-muted">Duration</span>
-                    <span className="text-primary">{formatDuration(rule.officeHours.durationMinutes)}</span>
+                    <span className="text-primary">{formatDuration(rule.bookable.durationMinutes)}</span>
                   </>
                 )}
                 {/* Added */}

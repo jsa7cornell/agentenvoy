@@ -40,7 +40,7 @@ describe("buildCalendarPitch", () => {
 // ─── buildDeferralFieldsList ─────────────────────────────────────────────────
 
 describe("buildDeferralFieldsList", () => {
-  const base = { isDirective: false, isOfficeHoursLink: false };
+  const base = { isDirective: false, isBookableChildLink: false };
 
   it("returns null when guestPicks is null", () => {
     expect(buildDeferralFieldsList({ ...base, guestPicks: null })).toBeNull();
@@ -85,17 +85,17 @@ describe("buildDeferralFieldsList", () => {
       buildDeferralFieldsList({
         guestPicks: { location: true },
         isDirective: true,
-        isOfficeHoursLink: false,
+        isBookableChildLink: false,
       }),
     ).toBeNull();
   });
 
-  it("returns null when isOfficeHoursLink is true", () => {
+  it("returns null when isBookableChildLink is true", () => {
     expect(
       buildDeferralFieldsList({
         guestPicks: { location: true },
         isDirective: false,
-        isOfficeHoursLink: true,
+        isBookableChildLink: true,
       }),
     ).toBeNull();
   });
@@ -168,7 +168,7 @@ describe("buildGuestPickHint", () => {
 // ─── buildSuggestAltClause (unreachable in production) ───────────────────────
 
 describe("buildSuggestAltClause", () => {
-  const base = { isDirective: false, isOfficeHoursLink: false };
+  const base = { isDirective: false, isBookableChildLink: false };
 
   it("returns null when guestPicks is null", () => {
     expect(
@@ -208,17 +208,17 @@ describe("buildSuggestAltClause", () => {
       buildSuggestAltClause({
         guestPicks: { format: true },
         isDirective: true,
-        isOfficeHoursLink: false,
+        isBookableChildLink: false,
       }),
     ).toBeNull();
   });
 
-  it("returns null for office-hours links", () => {
+  it("returns null for bookable-link child links", () => {
     expect(
       buildSuggestAltClause({
         guestPicks: { format: true },
         isDirective: false,
-        isOfficeHoursLink: true,
+        isBookableChildLink: true,
       }),
     ).toBeNull();
   });

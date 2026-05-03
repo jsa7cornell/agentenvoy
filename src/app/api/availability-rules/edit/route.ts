@@ -1,16 +1,16 @@
 /**
- * Office Hours edit endpoint (Phase 1 PR 7).
+ * Bookable Link edit endpoint (Phase 1 PR 7).
  *
- * Companion to `confirm/route.ts` — that one creates a new Office Hours rule
+ * Companion to `confirm/route.ts` — that one creates a new Bookable Link rule
  * from a chat-flow proposal; this one updates an existing rule's editable
  * parameters from the Event Links sheet's Edit dialog. Both writers must
  * keep shape parity with `handleUpdateAvailabilityRule` (operation:
- * "modify", action: "office_hours") at `app/src/agent/actions.ts`.
+ * "modify", action: "bookable") at `app/src/agent/actions.ts`.
  *
  * Defense-in-depth shape:
  *   1. Authn — host must own the rule (it lives on `User.preferences.explicit
  *      .structuredRules[]`, so ownership is implicit).
- *   2. Body shape — validated against the OfficeHoursProposal contract
+ *   2. Body shape — validated against the BookableLinkProposal contract
  *      (mirrors `confirm/route.ts`).
  *   3. Cross-check — `linkSlug` and `linkCode` are NOT mutable from this
  *      endpoint; the rule's URL is permanent. The host can edit name /
@@ -149,16 +149,20 @@ export async function POST(req: NextRequest) {
     ((explicit as Record<string, unknown>).structuredRules as
       | AvailabilityPreference[]
       | undefined) ?? [];
+  // TODO(vocab-cleanup): remove generalLinkName fallback after migration
   const generalLinkName =
-    typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined;
+    typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName :
+    (typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined);
 
   const target = existingRules.find((r) => r.id === ruleId);
   if (!target) {
     return NextResponse.json({ error: "Rule not found" }, { status: 404 });
   }
-  if (target.action !== "office_hours" || !target.officeHours) {
+  // TODO(vocab-cleanup): remove || "office_hours" after migration
+  const targetBookable = target.bookable ?? (target as unknown as { officeHours?: typeof target.bookable }).officeHours;
+  if ((target.action !== "bookable" && target.action !== ("office_hours" as string)) || !targetBookable) {
     return NextResponse.json(
-      { error: "Rule is not an Office Hours rule" },
+      { error: "Rule is not a Bookable Link rule" },
       { status: 400 },
     );
   }
@@ -168,8 +172,9 @@ export async function POST(req: NextRequest) {
   const taken = new Set<string>();
   for (const r of existingRules) {
     if (r.id === ruleId) continue;
-    if (r.action !== "office_hours" || !r.officeHours) continue;
-    const n = (r.officeHours.name ?? r.officeHours.title ?? "").trim();
+    const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
+    if ((r.action !== "bookable" && r.action !== ("office_hours" as string)) || !bookableData) continue;
+    const n = (bookableData.name ?? bookableData.title ?? "").trim();
     if (n) taken.add(normalizeLinkName(n));
   }
   taken.add(
@@ -187,31 +192,32 @@ export async function POST(req: NextRequest) {
   // Detect duration/format change BEFORE rewriting — the previous values are
   // used by the clear-on-edit step below. Reusable-link guest-picks proposal,
   // decided 2026-04-28.
-  const prevDuration = target.officeHours.durationMinutes;
-  const prevFormat = target.officeHours.format;
+  const prevDuration = targetBookable.durationMinutes;
+  const prevFormat = targetBookable.format;
   const durationChanged = parsed.durationMinutes !== prevDuration;
   const formatChanged = parsed.format !== prevFormat;
 
   const nowIso = new Date().toISOString();
   const updated: AvailabilityPreference = {
     ...target,
+    action: "bookable",
     timeStart: parsed.timeStart,
     timeEnd: parsed.timeEnd,
     daysOfWeek: parsed.daysOfWeek,
     effectiveDate: parsed.effectiveDate,
     expiryDate: parsed.expiryDate,
-    officeHours: {
+    bookable: {
       // Preserve immutable fields — linkSlug and linkCode are permanent.
-      linkSlug: target.officeHours.linkSlug,
-      linkCode: target.officeHours.linkCode,
+      linkSlug: targetBookable.linkSlug,
+      linkCode: targetBookable.linkCode,
       // guestPicks: prefer the body's value (host explicitly toggled in the
       // edit form); fall back to the existing rule's value when absent so an
       // edit that doesn't touch the toggles preserves them. Reusable-link
       // guest-picks proposal, 2026-04-28.
       ...(parsed.guestPicks
         ? { guestPicks: parsed.guestPicks }
-        : target.officeHours.guestPicks
-          ? { guestPicks: target.officeHours.guestPicks }
+        : targetBookable.guestPicks
+          ? { guestPicks: targetBookable.guestPicks }
           : {}),
       // Update editable fields.
       name: parsed.title,

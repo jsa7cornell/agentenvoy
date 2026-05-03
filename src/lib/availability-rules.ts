@@ -14,7 +14,7 @@ export interface AvailabilityPreference {
   id: string;
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "location" | "office_hours" | "no_in_person";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "location" | "bookable" | "no_in_person";
   timeStart?: string;     // "HH:MM" 24h
   timeEnd?: string;       // "HH:MM" 24h
   allDay?: boolean;
@@ -26,17 +26,17 @@ export interface AvailabilityPreference {
   bufferAppliesTo?: string;
   locationLabel?: string; // for action: "location" — e.g. "Baja", "NYC"
   /**
-   * Office hours scoping — only present when action === "office_hours".
+   * Bookable link scoping — only present when action === "bookable".
    * Defines a public, shareable booking surface. The rule's time window +
    * days define when bookings are offerable; format/duration/title lock
    * the meeting type. linkCode is the public identifier used in the URL.
    */
-  officeHours?: {
+  bookable?: {
     /** Link-directory-display name — the host-facing identifier shown in "My links"
      *  and matched by the recall intent ("what's my sales pitch link"). Per-host
      *  unique, case-insensitive. Added 2026-04-23 per reusable-links proposal R1.
      *  Optional for legacy rules created before 2026-04-23 — callers should use
-     *  getOfficeHoursDisplayName() which falls back to title. */
+     *  getBookableLinkDisplayName() which falls back to title. */
     name?: string;
     title: string;          // meeting-title semantic for calendar events
     format: "video" | "phone" | "in-person";
@@ -62,11 +62,11 @@ export interface AvailabilityPreference {
 }
 
 /**
- * Compiled office-hours link entry — emitted from compileStructuredRules() alongside
- * CompiledRules. Each active office_hours rule produces one entry. Consumed by the
- * office-hours slot transform, not by the core scoring engine.
+ * Compiled bookable link entry — emitted from compileStructuredRules() alongside
+ * CompiledRules. Each active bookable rule produces one entry. Consumed by the
+ * bookable-links slot transform, not by the core scoring engine.
  */
-export interface CompiledOfficeHoursLink {
+export interface CompiledBookableLink {
   ruleId: string;
   linkCode: string;
   linkSlug: string;
@@ -81,15 +81,15 @@ export interface CompiledOfficeHoursLink {
 }
 
 /**
- * Resolve the host-facing display name for an office-hours rule. Prefers the
+ * Resolve the host-facing display name for a bookable link rule. Prefers the
  * explicit `name` field; falls back to `title` for legacy rules created before
  * 2026-04-23. Used for "My links" popover labels, uniqueness checks, and recall
  * matching. Trimmed; case preserved.
  */
-export function getOfficeHoursDisplayName(officeHours: NonNullable<AvailabilityPreference["officeHours"]>): string {
-  const n = (officeHours.name ?? "").trim();
+export function getBookableLinkDisplayName(bookable: NonNullable<AvailabilityPreference["bookable"]>): string {
+  const n = (bookable.name ?? "").trim();
   if (n) return n;
-  return (officeHours.title ?? "").trim() || "Office Hours";
+  return (bookable.title ?? "").trim() || "Bookable Link";
 }
 
 /**
@@ -142,32 +142,35 @@ export function expireRules(rules: AvailabilityPreference[]): { rules: Availabil
 // --- Deterministic Compiler ---
 
 /**
- * Extract all active office-hours rules as compiled link entries.
- * Separate from compileStructuredRules because office-hours rules do NOT
+ * Extract all active bookable link rules as compiled link entries.
+ * Separate from compileStructuredRules because bookable rules do NOT
  * affect the global scoring engine — they only apply to sessions spawned
- * from their specific link, and are consumed by the office-hours slot
+ * from their specific link, and are consumed by the bookable-links slot
  * transform at session time.
  *
  * Pure function — no LLM, no async, fully deterministic.
  */
-export function compileOfficeHoursLinks(rules: AvailabilityPreference[]): CompiledOfficeHoursLink[] {
+export function compileBookableLinks(rules: AvailabilityPreference[]): CompiledBookableLink[] {
   const today = new Date().toISOString().slice(0, 10);
-  const out: CompiledOfficeHoursLink[] = [];
+  const out: CompiledBookableLink[] = [];
 
   for (const rule of rules) {
-    if (rule.action !== "office_hours") continue;
+    // TODO(vocab-cleanup): remove || "office_hours" after migration
+    if (rule.action !== "bookable" && rule.action !== ("office_hours" as string)) continue;
     if (rule.status !== "active") continue;
-    if (!rule.officeHours) continue;
+    // Support both new field name (bookable) and legacy (officeHours) for one deploy cycle
+    const bookableData = rule.bookable ?? (rule as unknown as { officeHours?: typeof rule.bookable }).officeHours;
+    if (!bookableData) continue;
     if (rule.expiryDate && rule.expiryDate < today) continue;
     if (rule.effectiveDate && rule.effectiveDate > today) continue;
 
     out.push({
       ruleId: rule.id,
-      linkCode: rule.officeHours.linkCode,
-      linkSlug: rule.officeHours.linkSlug,
-      title: rule.officeHours.title,
-      format: rule.officeHours.format,
-      durationMinutes: rule.officeHours.durationMinutes,
+      linkCode: bookableData.linkCode,
+      linkSlug: bookableData.linkSlug,
+      title: bookableData.title,
+      format: bookableData.format,
+      durationMinutes: bookableData.durationMinutes,
       windowStart: rule.timeStart || "00:00",
       windowEnd: rule.timeEnd || "23:59",
       daysOfWeek: rule.daysOfWeek || [],
@@ -182,8 +185,8 @@ export function compileOfficeHoursLinks(rules: AvailabilityPreference[]): Compil
  * Convert structured rules into the CompiledRules format consumed by the scoring engine.
  * Pure function — no LLM, no async, fully deterministic.
  *
- * Note: office_hours rules are NOT processed here — they're compiled separately via
- * compileOfficeHoursLinks(). The scoring engine is global; office hours are per-link.
+ * Note: bookable rules are NOT processed here — they're compiled separately via
+ * compileBookableLinks(). The scoring engine is global; bookable links are per-link.
  */
 export function compileStructuredRules(
   rules: AvailabilityPreference[],
@@ -332,9 +335,9 @@ export function compileStructuredRules(
         break;
       }
 
-      case "office_hours": {
-        // No-op in the global compiler. Office hours don't affect the host's
-        // global scored schedule — they're per-link. Use compileOfficeHoursLinks()
+      case "bookable": {
+        // No-op in the global compiler. Bookable links don't affect the host's
+        // global scored schedule — they're per-link. Use compileBookableLinks()
         // to extract them for the session-time slot transform.
         break;
       }

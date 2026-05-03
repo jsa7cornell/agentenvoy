@@ -6,7 +6,7 @@
  * Opens when the host taps **Edit** on any reusable-link card. The dialog
  * gates its editable form on `row.recurringWindowConfig != null` — i.e.,
  * the link has an attached recurring window — rather than on
- * `row.kind === "office_hours"`. Today Office Hours is the only such
+ * `row.kind === "bookable"`. Today Bookable Links is the only such
  * variant; any future recurring-window-backed reusable (e.g. a sales-intro
  * link with weekday slots) inherits the editable form automatically. Links
  * without a recurring window (Primary) surface a stub pointing to
@@ -15,7 +15,7 @@
  * Visual contract: bottom-sheet chrome mirrors `rule-confirm-sheet.tsx`
  * (max-h 88vh, drag handle, pinned footer with primary/cancel actions).
  *
- * Vocabulary: "Primary link" (capitalized — SPEC §2.2), "Office Hours"
+ * Vocabulary: "Primary link" (capitalized — SPEC §2.2), "Bookable Link"
  * (capitalized — feature name). Header copy stays variant-aware on
  * `row.kind` for now; the gate alone has been generalized in this PR.
  */
@@ -23,7 +23,7 @@
 import { useEffect, useState } from "react";
 import {
   RuleFormFields,
-  type OfficeHoursProposal,
+  type BookableLinkProposal,
 } from "../onboarding/rule-form-fields";
 import type { ReusableLinkRow } from "./event-links-card";
 
@@ -41,7 +41,7 @@ export function EventLinksEditDialog({
   onSaved,
   onDismiss,
 }: EventLinksEditDialogProps) {
-  const [proposal, setProposal] = useState<OfficeHoursProposal | null>(null);
+  const [proposal, setProposal] = useState<BookableLinkProposal | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -116,7 +116,7 @@ export function EventLinksEditDialog({
   // `row.kind` so today's Office Hours / Primary labels stay verbatim;
   // when a future variant lands, only the copy table needs a touch-up.
   const hasRecurringWindow = !!row.recurringWindowConfig;
-  const isOfficeHours = row.kind === "office_hours";
+  const isBookableLink = row.kind === "bookable";
   const canSave =
     hasRecurringWindow &&
     proposal !== null &&
@@ -149,7 +149,7 @@ export function EventLinksEditDialog({
         {/* Header */}
         <div className="flex items-center justify-between px-4 pt-1 pb-2">
           <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-indigo-500">
-            {isOfficeHours ? "🕐 Edit Office Hours" : "🔗 Edit Primary link"}
+            {isBookableLink ? "🕐 Edit Bookable Link" : "🔗 Edit Primary link"}
           </span>
           <button
             type="button"

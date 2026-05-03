@@ -34,7 +34,7 @@
  */
 
 import { useState } from "react";
-import { RuleFormFields, type OfficeHoursProposal } from "./rule-form-fields";
+import { RuleFormFields, type BookableLinkProposal } from "./rule-form-fields";
 
 export interface RuleConfirmCardProps {
   /** ChannelMessage.id of the system row carrying this proposal — sent to
@@ -43,7 +43,7 @@ export interface RuleConfirmCardProps {
   proposalMessageId: string;
   /** Initial proposal (what Envoy parsed). The card initializes its editable
    *  state from this value. */
-  initialProposal: OfficeHoursProposal;
+  initialProposal: BookableLinkProposal;
   /** Fired after a successful confirm so the parent can refresh the feed
    *  and show the confirmation row + new Event Links card. */
   onConfirmed?: (result: { ruleId: string; linkUrl?: string }) => void;
@@ -58,7 +58,7 @@ export function RuleConfirmCard({
   onConfirmed,
   onCancelled,
 }: RuleConfirmCardProps) {
-  const [proposal, setProposal] = useState<OfficeHoursProposal>(initialProposal);
+  const [proposal, setProposal] = useState<BookableLinkProposal>(initialProposal);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<"confirmed" | "cancelled" | null>(null);
@@ -100,7 +100,7 @@ export function RuleConfirmCard({
   if (done === "confirmed") {
     return (
       <div className="self-start w-[92%] max-w-[480px] rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2.5 text-[12px] text-emerald-700 dark:text-emerald-300">
-        ✓ Created Office Hours link · {proposal.title}
+        ✓ Created Bookable Link · {proposal.title}
       </div>
     );
   }
@@ -112,7 +112,7 @@ export function RuleConfirmCard({
     <div className="self-start w-[92%] max-w-[480px] rounded-xl border border-indigo-500/40 bg-background dark:bg-white/[0.03] p-3.5 flex flex-col gap-2.5 shadow-sm">
       <div className="flex items-center justify-between">
         <span className="text-[9px] font-bold uppercase tracking-[0.08em] text-indigo-500">
-          🕐 New Office Hours rule
+          🕐 New Bookable Link
         </span>
         <button
           type="button"

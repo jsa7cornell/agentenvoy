@@ -14,25 +14,25 @@
  *   │ agentenvoy.ai/meet/john                       [Copy]  │
  *   └───────────────────────────────────────────────────────┘
  *
- * The Primary variant gets a faint accent surface; Office Hours and other
+ * The Primary variant gets a faint accent surface; Bookable Links and other
  * variants render in the neutral surface tone.
  *
  * Vocabulary: copy uses **Primary link** (capitalized) for the host's default
- * reusable link — matches `NegotiationLink.type === "primary"` and SPEC
- * §2.2. **Office Hours** (capitalized — feature name) labels the recurring-
- * window-backed reusable variant.
+ * bookable link — matches `NegotiationLink.type === "primary"` and SPEC
+ * §2.2. **Bookable Link** (capitalized — feature name) labels the recurring-
+ * window-backed bookable variant.
  */
 
 import { useEffect, useState } from "react";
 import { canNativeShare, shareInvite } from "@/lib/share-invite";
 
-export type ReusableLinkKind = "primary" | "office_hours";
+export type BookableLinkKind = "primary" | "bookable";
 
 export interface ReusableLinkRow {
   /** Stable client-side key — for Primary the literal `"primary"`; for
-   *  Office Hours the rule id. */
+   *  Bookable Links the rule id. */
   key: string;
-  kind: ReusableLinkKind;
+  kind: BookableLinkKind;
   /** Display name — host-facing identifier (e.g. "Primary link",
    *  "Guitar students"). */
   name: string;
@@ -97,8 +97,8 @@ export function EventLinksCard({ row, onEdit }: EventLinksCardProps) {
   const isPrimary = row.kind === "primary";
 
   async function share() {
-    // Primary link → generic friendly invite. Office Hours / other named
-    // reusables → bucket-named invite ("Find a time during Office Hours:").
+    // Primary link → generic friendly invite. Bookable Links / other named
+    // reusables → bucket-named invite ("Find a time during Drop-in Hours:").
     await shareInvite({
       url: row.url,
       bucket: isPrimary ? undefined : row.name,

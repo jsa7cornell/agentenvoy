@@ -167,7 +167,9 @@ export interface UserPreferences {
     eventProtectionOverrides?: EventProtectionOverride[];
     /** Display name for the host's default /meet/{slug} link in the "My links"
      *  popover. Default "Primary link". Participates in per-host uniqueness with
-     *  officeHours[*].name. Added 2026-04-23 (reusable-links proposal). */
+     *  bookable[*].name. Added 2026-04-23 (reusable-links proposal). */
+    primaryLinkName?: string;
+    /** @deprecated use primaryLinkName. Kept for DB backward compat. TODO(vocab-cleanup): remove after migration. */
     generalLinkName?: string;
     /** Host opt-in: "let guests change format / duration" toggles for the
      *  primary (general) link. Both default to absent/false — guests cannot

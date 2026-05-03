@@ -64,7 +64,7 @@ vi.mock("@/lib/scoring", () => ({
 
 vi.mock("@/lib/availability-rules", () => ({
   getActiveLocationRule: () => null,
-  compileOfficeHoursLinks: () => [],
+  compileBookableLinks: () => [],
 }));
 
 vi.mock("@/lib/availability-density", () => ({
@@ -75,8 +75,8 @@ vi.mock("@/lib/scheduling-mode", () => ({
   getSchedulingMode: () => "time" as const,
 }));
 
-vi.mock("@/lib/office-hours", () => ({
-  applyOfficeHoursWindow: (args: { slots: unknown[] }) => args.slots,
+vi.mock("@/lib/bookable-links", () => ({
+  applyBookableWindow: (args: { slots: unknown[] }) => args.slots,
 }));
 
 vi.mock("@/lib/bilateral-availability", () => ({

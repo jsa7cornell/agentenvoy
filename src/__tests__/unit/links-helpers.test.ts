@@ -80,7 +80,7 @@ describe("getLinkPosture — Primary path", () => {
 
 describe("getLinkPosture — variance path", () => {
   const completeVariance: LinkContext = {
-    type: "office_hours",
+    type: "bookable",
     parameters: {
       hoursStartMinutes: 13 * 60,
       hoursEndMinutes: 16 * 60,
@@ -114,7 +114,7 @@ describe("getLinkPosture — variance path", () => {
 
   it("throws when variance is missing required posture fields", () => {
     const sparseVariance: LinkContext = {
-      type: "office_hours",
+      type: "bookable",
       parameters: { duration: 30 }, // missing hours, days, buffer, format
     };
     expect(() => getLinkPosture(sparseVariance, PRIMARY_USER)).toThrow(
@@ -124,7 +124,7 @@ describe("getLinkPosture — variance path", () => {
 
   it("error message names every missing field", () => {
     const sparseVariance: LinkContext = {
-      type: "office_hours",
+      type: "bookable",
       parameters: {},
     };
     expect(() => getLinkPosture(sparseVariance, PRIMARY_USER)).toThrow(
@@ -134,7 +134,7 @@ describe("getLinkPosture — variance path", () => {
 
   it("preserves explicit empty array for daysOfWeek", () => {
     const variance: LinkContext = {
-      type: "office_hours",
+      type: "bookable",
       parameters: {
         hoursStartMinutes: 9 * 60,
         hoursEndMinutes: 17 * 60,

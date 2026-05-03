@@ -1,27 +1,27 @@
 /**
- * Office Hours — per-link slot transform.
+ * Bookable Links — per-link slot transform.
  *
- * When a negotiation session is spawned from an office-hours link, the host's
+ * When a negotiation session is spawned from a bookable link, the host's
  * global scored schedule is filtered through the rule's window before being
  * offered to the guest. The transform:
  *
  *  1. Restricts offerable slots to the rule's time window + days of week.
  *  2. Overrides SOFT protection inside the window (blocked_window, off_hours,
- *     weekend). If the host declared office hours Tue 2–4pm and also has a
+ *     weekend). If the host declared bookable hours Tue 2–4pm and also has a
  *     "surfing 6–9am" blocked window, that's not a conflict — the surf block
  *     is irrelevant to the 2–4 window. But if the host marked Tue afternoons
- *     as Focus Time in the preferences, office hours override it.
+ *     as Focus Time in the preferences, bookable hours override it.
  *  3. Preserves HARD protection — real calendar events (kind: "event") and
- *     declared blackout days (kind: "blackout"). Office hours never
+ *     declared blackout days (kind: "blackout"). Bookable links never
  *     double-book a confirmed meeting or vacation day.
- *  4. Subtracts already-booked office-hours child sessions for the same link.
+ *  4. Subtracts already-booked bookable-link child sessions for the same link.
  *     If guest A booked 2:00 and confirmed, guest B sees 2:00 as unavailable.
  *
  * Pure, synchronous, fully deterministic. Unit tested in isolation.
  */
 
 import type { ScoredSlot } from "./scoring";
-import type { CompiledOfficeHoursLink } from "./availability-rules";
+import type { CompiledBookableLink } from "./availability-rules";
 
 export interface ConfirmedBooking {
   /** ISO datetime (start of the booked slot) */
@@ -30,9 +30,9 @@ export interface ConfirmedBooking {
   end: string;
 }
 
-export interface ApplyOfficeHoursOptions {
-  /** The rule's compiled office-hours link entry — defines window, days, duration. */
-  rule: CompiledOfficeHoursLink;
+export interface ApplyBookableWindowOptions {
+  /** The rule's compiled bookable link entry — defines window, days, duration. */
+  rule: CompiledBookableLink;
   /** The host's global scored schedule for the relevant date range. */
   slots: ScoredSlot[];
   /** Confirmed bookings for the same link (subtract from offerable set). */
@@ -42,7 +42,7 @@ export interface ApplyOfficeHoursOptions {
 }
 
 /**
- * Apply the office-hours transform to a host's scored schedule.
+ * Apply the bookable-link transform to a host's scored schedule.
  *
  * Returns a new ScoredSlot[] where:
  *  - Slots outside the window/days are dropped entirely
@@ -51,12 +51,12 @@ export interface ApplyOfficeHoursOptions {
  *    at their existing score so the engine still treats them as unavailable
  *  - Slots that overlap a confirmed booking for the same link are dropped
  */
-export function applyOfficeHoursWindow({
+export function applyBookableWindow({
   rule,
   slots,
   confirmedBookings = [],
   timezone = "UTC",
-}: ApplyOfficeHoursOptions): ScoredSlot[] {
+}: ApplyBookableWindowOptions): ScoredSlot[] {
   const out: ScoredSlot[] = [];
 
   for (const slot of slots) {
@@ -86,7 +86,7 @@ export function applyOfficeHoursWindow({
     const isHardProtected = slot.kind === "event" || slot.kind === "blackout";
 
     // 5. Confirmed booking subtraction — if this slot overlaps a confirmed booking
-    //    for the same office-hours link, drop it entirely (guest B sees it gone).
+    //    for the same bookable link, drop it entirely (guest B sees it gone).
     if (overlapsAnyBooking(slot, confirmedBookings)) {
       continue;
     }
@@ -99,6 +99,8 @@ export function applyOfficeHoursWindow({
       out.push(slot);
     } else {
       // Override soft protection: re-score to 0 (explicitly free).
+      // SlotKind "office_hours" is the scoring band for bookable-window slots
+      // and must NOT be renamed (scoring engine invariant).
       out.push({
         ...slot,
         score: 0,
@@ -168,13 +170,13 @@ function pad2(n: number): string {
 }
 
 /**
- * Generate a unique link code for an office-hours rule. Uses the same nanoid-style
- * alphabet as contextual link codes for visual consistency in URLs.
+ * Generate a unique link code for a bookable link rule. Uses the same nanoid-style
+ * alphabet as personalized link codes for visual consistency in URLs.
  *
  * Format: 8 lowercase alphanumeric chars (collision-resistant enough for
  * per-user scoping; DB enforces uniqueness via the unique constraint on code).
  */
-export function generateOfficeHoursLinkCode(): string {
+export function generateBookableLinkCode(): string {
   const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
   let out = "";
   for (let i = 0; i < 8; i++) {

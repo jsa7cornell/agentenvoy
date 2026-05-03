@@ -32,7 +32,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { AvailabilityPreference } from "@/lib/availability-rules";
-import { getOfficeHoursDisplayName } from "@/lib/availability-rules";
+import { getBookableLinkDisplayName } from "@/lib/availability-rules";
 import {
   classifySession,
   matchesFilter,
@@ -89,9 +89,9 @@ function format12h(hhmm: string | undefined): string {
   return m === 0 ? `${h12}${suffix}` : `${h12}:${String(m).padStart(2, "0")}${suffix}`;
 }
 
-function buildOfficeHoursSub(rule: AvailabilityPreference): string {
-  const oh = rule.officeHours;
-  if (!oh) return "Office Hours";
+function buildBookableLinkSub(rule: AvailabilityPreference): string {
+  const oh = rule.bookable ?? (rule as unknown as { officeHours?: typeof rule.bookable }).officeHours;
+  if (!oh) return "Drop-in Hours";
   const days = formatDayList(rule.daysOfWeek);
   const start = format12h(rule.timeStart);
   const end = format12h(rule.timeEnd);
@@ -103,10 +103,11 @@ function buildOfficeHoursSub(rule: AvailabilityPreference): string {
 function buildEventSub(s: UpcomingEventRow): string {
   const linkType = s.link?.type;
   if (linkType === "primary") return "via primary link";
-  if (linkType === "office_hours" && s.link?.slug && s.link?.code) {
-    return `via /meet/${s.link.slug}/${s.link.code}`;
+  // TODO(vocab-cleanup): remove "office_hours" fallback after migration
+  if (linkType === "bookable" || linkType === "office_hours") {
+    if (s.link?.slug && s.link?.code) return `via /meet/${s.link.slug}/${s.link.code}`;
+    return "via Drop-in Hours";
   }
-  if (linkType === "office_hours") return "via Office Hours";
   if (s.link?.topic) return s.link.topic;
   if (s.link?.inviteeName) return `with ${s.link.inviteeName}`;
   return "";
@@ -284,7 +285,7 @@ export function EventLinksPageContent() {
   const [hostFirstName, setHostFirstName] = useState<string>("");
 
   // Route the Edit click on a Primary card to the PrimaryEditDialog;
-  // office_hours / other variance rows continue to use EventLinksEditDialog.
+  // bookable / other variance rows continue to use EventLinksEditDialog.
   function handleEditClick(row: ReusableLinkRow) {
     if (row.kind === "primary") {
       setEditingPrimary(true);
@@ -306,7 +307,8 @@ export function EventLinksPageContent() {
         const first = fullName.split(/\s+/)[0] ?? "";
         if (first) setHostFirstName(first);
         if (slug) {
-          const primaryName = (data.generalLinkName as string) || (first ? `${first}'s Primary Link` : "Primary link");
+          // TODO(vocab-cleanup): remove generalLinkName fallback after migration
+          const primaryName = (data.primaryLinkName as string) || (data.generalLinkName as string) || (first ? `${first}'s Primary Link` : "Primary link");
           const defaultDur =
             typeof data.defaultMeetingMinutes === "number" ? data.defaultMeetingMinutes : 30;
           out.push({
@@ -323,14 +325,16 @@ export function EventLinksPageContent() {
             // field was introduced — treat missing status as "active" for
             // backward compatibility. Only skip explicitly paused/expired rules.
             const rStatus = r.status as string | undefined;
-            if (r.action !== "office_hours" || (rStatus && rStatus !== "active") || !r.officeHours) continue;
-            const oh = r.officeHours;
+            // TODO(vocab-cleanup): remove || "office_hours" after migration
+            const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
+            if ((r.action !== "bookable" && r.action !== ("office_hours" as string)) || (rStatus && rStatus !== "active") || !bookableData) continue;
+            const oh = bookableData;
             if (!oh.linkCode || !oh.linkSlug) continue;
             out.push({
               key: r.id,
-              kind: "office_hours",
-              name: getOfficeHoursDisplayName(oh),
-              sub: buildOfficeHoursSub(r),
+              kind: "bookable",
+              name: getBookableLinkDisplayName(oh),
+              sub: buildBookableLinkSub(r),
               url: `${origin}/meet/${oh.linkSlug}/${oh.linkCode}`,
               icon: "🕐",
               ruleId: r.id,

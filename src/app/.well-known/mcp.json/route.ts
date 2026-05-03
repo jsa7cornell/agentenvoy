@@ -109,7 +109,7 @@ export function GET() {
           method: "GET",
           contentType: "application/agent+json",
           description:
-            "Single-fetch JSON snapshot of a contextual link's parameters + scored slot list + booking guidance. For agents that prefer GET-then-POST over JSON-RPC. Same data as MCP get_availability + get_meeting_parameters; defaults: limit=20, no dateRange floor, sorted best-first.",
+            "Single-fetch JSON snapshot of a personalized link's parameters + scored slot list + booking guidance. For agents that prefer GET-then-POST over JSON-RPC. Same data as MCP get_availability + get_meeting_parameters; defaults: limit=20, no dateRange floor, sorted best-first.",
         },
         {
           url: `${BASE_URL}/meet/{slug}/agent.json`,
@@ -121,7 +121,7 @@ export function GET() {
             "Bare-vanity form for a host's primary link. Resolves the slug to the host's default link.",
         },
       ],
-      // In-page discovery hint — the contextual /meet/<slug>/<code> page
+      // In-page discovery hint — the personalized /meet/<slug>/<code> page
       // server-renders the snapshot as an embedded script tag. Bare-vanity
       // /meet/<slug> does NOT embed (privacy posture: bare URLs are widely
       // shared and crawlable; bookable detail stays behind a deliberate fetch).
@@ -129,7 +129,7 @@ export function GET() {
         selector: 'script[type="application/agent+json"][data-agent-snapshot]',
         scope: "/meet/{slug}/{code}",
         description:
-          "On contextual meet pages, an `<script type=\"application/agent+json\">` tag carries the same snapshot as `/agent.json`. Cold web_fetch agents that can't issue separate API calls can parse this from the page HTML.",
+          "On personalized meet pages, an `<script type=\"application/agent+json\">` tag carries the same snapshot as `/agent.json`. Cold web_fetch agents that can't issue separate API calls can parse this from the page HTML.",
       },
       docs: {
         description: `${BASE_URL}/llms.txt`,

@@ -3,8 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getOrComputeSchedule, CalendarEvent } from "@/lib/calendar";
-import { type AvailabilityPreference, compileOfficeHoursLinks } from "@/lib/availability-rules";
-import { applyOfficeHoursWindow } from "@/lib/office-hours";
+import { type AvailabilityPreference, compileBookableLinks } from "@/lib/availability-rules";
+import { applyBookableWindow } from "@/lib/bookable-links";
 import type { EventProtectionOverride } from "@/lib/scoring";
 
 export async function GET(req: NextRequest) {
@@ -65,19 +65,19 @@ export async function GET(req: NextRequest) {
     return t >= weekStart.getTime() && t < weekEnd.getTime();
   });
 
-  // Apply office-hours transforms so the host's own availability view
-  // reflects any office-hours rules (soft-protection override inside window).
+  // Apply bookable-link transforms so the host's own availability view
+  // reflects any bookable rules (soft-protection override inside window).
   // Confirmed bookings are already present as real calendar events via the
   // Google Calendar sync path, so we pass an empty array here.
-  const compiledOH = compileOfficeHoursLinks(structuredRules);
+  const compiledOH = compileBookableLinks(structuredRules);
   for (const ohRule of compiledOH) {
-    const transformed = applyOfficeHoursWindow({
+    const transformed = applyBookableWindow({
       rule: ohRule,
       slots,
       confirmedBookings: [],
       timezone: schedule.timezone,
     });
-    // applyOfficeHoursWindow drops slots outside the window — merge its
+    // applyBookableWindow drops slots outside the window — merge its
     // overrides back into the full week set so the rest of the day still renders.
     const overrideByKey = new Map(transformed.map((s) => [`${s.start}|${s.end}`, s]));
     slots = slots.map((s) => overrideByKey.get(`${s.start}|${s.end}`) ?? s);

@@ -7,7 +7,7 @@ import { normalizeLinkParameters } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
 
 // POST /api/negotiate/create
-// Creates a contextual negotiation link
+// Creates a personalized negotiation link
 // Auth: Bearer token OR NextAuth session
 export async function POST(req: NextRequest) {
   const userId = await authenticateRequest(req);
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
   const link = await prisma.negotiationLink.create({
     data: {
       userId,
-      type: "contextual",
+      type: "personalized",
       slug: user.meetSlug,
       code,
       inviteeEmail: inviteeEmail || parsedRules.inviteeEmail || null,
@@ -90,14 +90,14 @@ export async function POST(req: NextRequest) {
 
   const baseUrl = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
   const primaryUrl = `${baseUrl}/meet/${user.meetSlug}`;
-  const contextualUrl = `${baseUrl}/meet/${user.meetSlug}/${code}`;
+  const personalizedUrl = `${baseUrl}/meet/${user.meetSlug}/${code}`;
 
   return NextResponse.json({
     link: {
       id: link.id,
-      type: "contextual",
+      type: "personalized",
       primaryUrl,
-      contextualUrl,
+      personalizedUrl,
       code,
       inviteeEmail: link.inviteeEmail,
       inviteeName: link.inviteeName,

@@ -1,7 +1,7 @@
 /**
- * Fan-out a Primary posture change to all reusable variance links.
+ * Fan-out a Primary posture change to all bookable variance links.
  *
- * Called from the "Apply to all reusable links?" prompt that appears after
+ * Called from the "Apply to all bookable links?" prompt that appears after
  * a host saves a Primary edit. The save itself lands at
  * `/api/me/scheduling-defaults` (writes `User.preferences`). This endpoint
  * is the optional second step: when the host confirms, copy the same

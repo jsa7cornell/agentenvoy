@@ -9,8 +9,8 @@ import { generateCode } from "@/lib/utils";
 import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
 import type { ScoredSlot, LinkParameters } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
-import { compileOfficeHoursLinks, type AvailabilityPreference } from "@/lib/availability-rules";
-import { applyOfficeHoursWindow } from "@/lib/office-hours";
+import { compileBookableLinks, type AvailabilityPreference } from "@/lib/availability-rules";
+import { applyBookableWindow } from "@/lib/bookable-links";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
 import {
@@ -117,18 +117,20 @@ export async function POST(req: NextRequest) {
     (user.preferences as Record<string, unknown>) || {},
   );
 
-  // Office-hours detection: if a code is provided and matches an active
-  // office_hours rule on this user, spawn a fresh child link + session for
+  // Bookable-link detection: if a code is provided and matches an active
+  // bookable rule on this user, spawn a fresh child link + session for
   // this visitor. Each visit creates a new session (primary-link semantics).
-  // Runs BEFORE the standard NegotiationLink lookup so office-hours codes
-  // don't collide with contextual link codes.
-  let officeHoursRule: AvailabilityPreference | null = null;
+  // Runs BEFORE the standard NegotiationLink lookup so bookable link codes
+  // don't collide with personalized link codes.
+  let officeHoursRule: AvailabilityPreference | null = null; // variable retained for diff-locality; represents the matched bookable rule
   if (code) {
     const prefsRaw = (user.preferences as Record<string, unknown>) || {};
     const explicit = (prefsRaw.explicit as Record<string, unknown>) || {};
     const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
     const match = rules.find(
-      (r) => r.action === "office_hours" && r.officeHours?.linkCode === code,
+      // TODO(vocab-cleanup): remove || "office_hours" after migration
+      (r) => (r.action === "bookable" || r.action === ("office_hours" as string)) &&
+        (r.bookable ?? (r as unknown as { officeHours?: { linkCode?: string } }).officeHours)?.linkCode === code,
     );
     if (match) {
       const today = new Date().toISOString().slice(0, 10);
@@ -155,7 +157,7 @@ export async function POST(req: NextRequest) {
     // recurringWindowId. Primary-link semantics: each visit creates a new link +
     // session, and the guest resumes via the sessionId URL, not the rule's
     // public /meet/{slug}/{code}.
-    const oh = officeHoursRule.officeHours!;
+    const oh = (officeHoursRule.bookable ?? (officeHoursRule as unknown as { officeHours?: typeof officeHoursRule.bookable }).officeHours)!;
     const childCode = generateCode();
     // Pipe host's per-rule guest-picks toggles (if opted in) into the child
     // link's parameters.guestPicks. Defensive: only writes when the dimension
@@ -173,7 +175,7 @@ export async function POST(req: NextRequest) {
     link = await prisma.negotiationLink.create({
       data: {
         userId: user.id,
-        type: "contextual",
+        type: "personalized",
         slug: user.meetSlug!,
         code: childCode,
         topic: oh.title,
@@ -735,7 +737,7 @@ export async function POST(req: NextRequest) {
   // was spawned from (if any), so the greeting shows the same set of times the
   // slots endpoint will later return for the widget.
   if (officeHoursRule) {
-    const compiledLinks = compileOfficeHoursLinks([officeHoursRule]);
+    const compiledLinks = compileBookableLinks([officeHoursRule]);
     const compiled = compiledLinks[0];
     if (compiled) {
       const siblings = await prisma.negotiationSession.findMany({
@@ -753,7 +755,7 @@ export async function POST(req: NextRequest) {
           start: s.agreedTime!.toISOString(),
           end: new Date(s.agreedTime!.getTime() + (s.duration || compiled.durationMinutes) * 60 * 1000).toISOString(),
         }));
-      filteredSlots = applyOfficeHoursWindow({
+      filteredSlots = applyBookableWindow({
         rule: compiled,
         slots: filteredSlots,
         timezone: hostTimezone,
@@ -927,7 +929,8 @@ export async function POST(req: NextRequest) {
     // ────────────────────────────────────────────────────────────────────
 
     const isAnonymousLink = link.type === "primary" || !!link.recurringWindowId;
-    const isOfficeHoursLink = !!link.recurringWindowId;
+    const isPrimaryLink = link.type === "primary";
+    const isBookableChildLink = !!link.recurringWindowId;
 
     const storedSteering = readStoredSteering(linkRules);
     const effectiveSteering = storedSteering ?? deriveLegacy(linkRules);
@@ -973,7 +976,8 @@ export async function POST(req: NextRequest) {
       inviteeCount: inviteeNamesArr.length,
       linkRules,
       isAnonymousLink,
-      isOfficeHoursLink,
+      isPrimaryLink,
+      isBookableChildLink,
       effectiveSteering,
       activityText,
       linkLocationForOpener,

@@ -72,11 +72,11 @@ const EXISTING_RULE = {
   id: RULE_ID,
   originalText: "guitar students every weekday 9–5, 30 min slots",
   type: "recurring" as const,
-  action: "office_hours" as const,
+  action: "bookable" as const,
   timeStart: "09:00",
   timeEnd: "17:00",
   daysOfWeek: [1, 2, 3, 4, 5],
-  officeHours: {
+  bookable: {
     name: "Guitar students",
     title: "Guitar students",
     format: "video" as const,
@@ -196,8 +196,8 @@ describe("POST /api/availability-rules/edit", () => {
             {
               ...EXISTING_RULE,
               id: "rule_other",
-              officeHours: {
-                ...EXISTING_RULE.officeHours,
+              bookable: {
+                ...EXISTING_RULE.bookable,
                 name: "Sales Pitch",
               },
             },
@@ -268,26 +268,27 @@ describe("POST /api/availability-rules/edit", () => {
     expect(updated.timeStart).toBe("10:00");
     expect(updated.timeEnd).toBe("16:00");
     expect(updated.daysOfWeek).toEqual([1, 2, 3, 4, 5]);
-    const oh = updated.officeHours as Record<string, unknown>;
-    expect(oh.name).toBe("Guitar students v2");
-    expect(oh.title).toBe("Guitar students v2");
-    expect(oh.format).toBe("video");
-    expect(oh.durationMinutes).toBe(45);
+    const bl = updated.bookable as Record<string, unknown>;
+    expect(bl.name).toBe("Guitar students v2");
+    expect(bl.title).toBe("Guitar students v2");
+    expect(bl.format).toBe("video");
+    expect(bl.durationMinutes).toBe(45);
     // Immutable — must be preserved.
-    expect(oh.linkSlug).toBe("jane");
-    expect(oh.linkCode).toBe("code1234");
+    expect(bl.linkSlug).toBe("jane");
+    expect(bl.linkCode).toBe("code1234");
 
     expect(invalidateSchedule).toHaveBeenCalledWith(USER_ID);
     expect(invalidateBehaviorSnapshot).toHaveBeenCalledWith(USER_ID);
   });
 
-  it("does not collide with the host's Primary link name (generalLinkName)", async () => {
+  it("does not collide with the host's Primary link name (primaryLinkName / generalLinkName)", async () => {
     (getServerSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { id: USER_ID },
     });
     (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       preferences: {
         explicit: {
+          // TODO(vocab-cleanup): use primaryLinkName after migration
           generalLinkName: "Jane Doe",
           structuredRules: [EXISTING_RULE],
         },

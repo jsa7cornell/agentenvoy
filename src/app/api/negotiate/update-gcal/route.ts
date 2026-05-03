@@ -133,13 +133,14 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Mirror format change to link.parameters for contextual links
+    // Mirror format change to link.parameters for personalized links
     if (proposed.format) {
       const sessionWithLink = await prisma.negotiationSession.findUnique({
         where: { id: sessionId },
         select: { link: { select: { id: true, type: true, parameters: true } } },
       });
-      if (sessionWithLink?.link.type === "contextual") {
+      // TODO(vocab-cleanup): remove || "contextual" after migration
+      if (sessionWithLink?.link.type === "personalized" || sessionWithLink?.link.type === "contextual") {
         const existing = parseLinkParameters(sessionWithLink.link.parameters);
         await prisma.negotiationLink.update({
           where: { id: sessionWithLink.link.id },

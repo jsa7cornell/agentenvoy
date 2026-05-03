@@ -293,7 +293,7 @@ model HostAccessToken {
 model NegotiationLink {
   id              String    @id @default(cuid())
   userId          String
-  type            String    @default("primary") // primary | contextual | office_hours
+  type            String    @default("primary") // primary | bookable | personalized
   mode            String    @default("single") // "single" | "group"
   slug            String // same as user.meetSlug for primary
   code            String?   @unique // unique code for contextual links
