@@ -297,7 +297,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [confirmFormExpanded, setConfirmFormExpanded] = useState(false);
   const [formGuestName, setFormGuestName] = useState("");
   const [formGuestEmail, setFormGuestEmail] = useState("");
-  const [formWantsReminder, setFormWantsReminder] = useState(true);
   const [formGuestNote, setFormGuestNote] = useState("");
   // Triggers a longer celebratory glow on the top event card right after
   // confirm. Kept separate from statusAnimating (1.5s, existing status pulse).
@@ -766,7 +765,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     format: string;
     location: string | null;
     timezone?: string;
-  }, opts?: { guestName?: string; guestEmail?: string; wantsReminder?: boolean; guestNote?: string }) {
+  }, opts?: { guestName?: string; guestEmail?: string; guestNote?: string }) {
     if (!sessionId || isConfirming) return;
     setIsConfirming(true);
     setConfirmError(null);
@@ -784,7 +783,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           timezone: proposal.timezone,
           guestName: opts?.guestName ?? formGuestName ?? undefined,
           guestEmail: opts?.guestEmail ?? formGuestEmail ?? guestEmail ?? undefined,
-          wantsReminder: opts?.wantsReminder ?? formWantsReminder,
           guestNote: opts?.guestNote ?? (formGuestNote.trim() || undefined),
         }),
       });
@@ -2642,7 +2640,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                     {
                       guestName: formGuestName.trim(),
                       guestEmail: formGuestEmail.trim(),
-                      wantsReminder: formWantsReminder,
                       guestNote: formGuestNote.trim() || undefined,
                     },
                   );
@@ -2696,7 +2693,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (!canSubmit) return;
             handleConfirm(
               { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effective.location },
-              { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), wantsReminder: formWantsReminder, guestNote: formGuestNote.trim() || undefined }
+              { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), guestNote: formGuestNote.trim() || undefined }
             );
           };
           return (
@@ -2761,21 +2758,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                         placeholder="Dial-in number, agenda notes, anything the other person should know…"
                       />
                     </div>
-                    <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={formWantsReminder}
-                        onChange={(e) => setFormWantsReminder(e.target.checked)}
-                        className="mt-0.5 h-4 w-4 accent-emerald-500"
-                      />
-                      <span className="text-xs text-secondary">Send me a reminder email before the meeting</span>
-                    </label>
                   </div>
                 )}
                 <button
                   onClick={clickConfirmButton}
                   disabled={isConfirming || inPast || (confirmFormExpanded && !canSubmit)}
-                  className="w-full mt-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+                  className="w-full mt-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition"
                 >
                   {isConfirming ? "Confirming..." : confirmFormExpanded ? "Confirm" : "Confirm this time"}
                 </button>
