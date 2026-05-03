@@ -172,6 +172,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [gcalStatus, setGcalStatus] = useState<{
     eventExists: boolean;
     guestOnInvite: boolean;
@@ -1854,13 +1855,48 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             {/* Spacer to push buttons to the right when badge is present */}
             <span className="flex-1" />
 
-            {/* Cancel button — confirmed sessions only */}
+            {/* Cancel button — confirmed sessions only. Cancel is a
+                meeting-level action (deletes the calendar event) and is
+                separate from Archive (link-level visibility). Cancel keeps
+                its confirm modal because it has external side effects. */}
             {confirmed && (
               <button
                 onClick={() => setShowCancelModal(true)}
                 className="text-[11px] text-red-500/70 hover:text-red-400 transition"
               >
                 Cancel meeting
+              </button>
+            )}
+
+            {/* Archive button — always available to the host on a live
+                session. One-click, no confirm: flips the link to "Host
+                archived this meeting" for the guest and removes it from
+                the active My Events views. Host can unarchive from the
+                "All Events" filter. */}
+            {sessionId && (
+              <button
+                onClick={async () => {
+                  if (isArchiving) return;
+                  setIsArchiving(true);
+                  try {
+                    const res = await fetch("/api/negotiate/archive", {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ sessionId, archived: true }),
+                    });
+                    if (res.ok) {
+                      window.location.href = "/dashboard/event-links";
+                    }
+                  } finally {
+                    setIsArchiving(false);
+                  }
+                }}
+                disabled={isArchiving}
+                className="text-[11px] text-muted hover:text-secondary transition disabled:opacity-50"
+                title="Archive (the link will show 'host archived this' to guests)"
+                data-testid="deal-room-archive-button"
+              >
+                {isArchiving ? "Archiving…" : "Archive"}
               </button>
             )}
           </div>
@@ -2274,18 +2310,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               return null;
             }
 
-            // host_update system messages: internal accounting when the host
-            // changes meeting params via dashboard. The guest has no context
-            // for "Format updated to phone" (they never saw the previous
-            // format), so hide from guest view. Host still sees them for
-            // continuity.
-            if (
-              msg.role === "system" &&
-              (msg.metadata as Record<string, unknown> | null)?.kind === "host_update" &&
-              !isHost
-            ) {
-              return null;
-            }
+            // host_update system messages render as inline ✓ lines for both
+            // host and guest — guests see the change (e.g. "✓ Format updated
+            // to phone") via the isHostUpdateInline path below.
 
             // Stage 3 V4 — mode-aware meta-narration suppression.
             // In `offer` or `confirmed` mode, hide administrator bubbles
