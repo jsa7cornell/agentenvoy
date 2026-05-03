@@ -1,16 +1,12 @@
 /**
- * Event Links page bucket classifier — V1 redesign (2026-05-02).
+ * My Events table bucket + filter — 2026-05-03 redesign.
  *
- * Pure function under test: `classifySession` / `matchesFilter` from
- * `src/lib/event-links-buckets.ts`. The page's "Upcoming events" group
- * filters sessions into All / Coordinating / Confirmed / Complete /
- * Cancelled. The classifier is the canonical mapping (desktop + mobile
- * sheet share it).
- *
- * **2026-05-02 V1 redesign change** — the prior `needs_you` bucket and
- * the `past` catch-all were retired. `past` was split into `complete`
- * (agreed time elapsed) vs `cancelled` (terminal status). Per
- * `previews/event-links-page-redesign.html` and SPEC §2.6.
+ * Pure functions under test: `classifySession` / `matchesFilter` from
+ * `src/lib/event-links-buckets.ts`. Buckets are unchanged
+ * (coordinating | confirmed | complete | cancelled). Filters were
+ * collapsed to three chips: `confirmed` (default home view),
+ * `actively_coordinating` (live, not archived), `all` (everything).
+ * Archive is now a filter axis: non-`all` chips exclude archived rows.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -19,6 +15,7 @@ import {
   EVENT_FILTERS,
   EVENT_FILTER_LABELS,
   EVENT_PILL_LABELS,
+  DEFAULT_EVENT_FILTER,
   type SessionLike,
 } from "@/lib/event-links-buckets";
 
@@ -28,55 +25,41 @@ const PAST = "2026-04-25T12:00:00Z";
 
 describe("classifySession", () => {
   it("expired session → cancelled", () => {
-    const s: SessionLike = { status: "expired" };
-    expect(classifySession(s, NOW)).toBe("cancelled");
+    expect(classifySession({ status: "expired" }, NOW)).toBe("cancelled");
   });
 
   it("cancelled session → cancelled", () => {
-    const s: SessionLike = { status: "cancelled" };
-    expect(classifySession(s, NOW)).toBe("cancelled");
+    expect(classifySession({ status: "cancelled" }, NOW)).toBe("cancelled");
   });
 
   it("cancelled wins over a past agreedTime", () => {
-    // A session that was scheduled for past time but got cancelled is
-    // categorized as cancelled, not complete.
-    const s: SessionLike = { status: "cancelled", agreedTime: PAST };
-    expect(classifySession(s, NOW)).toBe("cancelled");
+    expect(classifySession({ status: "cancelled", agreedTime: PAST }, NOW)).toBe("cancelled");
   });
 
   it("agreed-but-elapsed → complete", () => {
-    const s: SessionLike = { status: "agreed", agreedTime: PAST };
-    expect(classifySession(s, NOW)).toBe("complete");
+    expect(classifySession({ status: "agreed", agreedTime: PAST }, NOW)).toBe("complete");
   });
 
   it("agreed-and-future → confirmed", () => {
-    const s: SessionLike = { status: "agreed", agreedTime: FUTURE };
-    expect(classifySession(s, NOW)).toBe("confirmed");
+    expect(classifySession({ status: "agreed", agreedTime: FUTURE }, NOW)).toBe("confirmed");
   });
 
   it("active without agreedTime → coordinating", () => {
-    const s: SessionLike = { status: "active" };
-    expect(classifySession(s, NOW)).toBe("coordinating");
+    expect(classifySession({ status: "active" }, NOW)).toBe("coordinating");
   });
 
-  it("escalated → coordinating (no longer routed to needs_you)", () => {
-    // 2026-05-02 redesign: needs_you bucket retired. Escalated sessions
-    // surface in coordinating until they're agreed/cancelled.
-    const s: SessionLike = { status: "escalated" };
-    expect(classifySession(s, NOW)).toBe("coordinating");
+  it("escalated → coordinating", () => {
+    expect(classifySession({ status: "escalated" }, NOW)).toBe("coordinating");
   });
 
-  it("statusLabel text no longer affects bucketing", () => {
-    // Pre-redesign, "Needs you" / "Waiting for you" labels routed to
-    // needs_you. Post-redesign, only the canonical status fields drive
-    // bucketing.
-    const s: SessionLike = { status: "active", statusLabel: "Waiting for you to respond" };
-    expect(classifySession(s, NOW)).toBe("coordinating");
+  it("archived doesn't affect bucket", () => {
+    // Bucket is purely status+time; archive is an orthogonal axis applied
+    // at filter time, not at classify time.
+    expect(classifySession({ status: "agreed", agreedTime: FUTURE, archived: true }, NOW)).toBe("confirmed");
   });
 
-  it("unknown status with no agreedTime → coordinating (default)", () => {
-    const s: SessionLike = { status: "proposed" };
-    expect(classifySession(s, NOW)).toBe("coordinating");
+  it("unknown status with no agreedTime → coordinating", () => {
+    expect(classifySession({ status: "proposed" }, NOW)).toBe("coordinating");
   });
 });
 
@@ -85,47 +68,39 @@ describe("matchesFilter", () => {
   const cancelled: SessionLike = { status: "expired" };
   const complete: SessionLike = { status: "agreed", agreedTime: PAST };
   const coord: SessionLike = { status: "active" };
+  const archivedConfirmed: SessionLike = { status: "agreed", agreedTime: FUTURE, archived: true };
+  const archivedCoord: SessionLike = { status: "active", archived: true };
 
-  it('"all" admits every bucket', () => {
-    for (const s of [confirmed, cancelled, complete, coord]) {
+  it('"all" admits every bucket including archived', () => {
+    for (const s of [confirmed, cancelled, complete, coord, archivedConfirmed, archivedCoord]) {
       expect(matchesFilter(s, "all", NOW)).toBe(true);
     }
   });
 
-  it("filters confirmed only", () => {
+  it('"confirmed" admits future-agreed only, excludes archived', () => {
     expect(matchesFilter(confirmed, "confirmed", NOW)).toBe(true);
+    expect(matchesFilter(archivedConfirmed, "confirmed", NOW)).toBe(false);
     expect(matchesFilter(cancelled, "confirmed", NOW)).toBe(false);
     expect(matchesFilter(complete, "confirmed", NOW)).toBe(false);
     expect(matchesFilter(coord, "confirmed", NOW)).toBe(false);
   });
 
-  it("filters cancelled only", () => {
-    expect(matchesFilter(cancelled, "cancelled", NOW)).toBe(true);
-    expect(matchesFilter(confirmed, "cancelled", NOW)).toBe(false);
-    expect(matchesFilter(complete, "cancelled", NOW)).toBe(false);
-  });
-
-  it("filters complete only", () => {
-    expect(matchesFilter(complete, "complete", NOW)).toBe(true);
-    expect(matchesFilter(cancelled, "complete", NOW)).toBe(false);
-    expect(matchesFilter(confirmed, "complete", NOW)).toBe(false);
-  });
-
-  it("filters coordinating only", () => {
-    expect(matchesFilter(coord, "coordinating", NOW)).toBe(true);
-    expect(matchesFilter(confirmed, "coordinating", NOW)).toBe(false);
+  it('"actively_coordinating" admits live coordinating only, excludes archived', () => {
+    expect(matchesFilter(coord, "actively_coordinating", NOW)).toBe(true);
+    expect(matchesFilter(archivedCoord, "actively_coordinating", NOW)).toBe(false);
+    expect(matchesFilter(confirmed, "actively_coordinating", NOW)).toBe(false);
+    expect(matchesFilter(cancelled, "actively_coordinating", NOW)).toBe(false);
+    expect(matchesFilter(complete, "actively_coordinating", NOW)).toBe(false);
   });
 });
 
 describe("filter constants", () => {
-  it("EVENT_FILTERS matches the V1 redesign ordering", () => {
-    expect(EVENT_FILTERS).toEqual([
-      "all",
-      "coordinating",
-      "confirmed",
-      "complete",
-      "cancelled",
-    ]);
+  it("EVENT_FILTERS reflects the 3-chip redesign in display order", () => {
+    expect(EVENT_FILTERS).toEqual(["confirmed", "actively_coordinating", "all"]);
+  });
+
+  it("default filter is 'confirmed'", () => {
+    expect(DEFAULT_EVENT_FILTER).toBe("confirmed");
   });
 
   it("each filter has a label", () => {
@@ -134,14 +109,13 @@ describe("filter constants", () => {
     }
   });
 
-  it("uses full word labels (not abbreviated)", () => {
-    expect(EVENT_FILTER_LABELS.coordinating).toBe("Coordinating");
+  it("uses the redesigned filter labels", () => {
     expect(EVENT_FILTER_LABELS.confirmed).toBe("Confirmed");
-    expect(EVENT_FILTER_LABELS.complete).toBe("Complete");
-    expect(EVENT_FILTER_LABELS.cancelled).toBe("Cancelled");
+    expect(EVENT_FILTER_LABELS.actively_coordinating).toBe("Actively Coordinating");
+    expect(EVENT_FILTER_LABELS.all).toBe("All Events");
   });
 
-  it("each non-all bucket has a pill label", () => {
+  it("each bucket has a pill label", () => {
     expect(EVENT_PILL_LABELS.coordinating).toBe("Coordinating");
     expect(EVENT_PILL_LABELS.confirmed).toBe("Confirmed");
     expect(EVENT_PILL_LABELS.complete).toBe("Complete");

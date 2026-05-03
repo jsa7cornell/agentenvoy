@@ -39,6 +39,7 @@ import {
   EVENT_FILTERS,
   EVENT_FILTER_LABELS,
   EVENT_PILL_LABELS,
+  DEFAULT_EVENT_FILTER,
   type EventBucket,
   type EventFilter,
   type SessionLike,
@@ -67,6 +68,10 @@ interface UpcomingEventRow extends SessionLike {
     topic?: string | null;
   } | null;
 }
+
+/** Sortable column ids for the My Events table. */
+type SortKey = "event" | "guest" | "created" | "confirmed" | "meeting" | "status";
+type SortDir = "asc" | "desc";
 
 const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -197,6 +202,8 @@ function statusPillStyle(bucket: EventBucket): PillStyle {
 interface ReusableCardGridProps {
   row: ReusableLinkRow;
   onEdit: (row: ReusableLinkRow) => void;
+  onToggleStatus?: (row: ReusableLinkRow) => void;
+  isTogglingStatus?: boolean;
 }
 
 /**
@@ -205,9 +212,10 @@ interface ReusableCardGridProps {
  * text-link at the bottom. See `previews/event-links-page-redesign.html`
  * `.rcard` styling.
  */
-function ReusableCardGrid({ row, onEdit }: ReusableCardGridProps) {
+function ReusableCardGrid({ row, onEdit, onToggleStatus, isTogglingStatus }: ReusableCardGridProps) {
   const [copied, setCopied] = useState(false);
   const isPrimary = row.kind === "primary";
+  const isPaused = row.status === "paused";
 
   function copy() {
     if (typeof navigator === "undefined" || !navigator.clipboard) return;
@@ -218,12 +226,14 @@ function ReusableCardGrid({ row, onEdit }: ReusableCardGridProps) {
 
   return (
     <div
-      className={`rounded-xl border p-4 flex flex-col gap-3 min-h-[160px] ${
+      className={`rounded-xl border p-4 flex flex-col gap-3 min-h-[160px] transition-opacity ${
         isPrimary
           ? "border-accent/40 bg-accent-surface/30"
-          : "border-secondary bg-surface-secondary/40"
+          : isPaused
+            ? "border-secondary bg-surface-secondary/20 opacity-60"
+            : "border-secondary bg-surface-secondary/40"
       }`}
-      data-testid={`desktop-reusable-card-${row.kind}`}
+      data-testid={`desktop-reusable-card-${row.kind}${isPaused ? "-paused" : ""}`}
     >
       <div className="flex items-start gap-2">
         <div
@@ -239,6 +249,11 @@ function ReusableCardGrid({ row, onEdit }: ReusableCardGridProps) {
         {isPrimary && (
           <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/10 text-accent flex-shrink-0">
             Default
+          </span>
+        )}
+        {isPaused && (
+          <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 flex-shrink-0">
+            Paused
           </span>
         )}
       </div>
@@ -258,15 +273,33 @@ function ReusableCardGrid({ row, onEdit }: ReusableCardGridProps) {
         </button>
       </div>
 
-      <button
-        type="button"
-        onClick={() => onEdit(row)}
-        className="text-[12px] text-secondary hover:text-accent transition self-start mt-auto"
-        data-testid={`desktop-reusable-edit-${row.kind}`}
-        aria-label={`Edit ${row.name}`}
-      >
-        Edit
-      </button>
+      <div className="flex items-center gap-3 mt-auto">
+        <button
+          type="button"
+          onClick={() => onEdit(row)}
+          className="text-[12px] text-secondary hover:text-accent transition"
+          data-testid={`desktop-reusable-edit-${row.kind}`}
+          aria-label={`Edit ${row.name}`}
+        >
+          Edit
+        </button>
+        {onToggleStatus && (
+          <button
+            type="button"
+            onClick={() => onToggleStatus(row)}
+            disabled={isTogglingStatus}
+            className={`text-[12px] transition disabled:opacity-50 ${
+              isPaused
+                ? "text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 dark:hover:text-emerald-300"
+                : "text-muted hover:text-secondary"
+            }`}
+            data-testid={`desktop-reusable-${isPaused ? "reactivate" : "pause"}-${row.kind}`}
+            aria-label={isPaused ? `Reactivate ${row.name}` : `Pause ${row.name}`}
+          >
+            {isTogglingStatus ? "…" : isPaused ? "Reactivate" : "Pause"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -274,14 +307,41 @@ function ReusableCardGrid({ row, onEdit }: ReusableCardGridProps) {
 export function EventLinksPageContent() {
   const [reusableRows, setReusableRows] = useState<ReusableLinkRow[]>([]);
   const [reusableLoaded, setReusableLoaded] = useState(false);
+  const [linkFilter, setLinkFilter] = useState<"active" | "paused">("active");
+  const [togglingStatus, setTogglingStatus] = useState<string | null>(null);
   const [events, setEvents] = useState<UpcomingEventRow[]>([]);
   const [eventsLoaded, setEventsLoaded] = useState(false);
-  const [filter, setFilter] = useState<EventFilter>("all");
+  const [filter, setFilter] = useState<EventFilter>(DEFAULT_EVENT_FILTER);
   const [editing, setEditing] = useState<ReusableLinkRow | null>(null);
   const [editingPrimary, setEditingPrimary] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("meeting");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [hostFirstName, setHostFirstName] = useState<string>("");
+
+  async function handleToggleStatus(row: ReusableLinkRow) {
+    if (!row.ruleId) return;
+    const next = row.status === "paused" ? "active" : "paused";
+    setTogglingStatus(row.ruleId);
+    try {
+      const res = await fetch("/api/availability-rules/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruleId: row.ruleId, status: next }),
+      });
+      if (res.ok) {
+        setReusableRows((prev) =>
+          prev.map((r) => (r.key === row.key ? { ...r, status: next } : r)),
+        );
+      }
+    } catch {
+      // silent
+    } finally {
+      setTogglingStatus(null);
+    }
+  }
 
   // Route the Edit click on a Primary card to the PrimaryEditDialog;
   // bookable / other variance rows continue to use EventLinksEditDialog.
@@ -319,12 +379,10 @@ export function EventLinksPageContent() {
           });
           const structured = (data.structuredRules as AvailabilityPreference[]) ?? [];
           for (const r of structured) {
-            // `r.status` may be undefined on rules created before the status
-            // field was introduced — treat missing status as "active" for
-            // backward compatibility. Only skip explicitly paused/expired rules.
-            const rStatus = r.status as string | undefined;
+            const rStatus = (r.status as string | undefined) ?? "active";
             const bookableData = r.bookable;
-            if (r.action !== "bookable" || (rStatus && rStatus !== "active") || !bookableData) continue;
+            // Include active + paused; skip expired and non-bookable rules.
+            if (r.action !== "bookable" || rStatus === "expired" || !bookableData) continue;
             const oh = bookableData;
             if (!oh.linkCode || !oh.linkSlug) continue;
             out.push({
@@ -334,6 +392,7 @@ export function EventLinksPageContent() {
               sub: buildBookableLinkSub(r),
               url: `${origin}/meet/${oh.linkSlug}/${oh.linkCode}`,
               icon: "🕐",
+              status: (rStatus === "paused" ? "paused" : "active") as "active" | "paused",
               ruleId: r.id,
               recurringWindowConfig: {
                 title: oh.title,
@@ -356,8 +415,15 @@ export function EventLinksPageContent() {
       .finally(() => setReusableLoaded(true));
   }
 
-  function refetchEvents() {
-    fetch("/api/negotiate/sessions?archived=false")
+  // Fetch URL depends on the chip: "all" pulls archived rows too; the
+  // other chips skip them server-side so we don't ship state we'll filter
+  // out anyway.
+  function refetchEvents(forFilter: EventFilter = filter) {
+    const url =
+      forFilter === "all"
+        ? "/api/negotiate/sessions"
+        : "/api/negotiate/sessions?archived=false";
+    fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!data?.sessions) return;
@@ -368,31 +434,113 @@ export function EventLinksPageContent() {
 
   useEffect(() => {
     refetchReusable();
-    refetchEvents();
+    refetchEvents(DEFAULT_EVENT_FILTER);
+    // refetchEvents/refetchReusable are stable closures over setState; we
+    // intentionally only run this on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Counts per bucket — surface them on each filter chip per the mockup
-  // (`All · 4`, `Coordinating · 2`, etc.).
-  const bucketCounts = useMemo(() => {
+  // Re-fetch when the user toggles to/from "all" so archived rows arrive
+  // (or stop arriving). The other two chips share the archived=false fetch
+  // so flipping between them is a pure client-side filter.
+  useEffect(() => {
+    refetchEvents(filter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
+
+  // Counts per filter — surfaced on each chip ("Confirmed · 2"). "all"
+  // mirrors the loaded set length; the other two re-run the filter so the
+  // count tracks what the chip would actually show.
+  const filterCounts = useMemo(() => {
     const now = Date.now();
-    const counts: Record<EventBucket, number> = {
-      coordinating: 0,
+    const counts: Record<EventFilter, number> = {
       confirmed: 0,
-      complete: 0,
-      cancelled: 0,
+      actively_coordinating: 0,
+      all: events.length,
     };
     for (const s of events) {
-      const b = classifySession(s, now);
-      counts[b] += 1;
+      if (matchesFilter(s, "confirmed", now)) counts.confirmed += 1;
+      if (matchesFilter(s, "actively_coordinating", now)) counts.actively_coordinating += 1;
     }
     return counts;
   }, [events]);
 
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      // Sensible defaults: dates ascending (soonest first), text ascending,
+      // status grouped alphabetically.
+      setSortDir("asc");
+    }
+  }
+
+  function sortValue(s: UpcomingEventRow, key: SortKey, now: number): string | number {
+    switch (key) {
+      case "event":
+        return (s.title || s.link?.topic || "").toLowerCase();
+      case "guest":
+        return (
+          s.guestName ||
+          s.link?.inviteeName ||
+          s.guestEmail ||
+          s.link?.inviteeEmail ||
+          ""
+        ).toLowerCase();
+      case "created":
+        return Date.parse(s.createdAt) || 0;
+      case "confirmed":
+        // Date the agreed slot was set; not all rows have one.
+        return s.agreedTime ? Date.parse(s.agreedTime) || 0 : 0;
+      case "meeting":
+        return s.agreedTime ? Date.parse(s.agreedTime) || 0 : 0;
+      case "status":
+        return classifySession(s, now);
+    }
+  }
+
   const filteredEvents = useMemo(() => {
-    if (filter === "all") return events;
     const now = Date.now();
-    return events.filter((s) => matchesFilter(s, filter, now));
-  }, [events, filter]);
+    const matched = events.filter((s) => matchesFilter(s, filter, now));
+    const dir = sortDir === "asc" ? 1 : -1;
+    matched.sort((a, b) => {
+      const av = sortValue(a, sortKey, now);
+      const bv = sortValue(b, sortKey, now);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+    return matched;
+  }, [events, filter, sortKey, sortDir]);
+
+  async function handleSetArchived(sessionId: string, archived: boolean) {
+    setArchiving(sessionId);
+    try {
+      const res = await fetch("/api/negotiate/archive", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, archived }),
+      });
+      if (res.ok) {
+        if (filter === "all") {
+          // "All" view shows archived rows — flip the local flag in place
+          // so the row stays put and the user can undo.
+          setEvents((prev) =>
+            prev.map((s) => (s.id === sessionId ? { ...s, archived } : s)),
+          );
+        } else {
+          // Live chips hide archived rows — drop it. Unarchive can't
+          // happen from these chips since archived rows aren't shown.
+          setEvents((prev) => prev.filter((s) => s.id !== sessionId));
+        }
+      }
+    } catch {
+      // silent
+    } finally {
+      setArchiving(null);
+    }
+  }
 
   async function handleCancel(sessionId: string) {
     setCancelling(sessionId);
@@ -421,23 +569,67 @@ export function EventLinksPageContent() {
       data-testid="desktop-event-links-page"
     >
       <div className="flex flex-col gap-10">
-        {/* GROUP 1 — Reusable links (3-up grid) */}
+        {/* GROUP 1 — My Bookable Links (3-up grid) */}
         <section aria-labelledby="reusable-links-heading">
-          <h2
-            id="reusable-links-heading"
-            className="text-[11px] font-semibold tracking-wider uppercase text-muted mb-3"
-          >
-            Your reusable links
-          </h2>
+          <div className="flex items-center gap-3 mb-3">
+            <h2
+              id="reusable-links-heading"
+              className="text-[11px] font-semibold tracking-wider uppercase text-muted"
+            >
+              My Bookable Links
+            </h2>
+            {/* Active / Paused filter chips — only show when there are
+                bookable rows (Primary card is excluded from filtering) */}
+            {reusableLoaded && reusableRows.some((r) => r.kind === "bookable") && (
+              <div className="flex gap-1.5" role="tablist" aria-label="Filter bookable links">
+                {(["active", "paused"] as const).map((f) => {
+                  const active = linkFilter === f;
+                  const count = reusableRows.filter(
+                    (r) => r.kind === "bookable" && (r.status ?? "active") === f,
+                  ).length;
+                  return (
+                    <button
+                      key={f}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setLinkFilter(f)}
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium border transition ${
+                        active
+                          ? "border-accent text-accent bg-accent/10"
+                          : "border-secondary text-secondary hover:border-accent/40"
+                      }`}
+                      data-testid={`desktop-links-filter-${f}`}
+                    >
+                      {f === "active" ? "Active" : "Paused"} · {count}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           {!reusableLoaded ? (
             <div className="px-3 py-2 text-sm text-muted">Loading…</div>
           ) : reusableRows.length === 0 ? (
             <div className="px-3 py-2 text-sm text-muted">No links yet.</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {reusableRows.map((r) => (
-                <ReusableCardGrid key={r.key} row={r} onEdit={handleEditClick} />
-              ))}
+              {/* Primary card is always visible regardless of chip */}
+              {reusableRows
+                .filter(
+                  (r) =>
+                    r.kind === "primary" ||
+                    (r.status ?? "active") === linkFilter,
+                )
+                .map((r) => (
+                  <ReusableCardGrid
+                    key={r.key}
+                    row={r}
+                    onEdit={handleEditClick}
+                    onToggleStatus={r.kind === "bookable" ? handleToggleStatus : undefined}
+                    isTogglingStatus={togglingStatus === r.ruleId}
+                  />
+                ))}
             </div>
           )}
         </section>
@@ -445,25 +637,25 @@ export function EventLinksPageContent() {
         {/* GROUP 2 — Create a reusable link (3 type cards) */}
         <CreateLinkPicker />
 
-        {/* GROUP 3 — Upcoming events */}
-        <section aria-labelledby="upcoming-events-heading">
+        {/* GROUP 3 — My Events */}
+        <section aria-labelledby="my-events-heading">
           <h2
-            id="upcoming-events-heading"
+            id="my-events-heading"
             className="text-[11px] font-semibold tracking-wider uppercase text-muted mb-3"
           >
-            Upcoming events
+            My Events
           </h2>
 
           {/* Filter chips (with counts) */}
           <div
             className="flex gap-1.5 mb-3 flex-wrap"
             role="tablist"
-            aria-label="Filter upcoming events"
+            aria-label="Filter my events"
             data-testid="desktop-event-links-filter-chips"
           >
             {EVENT_FILTERS.map((f) => {
               const active = f === filter;
-              const count = f === "all" ? events.length : bucketCounts[f as EventBucket];
+              const count = filterCounts[f];
               return (
                 <button
                   key={f}
@@ -488,26 +680,48 @@ export function EventLinksPageContent() {
             <div className="px-3 py-2 text-sm text-muted">Loading…</div>
           ) : filteredEvents.length === 0 ? (
             <div className="px-3 py-6 text-sm text-muted text-center border border-secondary rounded-xl">
-              {filter === "all" ? "No upcoming events." : "Nothing in this filter."}
+              {filter === "all" ? "No events yet." : "Nothing in this filter."}
             </div>
           ) : (
             <div
               className="rounded-xl border border-secondary overflow-hidden"
               data-testid="desktop-event-links-table"
             >
-              {/* Table header (desktop only — mobile-narrow viewports get
-                  the stacked sheet via the topbar pill).
-                  Columns: Event · Guest · Created · Confirmed · Meeting · Status · Actions */}
+              {/* Header row — every column heading is a sort toggle. */}
               <div
                 className="grid grid-cols-[2fr_1fr_0.85fr_0.85fr_1.1fr_0.9fr_1fr] gap-3 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted bg-surface-secondary/40 border-b border-secondary"
                 role="row"
               >
-                <div>Event</div>
-                <div>Guest</div>
-                <div>Created</div>
-                <div>Confirmed</div>
-                <div>Meeting</div>
-                <div>Status</div>
+                {(
+                  [
+                    { key: "event", label: "Event" },
+                    { key: "guest", label: "Guest" },
+                    { key: "created", label: "Created" },
+                    { key: "confirmed", label: "Confirmed" },
+                    { key: "meeting", label: "Meeting" },
+                    { key: "status", label: "Status" },
+                  ] as { key: SortKey; label: string }[]
+                ).map(({ key, label }) => {
+                  const active = sortKey === key;
+                  const arrow = active ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => toggleSort(key)}
+                      className={`text-left uppercase tracking-wider transition hover:text-secondary ${
+                        active ? "text-accent" : ""
+                      }`}
+                      data-testid={`desktop-event-links-sort-${key}`}
+                      aria-sort={
+                        active ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+                      }
+                    >
+                      {label}
+                      {arrow}
+                    </button>
+                  );
+                })}
                 <div className="text-right" />
               </div>
 
@@ -561,8 +775,14 @@ export function EventLinksPageContent() {
                       key={s.id}
                       className={`grid grid-cols-[2fr_1fr_0.85fr_0.85fr_1.1fr_0.9fr_1fr] gap-3 items-center px-4 py-3 ${
                         idx > 0 ? "border-t border-secondary" : ""
-                      } ${isCancelled ? "opacity-60" : "hover:bg-surface-secondary/30"} transition-colors`}
-                      data-testid={`desktop-event-links-row-${bucket}`}
+                      } ${
+                        s.archived
+                          ? "opacity-50"
+                          : isCancelled
+                            ? "opacity-60"
+                            : "hover:bg-surface-secondary/30"
+                      } transition-colors`}
+                      data-testid={`desktop-event-links-row-${bucket}${s.archived ? "-archived" : ""}`}
                     >
                       {/* Event title + sub — the whole first cell is the
                           click target when a deal-room URL exists. The link
@@ -632,8 +852,11 @@ export function EventLinksPageContent() {
                         </span>
                       </div>
 
-                      {/* Action column — Google Cal link on Confirmed,
-                          Cancel on live, Open on cancelled. */}
+                      {/* Action column — Google Cal (Confirmed) · Cancel
+                          (live meetings) · Open (terminal) · Archive /
+                          Unarchive (always available; one-click, no
+                          confirm). Archive is link-level; Cancel is
+                          meeting-level. */}
                       <div className="flex items-center justify-end gap-3 text-[12px]">
                         {isConfirmed && s.agreedTime && (
                           <a
@@ -656,7 +879,7 @@ export function EventLinksPageContent() {
                             Cancel
                           </button>
                         )}
-                        {isCancelled && dealUrl && (
+                        {isCancelled && !s.archived && dealUrl && (
                           <Link
                             href={dealUrl}
                             className="text-secondary hover:text-accent transition"
@@ -664,6 +887,28 @@ export function EventLinksPageContent() {
                           >
                             Open
                           </Link>
+                        )}
+                        {s.archived ? (
+                          <button
+                            type="button"
+                            onClick={() => handleSetArchived(s.id, false)}
+                            disabled={archiving === s.id}
+                            className="text-secondary hover:text-accent transition disabled:opacity-50"
+                            data-testid={`desktop-event-links-unarchive-${s.id}`}
+                          >
+                            {archiving === s.id ? "…" : "Unarchive"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSetArchived(s.id, true)}
+                            disabled={archiving === s.id}
+                            className="text-muted hover:text-secondary transition disabled:opacity-50"
+                            data-testid={`desktop-event-links-archive-${s.id}`}
+                            title="Archive (the link will show 'host archived this' to guests)"
+                          >
+                            {archiving === s.id ? "…" : "Archive"}
+                          </button>
                         )}
                       </div>
                     </li>

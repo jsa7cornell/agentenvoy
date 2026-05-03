@@ -43,6 +43,9 @@ export interface ReusableLinkRow {
   url: string;
   /** Visual signifier — emoji per the mockup (🔗, 🕐, 📱, etc.). */
   icon: string;
+  /** "active" | "paused" — bookable rules only; primary is always active.
+   *  Used to render the Paused badge and the Pause / Reactivate button. */
+  status?: "active" | "paused";
   /** Recurring-window-backed reusables only — the rule id used by the
    *  Edit dialog. Office Hours is the most common variant today; other
    *  recurring-window-backed variants populate this the same way. */

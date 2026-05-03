@@ -34,6 +34,7 @@ import {
   EVENT_FILTERS,
   EVENT_FILTER_LABELS,
   EVENT_PILL_LABELS,
+  DEFAULT_EVENT_FILTER,
   type EventFilter,
   type SessionLike,
 } from "@/lib/event-links-buckets";
@@ -137,12 +138,14 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
   const [reusableLoaded, setReusableLoaded] = useState(false);
   const [events, setEvents] = useState<UpcomingEventRow[]>([]);
   const [eventsLoaded, setEventsLoaded] = useState(false);
-  const [filter, setFilter] = useState<EventFilter>("all");
+  const [filter, setFilter] = useState<EventFilter>(DEFAULT_EVENT_FILTER);
   const [editing, setEditing] = useState<ReusableLinkRow | null>(null);
   const [editingPrimary, setEditingPrimary] = useState(false);
   const [archiving, setArchiving] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  const [linkFilter, setLinkFilter] = useState<"active" | "paused">("active");
+  const [togglingStatus, setTogglingStatus] = useState<string | null>(null);
 
   // Route Edit on Primary to PrimaryEditDialog (V1 Stage 2); other
   // variance rows continue to use EventLinksEditDialog.
@@ -184,7 +187,8 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
             (data.structuredRules as AvailabilityPreference[]) ?? [];
           for (const r of structured) {
             const bookableData = r.bookable;
-            if (r.action !== "bookable" || r.status !== "active" || !bookableData) continue;
+            const rStatus = (r.status as string | undefined) ?? "active";
+            if (r.action !== "bookable" || rStatus === "expired" || !bookableData) continue;
             const oh = bookableData;
             if (!oh.linkCode || !oh.linkSlug) continue;
             out.push({
@@ -194,6 +198,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
               sub: buildBookableLinkSub(r),
               url: `${origin}/meet/${oh.linkSlug}/${oh.linkCode}`,
               icon: "🕐",
+              status: (rStatus === "paused" ? "paused" : "active") as "active" | "paused",
               ruleId: r.id,
               recurringWindowConfig: {
                 title: oh.title,
@@ -216,8 +221,12 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
       .finally(() => setReusableLoaded(true));
   }
 
-  function refetchEvents() {
-    fetch("/api/negotiate/sessions?archived=false")
+  function refetchEvents(forFilter: EventFilter = filter) {
+    const url =
+      forFilter === "all"
+        ? "/api/negotiate/sessions"
+        : "/api/negotiate/sessions?archived=false";
+    fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!data?.sessions) return;
@@ -231,25 +240,60 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
     setReusableLoaded(false);
     setEventsLoaded(false);
     refetchReusable();
-    refetchEvents();
+    refetchEvents(filter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // Toggling to/from "all" needs a re-fetch so archived rows arrive.
+  useEffect(() => {
+    if (!open) return;
+    refetchEvents(filter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter]);
+
   const filteredEvents = useMemo(() => {
-    if (filter === "all") return events;
     const now = Date.now();
     return events.filter((s) => matchesFilter(s, filter, now));
   }, [events, filter]);
 
-  async function handleArchive(sessionId: string) {
+  async function handleToggleStatus(row: ReusableLinkRow) {
+    if (!row.ruleId) return;
+    const next = row.status === "paused" ? "active" : "paused";
+    setTogglingStatus(row.ruleId);
+    try {
+      const res = await fetch("/api/availability-rules/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruleId: row.ruleId, status: next }),
+      });
+      if (res.ok) {
+        setReusableRows((prev) =>
+          prev.map((r) => (r.key === row.key ? { ...r, status: next } : r)),
+        );
+      }
+    } catch {
+      // silent
+    } finally {
+      setTogglingStatus(null);
+    }
+  }
+
+  async function handleSetArchived(sessionId: string, archived: boolean) {
     setArchiving(sessionId);
     try {
       const res = await fetch("/api/negotiate/archive", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, archived: true }),
+        body: JSON.stringify({ sessionId, archived }),
       });
       if (res.ok) {
-        setEvents((prev) => prev.filter((s) => s.id !== sessionId));
+        if (filter === "all") {
+          setEvents((prev) =>
+            prev.map((s) => (s.id === sessionId ? { ...s, archived } : s)),
+          );
+        } else {
+          setEvents((prev) => prev.filter((s) => s.id !== sessionId));
+        }
       }
     } catch {
       // silent — surface comes from network panel during dev
@@ -327,9 +371,38 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
           </button>
         </div>
 
-        {/* GROUP 1 — Reusable links */}
-        <div className="text-[10px] font-semibold tracking-wider uppercase text-muted mt-2 mb-2 px-1">
-          Reusable links
+        {/* GROUP 1 — My Bookable Links */}
+        <div className="flex items-center gap-2 mt-2 mb-2 px-1">
+          <div className="text-[10px] font-semibold tracking-wider uppercase text-muted">
+            My Bookable Links
+          </div>
+          {reusableLoaded && reusableRows.some((r) => r.kind === "bookable") && (
+            <div className="flex gap-1" role="tablist" aria-label="Filter bookable links">
+              {(["active", "paused"] as const).map((f) => {
+                const active = linkFilter === f;
+                const count = reusableRows.filter(
+                  (r) => r.kind === "bookable" && (r.status ?? "active") === f,
+                ).length;
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setLinkFilter(f)}
+                    className={`px-2 py-0.5 rounded-full text-[9.5px] font-medium border transition ${
+                      active
+                        ? "border-accent text-accent bg-accent/10"
+                        : "border-secondary text-secondary"
+                    }`}
+                    data-testid={`mobile-links-filter-${f}`}
+                  >
+                    {f === "active" ? "Active" : "Paused"} · {count}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         {!reusableLoaded ? (
           <div className="px-3 py-2 text-xs text-muted">Loading…</div>
@@ -337,13 +410,37 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
           <div className="px-3 py-2 text-xs text-muted">No links yet.</div>
         ) : (
           <div className="flex flex-col gap-2">
-            {reusableRows.map((r) => (
-              <EventLinksCard
-                key={r.key}
-                row={r}
-                onEdit={handleEditClick}
-              />
-            ))}
+            {reusableRows
+              .filter(
+                (r) => r.kind === "primary" || (r.status ?? "active") === linkFilter,
+              )
+              .map((r) => (
+                <div key={r.key} className={r.status === "paused" ? "opacity-60" : ""}>
+                  <EventLinksCard
+                    row={r}
+                    onEdit={handleEditClick}
+                  />
+                  {r.kind === "bookable" && (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleStatus(r)}
+                      disabled={togglingStatus === r.ruleId}
+                      className={`mt-1 ml-1 text-[10px] transition disabled:opacity-50 ${
+                        r.status === "paused"
+                          ? "text-emerald-500 hover:text-emerald-400"
+                          : "text-muted hover:text-secondary"
+                      }`}
+                      data-testid={`mobile-links-${r.status === "paused" ? "reactivate" : "pause"}-${r.key}`}
+                    >
+                      {togglingStatus === r.ruleId
+                        ? "…"
+                        : r.status === "paused"
+                          ? "Reactivate"
+                          : "Pause"}
+                    </button>
+                  )}
+                </div>
+              ))}
           </div>
         )}
 
@@ -354,16 +451,16 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
           <CreateLinkPickerMobile />
         </div>
 
-        {/* GROUP 2 — Upcoming events */}
+        {/* GROUP 2 — My Events */}
         <div className="text-[10px] font-semibold tracking-wider uppercase text-muted mt-5 mb-2 px-1">
-          Upcoming events
+          My Events
         </div>
 
         {/* Filter chips */}
         <div
           className="flex gap-1.5 mb-2 overflow-x-auto -mx-1 px-1 pb-1"
           role="tablist"
-          aria-label="Filter upcoming events"
+          aria-label="Filter my events"
           data-testid="mobile-event-links-filter-chips"
         >
           {EVENT_FILTERS.map((f) => {
@@ -392,7 +489,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
           <div className="px-3 py-2 text-xs text-muted">Loading…</div>
         ) : filteredEvents.length === 0 ? (
           <div className="px-3 py-3 text-xs text-muted text-center">
-            {filter === "all" ? "No upcoming events." : "Nothing in this filter."}
+            {filter === "all" ? "No events yet." : "Nothing in this filter."}
           </div>
         ) : (
           <ul className="flex flex-col gap-1.5">
@@ -433,7 +530,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                       onClick={() => {
                         if (bucket === "confirmed") handleCancel(s.id);
                         else {
-                          handleArchive(s.id);
+                          handleSetArchived(s.id, true);
                           setConfirmCancelId(null);
                         }
                       }}
@@ -449,8 +546,10 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
               return (
                 <li
                   key={s.id}
-                  className="flex items-center gap-2 p-2.5 rounded-xl border border-secondary bg-surface-secondary/40"
-                  data-testid={`mobile-event-links-row-${bucket}`}
+                  className={`flex items-center gap-2 p-2.5 rounded-xl border border-secondary bg-surface-secondary/40 ${
+                    s.archived ? "opacity-50" : ""
+                  }`}
+                  data-testid={`mobile-event-links-row-${bucket}${s.archived ? "-archived" : ""}`}
                 >
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-semibold text-primary truncate">{title}</div>
@@ -474,33 +573,47 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                       Cancel
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => handleArchive(s.id)}
-                    disabled={archiving === s.id}
-                    className="flex-shrink-0 p-1 rounded-md text-zinc-500 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
-                    data-testid={`mobile-event-links-archive-${s.id}`}
-                    title="Archive"
-                    aria-label={`Archive ${title}`}
-                  >
-                    {archiving === s.id ? (
-                      <span className="text-[10px] text-muted">…</span>
-                    ) : (
-                      <svg
-                        className="w-3.5 h-3.5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M5 8a2 2 0 012-2h10a2 2 0 012 2v2H5V8zm0 4h14v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6zm5 2h4"
-                        />
-                      </svg>
-                    )}
-                  </button>
+                  {s.archived ? (
+                    <button
+                      type="button"
+                      onClick={() => handleSetArchived(s.id, false)}
+                      disabled={archiving === s.id}
+                      className="flex-shrink-0 px-2 py-1 rounded-md text-[10px] text-secondary hover:text-accent transition disabled:opacity-50"
+                      data-testid={`mobile-event-links-unarchive-${s.id}`}
+                      title="Unarchive"
+                      aria-label={`Unarchive ${title}`}
+                    >
+                      {archiving === s.id ? "…" : "Unarchive"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleSetArchived(s.id, true)}
+                      disabled={archiving === s.id}
+                      className="flex-shrink-0 p-1 rounded-md text-zinc-500 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
+                      data-testid={`mobile-event-links-archive-${s.id}`}
+                      title="Archive"
+                      aria-label={`Archive ${title}`}
+                    >
+                      {archiving === s.id ? (
+                        <span className="text-[10px] text-muted">…</span>
+                      ) : (
+                        <svg
+                          className="w-3.5 h-3.5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M5 8a2 2 0 012-2h10a2 2 0 012 2v2H5V8zm0 4h14v6a2 2 0 01-2 2H7a2 2 0 01-2-2v-6zm5 2h4"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  )}
                 </li>
               );
             })}
