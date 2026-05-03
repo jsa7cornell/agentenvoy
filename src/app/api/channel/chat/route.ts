@@ -330,7 +330,6 @@ export async function POST(req: NextRequest) {
           let rawClassifierKind: string | null = null;
           let fabricationDetected = false;
           let echoFlag = false;
-          let priorEnvoyContent = "";
           let recentEnvoyContents: string[] = [];
           if (marcoReplayResolved) {
             // Skip classifier entirely; trust the marco-pending reply.
@@ -370,7 +369,6 @@ export async function POST(req: NextRequest) {
               select: { content: true },
             });
             recentEnvoyContents = recentEnvoy.map((m) => m.content);
-            priorEnvoyContent = recentEnvoyContents[0] ?? "";
             const echoResult = isEchoOfRecentEnvoy(message, recentEnvoyContents);
             echoFlag = echoResult.isEcho;
 
