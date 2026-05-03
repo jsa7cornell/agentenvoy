@@ -98,8 +98,17 @@ export async function buildGuestFeedbackBundle(
     }
   }
 
+  // Two parallel sources of "what the guest saw":
+  //   1. ChannelMessage rows where threadId == sessionId — the host-side
+  //      feed entries (create_link narration, host directives) mirrored to
+  //      this thread.
+  //   2. Message rows where sessionId == session.id — the actual deal-room
+  //      conversation (greeting, guest replies, Envoy responses).
+  // Both must be merged for guest-filed reports — earlier bundles only
+  // pulled (1), so guest reports were missing the conversation entirely
+  // (caught 2026-05-03 on session cmopyhil10005vv679jodggod).
   const rawMessages = submission.includeContext
-    ? await loadSharedChannelMessagesWithMeta(host.id, session?.id ?? null)
+    ? await loadGuestVisibleMessages(host.id, session?.id ?? null)
     : [];
 
   const ordered = rawMessages;
@@ -197,19 +206,27 @@ function toGuestMessageWithMeta(m: FilingMessage): MessageWithMeta {
 }
 
 /**
- * Load ChannelMessage rows the guest would have rendered in this link's
- * session. Returns oldest→newest for filingContext / segmentation.
+ * Load everything the guest would have rendered: the host-side feed
+ * mirror (ChannelMessage with threadId == sessionId) PLUS the deal-room
+ * conversation (Message with sessionId == session.id). Merged by createdAt,
+ * filtered by visibility, returned oldest→newest.
+ *
+ * Both sources are needed: ChannelMessage carries the host's create_link
+ * narration (mirrored to the deal room), Message carries the greeting +
+ * guest replies + Envoy responses. Earlier bundles only loaded the
+ * ChannelMessage half, leaving guest-filed reports without the actual
+ * conversation.
  */
-async function loadSharedChannelMessagesWithMeta(
+async function loadGuestVisibleMessages(
   hostUserId: string,
   sessionId: string | null,
 ): Promise<FilingMessage[]> {
-  const where = sessionId
+  const channelWhere = sessionId
     ? { channel: { userId: hostUserId }, threadId: sessionId }
     : { channel: { userId: hostUserId }, threadId: null };
 
-  const rows = await prisma.channelMessage.findMany({
-    where,
+  const channelRowsP = prisma.channelMessage.findMany({
+    where: channelWhere,
     orderBy: { createdAt: "desc" },
     take: MAX_MESSAGES,
     select: {
@@ -221,7 +238,26 @@ async function loadSharedChannelMessagesWithMeta(
     },
   });
 
-  return rows
+  // Deal-room messages live on the Message table. Only load when we have a
+  // session to scope to — without one there's no deal-room thread.
+  const dealRoomRowsP = sessionId
+    ? prisma.message.findMany({
+        where: { sessionId },
+        orderBy: { createdAt: "desc" },
+        take: MAX_MESSAGES,
+        select: {
+          id: true,
+          role: true,
+          content: true,
+          createdAt: true,
+          metadata: true,
+        },
+      })
+    : Promise.resolve([]);
+
+  const [channelRows, dealRoomRows] = await Promise.all([channelRowsP, dealRoomRowsP]);
+
+  const merged: FilingMessage[] = [...channelRows, ...dealRoomRows]
     .filter((r) => GUEST_VISIBLE_ROLES.has(r.role))
     .map((r) => ({
       id: r.id,
@@ -229,6 +265,13 @@ async function loadSharedChannelMessagesWithMeta(
       content: r.content ?? "",
       createdAt: r.createdAt,
       metadata: r.metadata,
-    }))
-    .reverse();
+    }));
+
+  // Single chronological order across both sources. Cap to MAX_MESSAGES so
+  // long sessions don't blow the bundle size budget.
+  merged.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  if (merged.length > MAX_MESSAGES) {
+    return merged.slice(merged.length - MAX_MESSAGES);
+  }
+  return merged;
 }

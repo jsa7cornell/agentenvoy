@@ -774,37 +774,171 @@ export function formatComputedSchedule(
   return lines.join("\n");
 }
 
-/**
- * Determine human-readable availability categories from VIP stretch slots,
- * used to populate the first-message tease ("early mornings or weekends").
- * Returns up to three labels, ordered: early mornings → evenings → weekends.
- */
-function computeStretchTeaseCategories(slots: ScoredSlot[], tz: string): string[] {
-  let hasEarlyMorning = false;
-  let hasEvening = false;
-  let hasWeekend = false;
+export interface StretchTease {
+  /** Concrete adjacent ranges from stretch1 (score 2) — e.g. "8-9 AM PDT".
+   *  Empty array if no qualifying adjacent slots. */
+  adjacentRanges: string[];
+  /** Categorical buckets for stretch2 (score 3) and deeper stretch1 — e.g.
+   *  "evenings", "weekends", "earlier mornings". Empty if none. */
+  deeperCategories: string[];
+}
 
-  for (const slot of slots) {
-    const d = new Date(slot.start);
+/**
+ * Build a two-tier tease from VIP stretch slots, mirroring how a human host
+ * would describe extra availability:
+ *
+ *   "I could offer 8-9 AM PDT slots. If need be, we could do evenings or
+ *    weekends."
+ *
+ * Tier 1 (adjacentRanges): score-2 stretch1 slots that sit in the hour
+ * immediately before business-hours start or immediately after business-
+ * hours end on a weekday. These get a CONCRETE time range because they're
+ * the cheapest extension. Mid-day score-2 slots (gaps inside business
+ * hours) are intentionally skipped — they're not "stretches" in the
+ * conversational sense, just minor calendar friction.
+ *
+ * Tier 2 (deeperCategories): everything else — stretch1 slots further from
+ * business hours, all stretch2 slots, all weekend slots. Bucketed
+ * categorically so the host's protected schedule isn't laid bare.
+ *
+ * Determinism is the point here. The LLM receives this as structured text
+ * to render verbatim; freeform inference from raw OFFERABLE SLOTS produced
+ * inconsistent teases in dev testing.
+ */
+export function computeStretchTease(
+  stretch1: ScoredSlot[],
+  stretch2: ScoredSlot[],
+  tz: string,
+  rules: LinkParameters,
+): StretchTease {
+  const tzAbbr = new Intl.DateTimeFormat("en-US", { timeZoneName: "short", timeZone: tz })
+    .formatToParts(new Date())
+    .find((p) => p.type === "timeZoneName")?.value ?? "PT";
+
+  // hoursStartMinutes / hoursEndMinutes live on the link rules but aren't
+  // part of the LinkParameters interface yet — fall back to standard 9–5
+  // when absent. The values are minutes-since-midnight in the host's tz.
+  const rulesRecord = rules as unknown as Record<string, unknown>;
+  const hoursStart = (rulesRecord.hoursStartMinutes as number | undefined) ?? 540; // 9 AM
+  const hoursEnd = (rulesRecord.hoursEndMinutes as number | undefined) ?? 1020;    // 5 PM
+
+  // Per-slot classification by local time-of-day and day-of-week.
+  type Bucket = "preStart-adjacent" | "preStart-deep" | "postEnd-adjacent" | "postEnd-deep" | "weekend" | "midday";
+  const classify = (s: ScoredSlot): { bucket: Bucket; minutes: number; weekday: string } => {
+    const d = new Date(s.start);
     const parts = new Intl.DateTimeFormat("en-US", {
       hour: "numeric",
+      minute: "2-digit",
       weekday: "short",
       hour12: false,
       timeZone: tz,
     }).formatToParts(d);
-    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "12", 10);
+    const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+    const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
     const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+    const minutes = hour * 60 + minute;
+    if (weekday === "Sat" || weekday === "Sun") return { bucket: "weekend", minutes, weekday };
+    if (minutes < hoursStart) {
+      const bucket: Bucket = minutes >= hoursStart - 60 ? "preStart-adjacent" : "preStart-deep";
+      return { bucket, minutes, weekday };
+    }
+    if (minutes >= hoursEnd) {
+      const bucket: Bucket = minutes < hoursEnd + 60 ? "postEnd-adjacent" : "postEnd-deep";
+      return { bucket, minutes, weekday };
+    }
+    return { bucket: "midday", minutes, weekday };
+  };
 
-    if (hour < 9) hasEarlyMorning = true;
-    if (hour >= 18) hasEvening = true;
-    if (weekday === "Sat" || weekday === "Sun") hasWeekend = true;
+  // Tier 1 — only stretch1 slots, only the immediately-adjacent buckets.
+  const preStartMinutes: number[] = [];
+  const postEndMinutes: number[] = [];
+  for (const s of stretch1) {
+    const c = classify(s);
+    if (c.bucket === "preStart-adjacent") preStartMinutes.push(c.minutes);
+    if (c.bucket === "postEnd-adjacent") postEndMinutes.push(c.minutes);
   }
 
-  const categories: string[] = [];
-  if (hasEarlyMorning) categories.push("early mornings");
-  if (hasEvening) categories.push("evenings");
-  if (hasWeekend) categories.push("weekends");
-  return categories;
+  const adjacentRanges: string[] = [];
+  if (preStartMinutes.length > 0) {
+    // Slot starts span the adjacent hour; cover up to hoursStart for the
+    // close-of-range so "8-9 AM" reads cleanly even if only a 30-min slot
+    // exists.
+    const minStart = Math.min(...preStartMinutes);
+    adjacentRanges.push(`${formatMinutesOfDay(minStart)}-${formatMinutesOfDay(hoursStart)} ${tzAbbr}`);
+  }
+  if (postEndMinutes.length > 0) {
+    const maxEnd = Math.max(...postEndMinutes) + 30; // +30 min to cover the slot's end
+    adjacentRanges.push(`${formatMinutesOfDay(hoursEnd)}-${formatMinutesOfDay(maxEnd)} ${tzAbbr}`);
+  }
+
+  // Tier 2 — everything that didn't qualify as adjacent.
+  let hasEarlierMornings = false;
+  let hasLaterEvenings = false;
+  let hasWeekend = false;
+  const considerForDeep = [...stretch1, ...stretch2];
+  for (const s of considerForDeep) {
+    const c = classify(s);
+    if (c.bucket === "weekend") hasWeekend = true;
+    else if (c.bucket === "preStart-deep") hasEarlierMornings = true;
+    else if (c.bucket === "postEnd-deep") hasLaterEvenings = true;
+    // Stretch1 evenings count as "evenings" if they extend past hoursEnd+60
+    // (which would have classified as postEnd-deep above), so no extra
+    // logic needed here. preStart-adjacent / postEnd-adjacent skip
+    // intentionally — they're already in tier 1.
+  }
+
+  // Stretch2 in adjacent buckets is unusual but possible — promote to
+  // deeper categories so it doesn't disappear silently.
+  for (const s of stretch2) {
+    const c = classify(s);
+    if (c.bucket === "preStart-adjacent") hasEarlierMornings = true;
+    if (c.bucket === "postEnd-adjacent") hasLaterEvenings = true;
+  }
+
+  const deeperCategories: string[] = [];
+  if (hasEarlierMornings) deeperCategories.push("earlier mornings");
+  if (hasLaterEvenings) deeperCategories.push("evenings");
+  if (hasWeekend) deeperCategories.push("weekends");
+
+  return { adjacentRanges, deeperCategories };
+}
+
+/** "8 AM" / "5:30 PM" / "12 PM". Wraps minutes-of-day into a 12h label. */
+function formatMinutesOfDay(min: number): string {
+  const h24 = Math.floor(min / 60) % 24;
+  const m = min % 60;
+  const suffix = h24 < 12 ? "AM" : "PM";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return m === 0 ? `${h12} ${suffix}` : `${h12}:${String(m).padStart(2, "0")} ${suffix}`;
+}
+
+/**
+ * Render a tiered stretch tease as one sentence.
+ *
+ * Shapes:
+ *   adjacent + deeper:   "If those don't work, I could offer 8-9 AM PDT slots. If need be, we could do evenings or weekends."
+ *   adjacent only:       "If those don't work, I could offer 8-9 AM PDT slots."
+ *   deeper only:         "If those don't work, I could open up evenings or weekends."
+ *   neither:             "" (caller skips emitting the tease)
+ */
+export function renderStretchTeaseSentence(tease: StretchTease): string {
+  const { adjacentRanges, deeperCategories } = tease;
+  const joinOr = (xs: string[]): string =>
+    xs.length <= 1
+      ? (xs[0] ?? "")
+      : xs.length === 2
+        ? `${xs[0]} or ${xs[1]}`
+        : `${xs.slice(0, -1).join(", ")}, or ${xs[xs.length - 1]}`;
+
+  if (adjacentRanges.length === 0 && deeperCategories.length === 0) return "";
+
+  if (adjacentRanges.length > 0 && deeperCategories.length > 0) {
+    return `If those don't work, I could offer ${joinOr(adjacentRanges)} slots. If need be, we could do ${joinOr(deeperCategories)}.`;
+  }
+  if (adjacentRanges.length > 0) {
+    return `If those don't work, I could offer ${joinOr(adjacentRanges)} slots.`;
+  }
+  return `If those don't work, I could open up ${joinOr(deeperCategories)}.`;
 }
 
 /**
@@ -993,30 +1127,30 @@ export function formatOfferableSlots(
     lines.push(``);
   }
 
-  // VIP FIRST-MESSAGE TEASE — inject when stretch slots exist so the LLM
-  // knows to mention extra availability exactly once in its opening reply.
-  // Categories are computed deterministically from the stretch slot pool so
-  // the LLM doesn't have to infer them (reducing hallucination risk).
+  // VIP TIERED TEASE — surface what's "easily openable" (stretch1 adjacent
+  // to standard hours) as a concrete time range, then categorize "deeper"
+  // options (stretch2 + far-from-hours stretch1, weekends). Pre-computed
+  // here so the LLM renders verbatim instead of inferring from the raw
+  // OFFERABLE SLOTS list.
   //
-  // NOTE: the LLM fires this tease in its FIRST reply to the guest (typically
-  // the response to the guest's first scheduling question). It checks its own
-  // message history — if it has already replied once in this session it skips
-  // the tease. The greeting is template-generated before this; the tease
-  // rides the first LLM-generated follow-up.
+  // Send-once semantics: the LLM checks its own conversation history — if
+  // any prior Envoy turn exists this session, the tease is skipped. The
+  // template-generated greeting fires before the first LLM turn, so this
+  // tease rides the first LLM reply (typically a response to the guest's
+  // opening message).
   if (rules.isVip && (stretch1Slots.length > 0 || stretch2Slots.length > 0)) {
-    const stretchPool = [...stretch1Slots, ...stretch2Slots];
-    const teaseCategories = computeStretchTeaseCategories(stretchPool, tz);
-    const categoryPhrase = teaseCategories.length > 0
-      ? ` — ${teaseCategories.join(" or ")}`
-      : "";
-    lines.push(``);
-    lines.push(
-      `VIP AVAILABILITY TEASE (include ONCE in your first reply in this session, skip on later turns):` +
-      ` After addressing the guest's request, add ONE short sentence: ` +
-      `"If those don't work, there are a few other slots I could open up for you${categoryPhrase}." ` +
-      `Only send this once — if any prior Envoy turn exists, omit it. ` +
-      `Do NOT mention VIP or explain why more slots exist — just surface the hint naturally.`
-    );
+    const tease = computeStretchTease(stretch1Slots, stretch2Slots, tz, rules);
+    const teaseSentence = renderStretchTeaseSentence(tease);
+    if (teaseSentence) {
+      lines.push(``);
+      lines.push(
+        `VIP AVAILABILITY TEASE (include ONCE in your first reply this session, skip on later turns):` +
+        ` After addressing the guest's request, add this sentence verbatim: ` +
+        `"${teaseSentence}" ` +
+        `Skip the tease entirely if any prior Envoy turn exists in this session. ` +
+        `Do NOT mention VIP or explain why these slots are extra — they read as ordinary host options.`
+      );
+    }
   }
 
   lines.push(`Legend: ★ = host's preferred times. All listed times are safe to propose within their tier — do not combine or promote between tiers without guest pushback.`);
