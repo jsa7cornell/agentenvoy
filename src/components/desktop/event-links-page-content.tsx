@@ -320,7 +320,7 @@ export function EventLinksPageContent() {
   const [sortKey, setSortKey] = useState<SortKey>("meeting");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [hostFirstName, setHostFirstName] = useState<string>("");
-  const [gcalStatuses, setGcalStatuses] = useState<Record<string, "accepted" | "declined" | "tentative" | "needsAction" | "none">>({});
+  const [gcalStatuses, setGcalStatuses] = useState<Record<string, { rsvp: "accepted" | "declined" | "tentative" | "needsAction" | "none"; htmlLink: string | null }>>({});
 
   async function handleToggleStatus(row: ReusableLinkRow) {
     if (!row.ruleId) return;
@@ -465,7 +465,8 @@ export function EventLinksPageContent() {
         .then((data) => {
           if (!data) return;
           const rsvp = data.guestResponseStatus ?? "none";
-          setGcalStatuses((prev) => ({ ...prev, [sessionId]: rsvp }));
+          const htmlLink = data.htmlLink ?? null;
+          setGcalStatuses((prev) => ({ ...prev, [sessionId]: { rsvp, htmlLink } }));
         })
         .catch(() => {});
     });
@@ -903,7 +904,7 @@ export function EventLinksPageContent() {
                             {showGcal && (
                               <div className="flex flex-col gap-0.5">
                                 {isConfirmed && (() => {
-                                  const rsvp = gcalStatuses[s.id];
+                                  const gcal = gcalStatuses[s.id];
                                   const rsvpMap = {
                                     accepted:    { label: "✓ Accepted",  cls: "text-green-600 dark:text-green-400" },
                                     tentative:   { label: "~ Tentative", cls: "text-amber-600 dark:text-amber-400" },
@@ -911,26 +912,31 @@ export function EventLinksPageContent() {
                                     needsAction: { label: "No reply",    cls: "text-muted" },
                                     none:        { label: "No reply",    cls: "text-muted" },
                                   } as const;
-                                  const entry = rsvp ? rsvpMap[rsvp as keyof typeof rsvpMap] : null;
-                                  return entry ? (
-                                    <span className={`text-[11px] font-medium ${entry.cls}`}>
-                                      {entry.label}
-                                    </span>
-                                  ) : (
-                                    <span className="text-[11px] text-muted/40">—</span>
+                                  const entry = gcal ? rsvpMap[gcal.rsvp as keyof typeof rsvpMap] : null;
+                                  const gcalUrl = gcal?.htmlLink ?? (s.agreedTime ? buildGcalDayUrl(s.agreedTime) : null);
+                                  return (
+                                    <>
+                                      {entry ? (
+                                        <span className={`text-[11px] font-medium ${entry.cls}`}>
+                                          {entry.label}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[11px] text-muted/40">—</span>
+                                      )}
+                                      {gcalUrl && (
+                                        <a
+                                          href={gcalUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-[11px] text-accent hover:text-accent/70 transition-colors"
+                                          data-testid={`desktop-event-links-gcal-${s.id}`}
+                                        >
+                                          Open ↗
+                                        </a>
+                                      )}
+                                    </>
                                   );
                                 })()}
-                                {isConfirmed && s.agreedTime && (
-                                  <a
-                                    href={buildGcalDayUrl(s.agreedTime)}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-[11px] text-accent hover:text-accent/70 transition-colors"
-                                    data-testid={`desktop-event-links-gcal-${s.id}`}
-                                  >
-                                    Open ↗
-                                  </a>
-                                )}
                               </div>
                             )}
 

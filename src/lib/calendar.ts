@@ -1225,6 +1225,8 @@ export interface GCalEventStatus {
   guestOnInvite: boolean;
   guestResponseStatus: GCalAttendeeStatus | null;
   allAttendees: Array<{ email: string; responseStatus: GCalAttendeeStatus; self?: boolean }>;
+  /** Direct Google Calendar event URL (`htmlLink` from the API). */
+  htmlLink?: string | null;
 }
 
 /**
@@ -1326,12 +1328,13 @@ export async function getCalendarEventStatus(
       guestOnInvite: !!guestAttendee,
       guestResponseStatus: guestAttendee?.responseStatus ?? null,
       allAttendees: attendees,
+      htmlLink: data.htmlLink ?? null,
     };
   } catch (e: unknown) {
     const err = e as { code?: number; response?: { status?: number } };
     const status = err?.code ?? err?.response?.status;
     if (status === 404 || status === 410) {
-      return { eventExists: false, guestEmail, guestOnInvite: false, guestResponseStatus: null, allAttendees: [] };
+      return { eventExists: false, guestEmail, guestOnInvite: false, guestResponseStatus: null, allAttendees: [], htmlLink: null };
     }
     throw e;
   }
