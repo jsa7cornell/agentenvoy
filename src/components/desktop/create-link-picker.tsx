@@ -87,10 +87,10 @@ export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
     pitch:
       "Purpose-built bookable links for specific meeting types — share once, guests pick a slot, Envoy books it.",
     starters: [
-      { label: "Sales discovery", meta: "30m", prefill: "Create a sales discovery link — 30 min slots, weekday afternoons" },
-      { label: "Customer drop-in hours", meta: "30m", prefill: "Create a customer office hours link — 30 min slots, weekly" },
-      { label: "Mentor / advisor sessions", meta: "45m", prefill: "Create a mentor sessions link — 45 min slots" },
-      { label: "Candidate screens", meta: "30m", prefill: "Create a candidate screen link — 30 min slots, weekday mornings" },
+      { label: "Sales discovery", meta: "30m", prefill: "Create a sales discovery bookable link — 30 min, weekday afternoons" },
+      { label: "Customer drop-in hours", meta: "30m", prefill: "Create a customer office hours bookable link — 30 min, weekly" },
+      { label: "Mentor / advisor sessions", meta: "45m", prefill: "Create a mentor sessions bookable link — 45 min" },
+      { label: "Candidate screens", meta: "30m", prefill: "Create a candidate screening bookable link — 30 min, weekday mornings" },
     ],
     classes: {
       border: "border-l-[3px] border-cyan-600",
@@ -107,10 +107,10 @@ export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
     pitch:
       "Purpose-built links for multi-session programs — every booking spins up the whole series for that guest.",
     starters: [
-      { label: "Music / language lessons", meta: "60m × 10", prefill: "Create a recurring lessons link — 60 min, 10 sessions" },
-      { label: "Coaching program", meta: "45m × 8", prefill: "Create a coaching program link — 45 min, 8 sessions" },
-      { label: "Tutoring sessions", meta: "30m × weekly", prefill: "Create a tutoring link — 30 min, weekly" },
-      { label: "Customer check-ins", meta: "30m × monthly", prefill: "Create a customer check-in link — 30 min, monthly" },
+      { label: "Music / language lessons", meta: "60m · weekly", prefill: "Create a recurring music lessons bookable link — 60 min, weekly video" },
+      { label: "Coaching program", meta: "45m · weekly", prefill: "Create a recurring coaching bookable link — 45 min, weekly" },
+      { label: "Tutoring sessions", meta: "30m · weekly", prefill: "Create a recurring tutoring bookable link — 30 min, weekly" },
+      { label: "Customer check-ins", meta: "30m · monthly", prefill: "Create a recurring customer check-in bookable link — 30 min, monthly" },
     ],
     classes: {
       border: "border-l-[3px] border-amber-600",
@@ -127,10 +127,10 @@ export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
     pitch:
       "Purpose-built links for events with many guests — Envoy negotiates a time everyone can make.",
     starters: [
-      { label: "Workshop / class", meta: "90m", prefill: "Create a workshop link — 90 min, group event" },
-      { label: "Team kickoff", meta: "60m", prefill: "Create a team kickoff link — 60 min, group event" },
-      { label: "Founder dinner", meta: "2h", prefill: "Create a founder dinner link — 2 hours, group event" },
-      { label: "Panel interview", meta: "45m", prefill: "Create a panel interview link — 45 min, group event" },
+      { label: "Workshop / class", meta: "90m", prefill: "Create a workshop bookable link — 90 min, group" },
+      { label: "Team kickoff", meta: "60m", prefill: "Create a team kickoff bookable link — 60 min, group" },
+      { label: "Founder dinner", meta: "2h", prefill: "Create a founder dinner bookable link — 2 hours, group" },
+      { label: "Panel interview", meta: "45m", prefill: "Create a panel interview bookable link — 45 min, group" },
     ],
     classes: {
       border: "border-l-[3px] border-pink-600",
