@@ -330,6 +330,7 @@ export async function POST(req: NextRequest) {
           let rawClassifierKind: string | null = null;
           let fabricationDetected = false;
           let echoFlag = false;
+          let priorEnvoyContent = "";
           if (marcoReplayResolved) {
             // Skip classifier entirely; trust the marco-pending reply.
             intentBlock = { kind: marcoReplayResolved.kind };
@@ -368,6 +369,7 @@ export async function POST(req: NextRequest) {
               select: { content: true },
             });
             const recentEnvoyContents = recentEnvoy.map((m) => m.content);
+            priorEnvoyContent = recentEnvoyContents[0] ?? "";
             const echoResult = isEchoOfRecentEnvoy(message, recentEnvoyContents);
             echoFlag = echoResult.isEcho;
 
@@ -582,9 +584,8 @@ export async function POST(req: NextRequest) {
           //   - Continuation (prior envoy turn was a proposal): historyLimit:4 so
           //     the composer can see what was proposed and what the user is tweaking.
           if (intent === "create_bookable_link") {
-            const priorEnvoy = recentEnvoyContents[0] ?? "";
             const isBookableContinuation =
-              /setting up.*bookable|bookable link.*good to go|any tweaks\?/i.test(priorEnvoy);
+              /setting up.*bookable|bookable link.*good to go|any tweaks\?/i.test(priorEnvoyContent);
             const prefs = (user.preferences as Record<string, unknown> | null) ?? {};
             const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
             const defaultFormat = (explicit.defaultFormat as string | undefined) ?? "video";

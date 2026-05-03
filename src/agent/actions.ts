@@ -2989,6 +2989,7 @@ async function handleUpdateAvailabilityRule(
   let summary: string;
   let linkUrl: string | undefined;
   let addedRuleId: string | undefined;
+  let bookableName: string | undefined;
 
   if (operation === "rename_general") {
     const newName =
@@ -3078,10 +3079,12 @@ async function handleUpdateAvailabilityRule(
     };
     nextRules = [...existing, rule];
     addedRuleId = newId;
-    summary =
-      action === "bookable" && bookable
-        ? `Your "${bookable.name}" Bookable Link is ready: ${linkUrl}`
-        : `Added rule ${newId}`;
+    if (action === "bookable" && bookable) {
+      bookableName = bookable.name;
+      summary = `Your "${bookable.name}" Bookable Link is ready: ${linkUrl}`;
+    } else {
+      summary = `Added rule ${newId}`;
+    }
   } else if (operation === "update") {
     const idx = existing.findIndex((r) => r.id === id);
     if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
@@ -3157,7 +3160,7 @@ async function handleUpdateAvailabilityRule(
     data: {
       ...(addedRuleId ? { id: addedRuleId } : id ? { id } : {}),
       ...(linkUrl ? { linkUrl } : {}),
-      ...(bookable ? { bookableName: bookable.name } : {}),
+      ...(bookableName ? { bookableName } : {}),
     },
   };
 }
