@@ -277,6 +277,15 @@ export interface GreetingTemplate {
   render: (input: GreetingInput) => string;
 }
 
+// Markers indicating a timingLabel already carries a softener — used to avoid
+// double-qualifying when the agent has already encoded softness (e.g. "next week ideally").
+const TIMING_SOFT_MARKERS = ["ideally", "if possible", "prefer", "if that works", "flexible"] as const;
+
+function timingLabelHasSoftMarker(label: string): boolean {
+  const lower = label.toLowerCase();
+  return TIMING_SOFT_MARKERS.some((m) => lower.includes(m));
+}
+
 // ─── Helper: with-clause derivations (multi-invitee aware) ───────────────────
 
 /**
@@ -567,11 +576,22 @@ const proposalTemplate: GreetingTemplate = {
     const guestPickHint = deferralFieldsList ? null : buildGuestPickHint({ guestPicks, guestGuidance, hostFirstName });
     const suggestAltClause = deferralFieldsList ? null : buildSuggestAltClause({ guestPicks, isDirective, isBookableChildLink });
 
+    // When steering is soft and a timing label is set, append a brief
+    // flexibility note so the guest sees "next week" as a preference, not
+    // a hard constraint. Guard against timingLabels that already carry a
+    // softener (e.g. "next week ideally") to avoid double-qualifying.
+    const softTimingCue =
+      input.effectiveSteering === "soft" &&
+      input.timingLabel &&
+      !timingLabelHasSoftMarker(input.timingLabel)
+        ? " — flexible if that doesn't work"
+        : "";
+
     // Unified opener — when fields are deferred, append "but wanted to
     // check if you had preferences in terms of {list}".
     const openerLine = deferralFieldsList
       ? `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${proposalPhrase} but wanted to check if you had preferences in terms of ${deferralFieldsList}.`
-      : `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${proposalPhrase}.`;
+      : `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${proposalPhrase}${softTimingCue}.`;
 
     // Unified closing — when fields are deferred, append "and let us know
     // any suggestions on {list}". Subsumes the standalone `suggestAltClause`
@@ -633,7 +653,17 @@ const findTimeTemplate: GreetingTemplate = {
     // "asked me to find time", which inherently invites the guest to
     // weigh in. Don't repeat "but wanted to check" here; just append the
     // closing-side suggestion clause for clarity.
-    const openerLine = `👋 ${greeteeName}! ${hostFirstName} asked me to find time${findTimeWithClause}${timingLabel ? ` ${timingLabel}` : ""}.`;
+    //
+    // Same soft-timing guard as proposalTemplate: when steering is soft and
+    // a timingLabel is set, append a flexibility note unless the label
+    // already contains a softener.
+    const ftSoftTimingCue =
+      input.effectiveSteering === "soft" &&
+      timingLabel &&
+      !timingLabelHasSoftMarker(timingLabel)
+        ? " — flexible if that doesn't work"
+        : "";
+    const openerLine = `👋 ${greeteeName}! ${hostFirstName} asked me to find time${findTimeWithClause}${timingLabel ? ` ${timingLabel}` : ""}${ftSoftTimingCue}.`;
 
     let closingBase: string;
     if (deferralFieldsList) {
