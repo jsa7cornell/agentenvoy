@@ -720,6 +720,7 @@ export function EventLinksPageContent() {
                 const showCreated   = filter === "actively_coordinating" || filter === "all";
                 const showConfirmed = filter === "all";
                 const showMeeting   = filter === "confirmed" || filter === "all";
+                const showGcal      = filter === "confirmed" || filter === "all";
 
                 // Build grid template from visible data columns + fixed actions col.
                 const gridTemplateColumns = [
@@ -728,17 +729,19 @@ export function EventLinksPageContent() {
                   ...(showCreated   ? ["0.85fr"] : []),
                   ...(showConfirmed ? ["0.85fr"] : []),
                   ...(showMeeting   ? ["1.1fr"]  : []),
+                  ...(showGcal      ? ["1fr"]    : []),
                   "0.9fr",  // Status (always)
                   "1fr",    // Actions (always)
                 ].join(" ");
 
-                const headerCols: { key: SortKey; label: string }[] = [
-                  { key: "event",     label: "Event"     },
-                  { key: "guest",     label: "Guest"     },
-                  ...(showCreated   ? [{ key: "created"   as SortKey, label: "Created"   }] : []),
-                  ...(showConfirmed ? [{ key: "confirmed" as SortKey, label: "Confirmed" }] : []),
-                  ...(showMeeting   ? [{ key: "meeting"   as SortKey, label: "Meeting"   }] : []),
-                  { key: "status",    label: "Status"    },
+                const headerCols: { key: SortKey | "gcal"; label: string; sortable: boolean }[] = [
+                  { key: "event",     label: "Event",     sortable: true  },
+                  { key: "guest",     label: "Guest",     sortable: true  },
+                  ...(showCreated   ? [{ key: "created"   as SortKey, label: "Created",   sortable: true  }] : []),
+                  ...(showConfirmed ? [{ key: "confirmed" as SortKey, label: "Confirmed", sortable: true  }] : []),
+                  ...(showMeeting   ? [{ key: "meeting"   as SortKey, label: "Meeting",   sortable: true  }] : []),
+                  ...(showGcal      ? [{ key: "gcal"      as const,   label: "GCal",      sortable: false }] : []),
+                  { key: "status",    label: "Status",    sortable: true  },
                 ];
 
                 return (
@@ -749,14 +752,21 @@ export function EventLinksPageContent() {
                       style={{ gridTemplateColumns }}
                       role="row"
                     >
-                      {headerCols.map(({ key, label }) => {
-                        const active = sortKey === key;
+                      {headerCols.map(({ key, label, sortable }) => {
+                        if (!sortable) {
+                          return (
+                            <div key={key} className="uppercase tracking-wider">
+                              {label}
+                            </div>
+                          );
+                        }
+                        const active = sortKey === (key as SortKey);
                         const arrow = active ? (sortDir === "asc" ? " ↑" : " ↓") : "";
                         return (
                           <button
                             key={key}
                             type="button"
-                            onClick={() => toggleSort(key)}
+                            onClick={() => toggleSort(key as SortKey)}
                             className={`text-left uppercase tracking-wider transition hover:text-secondary ${
                               active ? "text-accent" : ""
                             }`}
@@ -882,26 +892,44 @@ export function EventLinksPageContent() {
                                     <span className="text-[11px] text-muted tabular-nums">
                                       {formatCompactTime(s.agreedTime)}
                                     </span>
-                                    {isConfirmed && (() => {
-                                      const rsvp = gcalStatuses[s.id];
-                                      if (!rsvp || rsvp === "none") return null;
-                                      const rsvpMap = {
-                                        accepted:    { label: "✓ Accepted",  cls: "text-green-600 dark:text-green-400" },
-                                        tentative:   { label: "~ Tentative", cls: "text-amber-600 dark:text-amber-400" },
-                                        declined:    { label: "✗ Declined",  cls: "text-red-600 dark:text-red-400" },
-                                        needsAction: { label: "No reply",    cls: "text-muted" },
-                                      } as const;
-                                      const entry = rsvpMap[rsvp as keyof typeof rsvpMap];
-                                      if (!entry) return null;
-                                      return (
-                                        <span className={`text-[10px] font-medium ${entry.cls}`}>
-                                          {entry.label}
-                                        </span>
-                                      );
-                                    })()}
                                   </div>
                                 ) : (
                                   <span className="text-[12px] text-muted">—</span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* GCal — RSVP status + Open link — Confirmed + All Events */}
+                            {showGcal && (
+                              <div className="flex flex-col gap-0.5">
+                                {isConfirmed && (() => {
+                                  const rsvp = gcalStatuses[s.id];
+                                  const rsvpMap = {
+                                    accepted:    { label: "✓ Accepted",  cls: "text-green-600 dark:text-green-400" },
+                                    tentative:   { label: "~ Tentative", cls: "text-amber-600 dark:text-amber-400" },
+                                    declined:    { label: "✗ Declined",  cls: "text-red-600 dark:text-red-400" },
+                                    needsAction: { label: "No reply",    cls: "text-muted" },
+                                    none:        { label: "No reply",    cls: "text-muted" },
+                                  } as const;
+                                  const entry = rsvp ? rsvpMap[rsvp as keyof typeof rsvpMap] : null;
+                                  return entry ? (
+                                    <span className={`text-[11px] font-medium ${entry.cls}`}>
+                                      {entry.label}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[11px] text-muted/40">—</span>
+                                  );
+                                })()}
+                                {isConfirmed && s.agreedTime && (
+                                  <a
+                                    href={buildGcalDayUrl(s.agreedTime)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[11px] text-accent hover:text-accent/70 transition-colors"
+                                    data-testid={`desktop-event-links-gcal-${s.id}`}
+                                  >
+                                    Open ↗
+                                  </a>
                                 )}
                               </div>
                             )}
@@ -916,23 +944,11 @@ export function EventLinksPageContent() {
                               </span>
                             </div>
 
-                      {/* Action column — Google Cal (Confirmed) · Cancel
-                          (live meetings) · Open (terminal) · Archive /
-                          Unarchive (always available; one-click, no
-                          confirm). Archive is link-level; Cancel is
-                          meeting-level. */}
+                      {/* Action column — Cancel (live meetings) · Open
+                          (terminal) · Archive / Unarchive (always
+                          available; one-click, no confirm). GCal link
+                          moved to GCal column. */}
                       <div className="flex items-center justify-end gap-3 text-[12px]">
-                        {isConfirmed && s.agreedTime && (
-                          <a
-                            href={buildGcalDayUrl(s.agreedTime)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-accent hover:text-accent/80 transition-colors flex items-center gap-1"
-                            data-testid={`desktop-event-links-gcal-${s.id}`}
-                          >
-                            Google Calendar <span aria-hidden>↗</span>
-                          </a>
-                        )}
                         {(isConfirmed || isCoordinating) && (
                           <button
                             type="button"
