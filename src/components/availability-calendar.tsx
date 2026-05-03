@@ -662,9 +662,9 @@ function LocationNotice({
   onClearLocation?: () => void;
 }) {
   return (
-    <div className="mt-3 flex items-start gap-1.5 rounded-md bg-amber-950/40 border border-amber-900/50 px-2 py-1.5">
+    <div className="mt-3 flex items-start gap-1.5 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-950/40 dark:border-amber-900/50 px-2 py-1.5">
       <span className="text-amber-400 text-[11px] mt-px">📍</span>
-      <p className="text-[10px] text-amber-300 leading-tight flex-1">
+      <p className="text-[10px] text-amber-700 dark:text-amber-300 leading-tight flex-1">
         Currently in {currentLocation.label}
         {currentLocation.until ? ` until ${currentLocation.until}` : ""}.
         In-person meetings not available.

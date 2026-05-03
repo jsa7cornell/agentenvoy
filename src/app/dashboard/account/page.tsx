@@ -947,23 +947,23 @@ function DevTools() {
       <h2 className="text-[10px] font-bold uppercase tracking-widest text-amber-400 mb-3">
         🛠 Dev Tools
       </h2>
-      <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4 space-y-3">
+      <div className="bg-amber-50 border border-amber-200 dark:bg-amber-500/5 dark:border-amber-500/20 rounded-xl p-4 space-y-3">
         <button
           onClick={handleResetAndGo}
           disabled={resetting}
-          className="w-full px-4 py-3 text-sm font-medium text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg hover:bg-amber-500/20 transition disabled:opacity-40"
+          className="w-full px-4 py-3 text-sm font-medium text-amber-800 bg-amber-100 border border-amber-300 dark:text-amber-300 dark:bg-amber-500/10 dark:border-amber-500/30 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-500/20 transition disabled:opacity-40"
         >
           {resetting ? "Resetting..." : "Reset & Test Onboarding →"}
         </button>
         <button
           onClick={handleCreateTestAccount}
           disabled={creating}
-          className="w-full px-3 py-2 text-xs font-medium text-amber-400/70 border border-amber-500/20 rounded-lg hover:bg-amber-500/10 transition disabled:opacity-40"
+          className="w-full px-3 py-2 text-xs font-medium text-amber-700 border border-amber-300 dark:text-amber-400/70 dark:border-amber-500/20 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-500/10 transition disabled:opacity-40"
         >
           {creating ? "Creating..." : "Create Throwaway Test Account"}
         </button>
         {devMessage && (
-          <p className="text-xs text-amber-300">{devMessage}</p>
+          <p className="text-xs text-amber-700 dark:text-amber-300">{devMessage}</p>
         )}
         <p className="text-[10px] text-muted">
           Reset clears your onboarding state. Reload the dashboard to restart onboarding.

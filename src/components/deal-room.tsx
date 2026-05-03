@@ -1508,7 +1508,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   const statusConfigs: Record<string, { label: string; color: string; border: string; dot: string }> = {
     active: { label: "Scheduling", color: "text-zinc-400", border: "border-zinc-700", dot: "bg-zinc-500" },
-    proposed: { label: "Proposed", color: "text-amber-400", border: "border-amber-500/25", dot: "bg-amber-400" },
+    proposed: { label: "Proposed", color: "text-amber-400", border: "border-amber-300 dark:border-amber-500/25", dot: "bg-amber-400" },
     agreed: { label: "Confirmed", color: "text-emerald-400", border: "border-emerald-500/25", dot: "bg-emerald-400" },
     cancelled: { label: "Cancelled", color: "text-red-400", border: "border-red-500/25", dot: "bg-red-400" },
     escalated: { label: "Escalated", color: "text-orange-400", border: "border-orange-500/25", dot: "bg-orange-400" },
@@ -1566,7 +1566,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         justConfirmedGlow
           ? "ring-2 ring-emerald-400/60 bg-emerald-500/10 shadow-[0_0_24px_rgba(16,185,129,0.35)] scale-[1.01]"
           : statusAnimating
-            ? "ring-1 " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-500/40 bg-amber-500/5")
+            ? "ring-1 " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-300 bg-amber-50 dark:ring-amber-500/40 dark:bg-amber-500/5")
             : ""
       }`}>
         {/* Row 1: Title + status. The activity emoji prefixes the title per
@@ -1699,15 +1699,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             the meeting is confirmed, we just couldn't auto-add it to GCal.
             The .ics download in the actions row below remains the floor. */}
         {isHost && confirmed && calendarWriteUnavailable && (
-          <div className="ml-5 mt-2.5 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+          <div className="ml-5 mt-2.5 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/5 px-3 py-2">
             <span className="text-amber-400 text-sm leading-5">⚠</span>
-            <div className="flex-1 text-xs text-amber-200/90 leading-5">
+            <div className="flex-1 text-xs text-amber-800 dark:text-amber-200/90 leading-5">
               <span className="font-medium">Not on your Google Calendar.</span>{" "}
               Grant calendar write access to auto-add future meetings — or use the .ics download below.
             </div>
             <button
               onClick={writeScopeReconnect.trigger}
-              className="text-xs font-medium text-amber-300 hover:text-amber-200 transition whitespace-nowrap"
+              className="text-xs font-medium text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-200 transition whitespace-nowrap"
             >
               Grant access
             </button>
@@ -1999,8 +1999,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               key={`${keyPrefix}-slot-compute-failed`}
               className="flex justify-start"
             >
-              <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-amber-500/10 border border-amber-500/20 px-4 py-3 text-sm text-amber-200 leading-snug">
-                <div className="text-[10px] font-bold uppercase tracking-wider mb-1 text-amber-300">
+              <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200 leading-snug">
+                <div className="text-[10px] font-bold uppercase tracking-wider mb-1 text-amber-700 dark:text-amber-300">
                   Envoy
                 </div>
                 <div>
@@ -2010,7 +2010,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                     onClick={() => {
                       if (typeof window !== "undefined") window.location.reload();
                     }}
-                    className="underline underline-offset-2 hover:text-amber-100"
+                    className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100"
                   >
                     Refresh to try again
                   </button>
@@ -2080,7 +2080,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       if (bilateralByDay && Object.keys(bilateralByDay).length > 0) return null;
       if (calendarDenied) {
         return (
-          <div className="mb-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-200 leading-snug">
+          <div className="mb-2 px-3 py-2 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 text-[11px] text-amber-800 dark:text-amber-200 leading-snug">
             We didn&apos;t get permission to read your calendar — that&apos;s okay,
             you can still pick from the times below.
           </div>
@@ -2316,8 +2316,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 <div key={msg.id}>
                   {dateSeparator}
                   <div className="flex justify-end">
-                    <div className="max-w-[70%] rounded-lg px-3 py-1.5 text-xs bg-amber-900/30 border border-amber-700/40 text-amber-300">
-                      <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-500 mr-1.5">Note</span>
+                    <div className="max-w-[70%] rounded-lg px-3 py-1.5 text-xs bg-amber-50 border border-amber-200 dark:bg-amber-900/30 dark:border-amber-700/40 text-amber-800 dark:text-amber-300">
+                      <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-600 dark:text-amber-500 mr-1.5">Note</span>
                       {msg.content}
                     </div>
                   </div>
@@ -2995,11 +2995,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
             return (
               <div
-                className="border-b border-amber-800/40 bg-amber-900/10 px-4 py-2.5 flex items-center gap-3 text-sm flex-shrink-0"
+                className="border-b border-amber-200 bg-amber-50 dark:border-amber-800/40 dark:bg-amber-900/10 px-4 py-2.5 flex items-center gap-3 text-sm flex-shrink-0"
                 data-testid="tz-recovery-banner"
               >
                 <span role="img" aria-label="clock">🕐</span>
-                <span className="flex-1 text-amber-100/90">
+                <span className="flex-1 text-amber-900 dark:text-amber-100/90">
                   Looks like you&apos;re in <strong>{prettyTz(browserTz)}</strong>.
                   This thread is currently in <strong>{prettyTz(sessionTimezone)}</strong>.
                 </span>
@@ -3014,7 +3014,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 <button
                   type="button"
                   onClick={dismiss}
-                  className="px-3 py-1 rounded-md text-xs font-medium text-amber-200 hover:text-amber-100 hover:bg-amber-900/20 transition"
+                  className="px-3 py-1 rounded-md text-xs font-medium text-amber-800 hover:text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:text-amber-100 dark:hover:bg-amber-900/20 transition"
                   aria-label="Keep current timezone"
                 >
                   Keep {prettyTz(sessionTimezone)}
@@ -3033,7 +3033,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (!slotsByDay || Object.keys(slotsByDay).length === 0) return null;
             if (calendarDenied) {
               return (
-                <div className="md:hidden border-b border-secondary flex-shrink-0 px-4 py-2 text-[11px] text-amber-200 bg-amber-500/10 leading-snug">
+                <div className="md:hidden border-b border-secondary flex-shrink-0 px-4 py-2 text-[11px] text-amber-800 bg-amber-50 dark:text-amber-200 dark:bg-amber-500/10 leading-snug">
                   We didn&apos;t get permission to read your calendar — that&apos;s
                   okay, pick a time below.
                 </div>

@@ -61,10 +61,10 @@ export function ScopeInterstitial() {
   if (!missingWrite || dismissed) return reconnect.modal;
 
   return (
-    <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5">
+    <div className="bg-amber-50 border-b border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 px-4 py-2.5">
       <div className="max-w-5xl mx-auto flex items-center gap-3">
         <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
-        <div className="flex-1 text-xs text-amber-100 leading-snug">
+        <div className="flex-1 text-xs text-amber-900 dark:text-amber-100 leading-snug">
           <span className="font-medium">Calendar write access needed.</span>{" "}
           We can read your calendar but can&apos;t put confirmed meetings on it.
           Grant write access so Envoy can add confirmed meetings.
@@ -72,7 +72,7 @@ export function ScopeInterstitial() {
         <button
           type="button"
           onClick={reconnect.trigger}
-          className="text-[11px] font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 px-3 py-1 rounded-md transition flex-shrink-0"
+          className="text-[11px] font-semibold bg-amber-100 hover:bg-amber-200 text-amber-900 dark:bg-amber-500/20 dark:hover:bg-amber-500/30 dark:text-amber-100 px-3 py-1 rounded-md transition flex-shrink-0"
         >
           Grant access
         </button>
@@ -89,7 +89,7 @@ export function ScopeInterstitial() {
               /* ignore */
             }
           }}
-          className="text-amber-200/60 hover:text-amber-100 text-xs flex-shrink-0"
+          className="text-amber-600 hover:text-amber-900 dark:text-amber-200/60 dark:hover:text-amber-100 text-xs flex-shrink-0"
           title="Dismiss"
         >
           ✕

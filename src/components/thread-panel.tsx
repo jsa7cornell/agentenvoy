@@ -210,8 +210,8 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
           if (msg.role === "host_note") {
             return (
               <div key={msg.id} className="self-end ml-auto max-w-[80%]">
-                <div className="rounded-lg px-3 py-1.5 text-xs bg-amber-500/10 border border-amber-500/20 text-amber-300">
-                  <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-500 mr-1.5">Note</span>
+                <div className="rounded-lg px-3 py-1.5 text-xs bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 text-amber-800 dark:text-amber-300">
+                  <span className="font-semibold uppercase tracking-wider text-[9px] text-amber-600 dark:text-amber-500 mr-1.5">Note</span>
                   {msg.content}
                 </div>
               </div>

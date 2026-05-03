@@ -77,8 +77,8 @@ export function GcalUpdateCard({ proposal, onConfirmed }: GcalUpdateCardProps) {
   }
 
   return (
-    <div className="rounded-lg border border-amber-700/40 bg-amber-950/20 p-3 space-y-3 text-sm">
-      <p className="font-medium text-amber-200 text-xs uppercase tracking-wide">
+    <div className="rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700/40 dark:bg-amber-950/20 p-3 space-y-3 text-sm">
+      <p className="font-medium text-amber-800 dark:text-amber-200 text-xs uppercase tracking-wide">
         Envoy is proposing an update to the confirmed meeting
       </p>
 

@@ -2062,7 +2062,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
         <div className="max-w-3xl mx-auto w-full">
         {/* Calendar connection prompt — only show for calibrated users without calendar */}
         {!calendarConnected && isCalibrated && (
-          <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 mb-3">
+          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 rounded-xl px-4 py-3 mb-3">
             <span className="text-amber-400 text-lg flex-shrink-0">&#128197;</span>
             <div className="flex-1">
               <p className="text-sm text-primary">Connect your Google Calendar</p>
