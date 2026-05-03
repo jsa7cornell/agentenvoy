@@ -3,11 +3,15 @@
 /**
  * Mobile dashboard chrome — v2.
  *
- * Three-element topbar (avatar | "Event Links" header pill | calendar icon)
- * paired with three slide-style sheets:
+ * Three-element topbar (avatar | "Event Links" header pill | calendar icon).
+ * Each button calls `openPanel(...)` on the shared `MobilePanelsProvider`,
+ * which owns the slide-in drawers and renders them once at the layout level.
+ * Hosting state in the provider lets contextual nudges (help bubbles, deep-
+ * link CTAs) open the same panels without owning their own drawer copy.
  *
- * - Avatar (left)        → slide-down Preferences drawer.
- * - Header pill (center) → slide-up Event Links sheet.
+ * Sheets:
+ * - Avatar (left)         → slide-down Preferences drawer.
+ * - Header pill (center)  → slide-up Event Links sheet.
  * - Calendar icon (right) → slide-down Availability drawer (same chrome as
  *   Preferences). The legacy `/dashboard/availability` route still exists for
  *   direct URL access and renders the same `<AvailabilityPanel>` underneath.
@@ -28,9 +32,7 @@
 
 import { useEffect, useState } from "react";
 import type { Session } from "next-auth";
-import { PreferencesDrawer } from "./preferences-drawer";
-import { EventLinksSheet } from "./event-links-sheet";
-import { AvailabilityDrawer } from "./availability-drawer";
+import { useMobilePanels } from "./mobile-panels-context";
 
 interface MobileDashboardHeaderProps {
   session: Session;
@@ -39,9 +41,7 @@ interface MobileDashboardHeaderProps {
 const BADGE_COUNTS_REVALIDATE_MS = 30_000;
 
 export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
-  const [prefsOpen, setPrefsOpen] = useState(false);
-  const [linksOpen, setLinksOpen] = useState(false);
-  const [availabilityOpen, setAvailabilityOpen] = useState(false);
+  const { openName, openPanel } = useMobilePanels();
   const [awaitingAck, setAwaitingAck] = useState(0);
 
   // Fetch the cyan-dot count on mount and revalidate every 30s. Defensive: a
@@ -80,43 +80,12 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
 
   const hasAwaitingAck = awaitingAck > 0;
 
-  // Lock body scroll while any sheet is open. Mobile sheets cover the
-  // viewport; without this the underlying page scrolls when users drag on
-  // the overlay.
-  useEffect(() => {
-    if (!prefsOpen && !linksOpen && !availabilityOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [prefsOpen, linksOpen, availabilityOpen]);
-
-  // Close the open sheet on Escape — keyboard parity with the desktop popover.
-  useEffect(() => {
-    if (!prefsOpen && !linksOpen && !availabilityOpen) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      setPrefsOpen(false);
-      setLinksOpen(false);
-      setAvailabilityOpen(false);
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [prefsOpen, linksOpen, availabilityOpen]);
-
   const initial =
     session.user?.name?.charAt(0)?.toUpperCase() ||
     session.user?.email?.charAt(0)?.toUpperCase() ||
     "?";
 
-  // The header sets `backdrop-filter: blur(...)` for its scroll halo. Per the
-  // CSS spec, a non-`none` backdrop-filter creates a containing block for any
-  // `position: fixed` descendant — which would clip the drawer/sheet to the
-  // header's box (~56px tall) instead of the viewport. Render the drawer and
-  // sheet as siblings of <header>, not children, so they escape the trap.
   return (
-    <>
     <header
       className="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-secondary flex-shrink-0 flex md:hidden"
       data-testid="mobile-dashboard-header"
@@ -126,12 +95,12 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
         <div className="justify-self-start">
           <button
             type="button"
-            onClick={() => setPrefsOpen(true)}
+            onClick={() => openPanel("preferences")}
             className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center"
             title="Preferences"
             aria-label="Open Preferences"
             aria-haspopup="dialog"
-            aria-expanded={prefsOpen}
+            aria-expanded={openName === "preferences"}
             data-testid="mobile-header-avatar"
           >
             {session.user?.image ? (
@@ -156,12 +125,12 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
         <div className="justify-self-center">
           <button
             type="button"
-            onClick={() => setLinksOpen(true)}
+            onClick={() => openPanel("eventLinks")}
             className="relative inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-surface-secondary/60 border border-secondary text-primary text-xs font-medium hover:border-accent/50 transition"
             title="Links & Events"
             aria-label="Open Links and Events"
             aria-haspopup="dialog"
-            aria-expanded={linksOpen}
+            aria-expanded={openName === "eventLinks"}
             data-testid="mobile-header-event-links"
           >
             <svg
@@ -198,12 +167,12 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
         <div className="justify-self-end">
           <button
             type="button"
-            onClick={() => setAvailabilityOpen(true)}
+            onClick={() => openPanel("availability")}
             className="w-9 h-9 rounded-full bg-surface-secondary/60 border border-secondary flex items-center justify-center text-secondary hover:text-primary hover:border-accent/50 transition"
             title="Availability"
             aria-label="Open Availability"
             aria-haspopup="dialog"
-            aria-expanded={availabilityOpen}
+            aria-expanded={openName === "availability"}
             data-testid="mobile-header-availability"
           >
             <svg
@@ -222,21 +191,6 @@ export function MobileDashboardHeader({ session }: MobileDashboardHeaderProps) {
           </button>
         </div>
       </div>
-
     </header>
-    <PreferencesDrawer
-      open={prefsOpen}
-      onClose={() => setPrefsOpen(false)}
-      session={session}
-    />
-    <EventLinksSheet
-      open={linksOpen}
-      onClose={() => setLinksOpen(false)}
-    />
-    <AvailabilityDrawer
-      open={availabilityOpen}
-      onClose={() => setAvailabilityOpen(false)}
-    />
-    </>
   );
 }

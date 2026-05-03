@@ -23,6 +23,7 @@ import { useSession } from "next-auth/react";
 import { useTheme } from "next-themes";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { HelpBubble } from "@/components/bubbles/help-bubble";
 
 export type ThemeMode = "light" | "dark" | "auto";
 
@@ -166,42 +167,18 @@ export function ThemePreferenceSync() {
 
   if (!showExplainer) return null;
 
-  const copy =
+  const message =
     showExplainer === "dark"
       ? "I just switched to dark — it's after 8pm in your timezone. I'll flip back to light in the morning. You can pin a preference in Account if you'd rather."
       : "I just switched to light — it's daytime in your timezone. I'll flip to dark at 8pm. You can pin a preference in Account if you'd rather.";
 
   return (
-    <div
-      className="fixed bottom-4 right-4 z-[90] max-w-sm rounded-xl border border-purple-500/40 bg-surface shadow-lg px-4 py-3"
-      role="status"
-    >
-      <div className="flex items-start gap-3">
-        <div className="flex-1 text-sm text-primary leading-relaxed">{copy}</div>
-        <button
-          type="button"
-          onClick={dismissExplainer}
-          aria-label="Dismiss"
-          className="text-muted hover:text-primary transition text-lg leading-none -mt-0.5"
-        >
-          ×
-        </button>
-      </div>
-      <div className="flex justify-end gap-2 mt-2">
-        <a
-          href="/dashboard/account"
-          className="text-[11px] text-purple-400 hover:text-purple-300 underline underline-offset-2"
-        >
-          Open preferences →
-        </a>
-        <button
-          type="button"
-          onClick={dismissExplainer}
-          className="text-[11px] text-muted hover:text-primary transition"
-        >
-          Got it
-        </button>
-      </div>
-    </div>
+    <HelpBubble
+      id="theme-auto-flip"
+      message={message}
+      target="preferences"
+      targetLabel="Open preferences"
+      onDismiss={dismissExplainer}
+    />
   );
 }
