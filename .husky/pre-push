@@ -1,2 +1,8 @@
 export PATH="/opt/homebrew/bin:$PATH"
+# Type-check against committed state only, not dirty working tree.
+# Stashing unstaged changes ensures the hook sees exactly what CI will build.
+git stash -q --keep-index
 npm run check
+RESULT=$?
+git stash pop -q 2>/dev/null || true
+exit $RESULT

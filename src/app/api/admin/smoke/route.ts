@@ -150,9 +150,9 @@ async function probeMigrations(): Promise<ProbeResult> {
     // FS having more dirs than DB rows = unapplied migrations = bad.
     // DB having more rows than FS dirs = normal after a migration flatten
     // (old rows stay in _prisma_migrations; filesystem was collapsed to a
-    // baseline). Allow up to 1 extra FS dir (migration added mid-deploy).
+    // baseline). Zero tolerance: any unapplied migration is a hard failure.
     const fsAhead = Math.max(0, fsCount - dbCount);
-    const ok = fsAhead <= 1;
+    const ok = fsAhead === 0;
     return {
       ok,
       fsCount,
