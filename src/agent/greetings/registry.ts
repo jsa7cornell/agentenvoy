@@ -63,6 +63,14 @@ import { formatLabel } from "@/lib/greeting-template";
 import { isSingleSlotExclusive } from "@/lib/intent";
 import type { Steering } from "@/lib/intent";
 import type { LinkRecurrence } from "@/lib/recurrence";
+import {
+  buildCalendarPitch,
+  buildDeferralFieldsList,
+  buildGuestPickHint,
+  buildSuggestAltClause,
+  type GuestGuidanceConfig,
+  type GuestPicksConfig,
+} from "./clauses";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -180,46 +188,43 @@ export interface GreetingInput {
   timingLabel: string | null;
 
   /**
-   * "Let me know where works for you[ — John suggested Central Park]." or null.
-   * Pre-built so the registry renderer doesn't repeat the suggestion-format
-   * logic inline. Fed into proposal/find-time branches only.
+   * Raw `link.parameters.guestPicks` config. Templates compose clauses from
+   * this via `clauses.ts` helpers (`buildGuestPickHint`, `buildSuggestAltClause`,
+   * `buildDeferralFieldsList`).
    *
-   * **Suppressed when `deferralFieldsList` is non-null** — the new unified
-   * opener/closing format (2026-04-29) absorbs the same information at both
-   * ends of the greeting, so this standalone block becomes redundant.
+   * Refactored 2026-05-03 from four pre-rendered string fields
+   * (`guestPickHint` / `suggestAltClause` / `deferralFieldsList` / `calendarPitch`)
+   * into raw inputs — see [GREETINGS.md §11.A].
    */
-  guestPickHint: string | null;
+  guestPicks: GuestPicksConfig | null;
 
   /**
-   * Dimension-aware suggest-alt clause. Pre-built so the registry doesn't
-   * need to know which dimensions the host set. Null when:
-   *   - steering is narrow/exclusive, or
-   *   - this is an office-hours link, or
-   *   - neither format nor duration is set.
-   *
-   * **Suppressed when `deferralFieldsList` is non-null** for the same reason
-   * as `guestPickHint` above.
+   * Raw `link.parameters.guestGuidance` config (location suggestions, tone).
+   * Templates read `tone` directly; `suggestions.locations` flow into
+   * `buildGuestPickHint`.
    */
-  suggestAltClause: string | null;
+  guestGuidance: GuestGuidanceConfig | null;
 
   /**
-   * Pre-formatted human-readable deferred-fields list — e.g. "the location",
-   * "the length and location", "the day, length, and location". Null when no
-   * fields are deferred.
-   *
-   * When non-null, the proposal/find-time templates inject it at TWO points:
-   * (1) opener — "...proposing X but wanted to check if you had preferences
-   * in terms of {list}." (2) closing — "Pick a time below and let us know
-   * any suggestions on {list}." Decided 2026-04-29 per John's feedback after
-   * observing Larry's greeting was silent on the deferred location.
+   * Number of future slots with score ≤ 1 (matches the picker's offerable
+   * predicate). Drives `buildCalendarPitch` — pitch fires only when >1
+   * bookable slot exists AND the viewer is anonymous.
    */
-  deferralFieldsList: string | null;
+  bookableSlotCount: number;
 
   /**
-   * Calendar-connect pitch ("…if you connect your calendar I can…"). Shown
-   * only when `bookableSlotCount > 1 && !isGuest`. Null otherwise.
+   * Whether the viewer is a logged-in guest (authenticated User who is
+   * NOT the host). Suppresses the calendar-connect pitch — logged-in
+   * guests already have app-level calendar access.
    */
-  calendarPitch: string | null;
+  isGuest: boolean;
+
+  /**
+   * Whether the link's effective steering is narrow or exclusive. Used by
+   * `buildSuggestAltClause` and `buildDeferralFieldsList` to skip clauses
+   * the host explicitly declined to defer.
+   */
+  isDirective: boolean;
 
   /** Sanitized host tone string from guidance, surfaced verbatim. May be null. */
   toneLine: string | null;
@@ -508,7 +513,8 @@ const anonymousTemplate: GreetingTemplate = {
     "and on reusables backed by a recurring window (Office Hours).",
   match: (input) => input.isAnonymousLink,
   render: (input) => {
-    const { hostFirstName, isOfficeHoursLink, rawTopic, meetingDescShort, calendarPitch } = input;
+    const { hostFirstName, isOfficeHoursLink, rawTopic, meetingDescShort } = input;
+    const calendarPitch = buildCalendarPitch(input);
     // Office-hours children carry a `topic` (e.g. "Coaching hours"). Bare
     // primary links don't — render the default offer instead.
     const hostTopic =
@@ -537,19 +543,29 @@ const proposalTemplate: GreetingTemplate = {
     "(format / duration / activity / location).",
   match: (input) => !input.isAnonymousLink && hasProposalSubstance(input),
   render: (input) => {
-    const { greeteeName, hostFirstName, toneLine, guestPickHint, suggestAltClause, calendarPitch, deferralFieldsList } = input;
+    const { greeteeName, hostFirstName, toneLine, guestPicks, guestGuidance, isDirective, isOfficeHoursLink } = input;
     const withClause = buildWithClause(input);
     const proposalPhrase = buildProposalPhrase(input);
 
+    // Compose clauses inline via the helpers in `clauses.ts`. Each helper
+    // returns its rendered string or null; gating logic for the unified
+    // opener/closing fold (2026-04-29) is applied here in the template:
+    // when `deferralFieldsList` is set, it suppresses tone, guestPickHint,
+    // and the standalone suggest-alt — those become redundant with the
+    // unified opener+closing.
+    const deferralFieldsList = buildDeferralFieldsList({ guestPicks, isDirective, isOfficeHoursLink });
+    const calendarPitch = buildCalendarPitch(input);
+    const guestPickHint = deferralFieldsList ? null : buildGuestPickHint({ guestPicks, guestGuidance, hostFirstName });
+    const suggestAltClause = deferralFieldsList ? null : buildSuggestAltClause({ guestPicks, isDirective, isOfficeHoursLink });
+
     // Unified opener — when fields are deferred, append "but wanted to
-    // check if you had preferences in terms of {list}". Replaces the
-    // previously-split standalone `guestPickHint` block (2026-04-29 fold).
+    // check if you had preferences in terms of {list}".
     const openerLine = deferralFieldsList
       ? `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${proposalPhrase} but wanted to check if you had preferences in terms of ${deferralFieldsList}.`
       : `👋 ${greeteeName}! I'm scheduling time ${withClause}. ${hostFirstName} is proposing ${proposalPhrase}.`;
 
     // Unified closing — when fields are deferred, append "and let us know
-    // any suggestions on {list}". Subsumes the legacy `suggestAltClause`
+    // any suggestions on {list}". Subsumes the standalone `suggestAltClause`
     // for the deferral case.
     let closingBase: string;
     if (deferralFieldsList) {
@@ -570,13 +586,9 @@ const proposalTemplate: GreetingTemplate = {
     // when the host's create_link message expressed deferral, which then
     // duplicates the opener+closing copy. Skip in deferral cases; legitimate
     // flavor tone (e.g. "It's his first week back.") still renders for
-    // non-deferral greetings. Live-fix from 2026-04-29 testing — Larry's
-    // greeting at /meet/johnanderson/gmgf3k.
+    // non-deferral greetings.
     if (toneLine && !deferralFieldsList) blocks.push(toneLine);
-    // guestPickHint suppressed when deferralFieldsList is set — same info,
-    // already absorbed into opener + closing above. Legacy callers that
-    // don't yet populate deferralFieldsList still see the standalone block.
-    if (!deferralFieldsList && guestPickHint) blocks.push(guestPickHint);
+    if (guestPickHint) blocks.push(guestPickHint);
     blocks.push(closing);
     return blocks.join("\n\n");
   },
@@ -598,8 +610,14 @@ const findTimeTemplate: GreetingTemplate = {
     "deferred format / duration / activity / location to the guest.",
   match: (input) => !input.isAnonymousLink && !hasProposalSubstance(input),
   render: (input) => {
-    const { greeteeName, hostFirstName, timingLabel, toneLine, guestPickHint, suggestAltClause, calendarPitch, deferralFieldsList } = input;
+    const { greeteeName, hostFirstName, timingLabel, toneLine, guestPicks, guestGuidance, isDirective, isOfficeHoursLink } = input;
     const findTimeWithClause = buildFindTimeWithClause(input);
+
+    // Same clause-composition + suppression pattern as proposalTemplate.
+    const deferralFieldsList = buildDeferralFieldsList({ guestPicks, isDirective, isOfficeHoursLink });
+    const calendarPitch = buildCalendarPitch(input);
+    const guestPickHint = deferralFieldsList ? null : buildGuestPickHint({ guestPicks, guestGuidance, hostFirstName });
+    const suggestAltClause = deferralFieldsList ? null : buildSuggestAltClause({ guestPicks, isDirective, isOfficeHoursLink });
 
     // Find-time greeting fires when no structural fields are set — the
     // host has effectively deferred everything. The opener already says
@@ -621,9 +639,8 @@ const findTimeTemplate: GreetingTemplate = {
     const closing = closingParts.join(" ");
 
     const blocks: string[] = [openerLine];
-    // Same tone-line suppression as proposalTemplate — see above.
     if (toneLine && !deferralFieldsList) blocks.push(toneLine);
-    if (!deferralFieldsList && guestPickHint) blocks.push(guestPickHint);
+    if (guestPickHint) blocks.push(guestPickHint);
     blocks.push(closing);
     return blocks.join("\n\n");
   },

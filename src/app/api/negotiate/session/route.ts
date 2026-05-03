@@ -30,9 +30,7 @@ import {
 } from "@/lib/greeting-template";
 import {
   selectGreeting,
-  formatDeferralFieldsList,
   type GreetingInput,
-  type DeferralFieldNoun,
 } from "@/agent/greetings/registry";
 import { readRecurrence } from "@/lib/recurrence";
 // formatAvailabilitySlotList / formatAvailabilityProse / formatStretchDays /
@@ -941,8 +939,10 @@ export async function POST(req: NextRequest) {
     const isDirective =
       effectiveSteering === "narrow" || effectiveSteering === "exclusive";
 
-    // Multi-slot signal drives the calendar-connect pitch. "Bookable" = future
-    // slot with score ≤ 1 (matches the widget's offerable predicate).
+    // Bookable-slot count drives the calendar-connect pitch in `clauses.ts`.
+    // "Bookable" = future slot with score ≤ 1 (matches the widget's offerable
+    // predicate). The pitch itself is composed inside the templates via
+    // `buildCalendarPitch`.
     const nowMs = Date.now();
     const bookableSlotCount = filteredSlots.filter(
       (s) =>
@@ -950,59 +950,6 @@ export async function POST(req: NextRequest) {
         typeof s.score === "number" &&
         s.score <= 1,
     ).length;
-    const isMultiSlot = bookableSlotCount > 1;
-    const calendarPitch = isMultiSlot && !isGuest
-      ? "Also, if you connect your calendar I can automagically find the best fit for you! 🗓️"
-      : null;
-
-    // Dimension-aware suggest-alt clause for the named-invitee greeting
-    // branches. Gated on guestPicks: only promise flexibility on dimensions
-    // where the host has explicitly opted guests in. Otherwise the composer
-    // refuses the change and the greeting becomes a broken promise — see the
-    // 2026-04-28 reusable-link guest-picks proposal (B5) and the screenshot
-    // regression where Envoy invited "suggest a different meeting length",
-    // accepted "45 mins", then refused with "I can't adjust that here."
-    // Anonymous reusable links use the separate seeded follow-up message
-    // below; this clause stays for the named-invitee contextual-link path.
-    const suggestAltClause = ((): string | null => {
-      if (isDirective || isOfficeHoursLink) return null;
-      const fmtPick = !!guestPicks?.format;
-      const durPick =
-        guestPicks?.duration === true ||
-        (Array.isArray(guestPicks?.duration) && guestPicks.duration.length > 0);
-      if (!fmtPick && !durPick) return null;
-      if (fmtPick && durPick)
-        return "and feel free to suggest a different format or meeting length if that's better for you";
-      if (fmtPick)
-        return "and feel free to suggest a different format if that's better for you";
-      return "and feel free to suggest a different meeting length if that's better for you";
-    })();
-
-    // Guest-pick hint — folds the old `hasGuestPicks` / buildOpenWindowGreeting
-    // special case inline. Date-pick is intentionally suppressed (the calendar
-    // widget IS the day picker).
-    const guestPickHint = ((): string | null => {
-      if (!guestPicks) return null;
-      const locPick = !!guestPicks.location;
-      const durPick = guestPicks.duration === true || (Array.isArray(guestPicks.duration) && guestPicks.duration.length > 0);
-      let lead: string | null = null;
-      if (locPick && durPick) lead = "where and how long works for you";
-      else if (locPick) lead = "where works for you";
-      else if (durPick) lead = "how long works for you";
-      if (!lead) return null;
-      let hint = `Let me know ${lead}`;
-      const locSugs = guestGuidance?.suggestions?.locations || [];
-      if (locPick && locSugs.length > 0) {
-        if (locSugs.length === 1) {
-          hint += ` — ${hostFirstName} suggested ${locSugs[0]}`;
-        } else if (locSugs.length === 2) {
-          hint += ` — ${hostFirstName} suggested ${locSugs[0]} or ${locSugs[1]}`;
-        } else {
-          hint += ` — ${hostFirstName} suggested ${locSugs.slice(0, -1).join(", ")}, or ${locSugs[locSugs.length - 1]}`;
-        }
-      }
-      return `${hint}.`;
-    })();
 
     // Pre-filter `rawTopic` for the registry: the anonymous template surfaces
     // it inline, but only when it's a real host-authored topic — generic
@@ -1011,34 +958,10 @@ export async function POST(req: NextRequest) {
     const filteredTopicForRegistry =
       rawTopic && !isGenericTopic(rawTopic) ? rawTopic : null;
 
-    // Unified deferral-fields list — replaces the split guestPickHint /
-    // suggestAltClause patterns with one consistent shape across all four
-    // dimensions (location / duration / format / date). Decided 2026-04-29
-    // per John's feedback that Larry's greeting was silent on the deferred
-    // location ("set up an in-person meeting with Larry — he picks the
-    // spot" produced no "Let me know where works for you" line).
-    //
-    // Skipped for office-hours and directive (single-slot-lock) links
-    // since neither expects guest input on these dimensions.
-    const deferralFieldsList = ((): string | null => {
-      if (isDirective || isOfficeHoursLink) return null;
-      const deferred: DeferralFieldNoun[] = [];
-      if (guestPicks?.location === true) deferred.push("location");
-      if (
-        guestPicks?.duration === true ||
-        (Array.isArray(guestPicks?.duration) && guestPicks.duration.length > 0)
-      ) {
-        deferred.push("length");
-      }
-      if (guestPicks?.format === true || Array.isArray(guestPicks?.format)) {
-        deferred.push("format");
-      }
-      // Date deferral is intentionally NOT inserted — the calendar widget
-      // IS the day picker and it always renders, so saying "let us know
-      // suggestions on the day" reads as redundant. Mirrors the existing
-      // guestPickHint behavior (date-pick is suppressed there too).
-      return formatDeferralFieldsList(deferred);
-    })();
+    // Clause composition (`guestPickHint`, `suggestAltClause`,
+    // `deferralFieldsList`, `calendarPitch`) lives inside the templates via
+    // `clauses.ts`. The route handler passes raw inputs only — see
+    // [GREETINGS.md §11.A] for the 2026-05-03 refactor that moved this out.
 
     // Build the registry input bundle. Mirrors the exact shape the previous
     // inlined branches read; the registry resolver picks the matching
@@ -1060,10 +983,11 @@ export async function POST(req: NextRequest) {
       rawTopic: filteredTopicForRegistry,
       meetingDescShort,
       timingLabel,
-      guestPickHint,
-      suggestAltClause,
-      deferralFieldsList,
-      calendarPitch,
+      guestPicks: guestPicks ?? null,
+      guestGuidance: guestGuidance ?? null,
+      bookableSlotCount,
+      isGuest,
+      isDirective,
       toneLine: guestGuidance?.tone ? guestGuidance.tone : null,
       // Recurring-meeting fields (§5.6 of the 2026-05-01 recurring proposal).
       // `recurrence` is parsed from the Prisma JsonValue; null for non-recurring links.

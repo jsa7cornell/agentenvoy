@@ -51,10 +51,11 @@ function baseInput(overrides: Partial<GreetingInput> = {}): GreetingInput {
     rawTopic: null,
     meetingDescShort: "meeting",
     timingLabel: null,
-    guestPickHint: null,
-    suggestAltClause: null,
-    deferralFieldsList: null,
-    calendarPitch: null,
+    guestPicks: null,
+    guestGuidance: null,
+    bookableSlotCount: 0,
+    isGuest: false,
+    isDirective: false,
     toneLine: null,
     recurrence: null,
     occurrenceIndex: null,
@@ -211,8 +212,9 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
     const input = baseInput({
       isAnonymousLink: true,
       meetingDescShort: "meeting",
-      calendarPitch:
-        "Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
+      // Calendar pitch fires when bookableSlotCount > 1 AND viewer is anonymous.
+      bookableSlotCount: 2,
+      isGuest: false,
     });
     const out = GREETINGS.anonymous.render(input);
     expect(out).toBe(
@@ -270,42 +272,21 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
     );
   });
 
-  it("Branch B-proposal: assembles tone line + guest-pick hint + suggest-alt + calendar pitch", () => {
-    const input = baseInput({
-      greeteeName: "Sarah",
-      effectiveFormat: "video",
-      durationForOpener: 30,
-      toneLine: "Looking forward to it!",
-      guestPickHint:
-        "Let me know where works for you — John suggested Sightglass.",
-      suggestAltClause:
-        "and feel free to suggest a different format or meeting length if that's better for you",
-      calendarPitch:
-        "Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
-    });
-    const out = GREETINGS.proposal.render(input);
-    expect(out).toBe(
-      [
-        "👋 Sarah! I'm scheduling time with you and John. John is proposing a 30 min video call.",
-        "Looking forward to it!",
-        "Let me know where works for you — John suggested Sightglass.",
-        "Pick a time below, and feel free to suggest a different format or meeting length if that's better for you. Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
-      ].join("\n\n"),
-    );
-  });
-
   // ─── Deferral-fields list (2026-04-29 unified opener/closing) ────────────
+  //
+  // The legacy "tone + guest-pick hint + suggest-alt + calendar pitch all flow
+  // through" test was deleted 2026-05-03. That state was unreachable in
+  // production after the 2026-04-29 unified-opener fold: any non-empty
+  // guestPicks triggers `deferralFieldsList`, which suppresses guestPickHint,
+  // suggestAltClause, and toneLine. The deferral-fields tests below cover the
+  // reachable production paths.
 
-  it("Branch B-proposal: with deferralFieldsList, opener appends 'but wanted to check' and closing appends 'let us know any suggestions'", () => {
+  it("Branch B-proposal: with guestPicks.location, opener appends 'but wanted to check' and closing appends 'let us know any suggestions'", () => {
     const input = baseInput({
       greeteeName: "Larry",
       effectiveFormat: "in-person",
       durationForOpener: 60,
-      deferralFieldsList: "the location",
-      // guestPickHint and suggestAltClause are now suppressed when
-      // deferralFieldsList is set — they would render redundant info.
-      guestPickHint: "Let me know where works for you.",
-      suggestAltClause: null,
+      guestPicks: { location: true },
     });
     const out = GREETINGS.proposal.render(input);
     expect(out).toBe(
@@ -316,29 +297,27 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
     );
   });
 
-  it("Branch B-proposal: with two deferred fields, list joins with 'and' (canonical order)", () => {
+  it("Branch B-proposal: two deferred fields render as 'the location and length'", () => {
     const input = baseInput({
       greeteeName: "Larry",
       effectiveFormat: "in-person",
       durationForOpener: 60,
-      deferralFieldsList: "the location and length",
+      guestPicks: { location: true, duration: true },
     });
     const out = GREETINGS.proposal.render(input);
     expect(out).toContain("preferences in terms of the location and length");
     expect(out).toContain("any suggestions on the location and length");
   });
 
-  it("Branch B-proposal: tone line is suppressed when deferralFieldsList is set", () => {
+  it("Branch B-proposal: tone line is suppressed when deferral kicks in", () => {
     // Composers tend to populate guestGuidance.tone with deferral-mirroring
-    // text ("Larry picks the spot and how long — just let him know what
-    // works.") when the host's create_link expressed deferral. That
-    // duplicates the opener+closing copy. Tone is suppressed in deferral
-    // cases — live-fix from /meet/johnanderson/gmgf3k testing 2026-04-29.
+    // text when the host's create_link expressed deferral. That duplicates
+    // the opener+closing copy — suppressed since 2026-04-29.
     const input = baseInput({
       greeteeName: "Larry",
       effectiveFormat: "in-person",
       durationForOpener: 60,
-      deferralFieldsList: "the location",
+      guestPicks: { location: true },
       toneLine: "Larry picks the spot and how long — just let him know what works.",
     });
     const out = GREETINGS.proposal.render(input);
@@ -346,23 +325,23 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
     expect(out).not.toContain("just let him know");
   });
 
-  it("Branch B-proposal: tone line still renders when no deferralFieldsList (legitimate flavor)", () => {
+  it("Branch B-proposal: tone line still renders when guestPicks is null (legitimate flavor)", () => {
     const input = baseInput({
       greeteeName: "Sarah",
       effectiveFormat: "video",
       durationForOpener: 30,
-      deferralFieldsList: null,
+      guestPicks: null,
       toneLine: "It's been a while — looking forward to catching up!",
     });
     const out = GREETINGS.proposal.render(input);
     expect(out).toContain("It's been a while — looking forward to catching up!");
   });
 
-  it("Branch B-find-time: with deferralFieldsList, only the closing carries the 'let us know' suggestion (opener already invites)", () => {
+  it("Branch B-find-time: with guestPicks.location, closing carries the 'let us know' suggestion (opener already invites)", () => {
     const input = baseInput({
       greeteeName: "Sarah",
       // No structural fields → find-time branch fires.
-      deferralFieldsList: "the location",
+      guestPicks: { location: true },
     });
     const out = GREETINGS["find-time"].render(input);
     expect(out).toContain("👋 Sarah! John asked me to find time");
@@ -455,20 +434,19 @@ describe("greeting registry — voice-equivalence (byte-identical to prior inlin
     );
   });
 
-  it("Branch B-find-time: tone + guest-pick hint + calendar pitch all flow through", () => {
+  it("Branch B-find-time: tone + calendar pitch flow through when no deferral fields are set", () => {
     const input = baseInput({
       greeteeName: "Sarah",
+      // guestPicks: null → no deferralFieldsList → tone renders.
       toneLine: "Excited to chat!",
-      guestPickHint: "Let me know how long works for you.",
-      calendarPitch:
-        "Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
+      bookableSlotCount: 2,
+      isGuest: false,
     });
     const out = GREETINGS["find-time"].render(input);
     expect(out).toBe(
       [
         "👋 Sarah! John asked me to find time.",
         "Excited to chat!",
-        "Let me know how long works for you.",
         "Pick a time below. Also, if you connect your calendar I can automagically find the best fit for you! 🗓️",
       ].join("\n\n"),
     );
