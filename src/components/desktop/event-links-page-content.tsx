@@ -588,22 +588,33 @@ export function EventLinksPageContent() {
                       } ${isCancelled ? "opacity-60" : "hover:bg-surface-secondary/30"} transition-colors`}
                       data-testid={`desktop-event-links-row-${bucket}`}
                     >
-                      {/* Event title + sub (linked to deal-room) */}
-                      <div className="min-w-0">
+                      {/* Event title + sub — the whole first cell is the
+                          click target when a deal-room URL exists. The link
+                          wraps both title and subtitle and gets –mx/+px
+                          padding so the hit area extends beyond just the
+                          text glyphs without touching neighbouring columns. */}
+                      <div className="min-w-0 -mx-1">
                         {dealUrl ? (
                           <Link
                             href={dealUrl}
-                            className={`text-[13px] font-medium truncate block hover:text-accent transition-colors ${
-                              isCancelled ? "text-secondary line-through decoration-1" : "text-primary"
+                            className={`flex flex-col px-1 py-1 rounded-md hover:bg-accent/5 transition-colors group ${
+                              isCancelled ? "opacity-100" : ""
                             }`}
                             data-testid={`desktop-event-links-title-${s.id}`}
                           >
-                            {title}
+                            <span className={`text-[13px] font-medium truncate group-hover:text-accent transition-colors ${
+                              isCancelled ? "text-secondary line-through decoration-1" : "text-primary"
+                            }`}>
+                              {title}
+                            </span>
+                            {sub && <span className="text-[11px] text-muted truncate mt-0.5">{sub}</span>}
                           </Link>
                         ) : (
-                          <div className="text-[13px] font-medium text-primary truncate">{title}</div>
+                          <div className="px-1 py-1">
+                            <div className="text-[13px] font-medium text-primary truncate">{title}</div>
+                            {sub && <div className="text-[11px] text-muted truncate mt-0.5">{sub}</div>}
+                          </div>
                         )}
-                        {sub && <div className="text-[11px] text-muted truncate mt-0.5">{sub}</div>}
                       </div>
 
                       {/* Guest */}
