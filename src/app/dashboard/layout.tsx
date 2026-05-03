@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { ScopeInterstitial } from "@/components/oauth/scope-interstitial";
+import { MobilePanelsProvider } from "@/components/mobile/mobile-panels-context";
 
 export default function DashboardLayout({
   children,
@@ -28,13 +29,18 @@ export default function DashboardLayout({
 
   if (status === "unauthenticated") return null;
 
+  // MobilePanelsProvider owns the slide-in drawers (Preferences, Event
+  // Links, Availability) so any descendant can open them by name. See
+  // `mobile-panels-context.tsx`.
   return (
-    <div className="flex-1 min-h-0 bg-surface text-primary flex flex-col overflow-hidden">
-      <DashboardHeader />
-      <ScopeInterstitial />
-      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
-        {children}
+    <MobilePanelsProvider>
+      <div className="flex-1 min-h-0 bg-surface text-primary flex flex-col overflow-hidden">
+        <DashboardHeader />
+        <ScopeInterstitial />
+        <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
+          {children}
+        </div>
       </div>
-    </div>
+    </MobilePanelsProvider>
   );
 }

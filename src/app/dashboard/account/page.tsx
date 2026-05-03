@@ -243,6 +243,29 @@ export default function AccountPage() {
         /dashboard/account until a Phase 6 rename.
       */}
       <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Mobile-only back chip. Desktop has the sticky header with Logo +
+            avatar that always lets you escape the page; on mobile no such
+            chrome is exposed at this route, so direct visitors (deep links,
+            help-bubble CTAs that bypass the drawer, shared URLs) need an
+            explicit way out. Returns to the dashboard rather than calling
+            router.back() — back history isn't guaranteed. */}
+        <Link
+          href="/dashboard"
+          className="md:hidden inline-flex items-center gap-1.5 text-xs text-muted hover:text-primary transition -mt-2"
+          data-testid="account-mobile-back"
+        >
+          <svg
+            className="w-3.5 h-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to dashboard
+        </Link>
+
         {/* Page heading — explicit "Preferences" title, distinct from the
             identity row beneath it. Mockup §6 implies the identity card carries
             the title role; we promote it for clarity at desktop widths. */}
