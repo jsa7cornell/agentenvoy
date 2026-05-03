@@ -687,168 +687,192 @@ export function EventLinksPageContent() {
               className="rounded-xl border border-secondary overflow-hidden"
               data-testid="desktop-event-links-table"
             >
-              {/* Header row — every column heading is a sort toggle. */}
-              <div
-                className="grid grid-cols-[2fr_1fr_0.85fr_0.85fr_1.1fr_0.9fr_1fr] gap-3 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted bg-surface-secondary/40 border-b border-secondary"
-                role="row"
-              >
-                {(
-                  [
-                    { key: "event", label: "Event" },
-                    { key: "guest", label: "Guest" },
-                    { key: "created", label: "Created" },
-                    { key: "confirmed", label: "Confirmed" },
-                    { key: "meeting", label: "Meeting" },
-                    { key: "status", label: "Status" },
-                  ] as { key: SortKey; label: string }[]
-                ).map(({ key, label }) => {
-                  const active = sortKey === key;
-                  const arrow = active ? (sortDir === "asc" ? " ↑" : " ↓") : "";
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => toggleSort(key)}
-                      className={`text-left uppercase tracking-wider transition hover:text-secondary ${
-                        active ? "text-accent" : ""
-                      }`}
-                      data-testid={`desktop-event-links-sort-${key}`}
-                      aria-label={`Sort by ${label}${active ? `, currently ${sortDir}ending` : ""}`}
+              {(() => {
+                // Column visibility per filter chip.
+                //   Confirmed:             Event · Guest · Meeting · Status · Actions
+                //   Actively Coordinating: Event · Guest · Created · Status · Actions
+                //   All Events:            Event · Guest · Created · Confirmed · Meeting · Status · Actions
+                const showCreated   = filter === "actively_coordinating" || filter === "all";
+                const showConfirmed = filter === "all";
+                const showMeeting   = filter === "confirmed" || filter === "all";
+
+                // Build grid template from visible data columns + fixed actions col.
+                // Actions col is always 1fr.
+                const gridCols = [
+                  "2fr",   // Event (always)
+                  "1fr",   // Guest (always)
+                  ...(showCreated   ? ["0.85fr"] : []),
+                  ...(showConfirmed ? ["0.85fr"] : []),
+                  ...(showMeeting   ? ["1.1fr"]  : []),
+                  "0.9fr", // Status (always)
+                  "1fr",   // Actions (always)
+                ].join("_");
+                const gridClass = `grid-cols-[${gridCols}]`;
+
+                const headerCols: { key: SortKey; label: string }[] = [
+                  { key: "event",     label: "Event"     },
+                  { key: "guest",     label: "Guest"     },
+                  ...(showCreated   ? [{ key: "created"   as SortKey, label: "Created"   }] : []),
+                  ...(showConfirmed ? [{ key: "confirmed" as SortKey, label: "Confirmed" }] : []),
+                  ...(showMeeting   ? [{ key: "meeting"   as SortKey, label: "Meeting"   }] : []),
+                  { key: "status",    label: "Status"    },
+                ];
+
+                return (
+                  <>
+                    {/* Header row */}
+                    <div
+                      className={`grid ${gridClass} gap-3 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted bg-surface-secondary/40 border-b border-secondary`}
+                      role="row"
                     >
-                      {label}
-                      {arrow}
-                    </button>
-                  );
-                })}
-                <div className="text-right" />
-              </div>
-
-              <ul role="list">
-                {filteredEvents.map((s, idx) => {
-                  const bucket = classifySession(s, Date.now());
-                  const pill = statusPillStyle(bucket);
-                  const guestLabel =
-                    s.guestName ||
-                    s.link?.inviteeName ||
-                    s.guestEmail ||
-                    s.link?.inviteeEmail ||
-                    "Guest";
-                  const title = s.title || s.link?.topic || `Meeting with ${guestLabel}`;
-                  const sub = buildEventSub(s);
-                  const dealUrl = getDealRoomUrl(s);
-                  const isCoordinating = bucket === "coordinating";
-                  const isConfirmed = bucket === "confirmed";
-                  const isCancelled = bucket === "cancelled";
-
-                  // Inline cancel-confirm state
-                  if (confirmCancelId === s.id) {
-                    return (
-                      <li
-                        key={s.id}
-                        className="grid grid-cols-[1fr_auto_auto] gap-2 items-center px-4 py-3 border-t border-red-500/30 bg-red-50 dark:bg-red-950/20"
-                        data-testid="desktop-event-links-cancel-confirm"
-                      >
-                        <span className="text-sm text-secondary">
-                          {isConfirmed ? "Cancel this meeting?" : "Stop coordinating this event?"}
-                        </span>
-                        <button
-                          onClick={() => setConfirmCancelId(null)}
-                          className="text-xs text-muted hover:text-secondary transition px-3 py-1.5"
-                        >
-                          Keep
-                        </button>
-                        <button
-                          onClick={() => handleCancel(s.id)}
-                          disabled={cancelling === s.id}
-                          className="text-xs font-medium text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 border border-red-500/30 rounded px-3 py-1.5 transition disabled:opacity-50"
-                        >
-                          {cancelling === s.id ? "…" : "Yes"}
-                        </button>
-                      </li>
-                    );
-                  }
-
-                  return (
-                    <li
-                      key={s.id}
-                      className={`grid grid-cols-[2fr_1fr_0.85fr_0.85fr_1.1fr_0.9fr_1fr] gap-3 items-center px-4 py-3 ${
-                        idx > 0 ? "border-t border-secondary" : ""
-                      } ${
-                        s.archived
-                          ? "opacity-50"
-                          : isCancelled
-                            ? "opacity-60"
-                            : "hover:bg-surface-secondary/30"
-                      } transition-colors`}
-                      data-testid={`desktop-event-links-row-${bucket}${s.archived ? "-archived" : ""}`}
-                    >
-                      {/* Event title + sub — the whole first cell is the
-                          click target when a deal-room URL exists. The link
-                          wraps both title and subtitle and gets –mx/+px
-                          padding so the hit area extends beyond just the
-                          text glyphs without touching neighbouring columns. */}
-                      <div className="min-w-0 -mx-1">
-                        {dealUrl ? (
-                          <Link
-                            href={dealUrl}
-                            className={`flex flex-col px-1 py-1 rounded-md hover:bg-accent/5 transition-colors group ${
-                              isCancelled ? "opacity-100" : ""
+                      {headerCols.map(({ key, label }) => {
+                        const active = sortKey === key;
+                        const arrow = active ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => toggleSort(key)}
+                            className={`text-left uppercase tracking-wider transition hover:text-secondary ${
+                              active ? "text-accent" : ""
                             }`}
-                            data-testid={`desktop-event-links-title-${s.id}`}
+                            data-testid={`desktop-event-links-sort-${key}`}
+                            aria-label={`Sort by ${label}${active ? `, currently ${sortDir}ending` : ""}`}
                           >
-                            <span className={`text-[13px] font-medium truncate group-hover:text-accent transition-colors ${
-                              isCancelled ? "text-secondary line-through decoration-1" : "text-primary"
-                            }`}>
-                              {title}
-                            </span>
-                            {sub && <span className="text-[11px] text-muted truncate mt-0.5">{sub}</span>}
-                          </Link>
-                        ) : (
-                          <div className="px-1 py-1">
-                            <div className="text-[13px] font-medium text-primary truncate">{title}</div>
-                            {sub && <div className="text-[11px] text-muted truncate mt-0.5">{sub}</div>}
-                          </div>
-                        )}
-                      </div>
+                            {label}{arrow}
+                          </button>
+                        );
+                      })}
+                      <div className="text-right" />
+                    </div>
 
-                      {/* Guest */}
-                      <div className="text-[12px] text-secondary truncate">{guestLabel}</div>
+                    <ul role="list">
+                      {filteredEvents.map((s, idx) => {
+                        const bucket = classifySession(s, Date.now());
+                        const pill = statusPillStyle(bucket);
+                        const guestLabel =
+                          s.guestName ||
+                          s.link?.inviteeName ||
+                          s.guestEmail ||
+                          s.link?.inviteeEmail ||
+                          "Guest";
+                        const title = s.title || s.link?.topic || `Meeting with ${guestLabel}`;
+                        const sub = buildEventSub(s);
+                        const dealUrl = getDealRoomUrl(s);
+                        const isCoordinating = bucket === "coordinating";
+                        const isConfirmed = bucket === "confirmed";
+                        const isCancelled = bucket === "cancelled";
 
-                      {/* Created */}
-                      <div className="text-[12px] text-secondary tabular-nums">
-                        {formatCompactDate(s.createdAt)}
-                      </div>
+                        if (confirmCancelId === s.id) {
+                          return (
+                            <li
+                              key={s.id}
+                              className="grid grid-cols-[1fr_auto_auto] gap-2 items-center px-4 py-3 border-t border-red-500/30 bg-red-50 dark:bg-red-950/20"
+                              data-testid="desktop-event-links-cancel-confirm"
+                            >
+                              <span className="text-sm text-secondary">
+                                {isConfirmed ? "Cancel this meeting?" : "Stop coordinating this event?"}
+                              </span>
+                              <button
+                                onClick={() => setConfirmCancelId(null)}
+                                className="text-xs text-muted hover:text-secondary transition px-3 py-1.5"
+                              >
+                                Keep
+                              </button>
+                              <button
+                                onClick={() => handleCancel(s.id)}
+                                disabled={cancelling === s.id}
+                                className="text-xs font-medium text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 border border-red-500/30 rounded px-3 py-1.5 transition disabled:opacity-50"
+                              >
+                                {cancelling === s.id ? "…" : "Yes"}
+                              </button>
+                            </li>
+                          );
+                        }
 
-                      {/* Confirmed — date agreedTime was set; "-" while still coordinating */}
-                      <div className="text-[12px] text-secondary tabular-nums">
-                        {formatCompactDate(s.agreedTime ?? null)}
-                      </div>
+                        return (
+                          <li
+                            key={s.id}
+                            className={`grid ${gridClass} gap-3 items-center px-4 py-3 ${
+                              idx > 0 ? "border-t border-secondary" : ""
+                            } ${
+                              s.archived
+                                ? "opacity-50"
+                                : isCancelled
+                                  ? "opacity-60"
+                                  : "hover:bg-surface-secondary/30"
+                            } transition-colors`}
+                            data-testid={`desktop-event-links-row-${bucket}${s.archived ? "-archived" : ""}`}
+                          >
+                            {/* Event */}
+                            <div className="min-w-0 -mx-1">
+                              {dealUrl ? (
+                                <Link
+                                  href={dealUrl}
+                                  className={`flex flex-col px-1 py-1 rounded-md hover:bg-accent/5 transition-colors group ${
+                                    isCancelled ? "opacity-100" : ""
+                                  }`}
+                                  data-testid={`desktop-event-links-title-${s.id}`}
+                                >
+                                  <span className={`text-[13px] font-medium truncate group-hover:text-accent transition-colors ${
+                                    isCancelled ? "text-secondary line-through decoration-1" : "text-primary"
+                                  }`}>
+                                    {title}
+                                  </span>
+                                  {sub && <span className="text-[11px] text-muted truncate mt-0.5">{sub}</span>}
+                                </Link>
+                              ) : (
+                                <div className="px-1 py-1">
+                                  <div className="text-[13px] font-medium text-primary truncate">{title}</div>
+                                  {sub && <div className="text-[11px] text-muted truncate mt-0.5">{sub}</div>}
+                                </div>
+                              )}
+                            </div>
 
-                      {/* Meeting — date + time of the agreed slot */}
-                      <div className="min-w-0">
-                        {s.agreedTime ? (
-                          <div className="flex flex-col">
-                            <span className="text-[12px] font-medium text-primary tabular-nums">
-                              {formatCompactDate(s.agreedTime)}
-                            </span>
-                            <span className="text-[11px] text-muted tabular-nums">
-                              {formatCompactTime(s.agreedTime)}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-[12px] text-muted">—</span>
-                        )}
-                      </div>
+                            {/* Guest */}
+                            <div className="text-[12px] text-secondary truncate">{guestLabel}</div>
 
-                      {/* Status pill */}
-                      <div>
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${pill.bg} ${pill.text}`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${pill.dot}`} aria-hidden />
-                          {EVENT_PILL_LABELS[bucket]}
-                        </span>
-                      </div>
+                            {/* Created — Actively Coordinating + All Events */}
+                            {showCreated && (
+                              <div className="text-[12px] text-secondary tabular-nums">
+                                {formatCompactDate(s.createdAt)}
+                              </div>
+                            )}
+
+                            {/* Confirmed date — All Events only */}
+                            {showConfirmed && (
+                              <div className="text-[12px] text-secondary tabular-nums">
+                                {formatCompactDate(s.agreedTime ?? null)}
+                              </div>
+                            )}
+
+                            {/* Meeting date+time — Confirmed + All Events */}
+                            {showMeeting && (
+                              <div className="min-w-0">
+                                {s.agreedTime ? (
+                                  <div className="flex flex-col">
+                                    <span className="text-[12px] font-medium text-primary tabular-nums">
+                                      {formatCompactDate(s.agreedTime)}
+                                    </span>
+                                    <span className="text-[11px] text-muted tabular-nums">
+                                      {formatCompactTime(s.agreedTime)}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-[12px] text-muted">—</span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Status pill */}
+                            <div>
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${pill.bg} ${pill.text}`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${pill.dot}`} aria-hidden />
+                                {EVENT_PILL_LABELS[bucket]}
+                              </span>
+                            </div>
 
                       {/* Action column — Google Cal (Confirmed) · Cancel
                           (live meetings) · Open (terminal) · Archive /
@@ -912,7 +936,10 @@ export function EventLinksPageContent() {
                     </li>
                   );
                 })}
-              </ul>
+                    </ul>
+                  </>
+                );
+              })()}
             </div>
           )}
         </section>
