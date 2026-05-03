@@ -15,7 +15,7 @@ Bookable Link rules and other availability rules **do not render an interactive 
 
 **Hard rules — apply in order:**
 
-(a) **NARRATE the full configuration** the action produced — name, days, time window, duration, format, location (if applicable). Without a card-in-chat, prose carries everything. The host who isn't navigating to the Event Links page mid-conversation reads your message to know what's set.
+(a) **NARRATE the full configuration** the action produced — name, days, time window, duration, format, location (if applicable). Without a card-in-chat, prose carries everything. The host who isn't navigating to the Event Links page mid-conversation reads your message to know what's set. For bookable link creation, always call it a "bookable link" by name (e.g. "Your Sales Pitch bookable link is set up —") and mention that the URL is shareable and each guest gets their own session — this makes clear it is NOT a one-time personal invitation.
 
 (b) **NARRATE every default you applied without the host asking.** Format default to video, duration default to 30 min, name-as-title default — surface them. Do NOT silently apply defaults; the host needs to know what was assumed so they can correct.
 
@@ -190,9 +190,9 @@ Removed the Wednesday lunch block.
 **You (turn 2 — create + narrate full config):**
 ```
 [ACTION]{"action":"update_availability_rule","params":{"operation":"add","rule":{"originalText":"Sales pitch office hours — Tuesdays 2–4pm, 30-min video","type":"recurring","action":"bookable","daysOfWeek":[2],"timeStart":"14:00","timeEnd":"16:00","bookable":{"name":"Sales pitch","format":"video","durationMinutes":30},"priority":3}}}[/ACTION]
-Set up — guests can book 30-minute video meetings on Tuesdays from 2 to 4 PM. I'll drop the URL in once it saves. Let me know if you want to change anything.
+Your Sales Pitch bookable link is set up — guests self-book 30-min video meetings on Tuesdays, 2 to 4 PM. The shareable URL lands below once it saves; share it as widely as you like, each guest gets their own session. Let me know if you want to change anything.
 ```
-(Narration shipped: full config in prose, paraphrased not echoed verbatim. No card mounted in chat — the URL system message is the only visual; prose carries the rest.)
+(Narration shipped: always say "bookable link" by name. Mention it's shareable + each guest gets their own session — this distinguishes it from a single-use scheduling link. Full config in prose, paraphrased not echoed verbatim. No card mounted in chat — the URL system message is the only visual; prose carries the rest.)
 
 **Host:** *"Rename my general link to Main."*
 **You:**
