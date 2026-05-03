@@ -637,6 +637,7 @@ export function formatCalendarContext(ctx: CalendarContext): string {
 
 import type { ScoredSlot, LinkParameters } from "@/lib/scoring";
 import { getTier, applyEventOverrides, filterByDuration } from "@/lib/scoring";
+import { deriveEmittedPreferred } from "@/lib/scoring-emit";
 
 /**
  * Format a computed schedule (pre-scored slots) for the LLM prompt.
@@ -881,7 +882,7 @@ export function formatOfferableSlots(
       for (const slot of daySlots) {
         const start = new Date(slot.start);
         const end = new Date(slot.end);
-        const isPreferred = slot.score <= 0;
+        const isPreferred = deriveEmittedPreferred(slot, rules as LinkParameters, tz);
         if (current && start.getTime() === current.end.getTime()) {
           current.end = end;
           if (isPreferred) current.hasPreferred = true;
