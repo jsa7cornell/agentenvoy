@@ -84,7 +84,7 @@ export async function applyPostureToScope(
   let varianceLinkIds: string[];
   if (scope === "all") {
     const links = await prisma.negotiationLink.findMany({
-      where: { userId, type: { not: "primary" } },
+      where: { userId, type: "office_hours" },
       select: { id: true },
     });
     varianceLinkIds = links.map((l) => l.id);
@@ -195,8 +195,8 @@ export async function findAffectedVariances(
   userId: string
 ): Promise<Array<{ id: string; name: string }>> {
   const links = await prisma.negotiationLink.findMany({
-    where: { userId, type: { not: "primary" } },
-    select: { id: true, slug: true, parameters: true, topic: true },
+    where: { userId, type: "office_hours" },
+    select: { id: true, slug: true, code: true, parameters: true, topic: true },
   });
 
   const affected: Array<{ id: string; name: string }> = [];
@@ -214,7 +214,7 @@ export async function findAffectedVariances(
     if (differs) {
       affected.push({
         id: link.id,
-        name: link.topic || link.slug,
+        name: link.topic || link.code || link.slug,
       });
     }
   }
