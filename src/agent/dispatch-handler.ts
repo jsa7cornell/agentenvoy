@@ -230,12 +230,21 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
   if (warnings.length > 0) {
     console.warn(`[dispatch-handler:${tier}] history sanitized | userId=${userId} | ${warnings.join("; ")}`);
   }
-  // Ensure the latest message is represented — sanitizeHistory drops items
-  // that don't meet the alternating rule. Defensive: if somehow nothing
-  // ended up in `messages`, fall back to a single user entry.
-  const finalMessages = messages.length > 0
-    ? messages
-    : [{ role: "user" as const, content: userMessage }];
+  // Ensure the current user message is always the last entry. Two failure
+  // modes: (a) history is empty → use fallback; (b) userMsgPersist hasn't
+  // resolved before findMany ran, so the current message isn't in DB yet and
+  // the history ends with an envoy/assistant turn — the model would then
+  // generate a continuation of that turn rather than responding to the user.
+  const lastMsg = messages[messages.length - 1];
+  const currentUserEntry = { role: "user" as const, content: userMessage };
+  let finalMessages: typeof messages;
+  if (messages.length === 0) {
+    finalMessages = [currentUserEntry];
+  } else if (lastMsg?.role === "user" && lastMsg?.content === userMessage) {
+    finalMessages = messages; // already ends with the current message
+  } else {
+    finalMessages = [...messages, currentUserEntry];
+  }
 
   const system = systemBase + "\n\nCONTEXT:\n" + contextParts.join("\n");
 
