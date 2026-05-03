@@ -124,7 +124,13 @@ const linkPatchBase = z
     intent: intentSchema.partial().optional(),
     steering: z.enum(["open", "soft", "narrow", "exclusive"]).optional(),
 
-    // Recurrence — passthrough to the existing `parseRecurrence` validator.
+    // Recurrence — passthrough to `parseRecurrence` (lib/recurrence.ts) which is
+    // the single source of truth for the LinkRecurrence shape. Deliberately
+    // NOT a structural Zod here: parseRecurrence is hand-written and does the
+    // full pre-anchor / post-anchor / endBy-optional validation; duplicating
+    // it as a Zod would split the contract across two validators that could
+    // drift. The handler calls parseRecurrence and traps throws, returning a
+    // clean error to the caller. (Per proposal §3.4, 2026-05-03.)
     recurrence: z.unknown().optional(),
 
     // Series-edit param for recurring links — same passthrough rationale.

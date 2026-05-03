@@ -1,6 +1,13 @@
 "use client";
 
 /**
+ * @deprecated 2026-05-03 — retired from the office-hours chat-create flow
+ * by proposal `2026-05-03_recurring-and-office-hours-widgets` §3.8. See
+ * the parallel @deprecated note on `rule-confirm-card.tsx` for context.
+ * Removal scheduled for a sibling cleanup PR.
+ *
+ * ---
+ *
  * Mobile bottom-sheet confirmation UI for the Office Hours create flow.
  *
  * Slides up over the chat thread; the host reviews / edits the prefilled

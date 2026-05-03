@@ -25,6 +25,9 @@ export type Axis =
   | "scheduling-verb with guest"
   | "host create vs modify vs cancel"
   | "recurring meeting create"
+  | "host-blabbers-office-hours-config"
+  | "host-asks-current-state"
+  | "host-specifies-recurring-meeting-bound"
   | "mixed adversarial";
 
 export const AXES: Axis[] = [
@@ -37,6 +40,9 @@ export const AXES: Axis[] = [
   "scheduling-verb with guest",
   "host create vs modify vs cancel",
   "recurring meeting create",
+  "host-blabbers-office-hours-config",
+  "host-asks-current-state",
+  "host-specifies-recurring-meeting-bound",
   "mixed adversarial",
 ];
 
@@ -69,6 +75,29 @@ const AXIS_INSTRUCTIONS: Record<Exclude<Axis, "mixed adversarial">, string> = {
       "(4) name-uniqueness probes — host names a recurring series whose name overlaps an existing guest's link. " +
       "(5) F8 regression class — bare phrasings the composer used to ladder ('weekly coaching', 'recurring sessions with Bob') that MUST still classify as create_link in a single turn rather than triggering a clarifier. " +
       "ALL utterances expectedTier='create_link'. The host enum has no separate 'recurring' intent — recurring is a parameter of the create_link emission, not a distinct routing tier. This axis hard-gates the F8 single-turn-emit fixture per proposal `2026-05-01_recurring-meeting-rendering-and-shareable-template` §5.16.",
+  "host-blabbers-office-hours-config":
+    "Generate host dashboard-chat utterances (role: 'host') that iterate on an EXISTING office-hours rule the host just created. The fixture's priorEnvoyTurn simulates a freshly-set-up rule. Cover: " +
+      "(1) add-a-day — 'also Thursdays', 'add Friday', 'and Wednesday'. " +
+      "(2) drop-a-day — 'actually drop Tuesdays', 'remove Wed'. " +
+      "(3) replace-duration — 'make it 45 min', '60 minutes instead', 'bump to an hour'. " +
+      "(4) replace-format — 'switch to phone', 'video instead', 'phone, not video'. " +
+      "(5) replace-window — 'shift to 3-5pm', 'extend to 5pm'. " +
+      "(6) conflict-handling — 'video on Tues and phone on Thurs' (data shape doesn't support per-day format split — composer must surface the limitation, not silently emit a malformed action). " +
+      "(7) contradictory restate — 'wait, make it Thursdays not Tuesdays' (composer should infer replacement, not addition). " +
+      "ALL utterances expectedTier='modify_link' (the host enum's modify intent). These iterative tweaks route to `update_availability_rule` patches with `operation: 'update'`. Per proposal `2026-05-03_recurring-and-office-hours-widgets` §3.14 — chat-driven iterative blabbering is the load-bearing UX for the office-hours-without-card model.",
+  "host-asks-current-state":
+    "Generate host dashboard-chat utterances (role: 'host') that QUERY the current state of an existing rule or link, NOT modify it. The composer should narrate the live state from the rule/link record without emitting an action. Cover: " +
+      "(1) bare 'what's it set to now', 'what's the current config', 'show me the rule again', 'where are we at'. " +
+      "(2) reminder asks — 'remind me what we set', 'what was it again', 'recap please'. " +
+      "(3) confirmation asks — 'is it Tuesdays or Thursdays', 'did we say 30 or 45', 'is it phone or video'. " +
+      "(4) ambiguous-but-clear-from-context — 'the rule', 'that one', 'the office hours' when only one is in play. " +
+      "ALL utterances expectedTier='query_event' or 'query_calendar' (host enum) or 'inquire' (guest enum). This axis pins the rule (f) of the calendar-rule-composer NARRATION DISCIPLINE: 'what's it set to now' is a state-of-record query, not a modify intent. Per proposal `2026-05-03_recurring-and-office-hours-widgets` §3.14.",
+  "host-specifies-recurring-meeting-bound":
+    "Generate host dashboard-chat utterances (role: 'host') that create a recurring meeting WITH an explicit endBy bound — the host bounds the series in their prompt, so the composer must emit endBy.count or endBy.until and narrate the bound. Cover: " +
+      "(1) count-bounded — 'weekly piano lessons with Pat for 8 sessions', 'recurring 1:1 with Sarah, 12 weeks', 'biweekly coaching, 6 sessions'. " +
+      "(2) until-date-bounded — 'weekly check-in through end of June', 'monthly review until December', 'daily standup until next Friday'. " +
+      "(3) ambiguous bounds — 'a few weeks', 'for the next month or so' (composer should NOT emit endBy on these — pick a number requires the host to be specific). " +
+      "ALL utterances expectedTier='create_link'. This axis covers the chat-driven reshape's endBy contract: composer emits endBy ONLY when the host bounds explicitly; otherwise endBy is OMITTED (default-forever, silent in narration). Per proposal `2026-05-03_recurring-and-office-hours-widgets` §3.10 + §3.1 narration rule (d).",
 };
 
 // Guest intents (legacy guest pipeline) + Host intents (PR1 chat-decisioning-

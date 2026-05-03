@@ -1,6 +1,22 @@
 "use client";
 
 /**
+ * @deprecated 2026-05-03 — retired from the office-hours chat-create flow
+ * by proposal `2026-05-03_recurring-and-office-hours-widgets` §3.8. The
+ * propose-then-confirm pattern was replaced by a chat-driven model: the
+ * `office_hours` action emits → handler commits the rule → composer
+ * narrates per the calendar-rule-composer narration discipline. Host
+ * iterates via natural language ("actually 45 min") with the composer
+ * emitting `update_availability_rule` patches per turn.
+ *
+ * This file remains in the tree as a back-compat shim for any in-flight
+ * `rule_proposal` system messages persisted before the deploy. The
+ * `/api/availability-rules/confirm` endpoint stays alive for the same
+ * reason. Removal scheduled for a sibling cleanup PR once main is stable
+ * AND no `rule_proposal` rows remain unconfirmed in production.
+ *
+ * ---
+ *
  * Desktop in-thread confirmation card for the Office Hours create flow.
  *
  * Renders inline as the next chat message after Envoy parses a host's

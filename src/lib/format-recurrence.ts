@@ -43,13 +43,16 @@ export function formatCadenceWord(rec: LinkRecurrence): string {
  *   endBy: { count: 10 }              → "10 sessions"
  *   endBy: { until: "2026-08-30T…" } → "sessions through Aug 30"
  *   (invalid until date)              → "a set number of sessions"
+ *   endBy absent (forever default)    → null  ← caller drops the clause
  *
- * @example
- *   formatEndByLabel(rec) // → "10 sessions"
- *   // used as: "recurring weekly at the same time (10 sessions)"
+ * Returns `null` when the host hasn't bounded the series — the chat-driven
+ * narration model treats default-forever as silent (proposal §3.6 / Rule 24
+ * hard rule (d)). Callers that compose the value into copy use `null` as
+ * the signal to drop the clause entirely rather than render a placeholder.
  */
-export function formatEndByLabel(rec: LinkRecurrence): string {
+export function formatEndByLabel(rec: LinkRecurrence): string | null {
   const { endBy } = rec;
+  if (!endBy) return null;
   if ("count" in endBy) {
     const n = endBy.count;
     return `${n} session${n === 1 ? "" : "s"}`;
@@ -68,13 +71,18 @@ export function formatEndByLabel(rec: LinkRecurrence): string {
 /**
  * Compact subtitle for meeting cards, link landing pages, and iMessage unfurls.
  *
- * @example
- *   formatRecurrenceSubtitle(rec) // → "weekly · 30 min · 10 sessions"
- *   formatRecurrenceSubtitle(rec) // → "every other week · 45 min · sessions through Aug 30"
+ *   bounded:       "weekly · 30 min · 10 sessions"
+ *   forever:       "weekly · 30 min"                ← endBy clause dropped
+ *   bounded by date: "every other week · 45 min · sessions through Aug 30"
+ *
+ * Series length is silent unless the host explicitly bounded it — the count
+ * is no longer the headline. Per the 2026-05-03 chat-driven narration reshape.
  */
 export function formatRecurrenceSubtitle(rec: LinkRecurrence): string {
   const cadence = formatCadenceWord(rec);
   const dur = `${rec.anchor.durationMin} min`;
   const endLabel = formatEndByLabel(rec);
-  return `${cadence} · ${dur} · ${endLabel}`;
+  const parts = [cadence, dur];
+  if (endLabel) parts.push(endLabel);
+  return parts.join(" · ");
 }

@@ -403,3 +403,96 @@ describe("expandRecurrence / toRRule require committed anchor", () => {
     expect(() => toRRule(preCommit)).toThrow(/anchor\.firstDateLocal and \.timeLocal/);
   });
 });
+
+// `endBy` is OPTIONAL per the 2026-05-03 chat-driven narration reshape —
+// composer no longer auto-emits an `endBy` default; the host bounds the
+// series explicitly via natural language, otherwise it runs forever (capped
+// only by MAX_OCCURRENCES + GCal's 730 hard limit).
+describe("LinkRecurrence — endBy optional (forever default)", () => {
+  it("parseRecurrence accepts a recurrence with no endBy field", () => {
+    const r = parseRecurrence({
+      v: "1",
+      pattern: "weekly",
+      timezone: "America/Los_Angeles",
+      anchor: { firstDateLocal: "2026-05-04", timeLocal: "15:00", durationMin: 45 },
+    });
+    expect(r.endBy).toBeUndefined();
+    expect(r.pattern).toBe("weekly");
+  });
+
+  it("parseRecurrence rejects a malformed endBy when present", () => {
+    expect(() =>
+      parseRecurrence({
+        v: "1",
+        pattern: "weekly",
+        timezone: "America/Los_Angeles",
+        anchor: { firstDateLocal: "2026-05-04", timeLocal: "15:00", durationMin: 45 },
+        endBy: { wrongShape: true },
+      }),
+    ).toThrow(/endBy/);
+  });
+
+  it("parseRecurrence rejects endBy.count when not a number", () => {
+    expect(() =>
+      parseRecurrence({
+        v: "1",
+        pattern: "weekly",
+        timezone: "America/Los_Angeles",
+        anchor: { firstDateLocal: "2026-05-04", timeLocal: "15:00", durationMin: 45 },
+        endBy: { count: "ten" },
+      }),
+    ).toThrow(/endBy\.count/);
+  });
+
+  it("toRRule emits no COUNT/UNTIL when endBy is absent", () => {
+    const r = parseRecurrence({
+      v: "1",
+      pattern: "weekly",
+      timezone: "America/Los_Angeles",
+      anchor: { firstDateLocal: "2026-05-04", timeLocal: "15:00", durationMin: 30 },
+    });
+    const rrule = toRRule(r);
+    expect(rrule).toBe("RRULE:FREQ=WEEKLY;BYDAY=MO");
+    expect(rrule).not.toMatch(/COUNT/);
+    expect(rrule).not.toMatch(/UNTIL/);
+  });
+
+  it("toRRule emits open-ended biweekly correctly with no endBy", () => {
+    const r = parseRecurrence({
+      v: "1",
+      pattern: "biweekly",
+      timezone: "America/Los_Angeles",
+      anchor: { firstDateLocal: "2026-05-04", timeLocal: "15:00", durationMin: 30 },
+    });
+    expect(toRRule(r)).toBe("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO");
+  });
+
+  it("expandRecurrence caps at MAX_OCCURRENCES (520) when endBy is absent", () => {
+    // Without endBy, the loop relies on MAX_OCCURRENCES as the only ceiling.
+    // Daily over a 3-year window = 1095 days; expansion must stop at 520.
+    const r = parseRecurrence({
+      v: "1",
+      pattern: "daily",
+      timezone: "America/Los_Angeles",
+      anchor: { firstDateLocal: "2026-01-01", timeLocal: "10:00", durationMin: 30 },
+    });
+    const out = expandRecurrence(r, new Date("2026-01-01T00:00:00Z"), new Date("2029-01-01T00:00:00Z"));
+    expect(out.length).toBe(520);
+  });
+
+  it("expandRecurrence with no endBy still respects from/to window", () => {
+    // 4-week window, weekly cadence, no endBy → exactly 4 occurrences in window.
+    const r = parseRecurrence({
+      v: "1",
+      pattern: "weekly",
+      timezone: "America/Los_Angeles",
+      anchor: { firstDateLocal: "2026-05-04", timeLocal: "15:00", durationMin: 30 },
+    });
+    const out = expandRecurrence(
+      r,
+      new Date("2026-05-01T00:00:00Z"),
+      new Date("2026-05-29T00:00:00Z"),
+    );
+    expect(out.length).toBe(4);
+  });
+});

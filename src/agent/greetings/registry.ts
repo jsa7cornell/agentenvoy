@@ -436,10 +436,13 @@ const recurringAnchorTemplate: GreetingTemplate = {
     const cadence = formatCadenceWord(rec);
     const topicNoun = rawTopic ?? "meeting";
 
-    // Optional session count — appended in parens when endBy.count is set.
-    // Omitted for until-date endBy (less intuitive inline; card subtitle covers it).
+    // Optional session count — appended in parens when host explicitly bounded
+    // the series via endBy.count. Omitted for forever (default) and for
+    // until-date endBy (less intuitive inline; card subtitle covers it).
+    // Per the 2026-05-03 chat-driven narration reshape: series length is
+    // silent unless the host asked.
     const countSuffix =
-      "count" in rec.endBy
+      rec.endBy && "count" in rec.endBy
         ? ` (${rec.endBy.count} session${rec.endBy.count === 1 ? "" : "s"})`
         : "";
 
@@ -481,10 +484,13 @@ const recurringFollowupTemplate: GreetingTemplate = {
     const { greeteeName, hostFirstName, recurrence, occurrenceIndex } = input;
     const rec = recurrence!;
 
-    // 1-based session number for display ("Session 3 of 10")
+    // 1-based session number for display ("Session 3 of 10").
+    // The "of N" suffix only renders when the host explicitly bounded the
+    // series via endBy.count. Forever default and until-date are silent
+    // here (the running session number alone carries the cadence).
     const sessionNum = (occurrenceIndex ?? 0) + 1;
     const totalSuffix =
-      "count" in rec.endBy ? ` of ${rec.endBy.count}` : "";
+      rec.endBy && "count" in rec.endBy ? ` of ${rec.endBy.count}` : "";
 
     const cadence = formatCadenceWord(rec);
     const endLabel = formatEndByLabel(rec);

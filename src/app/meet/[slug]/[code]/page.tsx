@@ -89,14 +89,18 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     details.push(parts.join(" "));
   }
 
-  // Recurrence line: "8 weekly sessions" / "sessions through Aug 30, every other week".
-  // Renders alongside the duration line so the iMessage unfurl carries
-  // series-ness up-front. Per proposal §5.8 — supports both the direct
-  // contextual recurring meeting and (post-PR2) the office-hours-with-series
-  // materialized child.
+  // Recurrence line — cadence is the headline; the count/end clause is
+  // included only when the host explicitly bounded the series. Default-
+  // forever is silent per the 2026-05-03 chat-driven narration reshape.
+  // Examples:
+  //   bounded:        "8 sessions, weekly"
+  //   bounded by date: "sessions through Aug 30, every other week"
+  //   forever:        "weekly"
   const recurrence = readRecurrence(link?.recurrence ?? null);
   if (recurrence) {
-    details.push(`${formatEndByLabel(recurrence)}, ${formatCadenceWord(recurrence)}`);
+    const endLabel = formatEndByLabel(recurrence);
+    const cadence = formatCadenceWord(recurrence);
+    details.push(endLabel ? `${endLabel}, ${cadence}` : cadence);
   }
 
   if (isGroup) {
