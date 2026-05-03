@@ -96,11 +96,13 @@ export function AvailabilityPanel({
   // used when forceMobile. Work week is the default.
   const [mobileView, setMobileView] = useState<"day" | "workweek" | "week">("workweek");
   // Desktop week-range toggle — full Sun-Sat vs. Mon-Fri workweek.
-  // Default to workweek on narrower screens where 7 columns would be cramped.
-  const [weekRange, setWeekRange] = useState<"full" | "workweek">(() => {
-    if (typeof window === "undefined") return "full";
-    return window.innerWidth < 1440 ? "workweek" : "full";
-  });
+  // Initializes to "full" to match SSR, then flips to "workweek" on narrower
+  // screens after hydration. useEffect avoids the Next.js hydration mismatch
+  // that a window-dependent useState initializer causes.
+  const [weekRange, setWeekRange] = useState<"full" | "workweek">("full");
+  useEffect(() => {
+    if (window.innerWidth < 1440) setWeekRange("workweek");
+  }, []);
 
   // Responsive — measure panel content width, pick 3/5/7 day view.
   const containerRef = useRef<HTMLDivElement | null>(null);
