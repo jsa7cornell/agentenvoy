@@ -257,30 +257,22 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
   const fullText = first.text;
   const allActions = parseActions(fullText);
 
-  // ── Office Hours create-flow interception (Phase 1 PR 5) ────────────────
-  // When the LLM emits `update_availability_rule` with operation:"add" and
-  // rule.action:"office_hours", we DO NOT execute the rule write here.
-  // Instead we persist a `system` ChannelMessage with `metadata.kind ===
-  // "rule_proposal"` carrying the proposed payload; the feed renders that
-  // as a desktop card or mobile bottom sheet, and the host commits via
-  // POST /api/availability-rules/confirm. Mirrors the existing
-  // gcal_update_proposal pattern (actions.ts:447 / feed.tsx:1293).
+  // Office-hours create flow: as of the 2026-05-03 chat-driven narration
+  // reshape (proposal `2026-05-03_recurring-and-office-hours-widgets` §3.8),
+  // office_hours actions now flow through executeActions like every other
+  // rule action. The host iterates via natural-language chat
+  // ("actually 45 min" / "also Thursdays") with the composer emitting
+  // `update_availability_rule` patches per turn. The rule lives on the
+  // Event Links page; the chat thread is pure prose narration.
   //
-  // Non-Office-Hours rule actions (block / allow / buffer / location /
-  // remove / update / rename_general) and all other action kinds still
-  // flow through executeActions unchanged. The `office_hours` keyword is
-  // the snake-case wire identifier for the **Office Hours** feature; it
-  // is unrelated to the host's "Business hours" window (`businessHoursStart`
-  // / `businessHoursEnd`), which is touched only by `handleUpdateBusinessHours`.
-  const interceptedProposals: Array<{ action: ActionRequest; payload: OfficeHoursProposalPayload }> = [];
-  const actions: ActionRequest[] = [];
-  for (const a of allActions) {
-    if (isOfficeHoursAddAction(a)) {
-      interceptedProposals.push({ action: a, payload: projectProposal(a) });
-    } else {
-      actions.push(a);
-    }
-  }
+  // Pre-2026-05-03: an `office_hours` `add` action was intercepted and
+  // persisted as a `kind: "rule_proposal"` system message that mounted
+  // RuleConfirmCard (desktop) / RuleConfirmSheet (mobile). The host
+  // confirmed via POST /api/availability-rules/confirm before the rule
+  // was written. That propose-then-confirm flow is retired; the
+  // confirm endpoint stays alive for any in-flight rule_proposal rows
+  // that predate the deploy.
+  const actions: ActionRequest[] = allActions;
 
   let actionResults: ActionResult[] = [];
   let timedOut = false;
@@ -307,31 +299,6 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
     }
   }
 
-  // For each intercepted Office Hours proposal, persist a `system`
-  // ChannelMessage that carries the parsed-but-not-yet-written rule. The
-  // feed renders this as a confirmation card (desktop) or sheet (mobile).
-  // We must persist the user message first (await `userMsgPersist`) so
-  // the proposal row appears AFTER it in the channel timeline.
-  if (interceptedProposals.length > 0) {
-    await userMsgPersist;
-    let channel = await prisma.channel.findUnique({ where: { userId } });
-    if (!channel) channel = await prisma.channel.create({ data: { userId } });
-    for (const { payload } of interceptedProposals) {
-      await prisma.channelMessage.create({
-        data: {
-          channelId: channel.id,
-          role: "system",
-          content: `Envoy is proposing a new Office Hours link · ${payload.title}`,
-          metadata: {
-            kind: "rule_proposal",
-            ruleAction: "office_hours",
-            proposal: payload as unknown as Prisma.InputJsonValue,
-          } as Prisma.InputJsonValue,
-        },
-      });
-    }
-  }
-
   emitStatus("finalizing");
 
   let displayText = stripActionBlocks(fullText);
@@ -349,17 +316,12 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
     }
   }
 
-  // When an Office Hours `add` was intercepted, the LLM text is typically
-  // "Your X link is ready — I'll share the URL once it saves." which is
-  // misleading at the proposal stage (the rule hasn't been written yet).
-  // Replace it with a proposal-stage prompt matching the mockup copy
-  // (mobile-v2.html §2). Keep the original narration available on the
-  // metadata for replay/observability.
-  if (interceptedProposals.length > 0) {
-    overriddenNarration = displayText || overriddenNarration;
-    displayText =
-      "Sounds great. Here's what I'm setting up — review and tap \"Looks good\" to create it:";
-  }
+  // The 2026-05-03 chat-driven reshape removed the office-hours
+  // proposal-stage narration override. The LLM's narration (per the
+  // calendar-rule-composer narration discipline) IS the host-visible
+  // response — no card, no "Sounds great. Here's what I'm setting up..."
+  // intercept. The handler executes the rule write directly and the
+  // composer's prose carries the full picture.
 
   const additions: Partial<ChannelMessageMetadata> = {};
   if (actions.length > 0) {
@@ -377,29 +339,6 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
         ...(r.data ? { data: r.data } : {}),
       };
     });
-  }
-  // Record intercepted proposals on the envoy turn's metadata for
-  // observability + replay. The actual rule write happens later when the
-  // host taps "Looks good" on the card/sheet.
-  if (interceptedProposals.length > 0) {
-    const existingActions = additions.actions ?? [];
-    const existingResults = additions.actionResults ?? [];
-    additions.actions = [
-      ...existingActions,
-      ...interceptedProposals.map(({ action }) => ({
-        action: action.action,
-        params: (action.params ?? {}) as Record<string, unknown>,
-      })),
-    ];
-    additions.actionResults = [
-      ...existingResults,
-      ...interceptedProposals.map(({ action }) => ({
-        action: action.action,
-        success: true,
-        message: "proposal_persisted_awaiting_host_confirmation",
-        data: { intercepted: true, kind: "rule_proposal" },
-      })),
-    ];
   }
   const envoyMetadata = mergeChannelMetadata(
     overriddenNarration ? { overriddenNarration } : null,

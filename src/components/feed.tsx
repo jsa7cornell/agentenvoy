@@ -12,8 +12,10 @@ import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
 import { PreferencesExtendedFlow } from "./onboarding/preferences-extended-flow";
 import { shortTimezoneLabel } from "@/lib/timezone";
 import { GcalUpdateCard } from "./gcal-update-card";
-import { RuleConfirmCard } from "./onboarding/rule-confirm-card";
-import { RuleConfirmSheet } from "./onboarding/rule-confirm-sheet";
+// RuleConfirmCard / RuleConfirmSheet imports retired 2026-05-03 — the
+// office-hours create flow is now chat-driven (proposal §3.8). The
+// `OfficeHoursProposal` type is still imported because legacy
+// `rule_proposal` system messages pre-deploy use it for display.
 import type { OfficeHoursProposal } from "./onboarding/rule-form-fields";
 import { SendFeedbackLink } from "./send-feedback";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
@@ -1832,88 +1834,34 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                 </div>
               );
             }
-            // Office Hours rule_proposal (Phase 1 PR 5):
-            //   Desktop = in-thread card (no backdrop, doesn't trap chat)
-            //   Mobile  = bottom sheet sliding up over the thread
-            // Both are mounted; Tailwind responsive utilities pick one. The
-            // proposal stays editable until the host taps "Looks good"
-            // (POST /api/availability-rules/confirm) or Cancel. Once
-            // confirmed (`metadata.confirmed === true`) the card collapses
-            // to a one-liner; the sheet is hidden.
+            // Office Hours rule_proposal: retired from the chat-create flow
+            // 2026-05-03 (proposal `2026-05-03_recurring-and-office-hours-widgets`
+            // §3.8). The propose-then-confirm pattern was replaced by a
+            // chat-driven model: the office_hours action emits → handler
+            // commits the rule → composer narrates the full config in prose
+            // → host iterates via natural language ("actually 45 min").
+            // Any in-flight `rule_proposal` rows that predate the deploy
+            // render as a benign one-liner (the URL system message that
+            // follows the action result already carries the link).
             if (msg.metadata?.kind === "rule_proposal") {
               const meta = msg.metadata as Record<string, unknown>;
               const proposal = meta.proposal as OfficeHoursProposal | undefined;
               const alreadyConfirmed = meta.confirmed === true;
-              if (!proposal) {
+              if (alreadyConfirmed && proposal) {
                 return (
-                  <div key={msg.id} className="text-center text-xs text-muted py-2">
-                    {msg.content}
+                  <div
+                    key={msg.id}
+                    className="self-start w-[92%] max-w-[480px] rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2.5 text-[12px] text-emerald-700 dark:text-emerald-300"
+                  >
+                    ✓ Created Office Hours link · {proposal.title}
                   </div>
                 );
               }
-              const handleConfirmed = async () => {
-                // Refresh the channel so the confirmation row + any
-                // server-side follow-ups appear inline.
-                try {
-                  const r = await fetch("/api/channel/messages");
-                  if (r.ok) {
-                    const data = await r.json();
-                    setMessages(data.messages || []);
-                  }
-                } catch (e) {
-                  console.warn("[feed] refresh after rule confirm failed:", e);
-                }
-              };
-              const handleCancelled = () => {
-                // Mark the row's metadata locally so the card unmounts;
-                // server keeps the row for audit. No extra fetch needed.
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === msg.id
-                      ? {
-                          ...m,
-                          metadata: { ...(m.metadata ?? {}), dismissed: true },
-                        }
-                      : m,
-                  ),
-                );
-              };
-              if (alreadyConfirmed || (msg.metadata as { dismissed?: boolean })?.dismissed) {
-                if (alreadyConfirmed) {
-                  return (
-                    <div
-                      key={msg.id}
-                      className="self-start w-[92%] max-w-[480px] rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2.5 text-[12px] text-emerald-700 dark:text-emerald-300"
-                    >
-                      ✓ Created Office Hours link · {proposal.title}
-                    </div>
-                  );
-                }
-                return null;
-              }
-              return (
-                <div key={msg.id}>
-                  {/* Desktop card — inline in the thread, no backdrop */}
-                  <div className="hidden md:block py-2">
-                    <RuleConfirmCard
-                      proposalMessageId={msg.id}
-                      initialProposal={proposal}
-                      onConfirmed={handleConfirmed}
-                      onCancelled={handleCancelled}
-                    />
-                  </div>
-                  {/* Mobile bottom sheet — slides up over the thread */}
-                  <div className="md:hidden">
-                    <RuleConfirmSheet
-                      proposalMessageId={msg.id}
-                      initialProposal={proposal}
-                      open={true}
-                      onConfirmed={handleConfirmed}
-                      onDismiss={handleCancelled}
-                    />
-                  </div>
-                </div>
-              );
+              // Pre-confirm row from a legacy session — collapse to a
+              // benign one-liner. The host's chat-driven path produces the
+              // canonical narration via the LLM directly, so this is dead
+              // code for any rule_proposal created post-2026-05-03.
+              return null;
             }
             return (
               <div key={msg.id} className="text-center text-xs text-muted py-2">
