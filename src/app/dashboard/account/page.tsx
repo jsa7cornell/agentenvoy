@@ -814,7 +814,12 @@ export default function AccountPage() {
             </p>
 
             <label className="block text-xs text-secondary mb-2">
-              Type your email to confirm: <span className="text-primary font-mono">{session?.user?.email ?? ""}</span>
+              Type your email to confirm:{" "}
+              <span
+                className="text-primary font-mono cursor-pointer hover:opacity-70 transition-opacity"
+                title="Click to copy"
+                onClick={() => navigator.clipboard.writeText(session?.user?.email ?? "")}
+              >{session?.user?.email ?? ""}</span>
             </label>
             <input
               type="email"
