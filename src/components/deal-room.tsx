@@ -2114,7 +2114,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
     return (
       <div key={keyPrefix} className="flex justify-start">
-        <div className="max-w-[85%] w-full min-w-0 rounded-2xl px-3 py-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
+        <div className="max-w-[85%] w-full min-w-0 rounded-2xl px-3 pb-3 text-sm bg-surface-secondary border border-DEFAULT text-primary rounded-bl-sm">
           {narrationLine && (
             <div
               className="text-xs text-secondary leading-snug mb-2 px-1"

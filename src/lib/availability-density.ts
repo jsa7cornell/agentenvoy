@@ -5,13 +5,13 @@
 // so guests always see a useful number of options.
 //
 // Tiers:
-//   SPARSE  (<5 viable days in 14d window)  → extend to 42 days
+//   SPARSE  (<5 viable days in 28d window)  → extend to 42 days
 //   THIN    (<8 viable days in 42d window)  → extend to 90 days
-//   NORMAL  → keep 14 days
+//   NORMAL  → keep 28 days
 
 import type { ScoredSlot } from "@/lib/scoring";
 
-export const HORIZON_NORMAL = 14;
+export const HORIZON_NORMAL = 28;
 export const HORIZON_SPARSE = 42;
 export const HORIZON_THIN = 90;
 
