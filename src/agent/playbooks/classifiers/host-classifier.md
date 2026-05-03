@@ -31,6 +31,8 @@ Then for the rest:
 
 ## When in doubt
 
+**Bookable link setup continuations (highest priority rule):** If `Your prior turn` describes a bookable link setup proposal — e.g. it contains "Setting up '[Name]'", "I'd call this one", "bookable link", "Good to go?", "any tweaks?" — then ANY follow-up turn from the host is `create_bookable_link`, regardless of verb. This includes confirmations ("yes", "go for it", "sounds good"), adjustments ("make it 10-2 instead", "actually 45 min", "phone not video"), and corrections. The multi-turn bookable link setup flow owns all turns until the link is created.
+
 When in doubt between `create_bookable_link` and `create_link` — prefer `create_bookable_link` when there is no specific named person as the guest. The downstream matcher handles person-specific scheduling; `create_bookable_link` goes to a separate multi-turn setup flow.
 
 When in doubt between `create_link` and `modify_link` — prefer `create_link`. Single match also resolves to create. The matcher (downstream) is the place where create-vs-modify-with-single-existing-link is decided deterministically, not in classification. If the user actually wanted modify, their next turn ("no, change the time of the existing one") will classify as `modify_link` and the matcher will resolve it cleanly.
@@ -67,6 +69,13 @@ Display-settings or app-chrome requests ("change to light mode", "switch to dark
 - "I want a recurring tutoring link" → `{kind: "create_bookable_link"}`
 - "Set up office hours Tuesdays 2–4" → `{kind: "create_bookable_link"}`
 - "Create a bookable link — " → `{kind: "create_bookable_link"}`
+
+Setup continuations (prior turn was a bookable link proposal):
+- Prior: "Setting up 'Candidate Screening' — 30-min video, weekday mornings. Good to go?" + Current: "lets make it only work daily from 10-2 pst" → `{kind: "create_bookable_link"}`
+- Prior: "Setting up 'Sales Pitch'...Good to go?" + Current: "yes go for it" → `{kind: "create_bookable_link"}`
+- Prior: "A Bookable Link gives you...I'd call this one 'John's hours'..." + Current: "sounds good, but make it 45 min" → `{kind: "create_bookable_link"}`
+- Prior: "Setting up 'Mentor Sessions'...Good to go?" + Current: "actually phone not video" → `{kind: "create_bookable_link"}`
+- Prior: "Your 'Sales Discovery' bookable link is set up..." + Current: "change it to 45 min" → `{kind: "create_bookable_link"}`
 
 ### create_link
 
