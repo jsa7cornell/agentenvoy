@@ -3157,6 +3157,7 @@ async function handleUpdateAvailabilityRule(
     data: {
       ...(addedRuleId ? { id: addedRuleId } : id ? { id } : {}),
       ...(linkUrl ? { linkUrl } : {}),
+      ...(bookable ? { bookableName: bookable.name } : {}),
     },
   };
 }

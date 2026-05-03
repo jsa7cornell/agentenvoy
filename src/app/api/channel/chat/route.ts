@@ -570,9 +570,21 @@ export async function POST(req: NextRequest) {
           // -cancel or fire multi-match-disambiguate.
 
           // Bookable link creation — dedicated intent routed directly to the
-          // rule composer. historyLimit:4 keeps fresh creates from seeing
-          // unrelated NegotiationLink history in the channel.
+          // rule composer.
+          //
+          // historyLimit strategy:
+          //   - Fresh create (no prior proposal in context): historyLimit:0 so the
+          //     composer only sees the current message. This prevents prior bookable
+          //     link sessions from contaminating the new request (e.g. "Setting up
+          //     Candidate Screening" bleeding into "Create a tutoring link"). There
+          //     is also a race condition: userMsgPersist may not have resolved when
+          //     findMany runs, so take:4 could exclude the current message entirely.
+          //   - Continuation (prior envoy turn was a proposal): historyLimit:4 so
+          //     the composer can see what was proposed and what the user is tweaking.
           if (intent === "create_bookable_link") {
+            const priorEnvoy = recentEnvoyContents[0] ?? "";
+            const isBookableContinuation =
+              /setting up.*bookable|bookable link.*good to go|any tweaks\?/i.test(priorEnvoy);
             const prefs = (user.preferences as Record<string, unknown> | null) ?? {};
             const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
             const defaultFormat = (explicit.defaultFormat as string | undefined) ?? "video";
@@ -601,7 +613,7 @@ export async function POST(req: NextRequest) {
                 controller,
                 encoder,
                 contextLines,
-                historyLimit: 4,
+                historyLimit: isBookableContinuation ? 4 : 0,
                 emitStatus: (stage) => {
                   emitStatus(stage);
                 },
@@ -650,7 +662,7 @@ export async function POST(req: NextRequest) {
                   controller,
                   encoder,
                   contextLines,
-                  historyLimit: 4,
+                  historyLimit: 0,
                   emitStatus: (stage) => {
                     emitStatus(stage);
                   },
