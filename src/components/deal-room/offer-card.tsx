@@ -121,7 +121,7 @@ export function OfferCard({
             type="button"
             onClick={onConfirm}
             disabled={isConfirming}
-            className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
+            className="w-full px-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition"
           >
             {isConfirming ? "Confirming..." : "Confirm this time"}
           </button>
