@@ -697,17 +697,15 @@ export function EventLinksPageContent() {
                 const showMeeting   = filter === "confirmed" || filter === "all";
 
                 // Build grid template from visible data columns + fixed actions col.
-                // Actions col is always 1fr.
-                const gridCols = [
-                  "2fr",   // Event (always)
-                  "1fr",   // Guest (always)
+                const gridTemplateColumns = [
+                  "2fr",    // Event (always)
+                  "1fr",    // Guest (always)
                   ...(showCreated   ? ["0.85fr"] : []),
                   ...(showConfirmed ? ["0.85fr"] : []),
                   ...(showMeeting   ? ["1.1fr"]  : []),
-                  "0.9fr", // Status (always)
-                  "1fr",   // Actions (always)
-                ].join("_");
-                const gridClass = `grid-cols-[${gridCols}]`;
+                  "0.9fr",  // Status (always)
+                  "1fr",    // Actions (always)
+                ].join(" ");
 
                 const headerCols: { key: SortKey; label: string }[] = [
                   { key: "event",     label: "Event"     },
@@ -722,7 +720,8 @@ export function EventLinksPageContent() {
                   <>
                     {/* Header row */}
                     <div
-                      className={`grid ${gridClass} gap-3 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted bg-surface-secondary/40 border-b border-secondary`}
+                      className="grid gap-3 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted bg-surface-secondary/40 border-b border-secondary"
+                      style={{ gridTemplateColumns }}
                       role="row"
                     >
                       {headerCols.map(({ key, label }) => {
@@ -793,7 +792,7 @@ export function EventLinksPageContent() {
                         return (
                           <li
                             key={s.id}
-                            className={`grid ${gridClass} gap-3 items-center px-4 py-3 ${
+                            className={`grid gap-3 items-center px-4 py-3 ${
                               idx > 0 ? "border-t border-secondary" : ""
                             } ${
                               s.archived
@@ -802,6 +801,7 @@ export function EventLinksPageContent() {
                                   ? "opacity-60"
                                   : "hover:bg-surface-secondary/30"
                             } transition-colors`}
+                            style={{ gridTemplateColumns }}
                             data-testid={`desktop-event-links-row-${bucket}${s.archived ? "-archived" : ""}`}
                           >
                             {/* Event */}
