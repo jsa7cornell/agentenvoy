@@ -1206,6 +1206,21 @@ export function WeekView({
   const canGoPrev = weekDays[0].dateStr > minDate && weekOffset > 0;
   const canGoNext = weekDays[6].dateStr < maxDate;
 
+  // 5-day mode: when no weekend slots exist across the entire session, hide
+  // Sat/Sun to reclaim horizontal space for the weekday chips.
+  const hasWeekendSlots = useMemo(() => {
+    return Object.entries(slotsByDay).some(([dateStr, slots]) => {
+      const dow = new Date(dateStr + "T12:00:00").getDay();
+      return (dow === 0 || dow === 6) && slots.some((s) => (s.score ?? 0) <= 1);
+    });
+  }, [slotsByDay]);
+  const displayDays = hasWeekendSlots
+    ? weekDays
+    : weekDays.filter((wd) => {
+        const dow = new Date(wd.dateStr + "T12:00:00").getDay();
+        return dow !== 0 && dow !== 6;
+      });
+
   // When the user navigates weeks, keep the chips section open by selecting the
   // first day in the new week that has windows. Falls back to leaving the prior
   // selectedDay alone if no day in the new week has anything to show. Prior
@@ -1279,9 +1294,9 @@ export function WeekView({
         </button>
       </div>
 
-      {/* Week strip — 7 day cells in a single row */}
-      <div className="grid grid-cols-7 gap-1">
-        {weekDays.map((wd) => {
+      {/* Week strip — 5 or 7 day cells depending on weekend availability */}
+      <div className={`grid gap-1 ${hasWeekendSlots ? "grid-cols-7" : "grid-cols-5"}`}>
+        {displayDays.map((wd) => {
           const daySlots = slotsByDay[wd.dateStr] || [];
           const dayWindows = windowsByDay[wd.dateStr] || [];
           const isPast = wd.dateStr < todayStr;
