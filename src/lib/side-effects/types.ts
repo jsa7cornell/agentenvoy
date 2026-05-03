@@ -69,6 +69,14 @@ export interface CalendarCreateEventEffect {
   sessionId?: string;
   /** Overrides CALENDAR_SEND_UPDATES env default. Rarely needed. */
   sendUpdatesOverride?: "all" | "externalOnly" | "none";
+  /**
+   * RFC5545 recurrence lines (e.g. `["RRULE:FREQ=WEEKLY;COUNT=10;BYDAY=MO"]`).
+   * When set, GCal creates a recurring master event whose first instance
+   * starts at `startTime`; subsequent occurrences derive from the RRULE.
+   * Used by the recurring-meeting anchor-commit path (proposal
+   * `2026-05-01_recurring-meeting-rendering-and-shareable-template` §5.9).
+   */
+  recurrence?: string[];
   context?: Record<string, unknown>;
 }
 

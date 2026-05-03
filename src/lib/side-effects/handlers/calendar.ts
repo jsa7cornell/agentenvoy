@@ -101,6 +101,9 @@ export async function handleCalendarCreateEvent(
           },
         },
       }),
+      ...(effect.recurrence && effect.recurrence.length > 0 && {
+        recurrence: effect.recurrence,
+      }),
     };
 
     const sendUpdates = effect.sendUpdatesOverride || sendUpdatesDefault();

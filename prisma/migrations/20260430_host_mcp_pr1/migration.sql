@@ -31,8 +31,19 @@ ALTER TABLE "MCPCallLog" ALTER COLUMN "linkId" DROP NOT NULL;
 
 CREATE INDEX "MCPCallLog_userId_ts_idx" ON "MCPCallLog"("userId", "ts");
 
--- Rename existing FK to match Prisma's new naming convention for nullable FKs
-ALTER TABLE "MCPCallLog" RENAME CONSTRAINT "MCPCallLog_link_fkey" TO "MCPCallLog_linkId_fkey";
+-- Rename existing FK to match Prisma's new naming convention for nullable FKs.
+-- Guard: the old name exists in Supabase production but not in the CI baseline
+-- (the constraint was created as "MCPCallLog_linkId_fkey" from the start in
+-- the throwaway container). IF EXISTS makes this idempotent on both paths.
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'MCPCallLog_link_fkey'
+    AND conrelid = '"MCPCallLog"'::regclass
+  ) THEN
+    ALTER TABLE "MCPCallLog" RENAME CONSTRAINT "MCPCallLog_link_fkey" TO "MCPCallLog_linkId_fkey";
+  END IF;
+END $$;
 
 ALTER TABLE "MCPCallLog" ADD CONSTRAINT "MCPCallLog_userId_fkey"
     FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
