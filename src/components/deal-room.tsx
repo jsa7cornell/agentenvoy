@@ -176,6 +176,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [postConnectRefetching, setPostConnectRefetching] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showActionMenu, setShowActionMenu] = useState(false);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showActionMenu) return;
+    function onDocClick(e: MouseEvent) {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
+        setShowActionMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [showActionMenu]);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
   const [gcalStatus, setGcalStatus] = useState<{
@@ -1512,17 +1524,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // Server-driven status — confirmed state overrides sessionStatus for backwards compat
   const eventStatus = confirmed ? "agreed" : sessionStatus;
 
-  const statusConfigs: Record<string, { label: string; color: string; border: string; dot: string }> = {
-    active: { label: "Scheduling", color: "text-zinc-400", border: "border-zinc-700", dot: "bg-zinc-500" },
-    proposed: { label: "Proposed", color: "text-amber-400", border: "border-amber-300 dark:border-amber-500/25", dot: "bg-amber-400" },
-    agreed: { label: "Confirmed", color: "text-emerald-400", border: "border-emerald-500/25", dot: "bg-emerald-400" },
-    cancelled: { label: "Cancelled", color: "text-red-400", border: "border-red-500/25", dot: "bg-red-400" },
-    escalated: { label: "Escalated", color: "text-orange-400", border: "border-orange-500/25", dot: "bg-orange-400" },
-    expired: { label: "Expired", color: "text-zinc-500", border: "border-zinc-700", dot: "bg-zinc-600" },
-  };
-
-  const statusConfig = statusConfigs[eventStatus] || statusConfigs.active;
-
   // Event details come from confirmData (confirmed) or latestProposal (proposed) or just title (scheduling)
   const eventDateTime = confirmed && confirmData
     ? confirmData.dateTime as string
@@ -1566,30 +1567,65 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   })();
 
 
+  // Status prefix mapping — replaces the old chip + dot. The status word
+  // leads the title ("Confirmed: Call with Katie") and carries the color.
+  const STATUS_PREFIX: Record<string, { word: string; color: string }> = {
+    active:    { word: "Scheduling", color: "text-zinc-500 dark:text-zinc-400" },
+    proposed:  { word: "Proposed",   color: "text-amber-600 dark:text-amber-400" },
+    agreed:    { word: "Confirmed",  color: "text-emerald-600 dark:text-emerald-400" },
+    cancelled: { word: "Cancelled",  color: "text-red-600 dark:text-red-400" },
+    escalated: { word: "Escalated",  color: "text-orange-600 dark:text-orange-400" },
+    expired:   { word: "Expired",    color: "text-zinc-500" },
+  };
+  const statusPrefix = STATUS_PREFIX[eventStatus] || STATUS_PREFIX.active;
+
+  // Detect the video provider from the meet link so the "where to join"
+  // line can label it (Google Meet · meet.google.com/…). Falls back to
+  // "Video" when nothing matches.
+  const meetProvider = (() => {
+    if (!eventMeetLink) return null;
+    if (eventMeetLink.includes("meet.google")) return "Google Meet";
+    if (eventMeetLink.includes("zoom.")) return "Zoom";
+    if (eventMeetLink.includes("teams.microsoft")) return "Teams";
+    if (eventMeetLink.includes("webex.com")) return "Webex";
+    return "Video";
+  })();
+
+  // Whether the ⋯ menu has anything in it for the current viewer. If not,
+  // hide the kebab entirely.
+  const menuHasItems =
+    (confirmed && eventStatus !== "cancelled" && (!!googleCalUrl || true /* .ics always */)) ||
+    (confirmed || eventStatus === "cancelled") /* Find a new time */ ||
+    hasExtraDetails ||
+    (isHost && !!sessionId) /* Archive */ ||
+    (isHost && confirmed) /* Cancel meeting */;
+
   const eventCard = (
     <div className={`z-10 px-4 sm:px-5 pt-3 sm:pt-4 pb-2 bg-surface/95 backdrop-blur-sm flex-shrink-0 transition-all duration-500`}>
-      <div className={`max-w-3xl rounded-xl border ${statusConfig.border} bg-black/[0.02] dark:bg-white/[0.03] px-4 py-3 transition-all duration-700 ${
+      <div className={`max-w-3xl rounded-xl border-[3px] px-4 py-3 transition-all duration-700 ${
+        confirmed
+          ? "border-emerald-500 dark:border-emerald-400 bg-emerald-500/[0.04] shadow-lg shadow-emerald-500/10 ring-4 ring-emerald-500/15 dark:ring-emerald-400/15"
+          : eventStatus === "cancelled"
+            ? "border-red-400/70 dark:border-red-500/60 bg-red-500/[0.03] shadow-md"
+            : "border-zinc-300 dark:border-zinc-700 bg-black/[0.02] dark:bg-white/[0.03] shadow-md shadow-black/5"
+      } ${
         justConfirmedGlow
-          ? "ring-2 ring-emerald-400/60 bg-emerald-500/10 shadow-[0_0_24px_rgba(16,185,129,0.35)] scale-[1.01]"
+          ? "ring-4 ring-emerald-400/60 shadow-[0_0_28px_rgba(16,185,129,0.4)] scale-[1.01]"
           : statusAnimating
-            ? "ring-1 " + (eventStatus === "confirmed" ? "ring-emerald-500/40 bg-emerald-500/5" : eventStatus === "cancelled" ? "ring-red-500/40 bg-red-500/5" : "ring-amber-300 bg-amber-50 dark:ring-amber-500/40 dark:bg-amber-500/5")
+            ? (eventStatus === "confirmed" ? "ring-emerald-500/40" : eventStatus === "cancelled" ? "ring-red-500/40" : "ring-amber-300 dark:ring-amber-500/40")
             : ""
       }`}>
-        {/* Row 1: Title + status. The activity emoji prefixes the title per
-            SPEC §3.6 (event card). Host-set `activityIcon` wins; falls
-            back to format-derived canonical emoji; final fallback is 🕐
-            when no activity / format signal is present. */}
-        <div className="flex items-center gap-2.5 mb-1.5">
-          <div className={`w-2.5 h-2.5 rounded-full ${statusConfig.dot} flex-shrink-0 transition-colors duration-500 ${statusAnimating ? "scale-125" : ""}`} style={statusAnimating ? { animation: "pulse 1s ease-in-out" } : {}} />
-          {(() => {
-            const titleEmoji = linkActivityIcon || getMeetingEmoji(eventFormat || linkFormat, eventLocation || linkLocation, linkActivity) || "🕐";
-            return <span className="flex-shrink-0 select-none text-sm" aria-hidden="true">{titleEmoji}</span>;
-          })()}
+        {/* Title row — status leads ("Confirmed: Call with Katie"). The
+            colored prefix replaces the old floating dot + chip. ⋯ on the
+            right opens the action menu. */}
+        <div className="flex items-center gap-2 mb-1">
+          <span className={`text-sm font-bold flex-shrink-0 ${statusPrefix.color}`}>
+            {statusPrefix.word}:
+          </span>
           <span className="text-sm font-semibold text-primary truncate">{getEventTitle()}</span>
           {isVip && <span className="text-[10px] text-amber-500/60 dark:text-amber-400/50 flex-shrink-0 select-none" title="Priority meeting">★</span>}
-          <span className={`text-[10px] font-semibold uppercase tracking-wide ${statusConfig.color} flex-shrink-0`}>{statusConfig.label}</span>
           {sessionStatusLabel &&
-            sessionStatusLabel.trim().toLowerCase() !== statusConfig.label.toLowerCase() && (
+            sessionStatusLabel.trim().toLowerCase() !== statusPrefix.word.toLowerCase() && (
               <span className="text-[10px] text-muted ml-2">{sessionStatusLabel}</span>
             )}
           <EditedPill
@@ -1597,11 +1633,112 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             lastEditedFields={lastEditedFields}
             className="ml-1"
           />
+          {menuHasItems && (
+            <div className="relative ml-auto flex-shrink-0" ref={actionMenuRef}>
+              <button
+                onClick={() => setShowActionMenu((v) => !v)}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-muted hover:text-primary hover:bg-surface-secondary border border-transparent hover:border-DEFAULT transition text-base leading-none"
+                title="More actions"
+                aria-label="More actions"
+                data-testid="event-card-actions-button"
+              >
+                ⋯
+              </button>
+              {showActionMenu && (
+                <div className="absolute right-0 top-9 z-30 min-w-[220px] rounded-lg border border-DEFAULT bg-surface-inset shadow-2xl py-1.5 text-xs">
+                  {confirmed && eventStatus !== "cancelled" && googleCalUrl && (
+                    <a
+                      href={googleCalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setShowActionMenu(false)}
+                      className="flex items-center gap-2 px-3 py-1.5 text-primary hover:bg-surface-secondary"
+                    >
+                      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0">
+                        <path d="M18.316 5.684H24v12.632h-5.684V5.684z" fill="#1967D2" />
+                        <path d="M5.684 18.316V5.684L0 5.684v12.632l5.684 0z" fill="#188038" />
+                        <path d="M18.316 24V18.316H5.684V24h12.632z" fill="#1967D2" />
+                        <path d="M18.316 5.684V0H5.684v5.684h12.632z" fill="#EA4335" />
+                        <path d="M18.316 18.316H5.684V5.684h12.632v12.632z" fill="#fff" />
+                        <path d="M9.2 15.7V9.1h1.5v2.4h2.6V9.1h1.5v6.6h-1.5v-2.8h-2.6v2.8H9.2z" fill="#1967D2" />
+                      </svg>
+                      Add to Google Calendar
+                    </a>
+                  )}
+                  {confirmed && eventStatus !== "cancelled" && (
+                    <button
+                      onClick={() => { downloadIcs(); setShowActionMenu(false); }}
+                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-primary hover:bg-surface-secondary"
+                    >
+                      <span aria-hidden>📅</span> Download .ics
+                    </button>
+                  )}
+                  {(confirmed || eventStatus === "cancelled") && (
+                    <button
+                      onClick={() => {
+                        setProposeChangesCount((n) => n + 1);
+                        setShowActionMenu(false);
+                        setTimeout(() => {
+                          document.querySelector<HTMLDivElement>("[data-messages-end]")?.scrollIntoView({ behavior: "smooth" });
+                        }, 50);
+                      }}
+                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-primary hover:bg-surface-secondary"
+                    >
+                      <span aria-hidden>🕒</span> Find a new time
+                    </button>
+                  )}
+                  {hasExtraDetails && (
+                    <button
+                      onClick={() => { setShowDetailsModal(true); setShowActionMenu(false); }}
+                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-primary hover:bg-surface-secondary"
+                    >
+                      <span aria-hidden>ℹ️</span> Details
+                    </button>
+                  )}
+                  {isHost && (sessionId || confirmed) && <div className="my-1 border-t border-DEFAULT" />}
+                  {isHost && sessionId && (
+                    <button
+                      onClick={async () => {
+                        if (isArchiving) return;
+                        setIsArchiving(true);
+                        try {
+                          const res = await fetch("/api/negotiate/archive", {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ sessionId, archived: true }),
+                          });
+                          if (res.ok) {
+                            window.location.href = "/dashboard/event-links";
+                          }
+                        } finally {
+                          setIsArchiving(false);
+                          setShowActionMenu(false);
+                        }
+                      }}
+                      disabled={isArchiving}
+                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-primary hover:bg-surface-secondary disabled:opacity-50"
+                      data-testid="deal-room-archive-button"
+                    >
+                      <span aria-hidden>📥</span> {isArchiving ? "Archiving…" : "Archive"}
+                    </button>
+                  )}
+                  {isHost && confirmed && (
+                    <button
+                      onClick={() => { setShowCancelModal(true); setShowActionMenu(false); }}
+                      className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-red-400 hover:bg-red-500/10"
+                    >
+                      <span aria-hidden>🚫</span> Cancel meeting
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Participants row (group events) */}
         {isGroupEvent && participants.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 ml-5 mb-1">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
             {participants.map((p, i) => (
               <span key={i} className="flex items-center gap-1 text-xs text-secondary">
                 <span className={`w-1.5 h-1.5 rounded-full ${
@@ -1615,18 +1752,28 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         )}
 
-        {/* Row 2: Details */}
-        <div className="flex flex-wrap gap-x-4 gap-y-0.5 ml-5 text-xs text-secondary">
-          {eventFormat && (() => {
-            const formatEmoji = getMeetingEmoji(eventFormat, null);
+        {/* Meta line — activity icon + duration + (when set) datetime.
+            The format word ("Video" / "Phone") drops out once we have a
+            time, since the icon + join line below already convey it.
+            Pre-confirm fallback below covers the "no time, no format"
+            case from link.parameters. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-secondary">
+          {(eventFormat || linkActivityIcon || linkActivity) && (() => {
+            const icon = linkActivityIcon || getMeetingEmoji(eventFormat, eventLocation || linkLocation, linkActivity) || "🕐";
             const formatText = eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat;
-            // ✏️ pencil suffix on deferred fields — proposal 2026-04-29
-            // feedback iter 2: replaced the "(proposed)" text suffix with
-            // a pencil icon. Map pin (📍) is reserved for actual location;
-            // pencil signals "editable / guest can suggest".
             const formatSuffix = linkGuestPicksFormat ? " ✏️" : "";
             const durationSuffix = linkGuestPicksDuration ? " ✏️" : "";
-            return <span>{formatEmoji}{formatEmoji ? " " : ""}{formatText}{formatSuffix} &middot; {eventDuration} min{durationSuffix}</span>;
+            // Drop the format word when we have a date/time; the icon
+            // and join-line carry it. Keep it when there's no time, so
+            // the line doesn't read as a naked "💻 30 min".
+            const showFormatWord = !eventDateTime && !!formatText;
+            return (
+              <span className="flex items-center gap-1.5">
+                <span aria-hidden className="text-sm leading-none">{icon}</span>
+                {showFormatWord && <span>{formatText}{formatSuffix} <span className="text-muted">·</span> </span>}
+                <span>{eventDuration} min{durationSuffix}</span>
+              </span>
+            );
           })()}
           {eventDateTime && (() => {
             const dt = new Date(eventDateTime);
@@ -1636,28 +1783,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             const datePart = dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
             const localTime = dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
             const hostTime = showDual ? dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: hostTz }) : null;
-            return <span>{datePart} {localTime}{hostTime ? ` (${hostTime})` : ""}</span>;
+            return <span><span className="text-muted">·</span> {datePart} {localTime}{hostTime ? ` (${hostTime})` : ""}</span>;
           })()}
-          {!eventDateTime && !eventFormat && (() => {
-            // Pre-confirmation fallback: render the host's proposal fragments
-            // from link.parameters so the guest sees what the meeting is ABOUT
-            // before a time is locked. Mirrors the greeting's prose-first
-            // approach — show what's set, drop what isn't.
+          {!eventDateTime && !eventFormat && !linkActivity && !linkActivityIcon && (() => {
+            // Pre-confirmation fallback when nothing is known yet — render
+            // the host's proposal fragments from link.parameters so the
+            // guest sees what the meeting is ABOUT before a time is locked.
             const parts: string[] = [];
-            if (linkActivity) {
-              parts.push(linkActivityIcon ? `${linkActivityIcon} ${linkActivity}` : linkActivity);
-            }
             if (slotDuration) parts.push(formatDuration(slotDuration) + (linkGuestPicksDuration ? " ✏️" : ""));
             if (linkTimingLabel) parts.push(linkTimingLabel + (linkGuestPicksDate ? " ✏️" : ""));
             if (linkLocation) {
-              // Locked location → 📍 prefix. If also deferred (rare —
-              // host gave a hint but guest can change), append ✏️.
               parts.push(`📍 ${linkLocation}` + (linkGuestPicksLocation ? " ✏️" : ""));
             } else if (linkGuestPicksLocation) {
-              // No location set + deferred → guest will pick. Use ✏️
-              // alone (NOT 📍) to signal "editable" rather than "we have
-              // a location". Matches John's 2026-04-29 directive: "icon
-              // should be a pencil. the map pin is for location."
               parts.push("✏️ Pick a location");
             }
             if (parts.length === 0) return <span>Meeting details pending</span>;
@@ -1665,26 +1802,38 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           })()}
           {confirmed && (formGuestName || formGuestEmail) && (
             <span className="text-muted">
-              {[formGuestName, formGuestEmail].filter(Boolean).join(" · ")}
-            </span>
-          )}
-          {eventMeetLink && (
-            <a href={eventMeetLink} className="text-indigo-400 hover:text-indigo-300 truncate max-w-[200px]" target="_blank" rel="noopener noreferrer">
-              {eventMeetLink.replace("https://", "").split("/").slice(0, 2).join("/")}
-            </a>
-          )}
-          {eventLocation && (
-            <span className="truncate max-w-[200px]" title={eventLocation}>
-              {getMeetingEmoji(null, eventLocation)} {eventLocation}
+              · {[formGuestName, formGuestEmail].filter(Boolean).join(" · ")}
             </span>
           )}
         </div>
 
+        {/* Where to join — own line when confirmed. Video link with provider
+            label, or location for in-person. Phone-bridge text could go here
+            when phone-format meetings carry a number; not wired yet. */}
+        {confirmed && eventMeetLink && (
+          <div className="mt-1 text-xs text-secondary flex items-center gap-1.5 flex-wrap">
+            <span aria-hidden>🔗</span>
+            <span>{meetProvider} ·</span>
+            <a
+              href={eventMeetLink}
+              className="text-indigo-400 hover:text-indigo-300 truncate max-w-[260px]"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {eventMeetLink.replace(/^https?:\/\//, "").split("/").slice(0, 2).join("/")}
+            </a>
+          </div>
+        )}
+        {confirmed && !eventMeetLink && eventLocation && (
+          <div className="mt-1 text-xs text-secondary flex items-center gap-1.5 flex-wrap">
+            <span aria-hidden>📍</span>
+            <span className="truncate" title={eventLocation}>{eventLocation}</span>
+          </div>
+        )}
+
         {/* Deferral status line — "🤔 Gathering John's suggestions on the
             location". Same neutral phrasing on host + guest views. Suppressed
-            post-confirm; deferrals stop mattering once a slot is locked.
-            Date deferral intentionally skipped (calendar widget IS the day
-            picker). Reuses formatDeferralFieldsList for canonical phrasing. */}
+            post-confirm; deferrals stop mattering once a slot is locked. */}
         {!confirmed && (() => {
           const deferred: DeferralFieldNoun[] = [];
           if (linkGuestPicksLocation) deferred.push("location");
@@ -1694,7 +1843,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           if (!list) return null;
           const firstName = (inviteeName || "").split(/\s+/)[0] || "the guest";
           return (
-            <div className="ml-5 mt-1 text-xs italic text-muted">
+            <div className="mt-1 text-xs italic text-muted">
               🤔 Gathering {firstName}&apos;s suggestions on {list}
             </div>
           );
@@ -1702,14 +1851,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
         {/* T3c: host-only soft upsell when the confirm pipeline degraded
             to .ics-only (no calendar.events write scope). Degrade-not-block:
-            the meeting is confirmed, we just couldn't auto-add it to GCal.
-            The .ics download in the actions row below remains the floor. */}
+            the meeting is confirmed, we just couldn't auto-add it to GCal. */}
         {isHost && confirmed && calendarWriteUnavailable && (
-          <div className="ml-5 mt-2.5 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/5 px-3 py-2">
+          <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/5 px-3 py-2">
             <span className="text-amber-400 text-sm leading-5">⚠</span>
             <div className="flex-1 text-xs text-amber-800 dark:text-amber-200/90 leading-5">
               <span className="font-medium">Not on your Google Calendar.</span>{" "}
-              Grant calendar write access to auto-add future meetings — or use the .ics download below.
+              Grant calendar write access to auto-add future meetings — or grab the .ics from the ⋯ menu.
             </div>
             <button
               onClick={writeScopeReconnect.trigger}
@@ -1721,78 +1869,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         )}
 
-        {/* Row 3: Actions (confirmed / cancelled only) */}
-        {(confirmed || eventStatus === "cancelled") && (
-          <div className="flex items-center gap-3 ml-5 mt-2.5">
-            {eventStatus !== "cancelled" && (
-              <>
-                {/* Google Calendar */}
-                {googleCalUrl && (
-                  <a href={googleCalUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-secondary/80 border border-DEFAULT hover:border-zinc-600 transition text-xs text-primary">
-                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 flex-shrink-0">
-                      <path d="M18.316 5.684H24v12.632h-5.684V5.684z" fill="#1967D2" />
-                      <path d="M5.684 18.316V5.684L0 5.684v12.632l5.684 0z" fill="#188038" />
-                      <path d="M18.316 24V18.316H5.684V24h12.632z" fill="#1967D2" />
-                      <path d="M18.316 5.684V0H5.684v5.684h12.632z" fill="#EA4335" />
-                      <path d="M18.316 18.316H5.684V5.684h12.632v12.632z" fill="#fff" />
-                      <path d="M9.2 15.7V9.1h1.5v2.4h2.6V9.1h1.5v6.6h-1.5v-2.8h-2.6v2.8H9.2z" fill="#1967D2" />
-                    </svg>
-                    Google
-                  </a>
-                )}
-                {/* ICS download */}
-                <button onClick={downloadIcs} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-surface-secondary/80 border border-DEFAULT hover:border-zinc-600 transition text-xs text-primary">
-                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                  </svg>
-                  .ics
-                </button>
-              </>
-            )}
-            {/* Find a new time — injects synthetic Envoy bubbles so the
-                guest can re-pick without typing. Each click adds another
-                pair (text + picker) at the bottom of the thread.
-                Renamed from "Propose changes" per 2026-04-20 calendar-popup
-                proposal: both host and guest have the same goal (find a
-                new time) — naming it that way aligns wording across the
-                two surfaces (deal room + popup). */}
-            <button
-              onClick={() => {
-                setProposeChangesCount((n) => n + 1);
-                // Scroll to bottom shortly after render so the new picker is visible.
-                setTimeout(() => {
-                  document
-                    .querySelector<HTMLDivElement>("[data-messages-end]")
-                    ?.scrollIntoView({ behavior: "smooth" });
-                }, 50);
-              }}
-              className="text-xs text-indigo-400 hover:text-indigo-300 transition"
-            >
-              Find a new time
-            </button>
-            {/* More details */}
-            {hasExtraDetails && (
-              <button
-                onClick={() => setShowDetailsModal(true)}
-                className="text-xs text-muted hover:text-secondary transition"
-              >
-                Details
-              </button>
-            )}
-          </div>
-        )}
-
-
         {/* Cancelled-state banner — per 2026-04-20 proposal §Q4, cancelled
             sessions stay visible in the feed (NOT auto-archived) with a
-            banner that offers a fresh-start path for whoever's looking:
-            • host → dashboard to schedule something new
-            • guest → host's primary /meet/<slug> to reach out again
-            Keeps the prior messages accessible (scroll up) while making
-            the "this meeting is over; here's what to do next" moment
-            unambiguous. Host can still archive manually from the sidebar. */}
+            banner that offers a fresh-start path. */}
         {eventStatus === "cancelled" && (
-          <div className="ml-5 mt-2.5 px-3 py-2.5 rounded-lg border border-red-500/20 bg-red-500/5">
+          <div className="mt-2.5 px-3 py-2.5 rounded-lg border border-red-500/20 bg-red-500/5">
             <div className="text-xs text-secondary mb-2">
               This meeting was cancelled. The deal room stays here for reference.
             </div>
@@ -1816,16 +1897,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </div>
         )}
 
-        {/* Host management row — Add participant (non-confirmed) + GCal status (confirmed) + Archive/Cancel */}
+        {/* Host informational row — group-link indicator (non-confirmed)
+            and GCal sync status (confirmed). Cancel/Archive moved into
+            the ⋯ menu above. */}
         {isHost && eventStatus !== "cancelled" && (
-          <div className="ml-5 mt-2.5 flex items-center gap-3 flex-wrap">
-            {/* Group-link active indicator — non-confirmed only */}
+          (!confirmed && isGroupEvent) || (confirmed && gcalStatus)
+        ) && (
+          <div className="mt-2 flex items-center gap-3 flex-wrap">
             {!confirmed && isGroupEvent && (
               <span className="text-[11px] text-muted">
                 Group link active — share link to add people
               </span>
             )}
-            {/* Google Calendar status badge — only when confirmed */}
             {confirmed && gcalStatus && gcalStatus.eventExists && (
               <span className="flex items-center gap-1.5 text-[11px] text-muted">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
@@ -1858,75 +1941,22 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 Not found on Google Calendar
               </span>
             )}
-
-            {/* Spacer to push buttons to the right when badge is present */}
-            <span className="flex-1" />
-
-            {/* Cancel button — confirmed sessions only. Cancel is a
-                meeting-level action (deletes the calendar event) and is
-                separate from Archive (link-level visibility). Cancel keeps
-                its confirm modal because it has external side effects. */}
-            {confirmed && (
-              <button
-                onClick={() => setShowCancelModal(true)}
-                className="text-[11px] text-red-500/70 hover:text-red-400 transition"
-              >
-                Cancel meeting
-              </button>
-            )}
-
-            {/* Archive button — always available to the host on a live
-                session. One-click, no confirm: flips the link to "Host
-                archived this meeting" for the guest and removes it from
-                the active My Events views. Host can unarchive from the
-                "All Events" filter. */}
-            {sessionId && (
-              <button
-                onClick={async () => {
-                  if (isArchiving) return;
-                  setIsArchiving(true);
-                  try {
-                    const res = await fetch("/api/negotiate/archive", {
-                      method: "PATCH",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ sessionId, archived: true }),
-                    });
-                    if (res.ok) {
-                      window.location.href = "/dashboard/event-links";
-                    }
-                  } finally {
-                    setIsArchiving(false);
-                  }
-                }}
-                disabled={isArchiving}
-                className="text-[11px] text-muted hover:text-secondary transition disabled:opacity-50"
-                title="Archive (the link will show 'host archived this' to guests)"
-                data-testid="deal-room-archive-button"
-              >
-                {isArchiving ? "Archiving…" : "Archive"}
-              </button>
-            )}
           </div>
         )}
 
-        {/* Agent-bookable indicator — single line, muted, no fill/border.
-            Visible in browser screenshots (so a browser-using agent's
-            screenshot pipeline can read it) but small enough not to
-            clutter the human UX. The "AI agents:" lead makes the
-            audience signal unambiguous. Slimmed 2026-05-01 after
-            initial promoted-banner version felt too loud. */}
-        <div className="mt-2 flex justify-end">
+        {/* Bookable-by-agents footer — small dashed-top pointer to /agents.
+            Replaces the prior full-sentence "AI agents: book via API at …"
+            line. The Link: rel="agent-api" middleware header still carries
+            the URL for non-rendering agents. */}
+        <div className="mt-2.5 pt-2 border-t border-dashed border-black/5 dark:border-white/5 flex justify-end">
           <a
             href="/agents"
             target="_blank"
             rel="noopener noreferrer"
             className="text-[11px] text-muted hover:text-indigo-400 transition"
-            title="AgentEnvoy has a Model Context Protocol API at /api/mcp — see /agents for docs"
+            title="Bookable by AI agents via MCP — agentenvoy.ai/api/mcp (docs at /agents)"
           >
-            <span aria-hidden="true">🤖</span>{" "}
-            <span className="text-secondary">AI agents:</span> book via API at{" "}
-            <span className="font-mono">agentenvoy.ai/api/mcp</span>{" "}
-            (docs at <span className="font-mono">/agents</span>)
+            🤖 Bookable by agents →
           </a>
         </div>
       </div>
