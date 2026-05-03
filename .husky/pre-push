@@ -1,8 +1,11 @@
 export PATH="/opt/homebrew/bin:$PATH"
-# Type-check against committed state only, not dirty working tree.
-# Stashing unstaged changes ensures the hook sees exactly what CI will build.
-git stash -q --keep-index
+# Block if there are unstaged TypeScript changes — the type check would pass
+# against the working tree but fail on CI against the committed state.
+# Stage or commit your .ts/.tsx changes before pushing.
+if ! git diff --quiet -- '*.ts' '*.tsx' 2>/dev/null; then
+  echo "❌ Unstaged TypeScript changes detected."
+  echo "   Pre-push type check passes against your working tree but will fail on CI."
+  echo "   Stage or commit your .ts/.tsx changes before pushing."
+  exit 1
+fi
 npm run check
-RESULT=$?
-git stash pop -q 2>/dev/null || true
-exit $RESULT
