@@ -355,6 +355,9 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
         ...(r.data ? { data: r.data } : {}),
       };
     });
+    // Tag the link kind so the feed can annotate the card.
+    const hasBookable = actions.some((a) => isBookableAction(a));
+    if (hasBookable) (additions as Record<string, unknown>).linkKind = "bookable";
   }
   const envoyMetadata = mergeChannelMetadata(
     overriddenNarration ? { overriddenNarration } : null,

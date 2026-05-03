@@ -724,7 +724,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
   });
 }
 
-function MeetLinkCard({ url, topic }: { url: string; topic?: string }) {
+function MeetLinkCard({ url, topic, kind }: { url: string; topic?: string; kind?: "bookable" | "recurring" }) {
   const [copied, setCopied] = useState(false);
   const [shareSupported, setShareSupported] = useState(false);
   useEffect(() => {
@@ -732,6 +732,16 @@ function MeetLinkCard({ url, topic }: { url: string; topic?: string }) {
   }, []);
   return (
     <div className="mt-3 bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 flex items-center gap-3">
+      {kind === "bookable" && (
+        <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+          Bookable
+        </span>
+      )}
+      {kind === "recurring" && (
+        <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+          ↻ Recurring
+        </span>
+      )}
       <code className="text-xs text-purple-400 truncate flex-1">{url}</code>
       {shareSupported && (
         <button
@@ -1880,6 +1890,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           // Chat bubble
           const isUser = msg.role === "user";
           const meetLinkMatch = !isUser ? msg.content.match(/(https?:\/\/[^\s]+\/meet\/[^\s]+)/) : null;
+          const meetLinkKind = (msg.metadata as Record<string, unknown> | null)?.linkKind as "bookable" | "recurring" | undefined;
           const reaction = isUser ? (msg.metadata?.reaction as string | undefined) : undefined;
           // §1n item 2: suppress speaker label on consecutive same-speaker bubbles
           // (modern messaging-app convention). Treat threads / system messages as
@@ -1906,7 +1917,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                   </div>
                 )}
                 <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
-                {meetLinkMatch && <MeetLinkCard url={meetLinkMatch[1]} />}
+                {meetLinkMatch && <MeetLinkCard url={meetLinkMatch[1]} kind={meetLinkKind} />}
               </div>
               {reaction && (
                 <div className="absolute -bottom-3 right-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/10 rounded-full px-1.5 py-0.5 text-sm shadow-sm select-none">
