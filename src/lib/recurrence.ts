@@ -53,6 +53,14 @@ export type EndBy =
  *
  * `parseRecurrence` accepts both shapes. `expandRecurrence` / `toRRule`
  * require the post-commit shape and throw a clear error otherwise.
+ *
+ * `endBy` is OPTIONAL (proposal `2026-05-03_recurring-and-office-hours-widgets`
+ * §3.5 — chat-driven narration reshape). When absent, the series runs forever
+ * (capped only by the 730-instance GCal hard limit and our 520-occurrence
+ * `MAX_OCCURRENCES` defense). The composer no longer auto-emits an `endBy`
+ * default; the host bounds the series explicitly via natural language ("for
+ * 12 weeks" / "until June") and `endBy` is silent in narration unless the
+ * host asked.
  */
 export interface LinkRecurrence {
   /** Schema version for forward-compat. */
@@ -72,7 +80,8 @@ export interface LinkRecurrence {
     /** For weekly/biweekly/monthly_nth_weekday: which day. Inferred from firstDateLocal if omitted. */
     dayOfWeek?: DayOfWeek;
   };
-  endBy: EndBy;
+  /** End condition. OMIT for forever (silent default per the chat-driven narration model). */
+  endBy?: EndBy;
   /** ISO UTC strings — occurrences whose UTC start equals any of these are skipped. */
   exclusions?: string[];
   /** How many days before an occurrence either side can reschedule it. Default 7. */
@@ -261,8 +270,14 @@ export function expandRecurrence(
   const tz = rec.timezone;
   const duration = rec.anchor.durationMin;
   const excl = new Set((rec.exclusions ?? []).map((s) => new Date(s).getTime()));
-  const untilMs = "until" in rec.endBy ? new Date(rec.endBy.until).getTime() : Infinity;
-  const countCap = "count" in rec.endBy ? rec.endBy.count : MAX_OCCURRENCES;
+  // Absent endBy → run forever, capped by MAX_OCCURRENCES (silent default per
+  // the chat-driven narration model). Per RFC5545 the absence of UNTIL/COUNT
+  // means an unbounded series; we apply our own MAX_OCCURRENCES guard rather
+  // than letting GCal's 730 limit be the only ceiling.
+  const endBy = rec.endBy;
+  const untilMs = endBy && "until" in endBy ? new Date(endBy.until).getTime() : Infinity;
+  const countCap = endBy && "count" in endBy ? endBy.count : MAX_OCCURRENCES;
+  const isCountBounded = !!endBy && "count" in endBy;
 
   const dow =
     rec.anchor.dayOfWeek ?? dayOfWeekLocal(rec.anchor.firstDateLocal, tz);
@@ -295,7 +310,7 @@ export function expandRecurrence(
       }
       // RFC5545 COUNT includes exclusions — consume regardless.
       emitted++;
-      if (startAt > to && !("count" in rec.endBy)) break;
+      if (startAt > to && !isCountBounded) break;
       cursor = addDaysLocal(cursor, stride);
     }
     return out;
@@ -313,7 +328,7 @@ export function expandRecurrence(
         });
       }
       emitted++;
-      if (startAt > to && !("count" in rec.endBy)) break;
+      if (startAt > to && !isCountBounded) break;
       cursor = addDaysLocal(cursor, 1);
     }
     return out;
@@ -341,7 +356,7 @@ export function expandRecurrence(
         });
       }
       emitted++;
-      if (startAt > to && !("count" in rec.endBy)) break;
+      if (startAt > to && !isCountBounded) break;
       month++;
       if (month > 12) { month = 1; year++; }
     }
@@ -375,13 +390,18 @@ export function toRRule(recIn: LinkRecurrence): string {
     const nCode = n === 5 ? -1 : n; // "last" → -1 per RFC5545
     parts.push("FREQ=MONTHLY", `BYDAY=${nCode}${byday}`);
   }
-  if ("count" in rec.endBy) parts.push(`COUNT=${rec.endBy.count}`);
-  else {
-    const untilUTC = new Date(rec.endBy.until)
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace(/\.\d{3}Z$/, "Z");
-    parts.push(`UNTIL=${untilUTC}`);
+  // Absent endBy → emit RRULE without COUNT/UNTIL (open-ended). GCal accepts
+  // open-ended RRULEs and silently caps at 730 instances per Google's hard
+  // limit; that's the intended "forever" behavior for the chat-driven model.
+  if (rec.endBy) {
+    if ("count" in rec.endBy) parts.push(`COUNT=${rec.endBy.count}`);
+    else {
+      const untilUTC = new Date(rec.endBy.until)
+        .toISOString()
+        .replace(/[-:]/g, "")
+        .replace(/\.\d{3}Z$/, "Z");
+      parts.push(`UNTIL=${untilUTC}`);
+    }
   }
   return `RRULE:${parts.join(";")}`;
 }
@@ -393,6 +413,12 @@ export function toRRule(recIn: LinkRecurrence): string {
  * doc). `anchor.durationMin` is the only always-required anchor field;
  * `firstDateLocal` and `timeLocal` may be absent on a freshly-created
  * recurring link that defers anchor selection to the guest.
+ *
+ * `endBy` is OPTIONAL — when absent, the series runs forever (capped only
+ * by `MAX_OCCURRENCES` defense + GCal's 730-instance hard limit). The
+ * composer no longer auto-emits an `endBy` default; the host bounds the
+ * series explicitly via natural language. When present it must be a
+ * well-formed `{ count }` or `{ until }` shape.
  */
 export function parseRecurrence(raw: unknown): LinkRecurrence {
   if (!raw || typeof raw !== "object") throw new Error("recurrence: not an object");
@@ -413,9 +439,19 @@ export function parseRecurrence(raw: unknown): LinkRecurrence {
   if (a.timeLocal !== undefined && typeof a.timeLocal !== "string") {
     throw new Error("recurrence: anchor.timeLocal");
   }
-  const endBy = r.endBy as Record<string, unknown>;
-  if (!endBy || !("count" in endBy || "until" in endBy)) {
-    throw new Error("recurrence: endBy");
+  // endBy is optional. When present, must be a well-formed `{count}` or
+  // `{until}` shape; absent means forever (silent default).
+  if (r.endBy !== undefined) {
+    const endBy = r.endBy as Record<string, unknown> | null;
+    if (!endBy || typeof endBy !== "object" || !("count" in endBy || "until" in endBy)) {
+      throw new Error("recurrence: endBy must be { count } or { until } when present");
+    }
+    if ("count" in endBy && typeof endBy.count !== "number") {
+      throw new Error("recurrence: endBy.count must be a number");
+    }
+    if ("until" in endBy && typeof endBy.until !== "string") {
+      throw new Error("recurrence: endBy.until must be a string");
+    }
   }
   return r as unknown as LinkRecurrence;
 }
