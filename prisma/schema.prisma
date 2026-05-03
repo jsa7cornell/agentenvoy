@@ -85,6 +85,7 @@ model User {
   channel           Channel?
   calendarCaches    CalendarCache[]
   computedSchedule  ComputedSchedule?
+  calendarListCache CalendarListCache?
   adminAccessLogs   AdminAccessLog[]     @relation("AdminAccessLogs")
   feedbackReports   FeedbackReport[]
   agentTokensMinted AgentAccessToken[]   @relation("AgentTokensMinted")
@@ -804,6 +805,22 @@ model ComputedSchedule {
   slots      Json     @default("[]") // ScoredSlot[] — protection scores -1 to 5
   computedAt DateTime @default(now())
   inputHash  String   @default("") // hash of (events + preferences) — skip recompute if unchanged
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// CalendarListCache: per-user TTL'd cache of Google's calendar list response.
+// Avoids the unconditional client.calendarList.list() round-trip on every
+// syncCalendar invocation. TTL = 30 minutes (enforced at the read site in
+// calendar.ts:getCachedCalendarList). Invalidated explicitly when the host
+// changes their active calendar set (calendar-filter route) or when the
+// lazy-migration in agent/knowledge resolves a literal "primary" id.
+// See proposal 2026-05-02_picker-load-perf for the invalidation discipline.
+model CalendarListCache {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  calendars Json     @default("[]") // Array<{ id: string; name: string }>
+  fetchedAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

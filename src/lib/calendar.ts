@@ -441,6 +441,60 @@ function fromStored(ev: StoredCalendarEvent): CalendarEvent {
   };
 }
 
+// --- CalendarListCache helpers (Wedge A — proposal 2026-05-02_picker-load-perf) ---
+
+const CALENDAR_LIST_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * Return the user's Google calendar list, served from a per-user TTL cache
+ * in `CalendarListCache`. Cache-miss path fetches fresh and upserts.
+ *
+ * The unconditional `client.calendarList.list()` this replaces was the
+ * dominant Google round-trip cost on the picker fetch path — it ran on every
+ * `syncCalendar` call, regardless of whether the per-calendar sync tokens were
+ * fresh. This brings warm-path Google round-trips per `getOrComputeSchedule`
+ * from 1 to 0 (assuming a fresh OAuth access token).
+ *
+ * Callers that need the live truth (e.g. the calendar-selection settings page)
+ * should bypass by calling `client.calendarList.list()` directly AND calling
+ * `invalidateCalendarListCache(userId)` so subsequent syncs see the fresh list.
+ */
+async function getCachedCalendarList(
+  client: ReturnType<typeof google.calendar>,
+  userId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cached = await (prisma as any).calendarListCache.findUnique({
+    where: { userId },
+  });
+  if (cached && cached.fetchedAt.getTime() > Date.now() - CALENDAR_LIST_TTL_MS) {
+    return cached.calendars as Array<{ id: string; name: string }>;
+  }
+  const { data: calList } = await client.calendarList.list();
+  const fresh = (calList.items ?? []).map((c) => ({
+    id: c.id || "primary",
+    name: c.summary || c.id || "primary",
+  }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma as any).calendarListCache.upsert({
+    where: { userId },
+    create: { userId, calendars: fresh, fetchedAt: new Date() },
+    update: { calendars: fresh, fetchedAt: new Date() },
+  });
+  return fresh;
+}
+
+/**
+ * Invalidate the CalendarListCache for a user so the next `syncCalendar` call
+ * fetches a fresh list from Google. Call this whenever `activeCalendarIds` is
+ * written — see proposal 2026-05-02_picker-load-perf §3c for the three known
+ * write sites and their treatments.
+ */
+export async function invalidateCalendarListCache(userId: string): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (prisma as any).calendarListCache.deleteMany({ where: { userId } });
+}
+
 /**
  * Sync a user's calendars using Google's incremental sync (syncToken).
  * On first call or 410 GONE, performs a full sync.
@@ -454,12 +508,10 @@ export async function syncCalendar(userId: string, activeCalendarIds?: string[])
   });
   const hostEmail = user?.email || "";
 
-  // Get all calendars, then filter to active set if configured
-  const { data: calList } = await client.calendarList.list();
-  const allCalendars = (calList.items ?? []).map((c) => ({
-    id: c.id || "primary",
-    name: c.summary || c.id || "primary",
-  }));
+  // Get all calendars from the TTL cache (Wedge A — avoids a Google round-trip
+  // on every syncCalendar call when the list is fresh). Falls back to a live
+  // fetch on cache miss or TTL expiry.
+  const allCalendars = await getCachedCalendarList(client, userId);
   const calendars =
     activeCalendarIds && activeCalendarIds.length > 0
       ? allCalendars.filter((c) => activeCalendarIds.includes(c.id))
@@ -1071,6 +1123,13 @@ export async function createCalendarEvent(
     attendeeEmails: string[];
     addMeetLink?: boolean;
     sessionId?: string;
+    /**
+     * RFC5545 recurrence lines (e.g. `["RRULE:FREQ=WEEKLY;COUNT=10;BYDAY=MO"]`)
+     * — when set, GCal creates a recurring master whose first occurrence is
+     * `startTime`; the resulting `eventId` is persisted on
+     * `NegotiationLink.seriesGcalEventId`. See `lib/recurrence.ts:toRRule`.
+     */
+    recurrence?: string[];
   }
 ) {
   // Routed through the side-effect dispatcher — preview deploys return fake
@@ -1087,6 +1146,7 @@ export async function createCalendarEvent(
     attendeeEmails: params.attendeeEmails,
     addMeetLink: params.addMeetLink,
     sessionId: params.sessionId,
+    recurrence: params.recurrence,
   });
   return {
     eventId: result.eventId,

@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { buildKnowledgePreview } from "@/agent/agent-runner";
-import { invalidateSchedule } from "@/lib/calendar";
+import { invalidateSchedule, invalidateCalendarListCache } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
 import type { UserPreferences } from "@/lib/scoring";
 import { getUserTimezone } from "@/lib/timezone";
@@ -71,6 +71,10 @@ async function resolvePrimaryCalendarIfNeeded(
         } as unknown as Prisma.InputJsonValue,
       },
     });
+    // Invalidate the CalendarListCache so the next syncCalendar call gets a
+    // fresh list reflecting the newly-resolved id rather than the stale literal.
+    // (Wedge A — proposal 2026-05-02_picker-load-perf §3c)
+    await invalidateCalendarListCache(userId);
     return resolved;
   } catch (e) {
     console.warn(

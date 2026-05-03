@@ -357,6 +357,16 @@ export async function GET(req: NextRequest) {
           // Picker's render path — the guest sees the Detailed tab on their
           // own device. Sonnet's tool path passes `false` per Cut 2.
           includeConflicts: true,
+          // PERF + CORRECTNESS (Wedge B — proposal 2026-05-02_picker-load-perf):
+          // reuse the host schedule already loaded at line 147 with link-scoped
+          // posture. Without this, computeBilateralForSession re-runs
+          // getOrComputeSchedule(hostId) internally with NO link context
+          // (Primary posture) — wrong posture for variance-link sessions (V1.5+)
+          // and a redundant load (~5 Prisma reads + 2 JSON deserializations).
+          // NB: `hostStableSlots` not `hostSlots` — this file already passes a
+          // `hostSlots: slots` (post-filter) to computeBilateralAvailability
+          // below; mixing them would violate SCORING.md §4.5.
+          hostStableSlots: schedule.slots,
         });
 
         // Logged-in guest fast path: when a live `getOrComputeSchedule`

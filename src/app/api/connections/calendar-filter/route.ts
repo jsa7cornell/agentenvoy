@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { invalidateSchedule } from "@/lib/calendar";
+import { invalidateSchedule, invalidateCalendarListCache } from "@/lib/calendar";
 import type { UserPreferences } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
 
@@ -37,8 +37,10 @@ export async function PUT(req: NextRequest) {
     },
   });
 
-  // Invalidate schedule so it recomputes with new calendar filter
+  // Invalidate schedule + calendarList cache so next sync fetches the
+  // updated list from Google (Wedge A — proposal 2026-05-02_picker-load-perf).
   await invalidateSchedule(session.user.id);
+  await invalidateCalendarListCache(session.user.id);
 
   return NextResponse.json({ status: "updated" });
 }

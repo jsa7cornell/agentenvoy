@@ -277,3 +277,53 @@ describe("computeBilateralForSession — host first name resolution", () => {
     expect(out.hostFirstName).toBe("Host");
   });
 });
+
+// ─── hostStableSlots (Wedge B — proposal 2026-05-02_picker-load-perf) ────────
+
+describe("computeBilateralForSession — hostStableSlots", () => {
+  it("uses pre-loaded hostStableSlots and does NOT call getOrComputeSchedule", async () => {
+    setSession({});
+    setSnapshot({ busy: [] });
+    // Provide pre-loaded slots — mock should NOT be called.
+    const preloaded: ScoredSlot[] = [hostSlot("2026-04-29T16:00:00.000Z", 1)];
+    const out = await computeBilateralForSession("session-1", {
+      hostStableSlots: preloaded,
+    });
+    expect(mockGetOrComputeSchedule).not.toHaveBeenCalled();
+    expect(out.available).toBe(true);
+    expect(out.byDay[0].matched).toHaveLength(1);
+  });
+
+  it("produces the same output whether slots come from hostStableSlots or internal load", async () => {
+    const slots: ScoredSlot[] = [
+      hostSlot("2026-04-29T16:00:00.000Z", 1), // matched
+      hostSlot("2026-04-29T17:00:00.000Z", 1), // guest busy → omitted from matched
+    ];
+    const busy = [{ start: "2026-04-29T17:00:00.000Z", end: "2026-04-29T17:30:00.000Z" }];
+
+    // Run via internal load path.
+    setSession({});
+    setSnapshot({ busy });
+    setHostSchedule(slots);
+    const internal = await computeBilateralForSession("session-1");
+
+    // Run via hostStableSlots path.
+    setSession({});
+    setSnapshot({ busy });
+    const preloaded = await computeBilateralForSession("session-2", {
+      hostStableSlots: slots,
+    });
+
+    expect(preloaded.byDay).toEqual(internal.byDay);
+    // The pre-loaded path must not trigger the mock.
+    expect(mockGetOrComputeSchedule).toHaveBeenCalledTimes(1); // only the internal call
+  });
+
+  it("falls back to internal load when hostStableSlots is omitted", async () => {
+    setSession({});
+    setSnapshot({ busy: [] });
+    setHostSchedule([hostSlot("2026-04-29T16:00:00.000Z", 1)]);
+    await computeBilateralForSession("session-1");
+    expect(mockGetOrComputeSchedule).toHaveBeenCalledTimes(1);
+  });
+});

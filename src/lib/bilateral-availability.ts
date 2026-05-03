@@ -265,6 +265,27 @@ export interface ComputeBilateralForSessionOptions {
    * thread. Picker's render path passes `true`; Sonnet tool passes `false`.
    */
   includeConflicts?: boolean;
+  /**
+   * Pre-loaded host scored slots from `getOrComputeSchedule(hostId).slots`.
+   * When supplied, bypasses the internal `getOrComputeSchedule` call —
+   * saves one full schedule load per request when the caller already has
+   * the host schedule (e.g. the slots route loads it at the top of the handler).
+   *
+   * CONTRACT (load-bearing per SCORING.md §4.5 no-mutation invariant):
+   * the supplied slots MUST be the unmutated host-stable list produced by
+   * `getOrComputeSchedule(session.hostId).slots` directly — NOT post-filter
+   * slots (e.g. after `applyEventOverrides`, score filter, past-filter,
+   * window clamp, density horizon, or duration filter). The name
+   * `hostStableSlots` (vs the shorter `hostSlots`) is deliberate: the slots
+   * route already passes a parameter named `hostSlots` to
+   * `computeBilateralAvailability` carrying the OPPOSITE (post-filter)
+   * semantics. Using a different name prevents a future refactor from
+   * accidentally swapping them.
+   *
+   * When omitted, the function loads the schedule internally as before
+   * (Sonnet's `get_matched_availability` tool path).
+   */
+  hostStableSlots?: ScoredSlot[];
 }
 
 const HOST_HOURS_PLACEHOLDER = "flexible";
@@ -487,12 +508,20 @@ export async function computeBilateralForSession(
     : new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
 
   // Host scored schedule.
-  let hostSlots: ScoredSlot[] = [];
-  try {
-    const schedule = await getOrComputeSchedule(session.hostId);
-    hostSlots = schedule.slots;
-  } catch (e) {
-    console.error("[bilateral] host schedule load failed", { sessionId, error: e });
+  // Wedge B (proposal 2026-05-02_picker-load-perf): when the caller already
+  // holds the host schedule (e.g. the slots route), accept it via
+  // `hostStableSlots` to avoid a redundant `getOrComputeSchedule` call.
+  // The slots route passes link-scoped slots (V1.5+); without this, the
+  // internal call below would use Primary posture — a correctness divergence
+  // for variance-link sessions in addition to the perf waste.
+  let hostSlots: ScoredSlot[] = options.hostStableSlots ?? [];
+  if (!options.hostStableSlots) {
+    try {
+      const schedule = await getOrComputeSchedule(session.hostId);
+      hostSlots = schedule.slots;
+    } catch (e) {
+      console.error("[bilateral] host schedule load failed", { sessionId, error: e });
+    }
   }
 
   // Guest scored slots from snapshot.

@@ -57,6 +57,9 @@ export function buildSeededExplicit(
     videoProvider: "google_meet",
     defaultDuration: 30,
     bufferMinutes: 0,
+    // NOTE: no invalidateCalendarListCache() needed here — this is the initial
+    // seed at signup; no CalendarListCache row exists yet for this user.
+    // See proposal 2026-05-02_picker-load-perf §3c for the invalidation discipline.
     activeCalendarIds: ["primary"],
   };
 
@@ -86,6 +89,8 @@ export function buildSeededExplicit(
     // scoring still works (Google resolves the alias server-side); only
     // the UI badge is lost. See google-onboarding-seed.ts for rationale.
     if (g.primaryCalendarId) {
+      // NOTE: no invalidateCalendarListCache() needed — same signup-seed context
+      // as above; no cache row exists yet. See proposal 2026-05-02_picker-load-perf §3c.
       seeded.activeCalendarIds = [g.primaryCalendarId];
     }
   }
