@@ -864,8 +864,15 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     // can throw in private-mode browsers.
     try {
       const pending = sessionStorage.getItem("envoy:pending-prefill");
+      const autoSubmit = sessionStorage.getItem("envoy:pending-autosubmit") === "true";
       if (pending) {
         sessionStorage.removeItem("envoy:pending-prefill");
+        sessionStorage.removeItem("envoy:pending-autosubmit");
+        if (autoSubmit) {
+          // Auto-submit: use pendingSendRef pattern (same as post-onboarding
+          // quick-reply) so the input state settles before handleSend fires.
+          pendingSendRef.current = pending;
+        }
         applyPrefill(pending);
       }
     } catch {

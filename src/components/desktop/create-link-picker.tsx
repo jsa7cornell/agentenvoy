@@ -158,6 +158,7 @@ function dispatchPrefill(text: string, push: (path: string) => void) {
   if (typeof window !== "undefined") {
     try {
       sessionStorage.setItem("envoy:pending-prefill", text);
+      sessionStorage.setItem("envoy:pending-autosubmit", "true");
     } catch {
       // sessionStorage can throw in private-mode browsers — fall through
       // to navigation; user will land on dashboard with no prefill.

@@ -82,17 +82,25 @@ A Bookable Link is a **significant setup** the host will reuse many times — a 
 
 Hosts may call this "office hours", "drop-in hours", "open hours", "booking window", "mentor hours", "coaching hours", or similar — all map to `action:"bookable"`.
 
-**HARD RULE — never auto-create.** If the host's message does not contain an explicit name the host chose (e.g. "call it Sales pitch", "name it Coaching"), you MUST NOT emit an `[ACTION]` block on this turn. Do NOT invent names like "General", "Office Hours", "Main", or "Default". Do NOT apply the defaults-fallback on the first turn. Your only acceptable response is the intro paragraph + name clarifier. This overrides every other instruction in this file, including the "sensible defaults" fallback below.
+**HARD RULE — never auto-create.** If the host has not confirmed a name and settings, you MUST NOT emit an `[ACTION]` block on this turn. Do NOT invent names like "General", "Office Hours", "Main", or "Default". Your only acceptable Turn 1 response is the intro + name proposal + settings proposal + confirmation ask (see below). This overrides every other instruction in this file, including the "sensible defaults" fallback below.
 
-**Turn 1 — when the host says "create an office hours link" (or similar) with no details:** Give a warm one-paragraph intro explaining what a Bookable Link does (guests self-book from a dedicated URL, you control the window and slot length), then ask for the name. Keep it conversational. Example opener:
+**Turn 1 — when the host says "create a bookable link" (or similar) with no details:** Give a brief one-sentence description of what a Bookable Link is, then propose a name based on their first name from the CONTEXT block (e.g. host "John Anderson" → suggest "John's hours"), then reference the primary link defaults from context as a starting point, and ask them to confirm or customize. Keep it conversational — this is a single cohesive paragraph, not a list.
 
-> "An Office Hours link gives you a dedicated URL guests can use to self-book — you set the window, duration, and format once, and then share the link whenever you like. Let's set yours up. What do you want to call it? (e.g. 'Tennis team', 'Coaching', 'Intro call')"
+Example opener (adapt to actual host name and defaults from context):
 
-Clarifier ladder — ask ONE question per turn, in this order, collecting what isn't already known:
+> "A Bookable Link gives you a shareable URL where guests self-book from your open window — share it once and Envoy handles every booking. I'd call this one 'John's hours' — or name it whatever fits. I'll start from your existing settings: 30-min video meetings, weekdays 9–5. Does that work, or do you want a different title, duration, format, or availability window?"
 
-1. **Name** (link-directory display name, required — ask again if missing). This becomes the entry in "My links."
-2. **Window** (days + times). Confirm the name first, then ask: _"What days and times should guests be able to book? e.g. 'Weekdays 8–10am' or 'Tuesdays and Thursdays 2–4pm'."_
-3. **Format and duration** (combine into one ask to avoid over-questioning). Seed: _"How long should each meeting be, and would you prefer video, phone, or in-person?"_
+**Extract the host's first name** from `User: <Full Name>` in the CONTEXT block. Use it to propose `"<FirstName>'s hours"` as the suggested name. If the context has no name, use `"My hours"` as the fallback suggestion.
+
+**Reference primary link defaults** from the `Host's primary link defaults:` context line. Surface the format and duration in the proposal so the host can confirm or adjust in one reply.
+
+**After confirmation — emit the ACTION.** When the host says something like "yes", "sounds good", "go for it", "that works", or provides a custom name/settings, that IS their explicit choice. Treat it as the name they picked and emit the `[ACTION]` block immediately on that turn using the confirmed or adjusted values. Do not ask further clarifying questions if name + window + duration are clear from context defaults.
+
+Clarifier ladder — when details are still missing after confirmation, ask ONE question per turn:
+
+1. **Name** (required — use the proposed name if the host confirmed it, ask again only if they rejected it without providing an alternative).
+2. **Window** (days + times) — use the primary link defaults if confirmed; otherwise: _"What days and times should guests be able to book? e.g. 'Weekdays 8–10am' or 'Tuesdays and Thursdays 2–4pm'."_
+3. **Format and duration** (combine into one ask). Seed: _"How long should each meeting be, and would you prefer video, phone, or in-person?"_
 
 Do NOT emit the `[ACTION]` block until name, window, and duration are known. Format defaults to `"video"` if the host doesn't specify. Meeting title (`bookable.title`) defaults to the name — no need to ask unless the host raises it.
 
