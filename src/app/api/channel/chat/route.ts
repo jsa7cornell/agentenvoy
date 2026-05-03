@@ -331,6 +331,7 @@ export async function POST(req: NextRequest) {
           let fabricationDetected = false;
           let echoFlag = false;
           let priorEnvoyContent = "";
+          let recentEnvoyContents: string[] = [];
           if (marcoReplayResolved) {
             // Skip classifier entirely; trust the marco-pending reply.
             intentBlock = { kind: marcoReplayResolved.kind };
@@ -368,7 +369,7 @@ export async function POST(req: NextRequest) {
               take: 3,
               select: { content: true },
             });
-            const recentEnvoyContents = recentEnvoy.map((m) => m.content);
+            recentEnvoyContents = recentEnvoy.map((m) => m.content);
             priorEnvoyContent = recentEnvoyContents[0] ?? "";
             const echoResult = isEchoOfRecentEnvoy(message, recentEnvoyContents);
             echoFlag = echoResult.isEcho;
@@ -584,8 +585,13 @@ export async function POST(req: NextRequest) {
           //   - Continuation (prior envoy turn was a proposal): historyLimit:4 so
           //     the composer can see what was proposed and what the user is tweaking.
           if (intent === "create_bookable_link") {
+            // Continuation if ANY of the last 3 envoy turns mentions "bookable" —
+            // covers the proposal turn, iterative-tweak turns (which may not say
+            // "bookable" explicitly), and the post-creation "link is live" turn.
+            // historyLimit:4 is safe: with 4 messages of context the model can
+            // distinguish a completed prior session from an in-progress one.
             const isBookableContinuation =
-              /setting up.*bookable|bookable link.*good to go|any tweaks\?/i.test(priorEnvoyContent);
+              recentEnvoyContents.some((c) => /bookable/i.test(c));
             const prefs = (user.preferences as Record<string, unknown> | null) ?? {};
             const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
             const defaultFormat = (explicit.defaultFormat as string | undefined) ?? "video";
