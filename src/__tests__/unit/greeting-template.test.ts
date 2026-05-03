@@ -1,25 +1,32 @@
+/**
+ * Tests for the surviving greeting helpers in `src/lib/greeting-template.ts`
+ * (post-2026-05-03 trim — see [GREETINGS.md §11.C]). Five test blocks for
+ * deleted exports (`formatAvailabilityWindows`, `formatAvailabilitySlotList`,
+ * `formatAvailabilityProse`, `alternateFormatsLabel`, host-canonical variant
+ * of formatAvailabilityWindows) were removed alongside the dead code.
+ *
+ * `filterByDuration` lives in `src/lib/scoring.ts`; tests are kept here for
+ * historical proximity but logically belong with scoring tests. Move when
+ * convenient.
+ */
+
 import { describe, it, expect } from "vitest";
+
 import {
-  formatAvailabilityWindows,
-  formatAvailabilityProse,
   humanTimezoneLabel,
   formatLabel,
-  alternateFormatsLabel,
+  computeCanonicalWeekLabel,
 } from "@/lib/greeting-template";
 import type { ScoredSlot } from "@/lib/scoring";
 import { filterByDuration } from "@/lib/scoring";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/**
- * Build a ScoredSlot for a given UTC date/hour/minute offset.
- * Tests pin `now` and use a fixed base date so results are deterministic.
- */
 function slot(
   baseUtcYmd: [number, number, number],
   hour: number,
   minute: number,
-  score: number
+  score: number,
 ): ScoredSlot {
   const [y, m, d] = baseUtcYmd;
   const start = new Date(Date.UTC(y, m - 1, d, hour, minute));
@@ -33,13 +40,12 @@ function slot(
   };
 }
 
-/** Build N consecutive 30-min slots at a given score. */
 function run(
   baseUtcYmd: [number, number, number],
   startHour: number,
   startMinute: number,
   count: number,
-  score: number
+  score: number,
 ): ScoredSlot[] {
   const slots: ScoredSlot[] = [];
   for (let i = 0; i < count; i++) {
@@ -48,116 +54,6 @@ function run(
   }
   return slots;
 }
-
-// Fixed "now" far before any of the test slots so everything is in the future.
-// UTC baseline: 2026-04-14 00:00Z — Pacific time is 2026-04-13 17:00 PDT.
-const NOW = new Date(Date.UTC(2026, 3, 14, 0, 0));
-const TZ = "America/Los_Angeles";
-
-// ─── formatAvailabilityWindows ───────────────────────────────────────────────
-
-describe("formatAvailabilityWindows", () => {
-  it("collapses contiguous 30-min slots into a single range", () => {
-    // Four 30-min slots on 4/15: 10:00, 10:30, 11:00, 11:30 PT (UTC 17:00–19:00)
-    const slots = run([2026, 4, 15], 17, 0, 4, 1);
-    const out = formatAvailabilityWindows(slots, TZ, NOW);
-    expect(out.lines).toHaveLength(1);
-    // Exactly one range, not four bullets
-    expect(out.lines[0]).toContain("10 AM–12 PM");
-    expect(out.hasPreferred).toBe(false);
-  });
-
-  it("marks a range containing a preferred slot with ★", () => {
-    // Three slots; the middle one is preferred (score -1)
-    const slots = [
-      ...run([2026, 4, 15], 17, 0, 1, 1),
-      ...run([2026, 4, 15], 17, 30, 1, -1),
-      ...run([2026, 4, 15], 18, 0, 1, 1),
-    ];
-    const out = formatAvailabilityWindows(slots, TZ, NOW);
-    expect(out.lines).toHaveLength(1);
-    expect(out.lines[0]).toContain("★");
-    expect(out.hasPreferred).toBe(true);
-  });
-
-  it("splits a block wider than ~3 hours (no '10 AM–6 PM' output)", () => {
-    // Eight contiguous slots = 4 hours starting 10 AM PT → should be truncated
-    // to a single ≤3h window, never "10 AM–2 PM" + nothing beyond, and
-    // definitely never the full 4h run.
-    const slots = run([2026, 4, 15], 17, 0, 8, 1); // 10:00–14:00 PT
-    const out = formatAvailabilityWindows(slots, TZ, NOW);
-    expect(out.lines).toHaveLength(1);
-    // Must not output the full 4-hour range
-    expect(out.lines[0]).not.toContain("10 AM–2 PM");
-    // Must output a ≤3h window starting at 10 AM
-    expect(out.lines[0]).toContain("10 AM–1 PM");
-  });
-
-  it("caps output at 5 days (plus week headers)", () => {
-    // Seven days, each with a single 30-min open slot at 10 AM PT.
-    const slots: ScoredSlot[] = [];
-    for (let day = 15; day <= 21; day++) {
-      slots.push(...run([2026, 4, day], 17, 0, 1, 1));
-    }
-    const out = formatAvailabilityWindows(slots, TZ, NOW);
-    // 5 day lines + week headers when days span multiple weeks
-    const dayLines = out.lines.filter((l) => l.startsWith("  •"));
-    expect(dayLines).toHaveLength(5);
-  });
-
-  it("prioritizes days with preferred slots when trimming to the 5-day cap", () => {
-    // 6 days of open slots. Day 20 has the only preferred slot.
-    // It must appear in the output even though there are 5 earlier days.
-    const slots: ScoredSlot[] = [];
-    for (let day = 15; day <= 19; day++) {
-      slots.push(...run([2026, 4, day], 17, 0, 1, 1));
-    }
-    slots.push(...run([2026, 4, 20], 17, 0, 1, -1)); // preferred
-    const out = formatAvailabilityWindows(slots, TZ, NOW);
-    const dayLines = out.lines.filter((l) => l.startsWith("  •"));
-    expect(dayLines).toHaveLength(5);
-    expect(out.hasPreferred).toBe(true);
-    const joined = out.lines.join("\n");
-    expect(joined).toContain("Apr 20");
-    expect(joined).toContain("★");
-  });
-
-  it("returns empty lines + hasPreferred=false when there are no offerable slots", () => {
-    const out = formatAvailabilityWindows([], TZ, NOW);
-    expect(out.lines).toEqual([]);
-    expect(out.hasPreferred).toBe(false);
-  });
-});
-
-// ─── formatAvailabilityWindows — host-canonical (decision #10 sweep) ────────
-// Dual-tz rendering removed 2026-04-21; guestTimezone param dropped from the
-// signature entirely in the follow-up cleanup. Tests below assert the
-// host-canonical output and host-local day grouping that replaced the old
-// dual-tz path.
-
-describe("formatAvailabilityWindows — host-canonical", () => {
-  // Slots on 4/15 17:00Z → 10 AM PT
-  const slots = run([2026, 4, 15], 17, 0, 4, 1);
-
-  it("renders in host tz with no CEST/parenthetical dual label", () => {
-    const out = formatAvailabilityWindows(slots, TZ, NOW);
-    expect(out.lines).toHaveLength(1);
-    const line = out.lines[0];
-    expect(line).toMatch(/10 AM–12 PM/);
-    expect(line).not.toMatch(/CEST|CET/);
-    expect(line).not.toContain("(");
-  });
-
-  it("groups by host-local day (not guest-local)", () => {
-    // Slot at 2026-04-15 06:30 UTC is 2026-04-14 23:30 PT — host-local day
-    // is Apr 14. The old guest-tz grouping branch would have put it on
-    // Apr 15; post-decision-#10 we always group host-local.
-    const earlyAm = slot([2026, 4, 15], 6, 30, 1);
-    const out = formatAvailabilityWindows([earlyAm], TZ, NOW);
-    expect(out.lines).toHaveLength(1);
-    expect(out.lines[0]).toContain("Apr 14");
-  });
-});
 
 // ─── humanTimezoneLabel ──────────────────────────────────────────────────────
 
@@ -168,7 +64,6 @@ describe("humanTimezoneLabel", () => {
   });
 
   it("uses the canonical TIMEZONE_TABLE label for zones in the table", () => {
-    // Asia/Kolkata is in the table; label is the hand-curated "India time"
     expect(humanTimezoneLabel("Asia/Kolkata")).toBe("India time");
   });
 
@@ -179,7 +74,7 @@ describe("humanTimezoneLabel", () => {
   });
 });
 
-// ─── format label helpers ────────────────────────────────────────────────────
+// ─── formatLabel ─────────────────────────────────────────────────────────────
 
 describe("formatLabel", () => {
   it("maps known formats", () => {
@@ -187,20 +82,51 @@ describe("formatLabel", () => {
     expect(formatLabel("phone")).toBe("phone call");
     expect(formatLabel("in-person")).toBe("in-person meeting");
   });
+
   it("returns null for undefined", () => {
     expect(formatLabel(undefined)).toBeNull();
   });
-});
 
-describe("alternateFormatsLabel", () => {
-  it("describes remaining formats", () => {
-    expect(alternateFormatsLabel("video")).toBe("a call or in-person");
-    expect(alternateFormatsLabel("phone")).toBe("video or in-person");
-    expect(alternateFormatsLabel("in-person")).toBe("phone or video");
+  it("passes through unknown formats verbatim", () => {
+    expect(formatLabel("custom")).toBe("custom");
   });
 });
 
-// ─── filterByDuration ────────────────────────────────────────────────────────
+// ─── computeCanonicalWeekLabel ───────────────────────────────────────────────
+
+describe("computeCanonicalWeekLabel", () => {
+  const TZ = "America/Los_Angeles";
+
+  it("returns null for empty slot lists", () => {
+    expect(computeCanonicalWeekLabel([], TZ)).toBeNull();
+  });
+
+  it("returns 'this week' when slots fall in the current Monday-Sunday bucket", () => {
+    // 2026-04-15 is a Wednesday. Anchor 'now' to that day.
+    const now = new Date(Date.UTC(2026, 3, 15, 17, 0));
+    // Slot Thursday 2026-04-16 — same week (Mon 4-13 → Sun 4-19).
+    const slots = [{ start: new Date(Date.UTC(2026, 3, 16, 17, 0)) }];
+    expect(computeCanonicalWeekLabel(slots, TZ, now)).toBe("this week");
+  });
+
+  it("returns 'next week' when slots fall in the next Monday-Sunday bucket", () => {
+    const now = new Date(Date.UTC(2026, 3, 15, 17, 0)); // Wed
+    // Slot Wednesday 2026-04-22 — next week (Mon 4-20 → Sun 4-26).
+    const slots = [{ start: new Date(Date.UTC(2026, 3, 22, 17, 0)) }];
+    expect(computeCanonicalWeekLabel(slots, TZ, now)).toBe("next week");
+  });
+
+  it("returns null when slots span multiple weeks", () => {
+    const now = new Date(Date.UTC(2026, 3, 15, 17, 0));
+    const slots = [
+      { start: new Date(Date.UTC(2026, 3, 16, 17, 0)) }, // this week
+      { start: new Date(Date.UTC(2026, 3, 22, 17, 0)) }, // next week
+    ];
+    expect(computeCanonicalWeekLabel(slots, TZ, now)).toBeNull();
+  });
+});
+
+// ─── filterByDuration (lives in scoring.ts; tests historically here) ─────────
 
 describe("filterByDuration", () => {
   it("is a pass-through for 30-min meetings", () => {
@@ -215,213 +141,29 @@ describe("filterByDuration", () => {
 
   it("keeps only valid start positions for a 60-min meeting", () => {
     // 3 consecutive slots: 10:00, 10:30, 11:00 → valid 60-min starts are 10:00 and 10:30
-    const slots = run([2026, 4, 15], 17, 0, 3, 1); // UTC 17:00, 17:30, 18:00
+    const slots = run([2026, 4, 15], 17, 0, 3, 1);
     const filtered = filterByDuration(slots, 60);
     expect(filtered).toHaveLength(2);
-    expect(filtered[0].start).toBe(slots[0].start); // 10:00 has 10:30 following
-    expect(filtered[1].start).toBe(slots[1].start); // 10:30 has 11:00 following
-    // 11:00 alone is NOT a valid 60-min start (no 11:30 in the list)
+    expect(filtered[0].start).toBe(slots[0].start);
+    expect(filtered[1].start).toBe(slots[1].start);
   });
 
   it("removes an isolated 30-min slot that cannot host a 60-min meeting", () => {
-    const isolated = [slot([2026, 4, 15], 17, 0, 1)]; // lone slot
+    const isolated = [slot([2026, 4, 15], 17, 0, 1)];
     expect(filterByDuration(isolated, 60)).toHaveLength(0);
   });
 
   it("handles a 90-min meeting requiring 3 consecutive slots", () => {
-    // 4 consecutive slots → valid 90-min starts: first 2 (each has 2 successors)
     const slots = run([2026, 4, 15], 17, 0, 4, 1);
     const filtered = filterByDuration(slots, 90);
     expect(filtered).toHaveLength(2);
   });
 
   it("works across a gap — non-consecutive slots are correctly excluded", () => {
-    // Slots at 10:00 and 11:00 (gap at 10:30) — neither is a valid 60-min start
     const gapped = [
-      slot([2026, 4, 15], 17, 0, 1),  // 10:00 PT
-      slot([2026, 4, 15], 18, 0, 1),  // 11:00 PT (gap at 10:30)
+      slot([2026, 4, 15], 17, 0, 1),
+      slot([2026, 4, 15], 18, 0, 1),
     ];
     expect(filterByDuration(gapped, 60)).toHaveLength(0);
-  });
-
-  it("integrates with formatAvailabilityWindows via durationMin param", () => {
-    // Only the first 2 of 3 consecutive slots are valid 60-min starts.
-    // The greeting should show the block range, not individual slots.
-    const slots = run([2026, 4, 15], 17, 0, 3, 1); // 10:00, 10:30, 11:00 PT
-    const out = formatAvailabilityWindows(slots, TZ, NOW, 60);
-    // 10:00 and 10:30 are kept → merges into "10–11 AM" (2 slots = 1h)
-    expect(out.lines).toHaveLength(1);
-    expect(out.lines[0]).toContain("10–11 AM");
-  });
-});
-
-// ─── formatAvailabilitySlotList (V2 Danny-spec) ──────────────────────────────
-
-import { formatAvailabilitySlotList } from "@/lib/greeting-template";
-
-describe("formatAvailabilitySlotList — block range labels", () => {
-  // Regression 2026-04-20: V2 greeting emitted only the block's start time.
-  // For a day with 7 AM–4 PM wide open, the guest saw `• 7:00 AM PT` and
-  // reasonably read that as "one 30-min slot" when it was "9 hours open."
-  // See greeting-template.ts fmtBlockLabel for context.
-  it("emits a range for a merged multi-slot block", () => {
-    // 18 contiguous score-0 slots = 9 hours starting 7 AM PT
-    const slots = run([2026, 4, 28], 14, 0, 18, 0); // 7 AM–4 PM PT
-    const out = formatAvailabilitySlotList(slots, TZ, NOW);
-    // One day header, one bullet (contiguous → one block)
-    const bullets = out.lines.filter((l) => l.startsWith("•"));
-    expect(bullets).toHaveLength(1);
-    // Must show a range, not just "7:00 AM PDT"
-    expect(bullets[0]).toMatch(/7:00 AM\s*–\s*4:00 PM/);
-  });
-
-  it("emits a bare start time for a single 30-min block", () => {
-    const slots = run([2026, 4, 28], 14, 0, 1, 0); // 7:00 AM only
-    const out = formatAvailabilitySlotList(slots, TZ, NOW);
-    const bullets = out.lines.filter((l) => l.startsWith("•"));
-    expect(bullets).toHaveLength(1);
-    // No en-dash, no range
-    expect(bullets[0]).not.toContain("–");
-    expect(bullets[0]).toContain("7:00 AM");
-  });
-
-  // Dual-tz rendering removed 2026-04-21 (decision #10). The greeting is
-  // always host-canonical; the guestTimezone param was dropped from the
-  // signature in the follow-up cleanup.
-  it("renders host-tz only — no EDT / slash-delimited dual label", () => {
-    const slots = run([2026, 4, 28], 14, 0, 6, 0); // 7–10 AM PT (3h)
-    const out = formatAvailabilitySlotList(slots, TZ, NOW);
-    const bullets = out.lines.filter((l) => l.startsWith("•"));
-    expect(bullets).toHaveLength(1);
-    expect(bullets[0]).toMatch(/7:00 AM\s*–\s*10:00 AM.*P(?:D|S)?T/);
-    expect(bullets[0]).not.toMatch(/EDT|EST/);
-    expect(bullets[0]).not.toContain(" / ");
-    expect(out.isDualTimezone).toBe(false);
-  });
-});
-
-// ─── formatAvailabilityProse ─────────────────────────────────────────────────
-
-describe("formatAvailabilityProse", () => {
-  // NOW = 2026-04-14 00:00Z = Mon 2026-04-13 17:00 PDT.
-  // This week Mon–Sun (host tz): Apr 13–Apr 19.
-  // Next week Mon–Sun:            Apr 20–Apr 26.
-
-  // Prose dual-tz gate removed 2026-04-21 (decision #10 sweep). Prose now
-  // renders regardless of viewer tz — greeting is host-canonical. Viewer-tz
-  // presentation lives on the card picker + Envoy follow-up chat instead.
-  it("still renders prose even when viewer tz would differ (host-canonical)", () => {
-    const slots = run([2026, 4, 15], 17, 0, 2, 0); // Tue 10 AM PT
-    const out = formatAvailabilityProse(slots, TZ, NOW);
-    expect(out).not.toBeNull();
-  });
-
-  it("returns null when slots fall beyond next week", () => {
-    // Week-after-next: May 4 (Mon of W+2)
-    const slots = run([2026, 5, 4], 17, 0, 2, 0);
-    const out = formatAvailabilityProse(slots, TZ, NOW);
-    expect(out).toBeNull();
-  });
-
-  it("returns null when no offerable slots remain", () => {
-    const slots = run([2026, 4, 15], 17, 0, 2, 5); // score 5 → filtered out
-    const out = formatAvailabilityProse(slots, TZ, NOW);
-    expect(out).toBeNull();
-  });
-
-  it("renders single-day this-week offer", () => {
-    // Tue Apr 14 PT (slots on Apr 14 UTC 17:00 = Apr 14 10 AM PT)
-    const slots = run([2026, 4, 14], 17, 0, 2, 0);
-    const out = formatAvailabilityProse(slots, TZ, NOW);
-    expect(out).not.toBeNull();
-    expect(out!.phrase).toBe("tomorrow");
-  });
-
-  it("renders two this-week days joined by 'or'", () => {
-    // Tue Apr 14 + Thu Apr 16, both PT 10 AM
-    const slots = [
-      ...run([2026, 4, 14], 17, 0, 2, 0),
-      ...run([2026, 4, 16], 17, 0, 2, 0),
-    ];
-    const out = formatAvailabilityProse(slots, TZ, NOW);
-    expect(out).not.toBeNull();
-    expect(out!.phrase).toBe("tomorrow or Thursday");
-  });
-
-  it("appends 'or next week if needed' when anchor=this-week and next-week slots exist", () => {
-    const slots = [
-      ...run([2026, 4, 14], 17, 0, 2, 0), // tomorrow (Tue)
-      ...run([2026, 4, 16], 17, 0, 2, 0), // Thu
-      ...run([2026, 4, 21], 17, 0, 2, 1), // next Tue
-      ...run([2026, 4, 22], 17, 0, 2, 1), // next Wed
-    ];
-    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, {
-      preferredAnchor: "this-week",
-    });
-    expect(out).not.toBeNull();
-    expect(out!.phrase).toBe("tomorrow or Thursday, or next week if needed");
-  });
-
-  it("appends 'this week if you need sooner' when anchor=next-week and this-week slots exist", () => {
-    const slots = [
-      ...run([2026, 4, 14], 17, 0, 2, 1), // tomorrow (this week) — fallback
-      ...run([2026, 4, 24], 17, 0, 2, 0), // next Fri — preferred (★-free but anchored)
-    ];
-    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, {
-      preferredAnchor: "next-week",
-    });
-    expect(out).not.toBeNull();
-    expect(out!.phrase).toBe("Friday next week, or this week if you need sooner");
-  });
-
-  it("collapses redundant 'next week' suffix when all preferred days are in next week", () => {
-    const slots = [
-      ...run([2026, 4, 20], 17, 0, 2, 0), // Mon next week
-      ...run([2026, 4, 21], 17, 0, 2, 0), // Tue next week
-      ...run([2026, 4, 14], 17, 0, 2, 1), // tomorrow (this week fallback)
-    ];
-    const out = formatAvailabilityProse(slots, TZ, NOW, undefined, undefined, {
-      preferredAnchor: "next-week",
-    });
-    expect(out).not.toBeNull();
-    // Should read "Monday or Tuesday next week, or this week if you need sooner"
-    // — not "Monday next week or Tuesday next week".
-    expect(out!.phrase).toBe(
-      "Monday or Tuesday next week, or this week if you need sooner",
-    );
-  });
-
-  it("no-split when all slots in the same week (no fallback tail)", () => {
-    const slots = [
-      ...run([2026, 4, 14], 17, 0, 2, 0),
-      ...run([2026, 4, 15], 17, 0, 2, 0),
-    ];
-    const out = formatAvailabilityProse(slots, TZ, NOW);
-    expect(out).not.toBeNull();
-    expect(out!.phrase).toBe("tomorrow or Wednesday");
-    expect(out!.phrase).not.toContain("if needed");
-  });
-
-  it("falls back to null when preferred group exceeds maxPreferredDays", () => {
-    // 5 this-week days — above default cap of 3
-    const slots = [
-      ...run([2026, 4, 14], 17, 0, 2, 0),
-      ...run([2026, 4, 15], 17, 0, 2, 0),
-      ...run([2026, 4, 16], 17, 0, 2, 0),
-      ...run([2026, 4, 17], 17, 0, 2, 0),
-      ...run([2026, 4, 18], 17, 0, 2, 0),
-    ];
-    const out = formatAvailabilityProse(slots, TZ, NOW);
-    expect(out).toBeNull();
-  });
-
-  it("sets hasPreferred when a ★ slot is present", () => {
-    const slots = [
-      ...run([2026, 4, 14], 17, 0, 2, 0),
-      ...run([2026, 4, 14], 18, 0, 1, -1),
-    ];
-    const out = formatAvailabilityProse(slots, TZ, NOW);
-    expect(out).not.toBeNull();
-    expect(out!.hasPreferred).toBe(true);
   });
 });
