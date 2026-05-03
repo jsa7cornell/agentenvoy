@@ -35,6 +35,25 @@ export type EndBy =
   | { count: number }
   | { until: string /* ISO UTC */ };
 
+/**
+ * `LinkRecurrence` has two valid states (proposal
+ * `2026-05-01_recurring-meeting-rendering-and-shareable-template` §3.5):
+ *
+ *   - **Pre-anchor-commit** — `anchor.firstDateLocal` and `.timeLocal` are
+ *     OMITTED. The host has framed the link as a series ("weekly piano
+ *     lessons") but is letting the guest pick the first slot. The composer
+ *     emits this shape, the link persists with `recurrence` populated, and
+ *     readers (greeting, card, landing page, MCP) treat it as recurring.
+ *
+ *   - **Post-anchor-commit** — both `firstDateLocal` and `timeLocal` are
+ *     filled in from the slot the guest picked. This is the shape
+ *     `expandRecurrence` and `toRRule` consume to write the GCal master
+ *     event. Confirm pipeline (`confirm-pipeline.ts`) is responsible for
+ *     promoting pre-commit → post-commit at anchor time.
+ *
+ * `parseRecurrence` accepts both shapes. `expandRecurrence` / `toRRule`
+ * require the post-commit shape and throw a clear error otherwise.
+ */
 export interface LinkRecurrence {
   /** Schema version for forward-compat. */
   v: "1";
@@ -42,11 +61,11 @@ export interface LinkRecurrence {
   /** IANA zone the wall-clock times are authored in. */
   timezone: string;
   anchor: {
-    /** The local date of the first occurrence, YYYY-MM-DD. */
-    firstDateLocal: string;
-    /** Wall-clock start, "HH:mm" (24h). */
-    timeLocal: string;
-    /** Duration in minutes. */
+    /** Local date of first occurrence, YYYY-MM-DD. Required post-commit, OMITTED pre-commit. */
+    firstDateLocal?: string;
+    /** Wall-clock start, "HH:mm" (24h). Required post-commit, OMITTED pre-commit. */
+    timeLocal?: string;
+    /** Duration in minutes. Always required. */
     durationMin: number;
     /** For monthly_nth_weekday: 1..5 (5 = last). Required when pattern is monthly_nth_weekday. */
     weekOfMonth?: number;
@@ -58,6 +77,57 @@ export interface LinkRecurrence {
   exclusions?: string[];
   /** How many days before an occurrence either side can reschedule it. Default 7. */
   rescheduleWindowDays?: number;
+}
+
+/** Post-anchor-commit narrowing — `firstDateLocal` and `timeLocal` are present. */
+export type CommittedLinkRecurrence = LinkRecurrence & {
+  anchor: LinkRecurrence["anchor"] & {
+    firstDateLocal: string;
+    timeLocal: string;
+  };
+};
+
+/** True when the recurrence carries a committed anchor (firstDateLocal + timeLocal). */
+export function isAnchorCommitted(rec: LinkRecurrence): rec is CommittedLinkRecurrence {
+  return typeof rec.anchor.firstDateLocal === "string" && typeof rec.anchor.timeLocal === "string";
+}
+
+/**
+ * Promote a (possibly pre-commit) recurrence to its committed shape by
+ * filling `anchor.firstDateLocal` and `.timeLocal` from the moment `startAt`,
+ * interpreted in the host's IANA timezone. Idempotent: existing committed
+ * shapes pass through with their original anchor (this matches the
+ * confirm-pipeline contract — the slot the guest just picked is the anchor;
+ * we don't re-derive on subsequent confirm passes for the same series).
+ *
+ * Used by `confirm-pipeline.ts` at anchor commit (proposal §5.9).
+ */
+export function commitAnchorAt(
+  rec: LinkRecurrence,
+  startAt: Date,
+  hostTimezone: string,
+): CommittedLinkRecurrence {
+  if (isAnchorCommitted(rec)) return rec;
+  const dateFmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: hostTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const timeFmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: hostTimezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return {
+    ...rec,
+    anchor: {
+      ...rec.anchor,
+      firstDateLocal: dateFmt.format(startAt),
+      timeLocal: timeFmt.format(startAt).replace(/^24:/, "00:"),
+    },
+  };
 }
 
 export interface ExpandedOccurrence {
@@ -175,12 +245,18 @@ const MAX_OCCURRENCES = 520; // 10y weekly
  * are applied.
  */
 export function expandRecurrence(
-  rec: LinkRecurrence,
+  recIn: LinkRecurrence,
   from: Date,
   to: Date,
 ): ExpandedOccurrence[] {
-  if (rec.v !== "1") throw new Error(`unsupported recurrence version: ${rec.v}`);
+  if (recIn.v !== "1") throw new Error(`unsupported recurrence version: ${recIn.v}`);
+  if (!isAnchorCommitted(recIn)) {
+    throw new Error(
+      "expandRecurrence: anchor.firstDateLocal and .timeLocal are required (anchor not yet committed)",
+    );
+  }
   if (to < from) return [];
+  const rec: CommittedLinkRecurrence = recIn;
 
   const tz = rec.timezone;
   const duration = rec.anchor.durationMin;
@@ -280,7 +356,13 @@ export function expandRecurrence(
  * Derive the RRULE string we'll write on the GCal master event.
  * GCal accepts RFC5545 RRULE:... content; BYDAY uses 2-letter day codes.
  */
-export function toRRule(rec: LinkRecurrence): string {
+export function toRRule(recIn: LinkRecurrence): string {
+  if (!isAnchorCommitted(recIn)) {
+    throw new Error(
+      "toRRule: anchor.firstDateLocal and .timeLocal are required (anchor not yet committed)",
+    );
+  }
+  const rec: CommittedLinkRecurrence = recIn;
   const dow =
     rec.anchor.dayOfWeek ?? dayOfWeekLocal(rec.anchor.firstDateLocal, rec.timezone);
   const byday = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"][dow];
@@ -304,7 +386,14 @@ export function toRRule(rec: LinkRecurrence): string {
   return `RRULE:${parts.join(";")}`;
 }
 
-/** Zod-lite runtime check. Returns the value typed, or throws. */
+/**
+ * Zod-lite runtime check. Returns the value typed, or throws.
+ *
+ * Accepts both pre-anchor-commit and post-commit shapes (see `LinkRecurrence`
+ * doc). `anchor.durationMin` is the only always-required anchor field;
+ * `firstDateLocal` and `timeLocal` may be absent on a freshly-created
+ * recurring link that defers anchor selection to the guest.
+ */
 export function parseRecurrence(raw: unknown): LinkRecurrence {
   if (!raw || typeof raw !== "object") throw new Error("recurrence: not an object");
   const r = raw as Record<string, unknown>;
@@ -314,9 +403,15 @@ export function parseRecurrence(raw: unknown): LinkRecurrence {
     throw new Error(`recurrence: bad pattern ${String(r.pattern)}`);
   }
   if (typeof r.timezone !== "string") throw new Error("recurrence: timezone");
-  const a = r.anchor as Record<string, unknown>;
-  if (!a || typeof a.firstDateLocal !== "string" || typeof a.timeLocal !== "string" || typeof a.durationMin !== "number") {
-    throw new Error("recurrence: anchor");
+  const a = r.anchor as Record<string, unknown> | undefined;
+  if (!a || typeof a.durationMin !== "number") {
+    throw new Error("recurrence: anchor.durationMin");
+  }
+  if (a.firstDateLocal !== undefined && typeof a.firstDateLocal !== "string") {
+    throw new Error("recurrence: anchor.firstDateLocal");
+  }
+  if (a.timeLocal !== undefined && typeof a.timeLocal !== "string") {
+    throw new Error("recurrence: anchor.timeLocal");
   }
   const endBy = r.endBy as Record<string, unknown>;
   if (!endBy || !("count" in endBy || "until" in endBy)) {

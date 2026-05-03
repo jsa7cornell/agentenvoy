@@ -1764,6 +1764,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                   statusLabel={status.label}
                   statusColor={status.color}
                   activityIcon={msg.thread.link.activityIcon || undefined}
+                  recurrence={(msg.thread.link as Record<string, unknown> | null | undefined)?.recurrence as Parameters<typeof ThreadCard>[0]["recurrence"]}
                   subtitle={(() => {
                     // ✏️ pencil suffix on deferred fields per 2026-04-29
                     // feedback iter 2: pencil icon replaces "(proposed)"

@@ -24,6 +24,7 @@ import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
 import { parseRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { UserPreferences } from "@/lib/scoring";
 import { parseLinkParameters } from "@/lib/link-parameters";
+import { snapshotPostureFromUser } from "@/lib/links/create";
 import {
   GUEST_PICKS_DURATION_MIN_MINUTES,
   GUEST_PICKS_DURATION_MAX_MINUTES,
@@ -872,7 +873,7 @@ export async function handleCreateLink(
   // context we still need the name — combine into a single lookup.
   const userRow = await prisma.user.findUnique({
     where: { id: userId },
-    select: { meetSlug: true, name: true },
+    select: { meetSlug: true, name: true, preferences: true },
   });
   if (!meetSlug) {
     meetSlug = userRow?.meetSlug || undefined;
@@ -1275,7 +1276,9 @@ export async function handleCreateLink(
     }
   }
 
+  const postureSnapshot = snapshotPostureFromUser({ preferences: userRow?.preferences as UserPreferences | null });
   const linkRulesPreIntent = normalizeLinkParameters({
+    ...postureSnapshot,
     ...rules,
     ...(effectiveFormat ? { format: effectiveFormat } : {}),
     ...(effectiveDurationParam != null ? { duration: effectiveDurationParam } : {}),
@@ -1314,6 +1317,7 @@ export async function handleCreateLink(
   // to null (one-off link) rather than blocking creation; the drift is
   // surfaced via warn-log. See src/lib/recurrence.ts for the shape.
   let recurrenceForLink: LinkRecurrence | null = null;
+  let recurrenceMultiGuestDropped = false;
   const rawRecurrence = params.recurrence;
   if (rawRecurrence != null) {
     try {
@@ -1323,6 +1327,22 @@ export async function handleCreateLink(
         `[create_link] recurrence rejected (${(e as Error).message}) — raw: ${JSON.stringify(rawRecurrence).slice(0, 200)}`,
       );
     }
+  }
+
+  // §5.10b — defense-in-depth single-guest guard. Closes parent-proposal
+  // §14.1 J8 drift that never landed in PR-A, per the
+  // 2026-05-01_recurring-meeting-rendering-and-shareable-template R3 fold.
+  // The composer playbook at calendar-event-composer.md:179 already says
+  // "v1 scope — single-guest only" but composer drift could still emit a
+  // multi-guest link with `recurrence` populated, leaving a malformed
+  // series in the database. Drop recurrence at the handler boundary; the
+  // first meeting still gets created.
+  if (recurrenceForLink != null && inviteeNames.length > 1) {
+    console.warn(
+      `[create_link] recurrence dropped — v1 supports single-guest only (got inviteeNames.length=${inviteeNames.length})`,
+    );
+    recurrenceForLink = null;
+    recurrenceMultiGuestDropped = true;
   }
 
   const link = await prisma.negotiationLink.create({
@@ -1407,9 +1427,12 @@ export async function handleCreateLink(
   const baseUrl = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
   const url = `${baseUrl}/meet/${meetSlug}/${code}`;
 
+  const baseMessage = `Created link for ${inviteeDisplay || "invitee"}${topic ? ` (${topic})` : ""}`;
   return {
     success: true,
-    message: `Created link for ${inviteeDisplay || "invitee"}${topic ? ` (${topic})` : ""}`,
+    message: recurrenceMultiGuestDropped
+      ? `${baseMessage} — Recurring group series isn't in v1 yet; I can set up the first meeting now.`
+      : baseMessage,
     data: {
       sessionId: session.id,
       linkId: link.id,

@@ -54,6 +54,7 @@ import {
 import { resolveParameters } from "@/lib/mcp/parameter-resolver";
 import { buildRulesPassthrough } from "@/lib/mcp/tools";
 import { getLinkPosture } from "@/lib/links/posture";
+import { readRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 
 /**
  * The wire shape consumed by external agents. `application/agent+json`
@@ -78,6 +79,15 @@ export type AgentSnapshot = {
    * the contract slot now so a future proposal doesn't reshape this output.
    */
   viewerOverlap?: undefined;
+  /**
+   * Recurring-meeting metadata, when the link's first booking commits a
+   * series rather than a one-off meeting. Populated from
+   * `NegotiationLink.recurrence` (per proposal
+   * `2026-05-01_recurring-meeting-rendering-and-shareable-template` §5.8).
+   * Anchor (`firstDateLocal`/`timeLocal`) is omitted on pre-commit links —
+   * the guest's first slot pick becomes the anchor.
+   */
+  recurrence?: LinkRecurrence;
   /**
    * How to actually book a slot. Currently always points at the public
    * MCP endpoint. Snapshot is guest-agent-targeted; host-side AI surfaces
@@ -182,6 +192,8 @@ export async function buildAgentSnapshot(
       "To cancel: POST tools/call `cancel_meeting` with `{ meetingUrl, sessionId }`. To reschedule: POST tools/call `reschedule_meeting` with `{ meetingUrl, sessionId, newSlot: { start } }`.",
   };
 
+  const recurrence = readRecurrence(link.recurrence);
+
   const baseSnapshot: Omit<AgentSnapshot, "slots"> = {
     schemaVersion: "2026-04-30",
     meetingUrl,
@@ -189,6 +201,7 @@ export async function buildAgentSnapshot(
     parameters,
     rules: rulesPassthrough,
     booking,
+    ...(recurrence ? { recurrence } : {}),
   };
 
   // Pull the host's global scored schedule.

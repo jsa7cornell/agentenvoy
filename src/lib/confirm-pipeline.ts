@@ -39,6 +39,7 @@ import { logRouteError } from "@/lib/route-error";
 import { buildGuestConfirmationEmail } from "@/lib/emails/guest-confirmation";
 import { parseLinkParameters } from "@/lib/link-parameters";
 import { generateCode } from "@/lib/utils";
+import { readRecurrence, toRRule, commitAnchorAt, type LinkRecurrence } from "@/lib/recurrence";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -677,6 +678,35 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     !!hostGoogleAcct?.refresh_token &&
     !!hostGoogleAcct?.scope?.split(" ").includes(HOST_WRITE_SCOPE);
 
+  // Recurring-meeting anchor commit (proposal §5.9). When the link carries
+  // a `recurrence` blob, the guest's slot pick BECOMES the series anchor.
+  // Promote the pre-commit recurrence to committed by filling
+  // `firstDateLocal` and `timeLocal` from `startTime` in the host's TZ,
+  // persist back to `link.recurrence`, then derive the RRULE that GCal
+  // writes on the master event. The materialized child URL (`dealRoomUrl`)
+  // is already in the description per [COMPOSER.md §4.6] — calendar invites
+  // are the canonical doorway and must point at the materialized child,
+  // never the source rule.
+  const linkRecurrence = readRecurrence(session.link.recurrence);
+  let committedRecurrence: LinkRecurrence | null = null;
+  let recurrenceLines: string[] | undefined;
+  if (linkRecurrence) {
+    const promoted = commitAnchorAt(linkRecurrence, startTime, hostTimezone);
+    try {
+      recurrenceLines = [toRRule(promoted)];
+      committedRecurrence = promoted;
+    } catch (e) {
+      // toRRule guards on shape; if we land here the recurrence blob is
+      // malformed in a way readRecurrence didn't catch. Degrade to a one-off
+      // GCal write rather than blocking the booking — the user still gets
+      // their first meeting; the series can be re-derived later.
+      console.error(
+        "[confirm] toRRule failed for recurring link — writing single event:",
+        e,
+      );
+    }
+  }
+
   const tGcalStart = Date.now();
   if (!hostHasWriteScope) {
     calendarWriteUnavailable = true;
@@ -703,6 +733,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       attendeeEmails,
       addMeetLink: useGoogleMeet,
       sessionId: session.id,
+      ...(recurrenceLines ? { recurrence: recurrenceLines } : {}),
     });
 
     if (useZoom) {
@@ -712,6 +743,26 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     }
     eventLink = result.htmlLink || undefined;
     confirmedCalendarEventId = result.eventId || undefined;
+
+    // Recurring-meeting follow-up: persist the committed recurrence (anchor
+    // now filled) + `seriesGcalEventId` on the link so future readers know
+    // the series is committed. Best-effort — a failure here doesn't undo
+    // the GCal write or the session transition.
+    if (committedRecurrence && confirmedCalendarEventId) {
+      try {
+        await prisma.negotiationLink.update({
+          where: { id: session.link.id },
+          data: {
+            recurrence: committedRecurrence as unknown as Prisma.InputJsonValue,
+            seriesGcalEventId: confirmedCalendarEventId,
+          },
+        });
+      } catch (e) {
+        console.warn(
+          `[confirm] series persistence failed (non-blocking): ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
 
     // Guard: in production, a synthetic (dryrun/log) or missing event ID
     // means `EFFECT_MODE_CALENDAR` isn't set to `live`. The session UI will

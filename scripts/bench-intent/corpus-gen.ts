@@ -24,6 +24,7 @@ export type Axis =
   | "off-topic injections"
   | "scheduling-verb with guest"
   | "host create vs modify vs cancel"
+  | "recurring meeting create"
   | "mixed adversarial";
 
 export const AXES: Axis[] = [
@@ -35,6 +36,7 @@ export const AXES: Axis[] = [
   "off-topic injections",
   "scheduling-verb with guest",
   "host create vs modify vs cancel",
+  "recurring meeting create",
   "mixed adversarial",
 ];
 
@@ -59,6 +61,14 @@ const AXIS_INSTRUCTIONS: Record<Exclude<Axis, "mixed adversarial">, string> = {
     "Generate non-scheduling utterances: weather chatter, greetings, random questions, quick thank-yous. These should all have expectedTier='chitchat'.",
   "scheduling-verb with guest":
     "Generate scheduling requests that contain an explicit scheduling verb ('set up', 'book', 'schedule', 'arrange', 'find time', 'grab time', 'get X on the calendar') plus a person name and optional timeframe. Examples: 'set up time with katie for next week', 'book a call with Marcus Thursday', 'find time for Sarah and me this week', 'get something on the calendar with Tom'. These should ALL have expectedTier='schedule' — scheduling verbs must never route to unclear.",
+  "recurring meeting create":
+    "Generate host dashboard-chat utterances (role: 'host') that frame a NEW link as a recurring meeting series. Cover: " +
+      "(1) single-turn fully-specified — host gives activity + cadence + duration + guest in one breath ('set up weekly piano lessons with Pat, 30 min, in-person — at my studio', 'recurring 1:1 with Sarah every Tuesday 4pm, 45 min'). " +
+      "(2) cadence variants — biweekly, every other week, monthly, daily. " +
+      "(3) bounded counts — '8 sessions', 'for 12 weeks', 'through end of June'. " +
+      "(4) name-uniqueness probes — host names a recurring series whose name overlaps an existing guest's link. " +
+      "(5) F8 regression class — bare phrasings the composer used to ladder ('weekly coaching', 'recurring sessions with Bob') that MUST still classify as create_link in a single turn rather than triggering a clarifier. " +
+      "ALL utterances expectedTier='create_link'. The host enum has no separate 'recurring' intent — recurring is a parameter of the create_link emission, not a distinct routing tier. This axis hard-gates the F8 single-turn-emit fixture per proposal `2026-05-01_recurring-meeting-rendering-and-shareable-template` §5.16.",
 };
 
 // Guest intents (legacy guest pipeline) + Host intents (PR1 chat-decisioning-

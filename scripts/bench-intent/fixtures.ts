@@ -28,7 +28,8 @@ export type PresetName =
   | "empty-new-host"
   | "host-with-named-links"
   | "host-general-only"
-  | "host-katie-bike-ride";
+  | "host-katie-bike-ride"
+  | "host-recurring-piano-lessons";
 
 export interface Fixture {
   host: string;
@@ -102,6 +103,19 @@ const PRESETS: Record<PresetName, Fixture> = {
     priorEnvoyTurn: undefined,
     recap:
       "John has a single active Katie catch-up session; a new 'bike ride with Katie' should classify as create_link (R1 default-to-create).",
+    isHost: true,
+  },
+  // Recurring-meeting-create gate — covers the F8 single-turn-emit
+  // regression class. Per proposal §5.16: utterances like "set up weekly
+  // piano lessons with Pat, 30 min, in-person — at my studio" must classify
+  // as `create_link` on the host enum (no clarifier ladder, no `unclear`).
+  // Pair with axis "recurring meeting create" in corpus-gen.
+  "host-recurring-piano-lessons": {
+    host: "John Anderson",
+    activeSessionsSummary: "",
+    priorEnvoyTurn: undefined,
+    recap:
+      "Fresh host context for recurring-meeting-create; 'set up weekly piano lessons with Pat' must classify as create_link in one turn (F8 hard-pass).",
     isHost: true,
   },
 };

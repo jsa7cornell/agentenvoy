@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Host-MCP — three tradeoff calls — AgentEnvoy</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0c;
+      --surface: #131318;
+      --surface-2: #1a1a22;
+      --surface-3: #21212c;
+      --border: rgba(255,255,255,0.08);
+      --border-strong: rgba(255,255,255,0.16);
+      --text: #f0f0f4;
+      --text-2: #9898a8;
+      --text-3: #5c5c70;
+      --purple: #7c3aed;
+      --purple-light: #a78bfa;
+      --emerald: #10b981;
+      --emerald-light: #34d399;
+      --emerald-dim: rgba(16,185,129,0.12);
+      --amber: #f59e0b;
+      --amber-dim: rgba(245,158,11,0.10);
+      --rose: #f43f5e;
+      --rose-dim: rgba(244,63,94,0.10);
+      --blue: #3b82f6;
+      --blue-light: #60a5fa;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 24px 16px 80px;
+      min-height: 100vh;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    /* HEADER */
+    .page-head { margin-bottom: 24px; }
+    .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+    .page-sub { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+
+    /* TABS */
+    .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+    .tab {
+      padding: 10px 16px; font-size: 13px; cursor: pointer; color: var(--text-2);
+      border-bottom: 2px solid transparent; transition: all .15s;
+      background: none; border-left: none; border-right: none; border-top: none;
+      font-family: inherit;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--emerald-light); border-bottom-color: var(--emerald); }
+    .tab .tnum { font-size: 11px; color: var(--text-3); margin-right: 6px; font-variant-numeric: tabular-nums; }
+    .tab.active .tnum { color: var(--emerald); }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* SECTION HEADER */
+    .section-q {
+      font-size: 17px; font-weight: 600; margin-bottom: 6px;
+    }
+    .section-sub { font-size: 13px; color: var(--text-2); margin-bottom: 24px; max-width: 800px; }
+    .scenario-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-3); margin-bottom: 12px;
+    }
+    .scenario-quote {
+      font-size: 15px; color: var(--text); padding: 14px 18px;
+      background: var(--surface); border-left: 2px solid var(--purple);
+      border-radius: 0 8px 8px 0; margin-bottom: 32px;
+      font-style: italic;
+    }
+    .scenario-quote .narrator { font-style: normal; color: var(--text-3); font-size: 12px; display: block; margin-bottom: 4px; }
+
+    /* OPTION GRID */
+    .options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media (max-width: 980px) { .options { grid-template-columns: 1fr; } }
+    .option {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px; display: flex; flex-direction: column;
+    }
+    .option.lean { border-color: rgba(16,185,129,0.35); box-shadow: 0 0 0 1px rgba(16,185,129,0.15); }
+    .opt-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+    .opt-letter {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+      background: var(--surface-3); color: var(--text-2); padding: 2px 8px; border-radius: 4px;
+    }
+    .option.lean .opt-letter { background: var(--emerald-dim); color: var(--emerald-light); }
+    .opt-title { font-size: 14px; font-weight: 600; }
+    .opt-tag { font-size: 11px; color: var(--text-3); margin-top: 2px; margin-bottom: 14px; }
+    .opt-tag.lean { color: var(--emerald-light); }
+
+    /* DEAL ROOM MOCKUP */
+    .dealroom {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px; margin-top: 8px; min-height: 280px;
+    }
+    .dr-head {
+      display: flex; align-items: center; gap: 8px; padding-bottom: 8px;
+      border-bottom: 1px solid var(--border); margin-bottom: 12px;
+      font-size: 11px; color: var(--text-3);
+    }
+    .dr-head .who { color: var(--text-2); }
+    .dr-head .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--emerald); }
+
+    .msg { margin-bottom: 10px; max-width: 85%; }
+    .msg-meta { font-size: 10px; color: var(--text-3); margin-bottom: 3px; display: flex; align-items: center; gap: 6px; }
+    .badge-claude {
+      font-size: 9px; background: rgba(124,58,237,0.18); color: var(--purple-light);
+      padding: 1px 5px; border-radius: 3px; letter-spacing: 0.02em; font-weight: 500;
+    }
+    .badge-envoy {
+      font-size: 9px; background: rgba(16,185,129,0.18); color: var(--emerald-light);
+      padding: 1px 5px; border-radius: 3px; letter-spacing: 0.02em; font-weight: 500;
+    }
+    .bubble {
+      padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.4;
+    }
+    .msg.guest { margin-right: auto; }
+    .msg.guest .bubble { background: var(--surface-2); color: var(--text); border-bottom-left-radius: 4px; }
+    .msg.host { margin-left: auto; }
+    .msg.host .bubble { background: rgba(124,58,237,0.18); color: var(--text); border-bottom-right-radius: 4px; }
+    .msg.host .msg-meta { justify-content: flex-end; }
+    .msg.envoy { margin-left: auto; }
+    .msg.envoy .bubble { background: rgba(16,185,129,0.12); color: var(--text); border-bottom-right-radius: 4px; border: 1px solid rgba(16,185,129,0.25); }
+    .msg.envoy .msg-meta { justify-content: flex-end; }
+
+    .annotate {
+      margin-top: 12px; padding: 10px 12px; background: var(--surface-2);
+      border-radius: 6px; font-size: 12px; color: var(--text-2);
+    }
+    .annotate strong { color: var(--text); }
+    .annotate.warn { background: var(--amber-dim); color: var(--amber); }
+    .annotate.warn strong { color: var(--amber); }
+    .annotate.good { background: var(--emerald-dim); color: var(--emerald-light); }
+    .annotate.good strong { color: var(--emerald-light); }
+    .annotate.bad { background: var(--rose-dim); color: var(--rose); }
+    .annotate.bad strong { color: var(--rose); }
+
+    /* HOST-VIEW HEADS-UP */
+    .hostview {
+      background: var(--surface-2); border: 1px dashed var(--border-strong); border-radius: 8px;
+      padding: 12px; margin-top: 12px;
+    }
+    .hostview-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); margin-bottom: 8px; }
+    .heads-up {
+      background: var(--amber-dim); border: 1px solid rgba(245,158,11,0.3); border-radius: 6px;
+      padding: 10px 12px; font-size: 12px;
+    }
+    .heads-up-icon { font-size: 14px; margin-right: 6px; }
+    .heads-up-title { color: var(--amber); font-weight: 600; margin-bottom: 4px; }
+    .heads-up-body { color: var(--text-2); margin-bottom: 8px; }
+    .heads-up-actions { display: flex; gap: 6px; }
+    .heads-up-btn { padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; border: none; font-family: inherit; }
+    .heads-up-btn.primary { background: var(--amber); color: #1a1a22; }
+    .heads-up-btn.secondary { background: transparent; color: var(--text-2); border: 1px solid var(--border-strong); }
+
+    /* CONSENT BANNER MOCKUP */
+    .consent-card {
+      background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 10px;
+      padding: 14px 16px; margin-top: 8px;
+    }
+    .consent-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+    .consent-head .icon { font-size: 16px; }
+    .consent-body { font-size: 12px; color: var(--text-2); margin-bottom: 12px; line-height: 1.5; }
+    .consent-body .email { color: var(--text); font-family: ui-monospace, monospace; font-size: 11.5px; }
+    .consent-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .consent-btn {
+      padding: 6px 12px; border-radius: 5px; font-size: 12px; cursor: pointer;
+      font-family: inherit; border: none;
+    }
+    .consent-btn.primary { background: var(--emerald); color: #0a0a0c; font-weight: 600; }
+    .consent-btn.primary:hover { background: var(--emerald-light); }
+    .consent-btn.secondary { background: transparent; color: var(--text-2); border: 1px solid var(--border-strong); }
+    .consent-btn.danger { background: transparent; color: var(--rose); border: 1px solid rgba(244,63,94,0.3); }
+
+    .recent-list { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .recent-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); margin-bottom: 8px; }
+    .recent-item {
+      display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      border-radius: 5px; font-size: 12px; cursor: pointer; margin-bottom: 2px;
+    }
+    .recent-item:hover { background: var(--surface-3); }
+    .recent-item .check {
+      width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid var(--text-3);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 9px; color: transparent;
+    }
+    .recent-item.checked .check { background: var(--emerald); border-color: var(--emerald); color: #0a0a0c; }
+    .recent-item .name { color: var(--text); font-weight: 500; }
+    .recent-item .meta { color: var(--text-3); margin-left: auto; font-size: 11px; }
+
+    /* TOAST MOCKUP */
+    .toast {
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; font-size: 12px; color: var(--text-2);
+      display: flex; align-items: center; gap: 8px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+      max-width: 280px; margin-bottom: 6px;
+    }
+    .toast .icon { color: var(--blue-light); }
+    .toast .config-link { color: var(--text-3); margin-left: auto; cursor: pointer; font-size: 11px; }
+    .toast.dismissing { opacity: 0.4; }
+
+    /* TIMELINE */
+    .timeline { display: flex; flex-direction: column; gap: 10px; padding: 8px 0; min-height: 280px; }
+    .tl-row { display: flex; gap: 10px; align-items: flex-start; }
+    .tl-time { font-size: 10px; color: var(--text-3); width: 30px; flex-shrink: 0; padding-top: 4px; font-variant-numeric: tabular-nums; }
+    .tl-event { flex: 1; }
+    .tl-claude { font-size: 12px; color: var(--purple-light); padding: 6px 10px; background: rgba(124,58,237,0.10); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px; }
+    .tl-claude.note { background: transparent; padding: 4px 0; color: var(--text-2); font-family: inherit; font-size: 12px; font-style: italic; }
+    .tl-banner { font-size: 12px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; }
+    .tl-banner.warn { background: var(--amber-dim); border-color: rgba(245,158,11,0.3); }
+    .tl-banner.warn .ti { color: var(--amber); font-weight: 600; }
+    .tl-banner.toast { background: rgba(59,130,246,0.10); border-color: rgba(59,130,246,0.3); }
+    .tl-banner.toast .ti { color: var(--blue-light); font-weight: 500; }
+    .tl-banner.silent { background: transparent; border-style: dashed; color: var(--text-3); font-style: italic; }
+    .tl-claude-says { font-size: 13px; padding: 10px 12px; background: rgba(124,58,237,0.15); border-radius: 8px; }
+    .tl-claude-says .ti { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--purple-light); margin-bottom: 4px; }
+
+    /* SUMMARY ROW */
+    .opt-summary {
+      margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--text-3); line-height: 1.5;
+    }
+    .opt-summary strong { color: var(--text-2); }
+    .opt-pros, .opt-cons { margin-top: 6px; }
+    .opt-pros { color: var(--emerald-light); }
+    .opt-cons { color: #f59e0b; }
+
+    /* DECIDE BAR */
+    .decide-bar {
+      margin-top: 28px; padding: 16px 20px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 10px;
+      display: flex; align-items: center; gap: 16px; font-size: 13px; flex-wrap: wrap;
+    }
+    .decide-bar .label { color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .decide-bar .lean { color: var(--emerald-light); font-weight: 600; }
+    .decide-bar .why { color: var(--text-2); flex: 1; min-width: 240px; }
+
+    /* SETTINGS PEEK */
+    .settings-peek {
+      margin-top: 12px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; font-size: 11px; color: var(--text-3);
+    }
+    .settings-peek .title { color: var(--text-2); font-weight: 600; margin-bottom: 6px; font-size: 12px; }
+    .settings-peek .row { display: flex; justify-content: space-between; padding: 3px 0; font-family: ui-monospace, monospace; font-size: 11px; }
+    .settings-peek .row .e { color: var(--text); }
+    .settings-peek .row .x { color: var(--rose); cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="page-head">
+      <div class="page-title">Host-side MCP — three tradeoff calls</div>
+      <div class="page-sub">Each tab is one decision. Side-by-side mockups; same scenario, three product behaviors. Author's lean is highlighted but not pre-decided.</div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-panel="t1"><span class="tnum">T1</span>Does Envoy reply when host's Claude posts?</button>
+      <button class="tab" data-panel="t2"><span class="tnum">T2</span>What counts as a "stranger" recipient?</button>
+      <button class="tab" data-panel="t3"><span class="tnum">T3</span>How does first-mint feel?</button>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════
+         T1 — post_to_deal_room behavior
+         ═════════════════════════════════════════════════════════ -->
+    <div class="panel active" id="t1">
+      <div class="section-q">When the host's own Claude posts in a deal-room, what does Envoy do?</div>
+      <div class="section-sub">
+        Envoy is the host's in-product delegate. The host's own Claude (via host-MCP) is also acting on their behalf.
+        Two delegates representing the same principal in the same room. The question is how they coexist.
+      </div>
+
+      <div class="scenario-label">Scenario</div>
+      <div class="scenario-quote">
+        <span class="narrator">John (to his Claude, in a separate Claude session):</span>
+        "Tell Bryan I can do Tuesday at 3pm if that works for him."
+      </div>
+      <div class="scenario-label">— but: John has a calendar block at 2:30pm Tuesday that Envoy knows about, and Claude doesn't.</div>
+
+      <div class="options">
+
+        <!-- OPTION A — Envoy replies in-thread -->
+        <div class="option">
+          <div class="opt-head">
+            <span class="opt-letter">A</span>
+            <span class="opt-title">Envoy replies in-thread</span>
+          </div>
+          <div class="opt-tag">Like guest-side `post_message` — Envoy generates a follow-up turn after Claude posts.</div>
+          <div class="dealroom">
+            <div class="dr-head"><span class="dot"></span><span class="who">Bryan ↔ John (deal-room)</span></div>
+            <div class="msg guest">
+              <div class="msg-meta"><span>Bryan</span><span>· 2:14pm</span></div>
+              <div class="bubble">What time works for you next week?</div>
+            </div>
+            <div class="msg host">
+              <div class="msg-meta"><span class="badge-claude">via Claude</span><span>· John</span></div>
+              <div class="bubble">Tuesday at 3pm work?</div>
+            </div>
+            <div class="msg envoy">
+              <div class="msg-meta"><span class="badge-envoy">Envoy</span><span>· John's assistant</span></div>
+              <div class="bubble">Quick note — John has something at 2:30 that day. 3pm is tight if it runs over. Want me to also offer 4pm?</div>
+            </div>
+          </div>
+          <div class="annotate bad"><strong>Bryan's view:</strong> Two of John's "voices" disagree mid-thread. He has to pick one — and now Envoy second-guessed Claude in front of him. Classic two-cooks problem.</div>
+          <div class="opt-summary">
+            <strong>What it gives you:</strong> Safety net. Envoy catches Claude's blind spots in front of the guest.
+            <div class="opt-cons">— Two host-side voices disagreeing publicly. Reads as confused, not careful.</div>
+            <div class="opt-cons">— Envoy is talking to its own teammate (host's Claude) while Bryan watches. Weird.</div>
+          </div>
+        </div>
+
+        <!-- OPTION B — Envoy silent, no validation -->
+        <div class="option">
+          <div class="opt-head">
+            <span class="opt-letter">B</span>
+            <span class="opt-title">Envoy silent</span>
+          </div>
+          <div class="opt-tag">Claude posts. Envoy doesn't reply. Doesn't validate either.</div>
+          <div class="dealroom">
+            <div class="dr-head"><span class="dot"></span><span class="who">Bryan ↔ John (deal-room)</span></div>
+            <div class="msg guest">
+              <div class="msg-meta"><span>Bryan</span><span>· 2:14pm</span></div>
+              <div class="bubble">What time works for you next week?</div>
+            </div>
+            <div class="msg host">
+              <div class="msg-meta"><span class="badge-claude">via Claude</span><span>· John</span></div>
+              <div class="bubble">Tuesday at 3pm work?</div>
+            </div>
+            <div style="opacity:0.4; font-size:11px; text-align:right; color:var(--text-3); margin-top:8px;">— Envoy stays out —</div>
+          </div>
+          <div class="annotate warn"><strong>Failure mode:</strong> Bryan accepts. The booking lands. Two days later John realizes the 2:30 block conflicts. Now he's awkwardly rescheduling, and his Claude looks like the one that screwed up.</div>
+          <div class="opt-summary">
+            <strong>What it gives you:</strong> Cleanest deal-room. Single host voice per turn. Predictable.
+            <div class="opt-pros">+ One delegate speaks. Bryan never sees the host arguing with itself.</div>
+            <div class="opt-cons">— No safety net. Claude's blind spots ship straight to the guest.</div>
+          </div>
+        </div>
+
+        <!-- OPTION C — Envoy silent in thread, validates pre-send -->
+        <div class="option lean">
+          <div class="opt-head">
+            <span class="opt-letter">C</span>
+            <span class="opt-title">Envoy silent to guest, validates host-side</span>
+          </div>
+          <div class="opt-tag lean">Author's new lean — splits "voice" from "guardrail".</div>
+          <div class="dealroom">
+            <div class="dr-head"><span class="dot"></span><span class="who">Bryan ↔ John (deal-room)</span></div>
+            <div class="msg guest">
+              <div class="msg-meta"><span>Bryan</span><span>· 2:14pm</span></div>
+              <div class="bubble">What time works for you next week?</div>
+            </div>
+            <div class="msg host">
+              <div class="msg-meta"><span class="badge-claude">via Claude</span><span>· John</span></div>
+              <div class="bubble">Tuesday at 3pm work?</div>
+            </div>
+            <div style="opacity:0.4; font-size:11px; text-align:right; color:var(--text-3); margin-top:8px;">— Envoy stays out of the deal-room —</div>
+          </div>
+
+          <div class="hostview">
+            <div class="hostview-label">— but in John's separate Claude session, BEFORE the post lands —</div>
+            <div class="heads-up">
+              <div class="heads-up-title"><span class="heads-up-icon">⚠</span>Heads up before this lands</div>
+              <div class="heads-up-body">Claude wants to send: <em>"Tuesday at 3pm work?"</em><br>You have a block at <strong>Tue 2:30pm</strong>. 3pm is 30 min after; if the prior runs over, this one's tight.</div>
+              <div class="heads-up-actions">
+                <button class="heads-up-btn primary">Send anyway</button>
+                <button class="heads-up-btn secondary">Edit time</button>
+                <button class="heads-up-btn secondary">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="annotate good"><strong>What this is:</strong> Envoy still does the safety-check, but it talks to <em>you</em>, not to Bryan. The deal-room stays clean; you stay informed. The host-side Claude flow has a guardrail without making your delegate look indecisive in public.</div>
+          <div class="opt-summary">
+            <strong>What it gives you:</strong> Both. Single host voice in the room AND a real guardrail.
+            <div class="opt-pros">+ Bryan sees one clean voice. You see Envoy's check before anything lands.</div>
+            <div class="opt-pros">+ Matches "Envoy as your delegate" framing — Envoy talks to <em>you</em>, not over you.</div>
+            <div class="opt-cons">— More to build (validation pipe + heads-up surface in the host Claude session).</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="decide-bar">
+        <span class="label">Author's lean</span>
+        <span class="lean">Option C</span>
+        <span class="why">B was the lean before this mockup; thinking through it concretely surfaced the third option. C respects the rule that <em>Envoy is the host's delegate</em> — a delegate that talks to the host (not over the host's other delegate, in front of the guest) is the right shape. The cost is real (more to build), but smaller than the cost of either two voices arguing publicly (A) or no safety net (B).</span>
+      </div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════
+         T2 — stranger definition
+         ═════════════════════════════════════════════════════════ -->
+    <div class="panel" id="t2">
+      <div class="section-q">When Claude tries to mint a link to someone, when does AgentEnvoy ask you first?</div>
+      <div class="section-sub">
+        Minting a link with an email triggers outreach. The product question: which emails does the host's Claude need explicit ack for?
+      </div>
+
+      <div class="scenario-label">Scenario</div>
+      <div class="scenario-quote">
+        <span class="narrator">John says to his Claude, three times:</span>
+        "Find a time with Bryan — bryan@example.com." (Bryan: 2 prior meetings via AgentEnvoy.)<br>
+        "Find a time with Sarah — sarah@example.com." (Sarah: 1 prior meeting.)<br>
+        "Find a time with this LinkedIn person — pulse@cold-outreach-saas.com." (Never met.)
+      </div>
+
+      <div class="options">
+
+        <!-- OPTION A — Auto-learn from history -->
+        <div class="option">
+          <div class="opt-head">
+            <span class="opt-letter">A</span>
+            <span class="opt-title">Auto-learn from session history</span>
+          </div>
+          <div class="opt-tag">User-level salt; AgentEnvoy infers "known" from past sessions.</div>
+
+          <div class="timeline">
+            <div class="tl-row"><div class="tl-time">10:01</div><div class="tl-event">
+              <div class="tl-claude">→ create_link(bryan@example.com)</div>
+              <div class="tl-banner silent">silently approved (in known-set)</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">10:02</div><div class="tl-event">
+              <div class="tl-claude">→ create_link(sarah@example.com)</div>
+              <div class="tl-banner silent">silently approved (in known-set)</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">10:03</div><div class="tl-event">
+              <div class="tl-claude">→ create_link(pulse@cold-outreach-saas.com)</div>
+              <div class="tl-banner warn"><span class="ti">consent_required</span> — NEW: Claude wants to reach out to <code>pulse@cold-outreach-saas.com</code></div>
+            </div></div>
+          </div>
+
+          <div class="annotate"><strong>What John sees:</strong> Two silent successes, then one consent banner for the cold outreach. Smooth for known recipients.</div>
+          <div class="annotate bad"><strong>What John doesn't see:</strong> AgentEnvoy quietly hash-checked Bryan and Sarah against a per-user salted set of every email John has ever interacted with. The "known set" is invisible. If a recipient he met once a year ago gets auto-approved, John can't tell that's why.</div>
+          <div class="opt-summary">
+            <strong>What it gives you:</strong> Zero-friction repeat outreach.
+            <div class="opt-pros">+ Smoothest UX for the common case.</div>
+            <div class="opt-cons">— Adds a User-level email-hash-set: a privacy surface that doesn't exist today.</div>
+            <div class="opt-cons">— Carve-out from the per-link-salt invariant in MCP SPEC §4.</div>
+            <div class="opt-cons">— Implicit. John has no surface where he can audit "who is Claude allowed to reach out to silently?"</div>
+          </div>
+        </div>
+
+        <!-- OPTION B — Always-destructive on first touch + allowlist -->
+        <div class="option">
+          <div class="opt-head">
+            <span class="opt-letter">B</span>
+            <span class="opt-title">Always ask first time, allowlist host grows</span>
+          </div>
+          <div class="opt-tag">Reviewer's lean. First touch always asks; explicit allowlist.</div>
+
+          <div class="timeline">
+            <div class="tl-row"><div class="tl-time">10:01</div><div class="tl-event">
+              <div class="tl-claude">→ create_link(bryan@example.com)</div>
+              <div class="tl-banner warn"><span class="ti">consent_required</span> — Claude wants to reach out to <code>bryan@example.com</code></div>
+              <div class="tl-claude note">John clicks "Approve and remember" → bryan added to allowlist</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">10:02</div><div class="tl-event">
+              <div class="tl-claude">→ create_link(sarah@example.com)</div>
+              <div class="tl-banner warn"><span class="ti">consent_required</span> — Claude wants to reach out to <code>sarah@example.com</code></div>
+              <div class="tl-claude note">John approves → sarah added.</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">10:03</div><div class="tl-event">
+              <div class="tl-claude">→ create_link(pulse@cold-outreach-saas.com)</div>
+              <div class="tl-banner warn"><span class="ti">consent_required</span> — Claude wants to reach out to <code>pulse@cold-outreach-saas.com</code></div>
+              <div class="tl-claude note">John dismisses (no approve) → not added.</div>
+            </div></div>
+          </div>
+
+          <div class="settings-peek">
+            <div class="title">Settings → Connectors → Allowlist (after approve)</div>
+            <div class="row"><span class="e">bryan@example.com</span><span>added 10:01</span><span class="x">×</span></div>
+            <div class="row"><span class="e">sarah@example.com</span><span>added 10:02</span><span class="x">×</span></div>
+          </div>
+
+          <div class="annotate good"><strong>What John sees:</strong> Three banners. One click each (or dismiss). After that, future Claude calls to Bryan and Sarah are silent. The list is John's, visible, editable.</div>
+          <div class="opt-summary">
+            <strong>What it gives you:</strong> Explicit control. No invisible auto-learning.
+            <div class="opt-pros">+ No new privacy surface. No hash-set of who you've met.</div>
+            <div class="opt-pros">+ Allowlist is auditable. John can revoke "stop letting Claude reach out to that person" anytime.</div>
+            <div class="opt-cons">— First touch with anyone is a banner. Friction for the first session.</div>
+          </div>
+        </div>
+
+        <!-- OPTION C — Always ask but smart suggestions -->
+        <div class="option lean">
+          <div class="opt-head">
+            <span class="opt-letter">C</span>
+            <span class="opt-title">Always ask, BUT one banner with smart suggestions</span>
+          </div>
+          <div class="opt-tag lean">Hybrid — first-touch friction visible, but bundled and 1-click.</div>
+
+          <div class="timeline">
+            <div class="tl-row"><div class="tl-time">10:01</div><div class="tl-event">
+              <div class="tl-claude">→ create_link × 3 (bryan, sarah, pulse@…)</div>
+            </div></div>
+          </div>
+
+          <div class="consent-card">
+            <div class="consent-head"><span class="icon">🤖</span>Claude wants to reach out to 3 people</div>
+            <div class="consent-body">
+              For each, AgentEnvoy will mint a link and send the recipient a notification.
+            </div>
+            <div class="recent-list">
+              <div class="recent-label">Recent guests (you've met before)</div>
+              <div class="recent-item checked">
+                <span class="check">✓</span>
+                <span class="name">Bryan</span>
+                <span class="meta"><span class="email" style="color:var(--text-3); font-family:ui-monospace,monospace; font-size:10.5px;">bryan@example.com · 2 prior meetings</span></span>
+              </div>
+              <div class="recent-item checked">
+                <span class="check">✓</span>
+                <span class="name">Sarah</span>
+                <span class="meta"><span class="email" style="color:var(--text-3); font-family:ui-monospace,monospace; font-size:10.5px;">sarah@example.com · 1 prior</span></span>
+              </div>
+              <div class="recent-label" style="margin-top: 10px;">New recipient</div>
+              <div class="recent-item">
+                <span class="check"></span>
+                <span class="name" style="color: var(--amber);">pulse@cold-outreach-saas.com</span>
+                <span class="meta" style="color:var(--text-3); font-size: 10.5px;">never met</span>
+              </div>
+            </div>
+            <div class="consent-actions" style="margin-top: 10px;">
+              <button class="consent-btn primary">Approve checked (2)</button>
+              <button class="consent-btn secondary">Edit selection</button>
+              <button class="consent-btn danger">Cancel all</button>
+            </div>
+            <div style="font-size: 10.5px; color: var(--text-3); margin-top: 8px;">☑ Add approved recipients to allowlist (silent next time)</div>
+          </div>
+
+          <div class="annotate good"><strong>What John sees:</strong> One banner, three rows. Known guests pre-checked (visibility) but easy 1-click approve. Cold outreach unchecked by default, name/domain visible. Total decision time: ~5 seconds.</div>
+          <div class="opt-summary">
+            <strong>What it gives you:</strong> A's smoothness for known + B's safety/transparency for cold.
+            <div class="opt-pros">+ John can see WHO Claude is reaching out to before saying yes.</div>
+            <div class="opt-pros">+ "Recent guests" row uses session history as <em>suggestion</em> not as <em>silent override</em>. Same data, different surface.</div>
+            <div class="opt-pros">+ Allowlist still grows from approves; future Claude calls to allowlisted people are silent.</div>
+            <div class="opt-cons">— Slightly more UI to design (the bundled multi-recipient banner shape).</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="decide-bar">
+        <span class="label">Author's lean</span>
+        <span class="lean">Option C</span>
+        <span class="why">B was my new lean from the review. But B treats single-recipient and multi-recipient cases the same (banner per call), which is the wrong shape when Claude is doing batch outreach. C uses session history as a UX <em>suggestion</em> (visible, pre-checked) rather than a silent override — gives A's smoothness with B's transparency. The privacy surface from A vanishes because nothing is auto-approved without a click.</span>
+      </div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════
+         T3 — first-mint feel
+         ═════════════════════════════════════════════════════════ -->
+    <div class="panel" id="t3">
+      <div class="section-q">First time someone connects Claude to AgentEnvoy, what do they feel?</div>
+      <div class="section-sub">
+        Brand-new PAT. User adds it as a custom connector in Claude. They open Claude and ask the simplest possible question:
+      </div>
+
+      <div class="scenario-label">Scenario</div>
+      <div class="scenario-quote">
+        <span class="narrator">John, in Claude, having just minted his first PAT:</span>
+        "What's on my AgentEnvoy?"
+      </div>
+      <div class="scenario-label">— Claude needs three reads to answer: list_my_links, list_my_sessions, get_my_availability.</div>
+
+      <div class="options">
+
+        <!-- OPTION A — auto_approve_read default -->
+        <div class="option">
+          <div class="opt-head">
+            <span class="opt-letter">A</span>
+            <span class="opt-title">Silent reads (auto_approve_read default)</span>
+          </div>
+          <div class="opt-tag">Reads fire silently. User sees Claude's answer.</div>
+
+          <div class="timeline">
+            <div class="tl-row"><div class="tl-time">0:00</div><div class="tl-event">
+              <div class="tl-claude note">User asks "What's on my AgentEnvoy?"</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:01</div><div class="tl-event">
+              <div class="tl-claude">→ list_my_links</div>
+              <div class="tl-banner silent">silent</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:01</div><div class="tl-event">
+              <div class="tl-claude">→ list_my_sessions</div>
+              <div class="tl-banner silent">silent</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:02</div><div class="tl-event">
+              <div class="tl-claude">→ get_my_availability</div>
+              <div class="tl-banner silent">silent</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:03</div><div class="tl-event">
+              <div class="tl-claude-says">
+                <div class="ti">Claude</div>
+                "You have 5 active links and 2 sessions in progress. Sarah's been waiting on confirmation since Tuesday; Mike just sent his first response."
+              </div>
+            </div></div>
+          </div>
+
+          <div class="annotate"><strong>What John feels:</strong> "Wow that worked." Smooth.</div>
+          <div class="annotate warn"><strong>What he didn't see:</strong> Three silent reads of his calendar, links, and active deal-rooms. He doesn't know that yet. He'll find out (correctly) when destructive actions trigger banners — but reads fired with zero visibility.</div>
+          <div class="opt-summary">
+            <strong>Vibe:</strong> "It just works."
+            <div class="opt-pros">+ Friction-light first touch. The agent feels capable.</div>
+            <div class="opt-cons">— First-time user has no exposure to the consent model. They learn it by surprise (when a write triggers a banner).</div>
+            <div class="opt-cons">— Privacy-conscious users may feel the data left their control without notice.</div>
+          </div>
+        </div>
+
+        <!-- OPTION B — always_ask first mint -->
+        <div class="option">
+          <div class="opt-head">
+            <span class="opt-letter">B</span>
+            <span class="opt-title">Ask everything (always_ask default)</span>
+          </div>
+          <div class="opt-tag">Every call is a banner. Relax via checkbox after first session.</div>
+
+          <div class="timeline">
+            <div class="tl-row"><div class="tl-time">0:00</div><div class="tl-event">
+              <div class="tl-claude note">User asks "What's on my AgentEnvoy?"</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:01</div><div class="tl-event">
+              <div class="tl-banner warn"><span class="ti">Claude wants to:</span> read your links → Approve / Deny</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:05</div><div class="tl-event">
+              <div class="tl-banner warn"><span class="ti">Claude wants to:</span> read your active sessions → Approve / Deny</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:09</div><div class="tl-event">
+              <div class="tl-banner warn"><span class="ti">Claude wants to:</span> read your calendar availability → Approve / Deny</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:13</div><div class="tl-event">
+              <div class="tl-claude-says">
+                <div class="ti">Claude</div>
+                "You have 5 active links and 2 sessions in progress…"
+              </div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:14</div><div class="tl-event">
+              <div class="tl-banner toast"><span class="ti">⚙</span> "You approved 3 reads. ☑ Trust this token to read silently next time?"</div>
+            </div></div>
+          </div>
+
+          <div class="annotate warn"><strong>What John feels:</strong> Three banners in a row before getting an answer. Possibly: "OK I get it, stop asking." Possibly: "Why is this so paranoid."</div>
+          <div class="annotate good"><strong>What's true:</strong> John has now SEEN the consent surface. He knows reads can fire silently if he wants — because he just turned them silent on purpose.</div>
+          <div class="opt-summary">
+            <strong>Vibe:</strong> "Pay attention before it does anything."
+            <div class="opt-pros">+ Highest trust: user explicitly opted into silent reads.</div>
+            <div class="opt-pros">+ User now knows the model exists and can navigate it.</div>
+            <div class="opt-cons">— Three banners before the first answer. Some users revoke the token in frustration.</div>
+            <div class="opt-cons">— Slow first impression of "agent doing work for me."</div>
+          </div>
+        </div>
+
+        <!-- OPTION C — silent reads + non-blocking toasts -->
+        <div class="option lean">
+          <div class="opt-head">
+            <span class="opt-letter">C</span>
+            <span class="opt-title">Silent + first-time non-blocking toasts</span>
+          </div>
+          <div class="opt-tag lean">Reads fire silently AND a discreet toast slides in for the first occurrence of each.</div>
+
+          <div class="timeline">
+            <div class="tl-row"><div class="tl-time">0:00</div><div class="tl-event">
+              <div class="tl-claude note">User asks "What's on my AgentEnvoy?"</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:01</div><div class="tl-event">
+              <div class="tl-claude">→ list_my_links · list_my_sessions · get_my_availability</div>
+              <div style="margin-top: 6px;">
+                <div class="toast"><span class="icon">○</span><span>Claude read your links</span><span class="config-link">⚙</span></div>
+                <div class="toast"><span class="icon">○</span><span>Claude read your sessions</span><span class="config-link">⚙</span></div>
+                <div class="toast"><span class="icon">○</span><span>Claude read your calendar</span><span class="config-link">⚙</span></div>
+              </div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:03</div><div class="tl-event">
+              <div class="tl-claude-says">
+                <div class="ti">Claude</div>
+                "You have 5 active links and 2 sessions in progress…"
+              </div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:08</div><div class="tl-event">
+              <div class="tl-banner toast" style="opacity: 0.5;">— toasts fade out auto-dismissing —</div>
+            </div></div>
+            <div class="tl-row"><div class="tl-time">0:09</div><div class="tl-event">
+              <div class="tl-claude note">Second time the same tool fires (today or ever): no toast. Quiet.</div>
+            </div></div>
+          </div>
+
+          <div class="annotate good"><strong>What John feels:</strong> Three small slide-ins as Claude works, then they fade. Claude answers fast. He saw the model, didn't have to act on it.</div>
+          <div class="annotate good"><strong>What's true:</strong> Per-tool one-time exposure. Future reads with that token are quiet (no toast for repeated tool calls). The ⚙ link in each toast opens Settings → Connectors so anyone curious can dig in.</div>
+          <div class="opt-summary">
+            <strong>Vibe:</strong> "Fast, but visible."
+            <div class="opt-pros">+ Best of both: silent execution, visible model.</div>
+            <div class="opt-pros">+ Toasts auto-dismiss; nothing blocks Claude.</div>
+            <div class="opt-pros">+ Power user can disable toasts in settings; default-on is the right safety nudge.</div>
+            <div class="opt-cons">— Adds a notification component (toast queue) to the host UI.</div>
+            <div class="opt-cons">— Tier 1 notification bell (WISHLIST — `Notification` table coming) might absorb this; need to decide whether toast is independent or rides on that surface.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="decide-bar">
+        <span class="label">Author's lean</span>
+        <span class="lean">Option C</span>
+        <span class="why">A was my original lean. Walking through the timelines: A trades transparency for smoothness, B trades smoothness for transparency. C is the obvious resolution if we're willing to add a toast component — and the WISHLIST Tier-1 Notification bell is already coming, so the surface partially exists. C makes the consent model self-revealing without a single blocking step.</span>
+    </div>
+
+  </div>
+
+  <script>
+    document.querySelectorAll('.tab').forEach(t => {
+      t.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        document.getElementById(t.dataset.panel).classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>

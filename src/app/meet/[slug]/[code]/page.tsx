@@ -5,6 +5,8 @@ import { GuestLightTheme } from "@/components/guest-light-theme";
 import { formatDuration } from "@/lib/format-duration";
 import { parseLinkParameters } from "@/lib/link-parameters";
 import { buildAgentSnapshot, type AgentSnapshot } from "@/lib/agent-snapshot";
+import { readRecurrence } from "@/lib/recurrence";
+import { formatCadenceWord, formatEndByLabel } from "@/lib/format-recurrence";
 
 interface Props {
   params: Promise<{ slug: string; code: string }>;
@@ -19,6 +21,9 @@ async function getLinkData(slug: string, code: string) {
         inviteeName: true,
         parameters: true,
         mode: true,
+        // recurrence: surfaced in the iMessage / link unfurl ("8 weekly
+        // sessions, 45 min") per proposal §5.8.
+        recurrence: true,
         user: { select: { name: true } },
       },
     });
@@ -82,6 +87,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     if (duration) parts.push(duration);
     if (format) parts.push(format);
     details.push(parts.join(" "));
+  }
+
+  // Recurrence line: "8 weekly sessions" / "sessions through Aug 30, every other week".
+  // Renders alongside the duration line so the iMessage unfurl carries
+  // series-ness up-front. Per proposal §5.8 — supports both the direct
+  // contextual recurring meeting and (post-PR2) the office-hours-with-series
+  // materialized child.
+  const recurrence = readRecurrence(link?.recurrence ?? null);
+  if (recurrence) {
+    details.push(`${formatEndByLabel(recurrence)}, ${formatCadenceWord(recurrence)}`);
   }
 
   if (isGroup) {

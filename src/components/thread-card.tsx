@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { canNativeShare, shareInvite } from "@/lib/share-invite";
+import { formatRecurrenceSubtitle } from "@/lib/format-recurrence";
+import type { LinkRecurrence } from "@/lib/recurrence";
 
 interface Participant {
   name: string | null;
@@ -45,6 +47,12 @@ interface ThreadCardProps {
   /** Named invitees on the link. When length > 1, a 👥 count chip renders in
    *  the title row so multi-person invites are visually distinct from 1:1s. */
   inviteeCount?: number;
+  /** Recurrence config copied from `link.recurrence` (or null when the link
+   *  is a one-off). When set, a 🔁 badge renders in the title row and the
+   *  cadence subtitle ("weekly · 30 min · 10 sessions") appears below the
+   *  format/duration line. Per proposal
+   *  `2026-05-01_recurring-meeting-rendering-and-shareable-template` §5.7. */
+  recurrence?: LinkRecurrence | null;
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
@@ -85,6 +93,7 @@ export default function ThreadCard({
   activityIcon,
   guestTimezoneLabel,
   inviteeCount,
+  recurrence,
 }: ThreadCardProps) {
   const style = STATUS_STYLES[statusColor] || STATUS_STYLES.gray;
   const [linkCopied, setLinkCopied] = useState(false);
@@ -181,9 +190,24 @@ export default function ThreadCard({
                 VIP
               </span>
             )}
+            {recurrence && (
+              <span
+                className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] bg-blue-500/12 text-blue-300"
+                title="Recurring meeting"
+                role="img"
+                aria-label="recurring meeting"
+              >
+                🔁
+              </span>
+            )}
           </div>
           {subtitle && (
             <div className="text-xs text-muted mt-0.5 truncate">{subtitle}</div>
+          )}
+          {recurrence && (
+            <div className="text-xs text-muted mt-0.5 truncate">
+              {formatRecurrenceSubtitle(recurrence)}
+            </div>
           )}
           {deferralLine && (
             <div className="text-xs italic text-muted mt-0.5 truncate">{deferralLine}</div>

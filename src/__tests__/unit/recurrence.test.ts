@@ -5,6 +5,8 @@ import {
   localWallToUTC,
   parseRecurrence,
   readRecurrence,
+  isAnchorCommitted,
+  commitAnchorAt,
   type LinkRecurrence,
 } from "@/lib/recurrence";
 
@@ -277,5 +279,127 @@ describe("parseRecurrence / readRecurrence", () => {
     expect(readRecurrence(null)).toBeNull();
     expect(readRecurrence({ v: "1" })).toBeNull();
     expect(readRecurrence("not an object")).toBeNull();
+  });
+
+  // The "guest picks the anchor" path — composer omits firstDateLocal +
+  // timeLocal at create time; the recurrence still persists so readers
+  // (greeting, card, MCP) treat the link as recurring. Anchor-commit
+  // promotes pre-commit → committed when the guest picks a slot.
+  // Bundle: 2026-05-03 `cmop18pde0003rtbl4xe096dk` link `u36ggs`.
+  it("accepts a pre-anchor-commit recurrence (firstDateLocal/timeLocal omitted)", () => {
+    const r = parseRecurrence({
+      v: "1",
+      pattern: "weekly",
+      timezone: "America/Los_Angeles",
+      anchor: { durationMin: 45 },
+      endBy: { count: 8 },
+    });
+    expect(r.anchor.firstDateLocal).toBeUndefined();
+    expect(r.anchor.timeLocal).toBeUndefined();
+    expect(r.anchor.durationMin).toBe(45);
+    expect(isAnchorCommitted(r)).toBe(false);
+  });
+
+  it("rejects an anchor missing durationMin", () => {
+    expect(() =>
+      parseRecurrence({
+        v: "1",
+        pattern: "weekly",
+        timezone: "America/Los_Angeles",
+        anchor: {},
+        endBy: { count: 8 },
+      }),
+    ).toThrow(/anchor\.durationMin/);
+  });
+
+  it("rejects when anchor.firstDateLocal is the wrong type", () => {
+    expect(() =>
+      parseRecurrence({
+        v: "1",
+        pattern: "weekly",
+        timezone: "America/Los_Angeles",
+        anchor: { durationMin: 30, firstDateLocal: 12345 },
+        endBy: { count: 8 },
+      }),
+    ).toThrow(/anchor\.firstDateLocal/);
+  });
+
+  it("isAnchorCommitted true after firstDateLocal + timeLocal land", () => {
+    const r = parseRecurrence({
+      v: "1",
+      pattern: "weekly",
+      timezone: "America/Los_Angeles",
+      anchor: { firstDateLocal: "2026-05-04", timeLocal: "15:00", durationMin: 45 },
+      endBy: { count: 8 },
+    });
+    expect(isAnchorCommitted(r)).toBe(true);
+  });
+});
+
+describe("commitAnchorAt", () => {
+  const preCommit: LinkRecurrence = {
+    v: "1",
+    pattern: "weekly",
+    timezone: "America/Los_Angeles",
+    anchor: { durationMin: 45 },
+    endBy: { count: 8 },
+  };
+
+  it("fills firstDateLocal + timeLocal from a UTC startAt in host TZ", () => {
+    // 2026-05-04 22:00 UTC = 2026-05-04 15:00 PDT.
+    const startAt = new Date("2026-05-04T22:00:00Z");
+    const out = commitAnchorAt(preCommit, startAt, "America/Los_Angeles");
+    expect(out.anchor.firstDateLocal).toBe("2026-05-04");
+    expect(out.anchor.timeLocal).toBe("15:00");
+    expect(out.anchor.durationMin).toBe(45);
+    expect(isAnchorCommitted(out)).toBe(true);
+  });
+
+  it("late-evening UTC stays on the host's local calendar day", () => {
+    // 2026-05-05 02:30 UTC = 2026-05-04 19:30 PDT (still the 4th in PDT).
+    const startAt = new Date("2026-05-05T02:30:00Z");
+    const out = commitAnchorAt(preCommit, startAt, "America/Los_Angeles");
+    expect(out.anchor.firstDateLocal).toBe("2026-05-04");
+    expect(out.anchor.timeLocal).toBe("19:30");
+  });
+
+  it("passes through an already-committed recurrence unchanged", () => {
+    const committed = parseRecurrence({
+      v: "1",
+      pattern: "weekly",
+      timezone: "America/Los_Angeles",
+      anchor: { firstDateLocal: "2026-04-01", timeLocal: "09:00", durationMin: 45 },
+      endBy: { count: 8 },
+    });
+    const out = commitAnchorAt(committed, new Date("2026-05-04T22:00:00Z"), "America/Los_Angeles");
+    expect(out.anchor.firstDateLocal).toBe("2026-04-01");
+    expect(out.anchor.timeLocal).toBe("09:00");
+  });
+
+  it("composes with toRRule to produce the expected RRULE", () => {
+    // Anchor on a Monday, weekly count=8 → BYDAY=MO + COUNT=8.
+    const startAt = new Date("2026-05-04T22:00:00Z"); // Mon 15:00 PDT
+    const committed = commitAnchorAt(preCommit, startAt, "America/Los_Angeles");
+    expect(toRRule(committed)).toBe("RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=8");
+  });
+});
+
+describe("expandRecurrence / toRRule require committed anchor", () => {
+  const preCommit: LinkRecurrence = {
+    v: "1",
+    pattern: "weekly",
+    timezone: "America/Los_Angeles",
+    anchor: { durationMin: 45 },
+    endBy: { count: 8 },
+  };
+
+  it("expandRecurrence throws when anchor is not committed", () => {
+    expect(() => expandRecurrence(preCommit, FAR_PAST, FAR_FUTURE)).toThrow(
+      /anchor\.firstDateLocal and \.timeLocal/,
+    );
+  });
+
+  it("toRRule throws when anchor is not committed", () => {
+    expect(() => toRRule(preCommit)).toThrow(/anchor\.firstDateLocal and \.timeLocal/);
   });
 });

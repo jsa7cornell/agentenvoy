@@ -6,6 +6,7 @@ import { shortTimezoneLabel } from "@/lib/timezone";
 import { displayStatusLabel } from "@/lib/status-label";
 import { buildChannelMessagesWhere } from "./_where";
 import { parseLinkParameters } from "@/lib/link-parameters";
+import { readRecurrence } from "@/lib/recurrence";
 
 // GET /api/channel/messages
 // Returns channel messages with thread snapshots for ThreadCard rendering
@@ -73,6 +74,9 @@ export async function GET() {
               mode: true,
               type: true,
               parameters: true, // read by the client to extract priority (Layer 5)
+              // recurrence (proposal 2026-05-01_recurring-meeting-rendering-and-shareable-template
+              // §5.7): ThreadCard renders the 🔁 badge + cadence subtitle when set.
+              recurrence: true,
             },
           },
           _count: {
@@ -154,6 +158,10 @@ export async function GET() {
     // chip and deal-room event card show the proposed-but-not-locked state.
     const guestPicks = (rules?.guestPicks as Record<string, unknown> | undefined) ?? null;
 
+    // Parse the LinkRecurrence Json column to a typed shape (or null on
+    // malformed). ThreadCard reads this to render the 🔁 + cadence subtitle.
+    const recurrence = readRecurrence(msg.thread.link?.recurrence ?? null);
+
     const base = {
       ...msg,
       thread: {
@@ -165,6 +173,7 @@ export async function GET() {
           ...msg.thread.link,
           activityIcon,
           guestPicks,
+          recurrence,
         },
       },
     };
