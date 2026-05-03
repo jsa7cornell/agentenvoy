@@ -569,55 +569,48 @@ export async function POST(req: NextRequest) {
           // below, which may resolve to deterministic-create / -modify /
           // -cancel or fire multi-match-disambiguate.
 
-          // Bookable Link creation — intercept before the scheduling LLM.
-          // "Create a bookable link", "office hours", "drop-in hours", etc.
-          // classify as create_link but the scheduling composer (calendar-
-          // event-composer.md) has no bookable-link concept and would ask
-          // "Who's the meeting with?" instead of running the multi-turn
-          // bookable setup flow in calendar-rule-composer.md.
-          if (intent === "create_link") {
-            const lowerMsg = message.toLowerCase();
-            const isBookableCreate =
-              /\b(bookable links?|office hours?|drop-?in hours?|booking window|mentor hours?|coaching hours?|open hours?)\b/.test(lowerMsg);
-            if (isBookableCreate) {
-              const prefs = (user.preferences as Record<string, unknown> | null) ?? {};
-              const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
-              const defaultFormat = (explicit.defaultFormat as string | undefined) ?? "video";
-              const defaultDuration = (explicit.defaultDuration as number | undefined) ?? 30;
-              const hoursStartMin =
-                (explicit.businessHoursStartMinutes as number | undefined) ??
-                ((explicit.businessHoursStart as number | undefined) ?? 9) * 60;
-              const hoursEndMin =
-                (explicit.businessHoursEndMinutes as number | undefined) ??
-                ((explicit.businessHoursEnd as number | undefined) ?? 17) * 60;
-              const fmtMin = (m: number) =>
-                `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
-              const contextLines = [
-                `Host's primary link defaults: format=${defaultFormat}, duration=${defaultDuration}min, hours=${fmtMin(hoursStartMin)}–${fmtMin(hoursEndMin)} weekdays`,
-              ];
-              try {
-                await runDispatchHandler({
-                  tier: "rule",
-                  playbookRelativePath:
-                    "src/agent/playbooks/composers/calendar-rule-composer.md",
-                  userId: safeUser.id,
-                  userName: user.name ?? null,
-                  channelId: safeChannel.id,
-                  userMessage: message,
-                  userMsgPersist,
-                  controller,
-                  encoder,
-                  contextLines,
-                  emitStatus: (stage) => {
-                    emitStatus(stage);
-                  },
-                });
-              } catch (e) {
-                console.error("[channel/chat] bookable-link dispatch failed:", e);
-              }
-              controller.close();
-              return;
+          // Bookable link creation — dedicated intent routed directly to the
+          // rule composer. historyLimit:4 keeps fresh creates from seeing
+          // unrelated NegotiationLink history in the channel.
+          if (intent === "create_bookable_link") {
+            const prefs = (user.preferences as Record<string, unknown> | null) ?? {};
+            const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
+            const defaultFormat = (explicit.defaultFormat as string | undefined) ?? "video";
+            const defaultDuration = (explicit.defaultDuration as number | undefined) ?? 30;
+            const hoursStartMin =
+              (explicit.businessHoursStartMinutes as number | undefined) ??
+              ((explicit.businessHoursStart as number | undefined) ?? 9) * 60;
+            const hoursEndMin =
+              (explicit.businessHoursEndMinutes as number | undefined) ??
+              ((explicit.businessHoursEnd as number | undefined) ?? 17) * 60;
+            const fmtMin = (m: number) =>
+              `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+            const contextLines = [
+              `Host's primary link defaults: format=${defaultFormat}, duration=${defaultDuration}min, hours=${fmtMin(hoursStartMin)}–${fmtMin(hoursEndMin)} weekdays`,
+            ];
+            try {
+              await runDispatchHandler({
+                tier: "rule",
+                playbookRelativePath:
+                  "src/agent/playbooks/composers/calendar-rule-composer.md",
+                userId: safeUser.id,
+                userName: user.name ?? null,
+                channelId: safeChannel.id,
+                userMessage: message,
+                userMsgPersist,
+                controller,
+                encoder,
+                contextLines,
+                historyLimit: 4,
+                emitStatus: (stage) => {
+                  emitStatus(stage);
+                },
+              });
+            } catch (e) {
+              console.error("[channel/chat] bookable-link dispatch failed:", e);
             }
+            controller.close();
+            return;
           }
 
           // Schedule + inquire both need calendar context. Continue into

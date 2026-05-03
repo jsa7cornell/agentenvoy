@@ -341,6 +341,7 @@ export const CHAT_INTENT_VALUES = [
  */
 export const HOST_CHAT_INTENT_VALUES = [
   "edit_preference",
+  "create_bookable_link",
   "create_link",
   "modify_link",
   "cancel_link",

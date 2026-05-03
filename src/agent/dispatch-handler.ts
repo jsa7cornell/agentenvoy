@@ -163,6 +163,9 @@ export interface DispatchArgs {
   emitStatus: (stage: "thinking" | "executing" | "finalizing") => void;
   /** Model ID override. Defaults to Sonnet — same as schedule path. */
   modelId?: string;
+  /** How many prior channel messages to load. Defaults to 10. Use a smaller
+   *  value (e.g. 4) for fresh-creation intents where prior history is noise. */
+  historyLimit?: number;
 }
 
 /**
@@ -187,6 +190,7 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
     contextLines,
     emitStatus,
     modelId = "claude-sonnet-4-6",
+    historyLimit = 10,
   } = args;
 
   const tierPlaybook = loadPlaybook(playbookRelativePath);
@@ -216,7 +220,7 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
   const history = await prisma.channelMessage.findMany({
     where: { channelId },
     orderBy: { createdAt: "desc" },
-    take: 10,
+    take: historyLimit,
   });
   history.reverse();
   const { messages, warnings } = sanitizeHistory(
