@@ -623,3 +623,81 @@ describe("formatDeferralFieldsList — canonical-order grammar", () => {
     expect(a).toBe("the location, length, day, and format");
   });
 });
+
+// ─── Soft-timing cue (2026-05-03) ────────────────────────────────────────────
+
+describe("soft-timing cue — proposal and find-time templates", () => {
+  it("proposal: appends soft cue when steering=soft and timingLabel set", () => {
+    const input = baseInput({
+      effectiveSteering: "soft",
+      effectiveFormat: "phone",
+      durationForOpener: 30,
+      timingLabel: "next week",
+    });
+    const out = GREETINGS["proposal"].render(input);
+    expect(out).toContain("next week — flexible if that doesn't work");
+  });
+
+  it("proposal: no soft cue when steering=open (even with timingLabel)", () => {
+    const input = baseInput({
+      effectiveSteering: "open",
+      effectiveFormat: "phone",
+      durationForOpener: 30,
+      timingLabel: "next week",
+    });
+    const out = GREETINGS["proposal"].render(input);
+    expect(out).not.toContain("flexible");
+    expect(out).toContain("next week.");
+  });
+
+  it("proposal: no soft cue when timingLabel is null", () => {
+    const input = baseInput({
+      effectiveSteering: "soft",
+      effectiveFormat: "phone",
+      durationForOpener: 30,
+      timingLabel: null,
+    });
+    const out = GREETINGS["proposal"].render(input);
+    expect(out).not.toContain("flexible");
+  });
+
+  it("proposal: no double-softener when timingLabel already contains 'ideally'", () => {
+    const input = baseInput({
+      effectiveSteering: "soft",
+      effectiveFormat: "phone",
+      durationForOpener: 30,
+      timingLabel: "next week ideally",
+    });
+    const out = GREETINGS["proposal"].render(input);
+    expect(out).toContain("next week ideally.");
+    expect(out).not.toContain("flexible");
+  });
+
+  it("find-time: appends soft cue when steering=soft and timingLabel set", () => {
+    const input = baseInput({
+      effectiveSteering: "soft",
+      timingLabel: "mid-May",
+    });
+    const out = GREETINGS["find-time"].render(input);
+    expect(out).toContain("mid-May — flexible if that doesn't work");
+  });
+
+  it("find-time: no soft cue when steering=open", () => {
+    const input = baseInput({
+      effectiveSteering: "open",
+      timingLabel: "mid-May",
+    });
+    const out = GREETINGS["find-time"].render(input);
+    expect(out).not.toContain("flexible");
+    expect(out).toContain("mid-May.");
+  });
+
+  it("find-time: no double-softener when timingLabel already contains 'if possible'", () => {
+    const input = baseInput({
+      effectiveSteering: "soft",
+      timingLabel: "next week if possible",
+    });
+    const out = GREETINGS["find-time"].render(input);
+    expect(out).not.toContain("flexible");
+  });
+});
