@@ -314,7 +314,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     holds: [],
     link: {
       id: "link-1",
-      type: "contextual",
+      type: "personalized",
       inviteeName: "Sarah",
       topic: "Q2 Planning",
       parameters: { format: "video", duration: 30 },
@@ -713,7 +713,7 @@ describe("executeActions", () => {
     // Dashboard said "Updated format to in-person"; deal room still showed
     // video because link.parameters.format beat session.format in the greeting
     // template's precedence chain. Dual-write is the fix.
-    it("writes format to BOTH session.format AND link.parameters for contextual links", async () => {
+    it("writes format to BOTH session.format AND link.parameters for personalized links", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
 
       const results = await executeActions(
@@ -867,7 +867,7 @@ describe("executeActions", () => {
         makeSession({
           link: {
             id: "link-1",
-            type: "contextual",
+            type: "personalized",
             inviteeName: "Bob",
             topic: null,
             parameters: {
@@ -916,7 +916,7 @@ describe("executeActions", () => {
     // Regression — 2026-04-18. Duration follows the same precedence rules as
     // format/location; missing the link.parameters mirror made "make it 45 min"
     // stick in the DB but not in the greeting or confirm card.
-    it("writes duration to link.parameters for contextual links when provided", async () => {
+    it("writes duration to link.parameters for personalized links when provided", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
       mockPrisma.user.findUnique.mockResolvedValue({ preferences: {} });
 
@@ -1000,7 +1000,7 @@ describe("executeActions", () => {
 
     // Regression — 2026-04-18. Same precedence-mismatch story as update_format.
     // Confirm route reads link.parameters.location; session-only write was invisible.
-    it("writes location to link.parameters for contextual links", async () => {
+    it("writes location to link.parameters for personalized links", async () => {
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
 
       const results = await executeActions(

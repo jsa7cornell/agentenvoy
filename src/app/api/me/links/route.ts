@@ -8,9 +8,6 @@
  *   - `bookable`   — per-rule links compiled from structuredRules (was `office_hours`)
  *   - `personalized` — unarchived, unexpired negotiationLinks (was `contextual`)
  *
- * NOTE: `kind: "standard"` and `kind: "bookable"` are the new wire values.
- * Consumers reading `kind: "office_hours"` or `kind: "contextual"` should
- * migrate to the new values. TODO(vocab-cleanup): remove old kind values.
  *
  * The chip list is read-only today; creation still goes through
  * /dashboard/my-links. When `/api/me/scheduling-state` ships, this
@@ -112,12 +109,11 @@ export async function GET() {
   }
 
   // Personalized links — unarchived, unexpired.
-  // TODO(vocab-cleanup): remove || "contextual" after migration
   const now = new Date();
   const personalized = await prisma.negotiationLink.findMany({
     where: {
       userId: session.user.id,
-      type: { in: ["personalized", "contextual"] },
+      type: "personalized",
       OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
     },
     select: {

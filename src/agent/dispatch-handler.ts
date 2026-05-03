@@ -60,8 +60,7 @@ export function isBookableAction(action: ActionRequest): boolean {
   if (params.operation !== "add") return false;
   const rule = params.rule as Record<string, unknown> | undefined;
   if (!rule) return false;
-  // TODO(vocab-cleanup): remove || "office_hours" after migration
-  return rule.action === "bookable" || rule.action === "office_hours";
+  return rule.action === "bookable";
 }
 
 /**
@@ -87,10 +86,7 @@ export type OfficeHoursProposalPayload = BookableLinkProposalPayload;
 export function projectProposal(action: ActionRequest): BookableLinkProposalPayload {
   const params = action.params as Record<string, unknown>;
   const rule = (params.rule as Record<string, unknown> | undefined) ?? {};
-  // Support both new field name (bookable) and legacy (officeHours) for one deploy cycle
-  // TODO(vocab-cleanup): remove officeHours fallback after migration
-  const bookableData = (rule.bookable as Record<string, unknown> | undefined) ??
-    (rule.officeHours as Record<string, unknown> | undefined) ?? {};
+  const bookableData = (rule.bookable as Record<string, unknown> | undefined) ?? {};
 
   const titleRaw =
     (typeof bookableData.name === "string" && bookableData.name.trim()) ||

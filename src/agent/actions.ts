@@ -428,8 +428,7 @@ async function patchLinkRulesForContextual(
   link: { id: string; type: string; parameters: unknown },
   changes: Record<string, unknown>,
 ): Promise<void> {
-  // TODO(vocab-cleanup): remove || "contextual" after migration
-  if (link.type !== "personalized" && link.type !== "contextual") return;
+  if (link.type !== "personalized") return;
   const existing = parseLinkParameters(link.parameters);
   const next: Record<string, unknown> = { ...existing };
   for (const [k, v] of Object.entries(changes)) {
@@ -2930,9 +2929,8 @@ function collectNormalizedLinkNames(
   const { exceptRuleId, includeGeneral = true } = opts;
   const out = new Set<string>();
   for (const r of existing) {
-    // TODO(vocab-cleanup): remove || "office_hours" after migration
-    if ((r.action !== "bookable" && r.action !== ("office_hours" as string))) continue;
-    const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
+    if (r.action !== "bookable") continue;
+    const bookableData = r.bookable;
     if (!bookableData) continue;
     if (exceptRuleId && r.id === exceptRuleId) continue;
     const name = (bookableData.name ?? bookableData.title ?? "").trim();
@@ -2985,9 +2983,7 @@ async function handleUpdateAvailabilityRule(
   const existing =
     ((explicit as Record<string, unknown>).structuredRules as AvailabilityPreference[] | undefined) ?? [];
   const currentGeneralName =
-    typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName :
-    typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : // TODO(vocab-cleanup): remove generalLinkName fallback after migration
-    undefined;
+    typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName : undefined;
 
   let nextRules: AvailabilityPreference[] = existing;
   let summary: string;
@@ -3011,7 +3007,6 @@ async function handleUpdateAvailabilityRule(
       };
     }
     explicit.primaryLinkName = newName;
-    delete (explicit as Record<string, unknown>).generalLinkName; // TODO(vocab-cleanup): remove after migration
     summary = `Renamed primary link to "${newName}"`;
     // Return the primary /meet/{slug} URL so the channel reply can display it.
     if (user?.meetSlug) {
@@ -3025,13 +3020,9 @@ async function handleUpdateAvailabilityRule(
 
     // Bookable-link-specific validation + population (R1, R4 folds).
     let bookable: AvailabilityPreference["bookable"] | undefined;
-    // TODO(vocab-cleanup): remove || "office_hours" after migration
-    if (action === "bookable" || action === ("office_hours" as string)) {
+    if (action === "bookable") {
       const bookableInput =
-        (ruleInput!.bookable as Partial<NonNullable<AvailabilityPreference["bookable"]>> | undefined) ??
-        // Legacy field name fallback for one deploy cycle
-        ((ruleInput as unknown as { officeHours?: unknown }).officeHours as Partial<NonNullable<AvailabilityPreference["bookable"]>> | undefined) ??
-        {};
+        (ruleInput!.bookable as Partial<NonNullable<AvailabilityPreference["bookable"]>> | undefined) ?? {};
       const nameRaw = typeof bookableInput.name === "string" ? bookableInput.name.trim() : "";
       if (!nameRaw) {
         return {
@@ -3069,7 +3060,7 @@ async function handleUpdateAvailabilityRule(
       id: newId,
       originalText: String(ruleInput!.originalText ?? "").trim() || "(no description)",
       type: (ruleInput!.type as AvailabilityPreference["type"]) ?? "recurring",
-      action: action === ("office_hours" as string) ? "bookable" : action, // TODO(vocab-cleanup): normalize legacy action
+      action,
       timeStart: ruleInput!.timeStart,
       timeEnd: ruleInput!.timeEnd,
       allDay: ruleInput!.allDay,
@@ -3088,7 +3079,7 @@ async function handleUpdateAvailabilityRule(
     nextRules = [...existing, rule];
     addedRuleId = newId;
     summary =
-      (action === "bookable" || action === ("office_hours" as string)) && bookable
+      action === "bookable" && bookable
         ? `Your "${bookable.name}" Bookable Link is ready: ${linkUrl}`
         : `Added rule ${newId}`;
   } else if (operation === "update") {
@@ -3096,11 +3087,9 @@ async function handleUpdateAvailabilityRule(
     if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
     const prior = existing[idx];
     // Bookable link rename: enforce uniqueness on name change.
-    // TODO(vocab-cleanup): remove || "office_hours" check after migration
-    const priorIsBookable = prior.action === "bookable" || prior.action === ("office_hours" as string);
+    const priorIsBookable = prior.action === "bookable";
     const _ruleInput = ruleInput!;
-    const ruleBookableInput = _ruleInput.bookable ??
-      (_ruleInput as unknown as { officeHours?: typeof _ruleInput.bookable }).officeHours;
+    const ruleBookableInput = _ruleInput.bookable;
     if (
       priorIsBookable &&
       ruleBookableInput &&
@@ -3121,8 +3110,7 @@ async function handleUpdateAvailabilityRule(
     }
     // Merge: shallow-merge top-level, deep-merge bookable so partial edits
     // (e.g. { bookable: { name: "X" } }) don't drop linkSlug/linkCode.
-    const priorBookable = prior.bookable ??
-      (prior as unknown as { officeHours?: typeof prior.bookable }).officeHours;
+    const priorBookable = prior.bookable;
     const mergedBookable = ruleBookableInput
       ? { ...(priorBookable ?? {}), ...(ruleBookableInput as object) }
       : prior.bookable;
@@ -3135,8 +3123,7 @@ async function handleUpdateAvailabilityRule(
     nextRules = [...existing];
     nextRules[idx] = merged;
     summary = `Updated rule ${id}`;
-    // TODO(vocab-cleanup): remove || "office_hours" after migration
-    if ((merged.action === "bookable" || merged.action === ("office_hours" as string)) && merged.bookable) {
+    if (merged.action === "bookable" && merged.bookable) {
       linkUrl = buildBookableLinkUrl(merged.bookable.linkSlug, merged.bookable.linkCode);
     }
   } else {
@@ -3145,11 +3132,9 @@ async function handleUpdateAvailabilityRule(
     if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
     const removed = existing[idx];
     nextRules = existing.filter((r) => r.id !== id);
-    const removedBookable = removed.bookable ??
-      (removed as unknown as { officeHours?: typeof removed.bookable }).officeHours;
-    // TODO(vocab-cleanup): remove || "office_hours" after migration
+    const removedBookable = removed.bookable;
     summary =
-      (removed.action === "bookable" || removed.action === ("office_hours" as string)) && removedBookable
+      removed.action === "bookable" && removedBookable
         ? `Removed "${removedBookable.name ?? removedBookable.title}".`
         : `Removed rule ${id}`;
   }

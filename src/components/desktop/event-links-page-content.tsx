@@ -103,8 +103,7 @@ function buildBookableLinkSub(rule: AvailabilityPreference): string {
 function buildEventSub(s: UpcomingEventRow): string {
   const linkType = s.link?.type;
   if (linkType === "primary") return "via primary link";
-  // TODO(vocab-cleanup): remove "office_hours" fallback after migration
-  if (linkType === "bookable" || linkType === "office_hours") {
+  if (linkType === "bookable") {
     if (s.link?.slug && s.link?.code) return `via /meet/${s.link.slug}/${s.link.code}`;
     return "via Drop-in Hours";
   }
@@ -307,8 +306,7 @@ export function EventLinksPageContent() {
         const first = fullName.split(/\s+/)[0] ?? "";
         if (first) setHostFirstName(first);
         if (slug) {
-          // TODO(vocab-cleanup): remove generalLinkName fallback after migration
-          const primaryName = (data.primaryLinkName as string) || (data.generalLinkName as string) || (first ? `${first}'s Primary Link` : "Primary link");
+          const primaryName = (data.primaryLinkName as string) || (first ? `${first}'s Primary Link` : "Primary link");
           const defaultDur =
             typeof data.defaultMeetingMinutes === "number" ? data.defaultMeetingMinutes : 30;
           out.push({
@@ -325,9 +323,8 @@ export function EventLinksPageContent() {
             // field was introduced — treat missing status as "active" for
             // backward compatibility. Only skip explicitly paused/expired rules.
             const rStatus = r.status as string | undefined;
-            // TODO(vocab-cleanup): remove || "office_hours" after migration
-            const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
-            if ((r.action !== "bookable" && r.action !== ("office_hours" as string)) || (rStatus && rStatus !== "active") || !bookableData) continue;
+            const bookableData = r.bookable;
+            if (r.action !== "bookable" || (rStatus && rStatus !== "active") || !bookableData) continue;
             const oh = bookableData;
             if (!oh.linkCode || !oh.linkSlug) continue;
             out.push({

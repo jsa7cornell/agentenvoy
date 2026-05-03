@@ -187,9 +187,7 @@ Summary should be a clean, unambiguous description like:
     const rule: ParsedRule = {
       originalText: text.trim(),
       type: (["ongoing", "recurring", "temporary", "one-time"].includes(parsed.type) ? parsed.type : "ongoing") as ParsedRule["type"],
-      action: (["block", "allow", "buffer", "prefer", "limit", "business_hours", "location", "bookable", "no_in_person"].includes(parsed.action) ? parsed.action :
-        // TODO(vocab-cleanup): remove "office_hours" cast after migration
-        (parsed.action as string) === "office_hours" ? "bookable" : "block") as ParsedRule["action"],
+      action: (["block", "allow", "buffer", "prefer", "limit", "business_hours", "location", "bookable", "no_in_person"].includes(parsed.action) ? parsed.action : "block") as ParsedRule["action"],
       timeStart: parsed.timeStart || undefined,
       timeEnd: parsed.timeEnd || undefined,
       allDay: parsed.allDay || false,

@@ -109,15 +109,6 @@ describe("isBookableAction", () => {
     ).toBe(true);
   });
 
-  it("also classifies legacy office_hours + add as intercepted (dual-read)", () => {
-    expect(
-      isBookableAction({
-        action: "update_availability_rule",
-        params: { operation: "add", rule: { action: "office_hours" } },
-      }),
-    ).toBe(true);
-  });
-
   it("does NOT intercept update_availability_rule with action=block", () => {
     expect(
       isBookableAction({
@@ -205,32 +196,6 @@ describe("projectProposal", () => {
     expect(out.timeStart).toBe("08:00");
     expect(out.timeEnd).toBe("10:00");
     expect(out.originalText).toContain("Tennis team");
-  });
-
-  it("also projects from legacy officeHours field (dual-read backward compat)", () => {
-    const out: BookableLinkProposalPayload = projectProposal({
-      action: "update_availability_rule",
-      params: {
-        operation: "add",
-        rule: {
-          originalText: "Tennis team office hours — weekdays 8–10am, 30-min video",
-          type: "recurring",
-          action: "office_hours",
-          daysOfWeek: [1, 2, 3, 4, 5],
-          timeStart: "08:00",
-          timeEnd: "10:00",
-          officeHours: {
-            name: "Tennis team",
-            format: "video",
-            durationMinutes: 30,
-          },
-          priority: 3,
-        },
-      },
-    });
-    expect(out.title).toBe("Tennis team");
-    expect(out.format).toBe("video");
-    expect(out.durationMinutes).toBe(30);
   });
 
   it("falls back to safe defaults on partial payloads", () => {

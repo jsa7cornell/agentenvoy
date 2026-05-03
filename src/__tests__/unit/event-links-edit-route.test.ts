@@ -288,8 +288,7 @@ describe("POST /api/availability-rules/edit", () => {
     (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
       preferences: {
         explicit: {
-          // TODO(vocab-cleanup): use primaryLinkName after migration
-          generalLinkName: "Jane Doe",
+          primaryLinkName: "Jane Doe",
           structuredRules: [EXISTING_RULE],
         },
       },

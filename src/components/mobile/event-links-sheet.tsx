@@ -108,8 +108,7 @@ function buildBookableLinkSub(rule: AvailabilityPreference): string {
 
 function buildEventSub(s: UpcomingEventRow): string {
   if (s.link?.type === "primary") return "via Primary link";
-  // TODO(vocab-cleanup): remove "office_hours" fallback after migration
-  if (s.link?.type === "bookable" || s.link?.type === "office_hours") return "via Drop-in Hours";
+  if (s.link?.type === "bookable") return "via Drop-in Hours";
   if (s.link?.topic) return s.link.topic;
   if (s.link?.inviteeName) return `with ${s.link.inviteeName}`;
   return "";
@@ -170,9 +169,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
         const slug = data.meetSlug as string | null | undefined;
         const out: ReusableLinkRow[] = [];
         if (slug) {
-          // TODO(vocab-cleanup): remove generalLinkName fallback after migration
-          const primaryName =
-            (data.primaryLinkName as string) || (data.generalLinkName as string) || "Primary link";
+          const primaryName = (data.primaryLinkName as string) || "Primary link";
           const defaultDur =
             typeof data.defaultMeetingMinutes === "number" ? data.defaultMeetingMinutes : 30;
           out.push({
@@ -186,9 +183,8 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
           const structured =
             (data.structuredRules as AvailabilityPreference[]) ?? [];
           for (const r of structured) {
-            // TODO(vocab-cleanup): remove || "office_hours" after migration
-            const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
-            if ((r.action !== "bookable" && r.action !== ("office_hours" as string)) || r.status !== "active" || !bookableData) continue;
+            const bookableData = r.bookable;
+            if (r.action !== "bookable" || r.status !== "active" || !bookableData) continue;
             const oh = bookableData;
             if (!oh.linkCode || !oh.linkSlug) continue;
             out.push({

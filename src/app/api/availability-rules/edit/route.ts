@@ -149,18 +149,15 @@ export async function POST(req: NextRequest) {
     ((explicit as Record<string, unknown>).structuredRules as
       | AvailabilityPreference[]
       | undefined) ?? [];
-  // TODO(vocab-cleanup): remove generalLinkName fallback after migration
   const generalLinkName =
-    typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName :
-    (typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined);
+    typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName : undefined;
 
   const target = existingRules.find((r) => r.id === ruleId);
   if (!target) {
     return NextResponse.json({ error: "Rule not found" }, { status: 404 });
   }
-  // TODO(vocab-cleanup): remove || "office_hours" after migration
-  const targetBookable = target.bookable ?? (target as unknown as { officeHours?: typeof target.bookable }).officeHours;
-  if ((target.action !== "bookable" && target.action !== ("office_hours" as string)) || !targetBookable) {
+  const targetBookable = target.bookable;
+  if (target.action !== "bookable" || !targetBookable) {
     return NextResponse.json(
       { error: "Rule is not a Bookable Link rule" },
       { status: 400 },

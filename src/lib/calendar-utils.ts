@@ -8,16 +8,14 @@ export const ROW_HEIGHT = 40; // px per 30-min row — 40px ensures the day grid
 // Score bands: Available (0-1), Protected (2-3), Blocked (4-5)
 // Bookable slots get a distinct teal to stand out from regular available (emerald).
 export function getScoreColor(score: number, kind?: string): string {
-  // TODO(vocab-cleanup): remove "office_hours" fallback after migration
-  if (kind === "bookable" || kind === "office_hours") return "bg-teal-100 dark:bg-teal-600/70";
+  if (kind === "bookable") return "bg-teal-100 dark:bg-teal-600/70";
   if (score <= 1) return "bg-emerald-100 dark:bg-emerald-600/60";
   if (score <= 3) return "bg-amber-100 dark:bg-amber-600/50";
   return "bg-red-100 dark:bg-red-600/50";
 }
 
 export function getScoreBorder(score: number, kind?: string): string {
-  // TODO(vocab-cleanup): remove "office_hours" fallback after migration
-  if (kind === "bookable" || kind === "office_hours") return "border-teal-500 dark:border-teal-400";
+  if (kind === "bookable") return "border-teal-500 dark:border-teal-400";
   if (score <= 1) return "border-emerald-500 dark:border-emerald-400";
   if (score <= 3) return "border-amber-500 dark:border-amber-400";
   return "border-red-600 dark:border-red-500";

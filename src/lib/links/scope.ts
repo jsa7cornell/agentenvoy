@@ -84,7 +84,7 @@ export async function applyPostureToScope(
   let varianceLinkIds: string[];
   if (scope === "all") {
     const links = await prisma.negotiationLink.findMany({
-      where: { userId, type: { in: ["bookable", "office_hours"] } }, // TODO(vocab-cleanup): remove || "office_hours" after migration
+      where: { userId, type: "bookable" },
       select: { id: true },
     });
     varianceLinkIds = links.map((l) => l.id);
@@ -195,7 +195,7 @@ export async function findAffectedVariances(
   userId: string
 ): Promise<Array<{ id: string; name: string }>> {
   const links = await prisma.negotiationLink.findMany({
-    where: { userId, type: { in: ["bookable", "office_hours"] } }, // TODO(vocab-cleanup): remove || "office_hours" after migration
+    where: { userId, type: "bookable" },
     select: { id: true, slug: true, code: true, parameters: true, topic: true },
   });
 

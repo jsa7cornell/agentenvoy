@@ -907,26 +907,20 @@ export async function POST(req: NextRequest) {
               (explicitPrefs.structuredRules as Array<{
                 action?: string;
                 status?: string;
-                // TODO(vocab-cleanup): remove officeHours fallback after migration
                 bookable?: { name?: string; title?: string; linkSlug?: string; linkCode?: string };
-                officeHours?: { name?: string; title?: string; linkSlug?: string; linkCode?: string };
               }> | undefined) ?? [];
-            // TODO(vocab-cleanup): remove generalLinkName fallback after migration
             const primaryLinkName =
               typeof explicitPrefs.primaryLinkName === "string" && (explicitPrefs.primaryLinkName as string).trim()
                 ? explicitPrefs.primaryLinkName as string
-                : typeof explicitPrefs.generalLinkName === "string" && (explicitPrefs.generalLinkName as string).trim()
-                  ? explicitPrefs.generalLinkName as string
-                  : "Primary link";
+                : "Primary link";
             const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
             const lines: string[] = [];
             if (safeUser.meetSlug) {
               lines.push(`- "${primaryLinkName}" (default): ${origin}/meet/${safeUser.meetSlug}`);
             }
             for (const r of structuredRules) {
-              // TODO(vocab-cleanup): remove || "office_hours" after migration
-              if ((r.action !== "bookable" && r.action !== "office_hours") || r.status !== "active") continue;
-              const linkData = r.bookable ?? r.officeHours;
+              if (r.action !== "bookable" || r.status !== "active") continue;
+              const linkData = r.bookable;
               if (!linkData) continue;
               const name = linkData.name ?? linkData.title ?? "Drop-in Hours";
               const url = linkData.linkSlug && linkData.linkCode

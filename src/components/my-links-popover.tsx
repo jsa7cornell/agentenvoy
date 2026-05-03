@@ -45,15 +45,13 @@ export function MyLinksPopover() {
         out.push({
           key: "primary",
           kind: "primary",
-          // TODO(vocab-cleanup): remove primaryLinkName || generalLinkName fallback after migration
-          name: (data.primaryLinkName as string) || (data.generalLinkName as string) || "Primary link",
+          name: (data.primaryLinkName as string) || "Primary link",
           url: `${origin}/meet/${slug}`,
         });
         const structured = (data.structuredRules as AvailabilityPreference[]) ?? [];
         for (const r of structured) {
-          // TODO(vocab-cleanup): remove || "office_hours" after migration
-          const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
-          if ((r.action !== "bookable" && r.action !== ("office_hours" as string)) || r.status !== "active" || !bookableData) continue;
+          const bookableData = r.bookable;
+          if (r.action !== "bookable" || r.status !== "active" || !bookableData) continue;
           const oh = bookableData;
           if (!oh.linkCode || !oh.linkSlug) continue;
           out.push({

@@ -43,11 +43,10 @@ export async function GET() {
   const { rules: expiredCleaned, changed: expiryChanged } = expireRules(structuredRules);
 
   // Backfill bookable linkSlug/linkCode for any rule missing them
-  // TODO(vocab-cleanup): remove || "office_hours" check after migration
   let linksChanged = false;
   const cleanedRules = expiredCleaned.map((rule) => {
-    const isBookable = rule.action === "bookable" || rule.action === ("office_hours" as string);
-    const bookableData = rule.bookable ?? (rule as unknown as { officeHours?: typeof rule.bookable }).officeHours;
+    const isBookable = rule.action === "bookable";
+    const bookableData = rule.bookable;
     if (!isBookable || !bookableData) return rule;
     if (bookableData.linkCode && bookableData.linkSlug) return rule;
     linksChanged = true;
@@ -143,10 +142,9 @@ export async function PUT(req: NextRequest) {
     // Hydrate bookable rules with linkSlug + linkCode if missing (first save).
     // The slug is denormalized from user.meetSlug; the code is generated once
     // and frozen for the life of the rule.
-    // TODO(vocab-cleanup): remove || "office_hours" check after migration
     const hydrated = (structuredRules as AvailabilityPreference[]).map((rule) => {
-      const isBookable = rule.action === "bookable" || rule.action === ("office_hours" as string);
-      const bookableData = rule.bookable ?? (rule as unknown as { officeHours?: typeof rule.bookable }).officeHours;
+      const isBookable = rule.action === "bookable";
+      const bookableData = rule.bookable;
       if (!isBookable || !bookableData) return rule;
       if (bookableData.linkCode && bookableData.linkSlug) return rule;
       return {

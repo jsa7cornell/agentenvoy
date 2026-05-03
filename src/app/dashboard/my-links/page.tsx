@@ -102,11 +102,10 @@ export default async function MyLinksPage() {
 
   // ── Personalized links ──────────────────────────────────────────────────
   const now = new Date();
-  // TODO(vocab-cleanup): remove || "contextual" after migration
   const personalizedLinks = await prisma.negotiationLink.findMany({
     where: {
       userId: user.id,
-      type: { in: ["personalized", "contextual"] },
+      type: "personalized",
       OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
     },
     select: {

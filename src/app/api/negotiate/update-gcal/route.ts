@@ -139,8 +139,7 @@ export async function POST(req: NextRequest) {
         where: { id: sessionId },
         select: { link: { select: { id: true, type: true, parameters: true } } },
       });
-      // TODO(vocab-cleanup): remove || "contextual" after migration
-      if (sessionWithLink?.link.type === "personalized" || sessionWithLink?.link.type === "contextual") {
+      if (sessionWithLink?.link.type === "personalized") {
         const existing = parseLinkParameters(sessionWithLink.link.parameters);
         await prisma.negotiationLink.update({
           where: { id: sessionWithLink.link.id },

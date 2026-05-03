@@ -229,17 +229,14 @@ export async function POST(req: NextRequest) {
     ((explicit as Record<string, unknown>).structuredRules as
       | AvailabilityPreference[]
       | undefined) ?? [];
-  // TODO(vocab-cleanup): remove generalLinkName fallback after migration
   const generalLinkName =
-    typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName :
-    (typeof explicit.generalLinkName === "string" ? explicit.generalLinkName : undefined);
+    typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName : undefined;
 
   // Per-host name uniqueness — same guard as handleUpdateAvailabilityRule.
   const taken = new Set<string>();
   for (const r of existingRules) {
-    // TODO(vocab-cleanup): remove || "office_hours" after migration
-    const bookableData = r.bookable ?? (r as unknown as { officeHours?: typeof r.bookable }).officeHours;
-    if ((r.action !== "bookable" && r.action !== ("office_hours" as string)) || !bookableData) continue;
+    const bookableData = r.bookable;
+    if (r.action !== "bookable" || !bookableData) continue;
     const n = (bookableData.name ?? bookableData.title ?? "").trim();
     if (n) taken.add(normalizeLinkName(n));
   }

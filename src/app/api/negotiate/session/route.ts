@@ -128,9 +128,7 @@ export async function POST(req: NextRequest) {
     const explicit = (prefsRaw.explicit as Record<string, unknown>) || {};
     const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
     const match = rules.find(
-      // TODO(vocab-cleanup): remove || "office_hours" after migration
-      (r) => (r.action === "bookable" || r.action === ("office_hours" as string)) &&
-        (r.bookable ?? (r as unknown as { officeHours?: { linkCode?: string } }).officeHours)?.linkCode === code,
+      (r) => r.action === "bookable" && r.bookable?.linkCode === code,
     );
     if (match) {
       const today = new Date().toISOString().slice(0, 10);

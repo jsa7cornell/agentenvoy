@@ -155,11 +155,9 @@ export function compileBookableLinks(rules: AvailabilityPreference[]): CompiledB
   const out: CompiledBookableLink[] = [];
 
   for (const rule of rules) {
-    // TODO(vocab-cleanup): remove || "office_hours" after migration
-    if (rule.action !== "bookable" && rule.action !== ("office_hours" as string)) continue;
+    if (rule.action !== "bookable") continue;
     if (rule.status !== "active") continue;
-    // Support both new field name (bookable) and legacy (officeHours) for one deploy cycle
-    const bookableData = rule.bookable ?? (rule as unknown as { officeHours?: typeof rule.bookable }).officeHours;
+    const bookableData = rule.bookable;
     if (!bookableData) continue;
     if (rule.expiryDate && rule.expiryDate < today) continue;
     if (rule.effectiveDate && rule.effectiveDate > today) continue;
