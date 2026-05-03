@@ -194,6 +194,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     eventExists: boolean;
     guestOnInvite: boolean;
     guestResponseStatus: "accepted" | "declined" | "tentative" | "needsAction" | null;
+    htmlLink?: string | null;
   } | null>(null);
   const [sessionStatus, setSessionStatus] = useState<string>("active");
   const [, setSessionStatusLabel] = useState<string>("");
@@ -1753,38 +1754,35 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             time, since the icon + join line below already convey it.
             Pre-confirm fallback below covers the "no time, no format"
             case from link.parameters. */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-secondary">
+        {/* Sub-lines (meta · join · rsvp) all share the same row shape:
+            fixed-width icon column so text left-aligns vertically, same
+            font size + color across rows. */}
+        <div className="space-y-0.5">
           {(eventFormat || linkActivityIcon || linkActivity) && (() => {
             const icon = linkActivityIcon || getMeetingEmoji(eventFormat, eventLocation || linkLocation, linkActivity) || "🕐";
             const formatText = eventFormat === "phone" ? "Phone" : eventFormat === "video" ? "Video" : eventFormat === "in-person" ? "In person" : eventFormat;
             const formatSuffix = linkGuestPicksFormat ? " ✏️" : "";
             const durationSuffix = linkGuestPicksDuration ? " ✏️" : "";
-            // Drop the format word when we have a date/time; the icon
-            // and join-line carry it. Keep it when there's no time, so
-            // the line doesn't read as a naked "💻 30 min".
             const showFormatWord = !eventDateTime && !!formatText;
-            return (
-              <span className="flex items-center gap-1.5">
-                <span aria-hidden className="text-sm leading-none">{icon}</span>
-                {showFormatWord && <span>{formatText}{formatSuffix} <span className="text-muted">·</span> </span>}
-                <span>{eventDuration} min{durationSuffix}</span>
-              </span>
-            );
-          })()}
-          {eventDateTime && (() => {
-            const dt = new Date(eventDateTime);
+            const dt = eventDateTime ? new Date(eventDateTime) : null;
             const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
             const hostTz = slotTimezone;
-            const showDual = hostTz && hostTz !== localTz;
-            const datePart = dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-            const localTime = dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
-            const hostTime = showDual ? dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: hostTz }) : null;
-            return <span><span className="text-muted">·</span> {datePart} {localTime}{hostTime ? ` (${hostTime})` : ""}</span>;
+            const showDual = !!dt && hostTz && hostTz !== localTz;
+            const datePart = dt ? dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : null;
+            const localTime = dt ? dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" }) : null;
+            const hostTime = showDual && dt ? dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: hostTz }) : null;
+            return (
+              <div className="flex items-center gap-2 text-xs text-secondary">
+                <span aria-hidden className="w-4 inline-flex justify-center text-sm leading-none flex-shrink-0">{icon}</span>
+                <span>
+                  {showFormatWord && <>{formatText}{formatSuffix} <span className="text-muted">·</span> </>}
+                  {eventDuration} min{durationSuffix}
+                  {dt && <> <span className="text-muted">·</span> {datePart} {localTime}{hostTime ? ` (${hostTime})` : ""}</>}
+                </span>
+              </div>
+            );
           })()}
           {!eventDateTime && !eventFormat && !linkActivity && !linkActivityIcon && (() => {
-            // Pre-confirmation fallback when nothing is known yet — render
-            // the host's proposal fragments from link.parameters so the
-            // guest sees what the meeting is ABOUT before a time is locked.
             const parts: string[] = [];
             if (slotDuration) parts.push(formatDuration(slotDuration) + (linkGuestPicksDuration ? " ✏️" : ""));
             if (linkTimingLabel) parts.push(linkTimingLabel + (linkGuestPicksDate ? " ✏️" : ""));
@@ -1793,34 +1791,38 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             } else if (linkGuestPicksLocation) {
               parts.push("✏️ Pick a location");
             }
-            if (parts.length === 0) return <span>Meeting details pending</span>;
-            return <span>{parts.join(" · ")}</span>;
+            return (
+              <div className="flex items-center gap-2 text-xs text-secondary">
+                <span aria-hidden className="w-4 inline-flex justify-center text-sm leading-none flex-shrink-0">🕐</span>
+                <span>{parts.length === 0 ? "Meeting details pending" : parts.join(" · ")}</span>
+              </div>
+            );
           })()}
-        </div>
 
-        {/* Where to join — own line when confirmed. Video link with provider
-            label, or location for in-person. Phone-bridge text could go here
-            when phone-format meetings carry a number; not wired yet. */}
-        {confirmed && eventMeetLink && (
-          <div className="mt-1 text-xs text-secondary flex items-center gap-1.5 flex-wrap">
-            <span aria-hidden>🔗</span>
-            <span>{meetProvider} ·</span>
-            <a
-              href={eventMeetLink}
-              className="text-indigo-400 hover:text-indigo-300 truncate max-w-[260px]"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {eventMeetLink.replace(/^https?:\/\//, "").split("/").slice(0, 2).join("/")}
-            </a>
-          </div>
-        )}
-        {confirmed && !eventMeetLink && eventLocation && (
-          <div className="mt-1 text-xs text-secondary flex items-center gap-1.5 flex-wrap">
-            <span aria-hidden>📍</span>
-            <span className="truncate" title={eventLocation}>{eventLocation}</span>
-          </div>
-        )}
+          {/* Where to join — own line when confirmed. */}
+          {confirmed && eventMeetLink && (
+            <div className="flex items-center gap-2 text-xs text-secondary">
+              <span aria-hidden className="w-4 inline-flex justify-center text-sm leading-none flex-shrink-0">🔗</span>
+              <span className="min-w-0 truncate">
+                {meetProvider} <span className="text-muted">·</span>{" "}
+                <a
+                  href={eventMeetLink}
+                  className="text-indigo-400 hover:text-indigo-300"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {eventMeetLink.replace(/^https?:\/\//, "").split("/").slice(0, 2).join("/")}
+                </a>
+              </span>
+            </div>
+          )}
+          {confirmed && !eventMeetLink && eventLocation && (
+            <div className="flex items-center gap-2 text-xs text-secondary">
+              <span aria-hidden className="w-4 inline-flex justify-center text-sm leading-none flex-shrink-0">📍</span>
+              <span className="truncate" title={eventLocation}>{eventLocation}</span>
+            </div>
+          )}
+        </div>
 
         {/* Deferral status line — "🤔 Gathering John's suggestions on the
             location". Same neutral phrasing on host + guest views. Suppressed
@@ -1903,39 +1905,61 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             {confirmed && gcalStatus && gcalStatus.eventExists && (() => {
               const guestFirstName =
                 (formGuestName || inviteeName || "").split(/\s+/)[0] || "Guest";
-              if (gcalStatus.guestOnInvite === false) {
-                return (
-                  <span className="flex items-center gap-1.5 text-[11px] text-amber-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
-                    {guestFirstName} not on invite
-                  </span>
-                );
-              }
-              if (!gcalStatus.guestResponseStatus) return null;
               const rsvp = gcalStatus.guestResponseStatus;
-              const text =
-                rsvp === "accepted"   ? `${guestFirstName} accepted invite` :
-                rsvp === "declined"   ? `${guestFirstName} declined invite` :
-                rsvp === "tentative"  ? `${guestFirstName} marked maybe` :
-                                        `${guestFirstName} RSVP pending`;
-              const color =
-                rsvp === "accepted"   ? "text-emerald-500" :
-                rsvp === "declined"   ? "text-red-400" :
-                                        "text-muted";
-              const dot =
-                rsvp === "accepted"   ? "bg-emerald-500" :
-                rsvp === "declined"   ? "bg-red-400" :
-                                        "bg-zinc-500";
-              return (
-                <span className={`flex items-center gap-1.5 text-[11px] ${color}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
-                  {text}
+              const notOnInvite = gcalStatus.guestOnInvite === false;
+              if (!notOnInvite && !rsvp) return null;
+              const text = notOnInvite
+                ? `${guestFirstName} not on invite`
+                : rsvp === "accepted"  ? `${guestFirstName} accepted invite`
+                : rsvp === "declined"  ? `${guestFirstName} declined invite`
+                : rsvp === "tentative" ? `${guestFirstName} marked maybe`
+                                       : `${guestFirstName} RSVP pending`;
+              const color = notOnInvite
+                ? "text-amber-500 dark:text-amber-400"
+                : rsvp === "accepted"  ? "text-emerald-600 dark:text-emerald-500"
+                : rsvp === "declined"  ? "text-red-500 dark:text-red-400"
+                                       : "text-secondary";
+              const dot = notOnInvite
+                ? "bg-amber-400"
+                : rsvp === "accepted"  ? "bg-emerald-500"
+                : rsvp === "declined"  ? "bg-red-400"
+                                       : "bg-zinc-500";
+              const inner = (
+                <>
+                  <span className="w-4 inline-flex justify-center flex-shrink-0">
+                    <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                  </span>
+                  <span>
+                    {text}
+                    {gcalStatus.htmlLink && (
+                      <span className="text-muted ml-1" aria-hidden>↗</span>
+                    )}
+                  </span>
+                </>
+              );
+              return gcalStatus.htmlLink ? (
+                <a
+                  href={gcalStatus.htmlLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex items-center gap-2 text-xs ${color} hover:underline`}
+                  title={notOnInvite
+                    ? "Open the event in Google Calendar to add the guest"
+                    : "Open the event in Google Calendar"}
+                >
+                  {inner}
+                </a>
+              ) : (
+                <span className={`flex items-center gap-2 text-xs ${color}`}>
+                  {inner}
                 </span>
               );
             })()}
             {confirmed && gcalStatus && !gcalStatus.eventExists && (
-              <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                <span className="w-1.5 h-1.5 rounded-full bg-zinc-600 flex-shrink-0" />
+              <span className="flex items-center gap-2 text-xs text-muted">
+                <span className="w-4 inline-flex justify-center flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-500" />
+                </span>
                 Not found on Google Calendar
               </span>
             )}
