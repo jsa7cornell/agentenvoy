@@ -196,7 +196,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     guestResponseStatus: "accepted" | "declined" | "tentative" | "needsAction" | null;
   } | null>(null);
   const [sessionStatus, setSessionStatus] = useState<string>("active");
-  const [sessionStatusLabel, setSessionStatusLabel] = useState<string>("");
+  const [, setSessionStatusLabel] = useState<string>("");
   const [statusAnimating, setStatusAnimating] = useState(false);
   const [isGroupEvent, setIsGroupEvent] = useState(false);
   const [participants, setParticipants] = useState<Array<{ name: string; status: string }>>([]);
@@ -1624,10 +1624,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           </span>
           <span className="text-sm font-semibold text-primary truncate">{getEventTitle()}</span>
           {isVip && <span className="text-[10px] text-amber-500/60 dark:text-amber-400/50 flex-shrink-0 select-none" title="Priority meeting">★</span>}
-          {sessionStatusLabel &&
-            sessionStatusLabel.trim().toLowerCase() !== statusPrefix.word.toLowerCase() && (
-              <span className="text-[10px] text-muted ml-2">{sessionStatusLabel}</span>
-            )}
           <EditedPill
             lastMaterialEditAt={lastMaterialEditAt}
             lastEditedFields={lastEditedFields}
@@ -1800,11 +1796,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (parts.length === 0) return <span>Meeting details pending</span>;
             return <span>{parts.join(" · ")}</span>;
           })()}
-          {confirmed && (formGuestName || formGuestEmail) && (
-            <span className="text-muted">
-              · {[formGuestName, formGuestEmail].filter(Boolean).join(" · ")}
-            </span>
-          )}
         </div>
 
         {/* Where to join — own line when confirmed. Video link with provider
@@ -1909,32 +1900,39 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 Group link active — share link to add people
               </span>
             )}
-            {confirmed && gcalStatus && gcalStatus.eventExists && (
-              <span className="flex items-center gap-1.5 text-[11px] text-muted">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
-                On Google Calendar
-                {gcalStatus.guestOnInvite && gcalStatus.guestResponseStatus && (
-                  <>
-                    <span className="text-zinc-600 dark:text-zinc-700 mx-0.5">·</span>
-                    <span className={
-                      gcalStatus.guestResponseStatus === "accepted" ? "text-emerald-500" :
-                      gcalStatus.guestResponseStatus === "declined" ? "text-red-400" :
-                      "text-zinc-400"
-                    }>
-                      Guest {gcalStatus.guestResponseStatus === "accepted" ? "accepted" :
-                             gcalStatus.guestResponseStatus === "declined" ? "declined" :
-                             gcalStatus.guestResponseStatus === "tentative" ? "maybe" : "awaiting"}
-                    </span>
-                  </>
-                )}
-                {gcalStatus.guestOnInvite === false && (
-                  <>
-                    <span className="text-zinc-600 dark:text-zinc-700 mx-0.5">·</span>
-                    <span className="text-amber-400">Guest not on invite</span>
-                  </>
-                )}
-              </span>
-            )}
+            {confirmed && gcalStatus && gcalStatus.eventExists && (() => {
+              const guestFirstName =
+                (formGuestName || inviteeName || "").split(/\s+/)[0] || "Guest";
+              if (gcalStatus.guestOnInvite === false) {
+                return (
+                  <span className="flex items-center gap-1.5 text-[11px] text-amber-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                    {guestFirstName} not on invite
+                  </span>
+                );
+              }
+              if (!gcalStatus.guestResponseStatus) return null;
+              const rsvp = gcalStatus.guestResponseStatus;
+              const text =
+                rsvp === "accepted"   ? `${guestFirstName} accepted invite` :
+                rsvp === "declined"   ? `${guestFirstName} declined invite` :
+                rsvp === "tentative"  ? `${guestFirstName} marked maybe` :
+                                        `${guestFirstName} RSVP pending`;
+              const color =
+                rsvp === "accepted"   ? "text-emerald-500" :
+                rsvp === "declined"   ? "text-red-400" :
+                                        "text-muted";
+              const dot =
+                rsvp === "accepted"   ? "bg-emerald-500" :
+                rsvp === "declined"   ? "bg-red-400" :
+                                        "bg-zinc-500";
+              return (
+                <span className={`flex items-center gap-1.5 text-[11px] ${color}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
+                  {text}
+                </span>
+              );
+            })()}
             {confirmed && gcalStatus && !gcalStatus.eventExists && (
               <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
                 <span className="w-1.5 h-1.5 rounded-full bg-zinc-600 flex-shrink-0" />
