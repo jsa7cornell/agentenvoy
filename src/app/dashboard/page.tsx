@@ -6,17 +6,17 @@ import Feed from "@/components/feed";
 import { AvailabilityPanel } from "@/components/availability-panel";
 import { validateReturnTo } from "@/lib/onboarding/return-to";
 
-// 40% chat / 60% calendar split on first load. Sidebar is ~260px, so the
-// resizable region is (window.innerWidth - 260). Chat gets 40% of that,
-// clamped to [CHAT_MIN, CHAT_MAX]. User can drag to any width within
-// that range and it snaps back to the 40% default only on fresh page load.
-const CHAT_MIN = 320;
+// Chat gets 45% of the full window width on first load (no sidebar — the
+// dashboard is a full-bleed split). Clamped to [CHAT_MIN, CHAT_MAX].
+// User can drag to any width within that range; snaps back to 45% only on
+// fresh page load.
+const CHAT_MIN = 420;
 const CHAT_MAX = 860;
 
 function DashboardPageInner() {
   const [chatWidth, setChatWidth] = useState<number>(() => {
-    if (typeof window === "undefined") return 420;
-    return Math.max(CHAT_MIN, Math.min(CHAT_MAX, Math.round((window.innerWidth - 260) / 2.5)));
+    if (typeof window === "undefined") return 480;
+    return Math.max(CHAT_MIN, Math.min(CHAT_MAX, Math.round(window.innerWidth * 0.45)));
   });
   const dragging = useRef(false);
   const startX = useRef(0);

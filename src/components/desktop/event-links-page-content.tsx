@@ -47,7 +47,7 @@ import {
 import { type ReusableLinkRow } from "@/components/mobile/event-links-card";
 import { EventLinksEditDialog } from "@/components/mobile/event-links-edit-dialog";
 import { PrimaryEditDialog } from "@/components/links/primary-edit-dialog";
-import { CreateLinkPicker } from "@/components/desktop/create-link-picker";
+import { CreateLinkPicker, CreateLinkPickerMobile } from "@/components/desktop/create-link-picker";
 
 interface UpcomingEventRow extends SessionLike {
   id: string;
@@ -565,7 +565,7 @@ export function EventLinksPageContent() {
 
   return (
     <div
-      className="hidden md:block min-h-[720px] mx-auto max-w-[1280px] px-12 py-8"
+      className="hidden md:block mx-auto max-w-[1280px] px-4 md:px-8 xl:px-12 py-6 md:py-8"
       data-testid="desktop-event-links-page"
     >
       <div className="flex flex-col gap-10">
@@ -635,7 +635,8 @@ export function EventLinksPageContent() {
         </section>
 
         {/* GROUP 2 — Create a reusable link (3 type cards) */}
-        <CreateLinkPicker />
+        <div className="lg:hidden"><CreateLinkPickerMobile /></div>
+        <div className="hidden lg:block"><CreateLinkPicker /></div>
 
         {/* GROUP 3 — My Events */}
         <section aria-labelledby="my-events-heading">
