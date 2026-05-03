@@ -613,6 +613,56 @@ export async function POST(req: NextRequest) {
             return;
           }
 
+          // Belt-and-suspenders: if the classifier returned create_link but
+          // the message clearly describes a bookable link (keyword present),
+          // re-route to the rule composer. This handles edge cases where Haiku
+          // misclassifies due to prior Bobby/Katie context in the channel.
+          if (intent === "create_link") {
+            const lowerMsg = message.toLowerCase();
+            const isBookableCreate =
+              /\b(bookable links?|office hours?|drop-?in hours?|booking window|mentor hours?|coaching hours?|open hours?|recurring (sessions?|link|bookable)|group meeting links?)\b/.test(lowerMsg);
+            if (isBookableCreate) {
+              const prefs = (user.preferences as Record<string, unknown> | null) ?? {};
+              const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
+              const defaultFormat = (explicit.defaultFormat as string | undefined) ?? "video";
+              const defaultDuration = (explicit.defaultDuration as number | undefined) ?? 30;
+              const hoursStartMin =
+                (explicit.businessHoursStartMinutes as number | undefined) ??
+                ((explicit.businessHoursStart as number | undefined) ?? 9) * 60;
+              const hoursEndMin =
+                (explicit.businessHoursEndMinutes as number | undefined) ??
+                ((explicit.businessHoursEnd as number | undefined) ?? 17) * 60;
+              const fmtMin = (m: number) =>
+                `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+              const contextLines = [
+                `Host's primary link defaults: format=${defaultFormat}, duration=${defaultDuration}min, hours=${fmtMin(hoursStartMin)}–${fmtMin(hoursEndMin)} weekdays`,
+              ];
+              try {
+                await runDispatchHandler({
+                  tier: "rule",
+                  playbookRelativePath:
+                    "src/agent/playbooks/composers/calendar-rule-composer.md",
+                  userId: safeUser.id,
+                  userName: user.name ?? null,
+                  channelId: safeChannel.id,
+                  userMessage: message,
+                  userMsgPersist,
+                  controller,
+                  encoder,
+                  contextLines,
+                  historyLimit: 4,
+                  emitStatus: (stage) => {
+                    emitStatus(stage);
+                  },
+                });
+              } catch (e) {
+                console.error("[channel/chat] bookable-link fallback dispatch failed:", e);
+              }
+              controller.close();
+              return;
+            }
+          }
+
           // Schedule + inquire both need calendar context. Continue into
           // the existing load pipeline.
           const isInquireTier =
