@@ -320,7 +320,11 @@ export function EventLinksPageContent() {
           });
           const structured = (data.structuredRules as AvailabilityPreference[]) ?? [];
           for (const r of structured) {
-            if (r.action !== "office_hours" || r.status !== "active" || !r.officeHours) continue;
+            // `r.status` may be undefined on rules created before the status
+            // field was introduced — treat missing status as "active" for
+            // backward compatibility. Only skip explicitly paused/expired rules.
+            const rStatus = r.status as string | undefined;
+            if (r.action !== "office_hours" || (rStatus && rStatus !== "active") || !r.officeHours) continue;
             const oh = r.officeHours;
             if (!oh.linkCode || !oh.linkSlug) continue;
             out.push({

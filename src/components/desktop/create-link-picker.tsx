@@ -53,8 +53,6 @@ interface LinkTypeDef {
   /** Inline SVG icon — kept here so each card's stroke color tokenizes
    *  cleanly with `currentColor`. */
   icon: React.ReactNode;
-  /** Top-of-card illustration. Decorative; aria-hidden. */
-  illustration: React.ReactNode;
   /** Free-text fallback prefill for "Or start from scratch →". */
   scratchPrefill: string;
 }
@@ -82,59 +80,6 @@ const GroupIcon = (
   </svg>
 );
 
-const BookableIllo = (
-  <div className="flex items-end justify-center gap-1.5 h-full" aria-hidden>
-    {["M", "T", "W", "T", "F"].map((d, i) => (
-      <div key={i} className="flex flex-col items-center gap-0.5">
-        <span className="text-[8px] font-semibold uppercase tracking-wider text-cyan-700/60 dark:text-cyan-300/60">
-          {d}
-        </span>
-        <div className="h-1 w-7 bg-cyan-200/70 dark:bg-cyan-700/30 rounded-sm" />
-        <div className="h-1.5 w-7 bg-cyan-500/70 rounded-sm" />
-        <div className="h-1 w-7 bg-cyan-200/70 dark:bg-cyan-700/30 rounded-sm" />
-      </div>
-    ))}
-  </div>
-);
-
-const RecurringIllo = (
-  <div className="flex flex-col gap-1.5" aria-hidden>
-    {["Wk1", "Wk2", "Wk3", "Wk4"].map((label) => (
-      <div key={label} className="flex items-center gap-1.5">
-        <span className="text-[8px] font-semibold uppercase tracking-wider text-amber-700/70 dark:text-amber-400/70 w-7">
-          {label}
-        </span>
-        {[0, 1, 2, 3, 4].map((d) => (
-          <div
-            key={d}
-            className={`h-1.5 w-3.5 rounded-sm ${
-              d === 2
-                ? "bg-amber-500/90"
-                : "bg-amber-200/70 dark:bg-amber-800/40"
-            }`}
-          />
-        ))}
-      </div>
-    ))}
-  </div>
-);
-
-const GroupIllo = (
-  <div className="flex items-center justify-center gap-2" aria-hidden>
-    <div className="w-8 h-8 rounded-full border-2 border-pink-500/70 flex items-center justify-center text-[11px] font-semibold text-pink-700 dark:text-pink-300 bg-pink-100/70 dark:bg-pink-900/30">
-      A
-    </div>
-    <span className="text-pink-500 text-sm">→</span>
-    <div className="w-9 h-9 rounded-md bg-pink-500/90 flex items-center justify-center text-base">
-      📅
-    </div>
-    <span className="text-pink-500 text-sm">←</span>
-    <div className="w-8 h-8 rounded-full border-2 border-pink-500/70 flex items-center justify-center text-[11px] font-semibold text-pink-700 dark:text-pink-300 bg-pink-100/70 dark:bg-pink-900/30">
-      B
-    </div>
-  </div>
-);
-
 export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
   {
     kind: "bookable",
@@ -154,7 +99,6 @@ export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
       starterHover: "hover:bg-cyan-50 dark:hover:bg-cyan-950/30",
     },
     icon: ClockIcon,
-    illustration: BookableIllo,
     scratchPrefill: "Create a reusable link — ",
   },
   {
@@ -175,7 +119,6 @@ export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
       starterHover: "hover:bg-amber-50 dark:hover:bg-amber-950/30",
     },
     icon: RepeatIcon,
-    illustration: RecurringIllo,
     scratchPrefill: "Create a recurring sessions link — ",
   },
   {
@@ -196,7 +139,6 @@ export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
       starterHover: "hover:bg-pink-50 dark:hover:bg-pink-950/30",
     },
     icon: GroupIcon,
-    illustration: GroupIllo,
     scratchPrefill: "Create a group meeting link — ",
   },
 ];
@@ -259,13 +201,8 @@ export function CreateLinkPicker({ className = "" }: CreateLinkPickerProps) {
             className={`rounded-xl border border-secondary bg-surface-secondary/40 ${def.classes.border} flex flex-col`}
             data-testid={`desktop-create-card-${def.kind}`}
           >
-            {/* Illustration */}
-            <div className="h-24 flex items-center justify-center px-4 pt-4 pb-3">
-              {def.illustration}
-            </div>
-
             {/* Title row */}
-            <div className="flex items-center gap-2 px-4 pt-1">
+            <div className="flex items-center gap-2 px-4 pt-4">
               <span
                 className={`flex items-center justify-center w-6 h-6 rounded-md ${def.classes.iconBg} ${def.classes.iconText}`}
                 aria-hidden
