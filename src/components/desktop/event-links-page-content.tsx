@@ -320,6 +320,7 @@ export function EventLinksPageContent() {
   const [sortKey, setSortKey] = useState<SortKey>("meeting");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [hostFirstName, setHostFirstName] = useState<string>("");
+  const [gcalStatuses, setGcalStatuses] = useState<Record<string, "accepted" | "declined" | "tentative" | "needsAction" | "none">>({});
 
   async function handleToggleStatus(row: ReusableLinkRow) {
     if (!row.ruleId) return;
@@ -447,6 +448,29 @@ export function EventLinksPageContent() {
     refetchEvents(filter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
+
+  // Fetch Google Calendar RSVP status for all confirmed sessions whenever
+  // the confirmed view is active and filteredEvents changes.
+  useEffect(() => {
+    if (filter !== "confirmed") return;
+    const now = Date.now();
+    const confirmedIds = events
+      .filter((s) => matchesFilter(s, "confirmed", now))
+      .map((s) => s.id);
+    if (confirmedIds.length === 0) return;
+    confirmedIds.forEach((sessionId) => {
+      if (gcalStatuses[sessionId] !== undefined) return; // already fetched
+      fetch(`/api/negotiate/gcal-status?sessionId=${sessionId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data) return;
+          const rsvp = data.guestResponseStatus ?? "none";
+          setGcalStatuses((prev) => ({ ...prev, [sessionId]: rsvp }));
+        })
+        .catch(() => {});
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, events]);
 
   // Counts per filter — surfaced on each chip ("Confirmed · 2"). "all"
   // mirrors the loaded set length; the other two re-run the filter so the
@@ -851,13 +875,30 @@ export function EventLinksPageContent() {
                             {showMeeting && (
                               <div className="min-w-0">
                                 {s.agreedTime ? (
-                                  <div className="flex flex-col">
+                                  <div className="flex flex-col gap-0.5">
                                     <span className="text-[12px] font-medium text-primary tabular-nums">
                                       {formatCompactDate(s.agreedTime)}
                                     </span>
                                     <span className="text-[11px] text-muted tabular-nums">
                                       {formatCompactTime(s.agreedTime)}
                                     </span>
+                                    {isConfirmed && (() => {
+                                      const rsvp = gcalStatuses[s.id];
+                                      if (!rsvp || rsvp === "none") return null;
+                                      const rsvpMap = {
+                                        accepted:    { label: "✓ Accepted",  cls: "text-green-600 dark:text-green-400" },
+                                        tentative:   { label: "~ Tentative", cls: "text-amber-600 dark:text-amber-400" },
+                                        declined:    { label: "✗ Declined",  cls: "text-red-600 dark:text-red-400" },
+                                        needsAction: { label: "No reply",    cls: "text-muted" },
+                                      } as const;
+                                      const entry = rsvpMap[rsvp as keyof typeof rsvpMap];
+                                      if (!entry) return null;
+                                      return (
+                                        <span className={`text-[10px] font-medium ${entry.cls}`}>
+                                          {entry.label}
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
                                 ) : (
                                   <span className="text-[12px] text-muted">—</span>
