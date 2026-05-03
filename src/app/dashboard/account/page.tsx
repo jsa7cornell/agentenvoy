@@ -882,6 +882,13 @@ export default function AccountPage() {
         </div>
       )}
       {calendarReconnect.modal}
+      <footer className="mt-8 pb-6 text-center text-xs text-muted space-x-4">
+        <a href="/privacy" className="hover:text-secondary transition">Privacy</a>
+        <span>&middot;</span>
+        <a href="/terms" className="hover:text-secondary transition">Terms</a>
+        <span>&middot;</span>
+        <a href="/faq" className="hover:text-secondary transition">How It Works</a>
+      </footer>
     </div>
   );
 }
