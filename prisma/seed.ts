@@ -123,7 +123,6 @@ async function main() {
       email: "onboarding@agentenvoy.dev",
       meetSlug: "onboardingtest",
       lastCalibratedAt: null,
-      onboardingPhase: null,
       preferences: { explicit: { timezone: "America/Los_Angeles" } },
       persistentKnowledge: "- This host has not been calibrated yet.",
     },

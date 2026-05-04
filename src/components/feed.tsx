@@ -7,7 +7,6 @@ import { ChannelChatStreamParser, type ChannelChatFrame } from "@/lib/channel-ch
 import { computeThreadStatus, computeGroupThreadStatus } from "@/lib/thread-status";
 import { formatDuration } from "@/lib/format-duration";
 import { formatDeferralFieldsList, type DeferralFieldNoun } from "@/agent/greetings/registry";
-import { QuickReplies } from "./onboarding/quick-replies";
 import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
 import { PreferencesExtendedFlow } from "./onboarding/preferences-extended-flow";
 import { shortTimezoneLabel } from "@/lib/timezone";
@@ -20,7 +19,6 @@ import type { BookableLinkProposal } from "./onboarding/rule-form-fields";
 import { SendFeedbackLink } from "./send-feedback";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { canNativeShare, shareInvite } from "@/lib/share-invite";
-import type { QuickReplyOption, OnboardingPhase } from "@/lib/onboarding-machine";
 
 interface ChannelMsg {
   id: string;
@@ -838,20 +836,18 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
   const hasLoadedRef = useRef(false);
 
   // ── Onboarding state ──────────────────────────────────────────────────
-  const [onboardingPhase, setOnboardingPhase] = useState<OnboardingPhase | null>(null);
-  const [activeOptions, setActiveOptions] = useState<QuickReplyOption[] | null>(null);
-  const [optionsLocked, setOptionsLocked] = useState(false);
-  const [inputPlaceholder, setInputPlaceholder] = useState<string | null>(null);
+  // The legacy 9-phase /api/onboarding/chat machine was deleted 2026-05-04
+  // — cold sign-up has been seed-everything since 2026-04-26. New users
+  // are calibrated at signup (`events.createUser`) and land directly on
+  // <FirstRunWelcome>. Tuning is opt-in via PrimaryLinkFlow /
+  // PreferencesExtendedFlow, both chat-native and message-persisted.
   const pendingSendRef = useRef<string | null>(null);
-  const onboardingInitRef = useRef(false);
   // Tuning-flow composer bridge: PrimaryLinkFlow registers a submit fn here
   // when a freetext step is active (phone, zoom, custom hours). handleSend
   // routes to it instead of /api/channel/chat so the main composer works
   // seamlessly as the input for those steps.
   const tuningComposerRef = useRef<((text: string) => void) | null>(null);
   const [tuningComposerPlaceholder, setTuningComposerPlaceholder] = useState<string | null>(null);
-
-  const isOnboarding = !isCalibrated && onboardingPhase !== null && onboardingPhase !== "complete";
 
   // Composer prefill bus — two delivery paths feed the same primitive:
   //
@@ -1009,247 +1005,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     router.replace(onboardReturnTo);
   }, [initialLoading, isCalibrated, onboardReturnTo, router]);
 
-  // ── Initialize onboarding when uncalibrated ───────────────────────────
-  useEffect(() => {
-    if (initialLoading || isCalibrated || onboardingInitRef.current) return;
-    onboardingInitRef.current = true;
-
-    async function initOnboarding() {
-      try {
-        // Seed the server with the browser-detected tz so the welcome can
-        // assume a reasonable zone before Google Calendar settings are
-        // consulted. Server validates + stamps `timezoneSource:"browser-detected"`;
-        // invalid values are ignored.
-        const browserTz = (() => {
-          try {
-            return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-          } catch {
-            return "";
-          }
-        })();
-        const params = new URLSearchParams();
-        if (onboardReturnTo) params.set("hasReturnTo", "1");
-        if (browserTz) params.set("browserTz", browserTz);
-        const qs = params.toString();
-        const url = qs ? `/api/onboarding/chat?${qs}` : "/api/onboarding/chat";
-        const res = await fetch(url);
-        if (!res.ok) return;
-        const data = await res.json();
-
-        if (data.redirect) {
-          window.location.href = data.redirect;
-          return;
-        }
-
-        // If we already loaded persisted onboarding history from the channel,
-        // don't re-add the current-phase messages — just sync phase + options.
-        // Otherwise we'd duplicate the last turn on every reload.
-        const hasPersistedHistory = messages.some(
-          (m) => (m.metadata as { kind?: string } | null)?.kind === "onboarding"
-        );
-        if (hasPersistedHistory) {
-          setOnboardingPhase(data.phase);
-          setInputPlaceholder(data.placeholder || null);
-          const lastMsg = data.messages?.[data.messages.length - 1];
-          if (lastMsg?.options?.length > 0) {
-            setActiveOptions(lastMsg.options);
-            setOptionsLocked(false);
-          }
-          return;
-        }
-
-        processOnboardingResult(data);
-      } catch (e) {
-        console.error("Failed to initialize onboarding:", e);
-      }
-    }
-    initOnboarding();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialLoading, isCalibrated]);
-
-  // ── Process onboarding API result ─────────────────────────────────────
-  const processOnboardingResult = useCallback(
-    (data: {
-      phase: OnboardingPhase;
-      messages: Array<{ content: string; options?: QuickReplyOption[]; delay?: number }>;
-      autoAdvance?: boolean;
-      onboardingComplete?: boolean;
-      /** Server short-circuited because `lastCalibratedAt` was already
-       *  set (cold-mount race protection — see onboarding/chat
-       *  route.ts comment). Treat as state-sync only: flip
-       *  isCalibrated, clear phase/options, do NOT emit any messages,
-       *  do NOT re-arm the demo-draft. Diagnosed 2026-04-26. */
-      alreadyCalibrated?: boolean;
-      placeholder?: string;
-    },
-    // Belt-and-suspenders gate for the demo auto-draft: only arm the
-    // Anderson draft when we arrived at `complete` by advancing from the
-    // terminal phase in THIS session — never on a stale re-POST or a GET
-    // that lands an already-complete user back on /dashboard. The server
-    // already gates `onboardingComplete: true` to the terminal phase
-    // advance, so this is defense-in-depth.
-    fromPhase?: OnboardingPhase,
-    ) => {
-      // Server already-calibrated short-circuit — sync state, no emits.
-      // This response shape comes from the duplicate-fire race fix; both
-      // racing POSTs arrive but only the first does any real work.
-      if (data.alreadyCalibrated) {
-        setIsCalibrated(true);
-        setOnboardingPhase(null);
-        setActiveOptions(null);
-        setInputPlaceholder(null);
-        return;
-      }
-
-      // Onboarding finished — switch to normal chat mode (no reload)
-      if (data.onboardingComplete) {
-        for (const msg of data.messages) {
-          addEnvoyMessage(msg.content);
-        }
-        setOnboardingPhase(null);
-        setInputPlaceholder(null);
-        setActiveOptions(null);
-        setIsCalibrated(true);
-
-        // onboardReturnTo path: user came in mid-flow (e.g. booking a deal
-        // room). Bounce them to the original destination instead of the
-        // demo-meeting auto-fire, so they resume the interrupted task.
-        if (onboardReturnTo) {
-          setTimeout(() => {
-            router.replace(onboardReturnTo);
-          }, 1200);
-          return;
-        }
-
-        // Only arm the demo auto-draft if this complete came from advancing
-        // the terminal phase (`intro`) in this session. initOnboarding calls
-        // this fn with no fromPhase, so a resumed already-complete user
-        // never arms the draft. (Post-2026-04-23 the terminal advance is
-        // intro→complete; the sunset `defaults_confirm` beat is still
-        // accepted as a legacy value for in-flight users.)
-        if (fromPhase !== "intro" && fromPhase !== "defaults_confirm") {
-          return;
-        }
-
-        // Cross-mount idempotency guard for the demo-draft. Server-side
-        // already-calibrated short-circuit catches the common case, but
-        // a sessionStorage flag survives any pathological remount path
-        // (Next.js prefetch, parallel mount in dev, etc.) and ensures
-        // the auto-draft only fires once per signed-in browser session.
-        // Diagnosed 2026-04-26: cold-mount race produced 2× demo drafts
-        // and 2× orphan link cards.
-        try {
-          if (sessionStorage.getItem("envoy:demo-draft-fired") === "1") {
-            return;
-          }
-          sessionStorage.setItem("envoy:demo-draft-fired", "1");
-        } catch {
-          // sessionStorage unavailable (private mode, SSR window): the
-          // server short-circuit and React mount semantics are still in
-          // place; proceed without the cross-mount guard.
-        }
-
-        // Auto-fire a test meeting after a short pause so the user sees the
-        // "watch what happens..." message first, then Envoy creates the demo
-        // invite in front of their eyes.
-        setTimeout(() => {
-          // Tone note: phrase this as a concrete, completed-sounding request
-          // so the LLM's reply is a short acknowledgement ("Ok, here's the
-          // invite I drafted for John — [slot/link]. Let me know any tweaks.")
-          // rather than a performative recap of what it's about to do.
-          pendingSendRef.current = "Draft a 5-minute meet & greet video call with John Anderson, founder of AgentEnvoy, at my next available time. Keep your reply short — just confirm the draft with the time + link and invite tweaks.";
-          setInput(pendingSendRef.current);
-        }, 2500);
-        return;
-      }
-
-      setOnboardingPhase(data.phase);
-      setInputPlaceholder(data.placeholder || null);
-
-      // Add envoy messages
-      for (const msg of data.messages) {
-        addEnvoyMessage(msg.content);
-      }
-
-      // Get options from last message (if any)
-      const lastMsg = data.messages[data.messages.length - 1];
-      if (lastMsg?.options && lastMsg.options.length > 0) {
-        setActiveOptions(lastMsg.options);
-        setOptionsLocked(false);
-      } else {
-        setActiveOptions(null);
-      }
-
-      // Auto-advance phases: show content, then auto-POST to advance
-      if (data.autoAdvance) {
-        setActiveOptions(null);
-        setTimeout(() => {
-          advanceOnboarding(data.phase, "auto");
-        }, 2500);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
-
-  function addEnvoyMessage(content: string) {
-    const msg: ChannelMsg = {
-      id: `onboarding-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      role: "envoy",
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, msg]);
-  }
-
-  function addUserMessage(content: string) {
-    const msg: ChannelMsg = {
-      id: `onboarding-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      role: "user",
-      content,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, msg]);
-  }
-
-  // ── Advance onboarding ────────────────────────────────────────────────
-  async function advanceOnboarding(
-    phase: OnboardingPhase,
-    response: string,
-    extra?: Record<string, unknown>
-  ) {
-    setLoading(true);
-    setOptionsLocked(true);
-    try {
-      const res = await fetch("/api/onboarding/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phase, response, ...extra }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error((err as { error?: string }).error || "Failed to advance onboarding");
-      }
-      const data = await res.json();
-      processOnboardingResult(data, phase);
-    } catch (e) {
-      console.error("Onboarding advance error:", e);
-      addEnvoyMessage("Something went wrong. Please try again.");
-      setOptionsLocked(false);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ── Handle quick reply selection ──────────────────────────────────────
-  function handleQuickReply(value: string, label: string) {
-    if (optionsLocked || !onboardingPhase) return;
-    addUserMessage(label);
-    setActiveOptions(null);
-    advanceOnboarding(onboardingPhase, value, { responseLabel: label });
-  }
-
-  // Auto-send after post-onboarding quick reply sets the input
+  // Auto-send after a sessionStorage prefill (e.g. event-links cross-route nav)
   useEffect(() => {
     if (pendingSendRef.current && input === pendingSendRef.current) {
       pendingSendRef.current = null;
@@ -1393,21 +1149,6 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
       setInput("");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
       tuningComposerRef.current(text);
-      return;
-    }
-
-    // ── Onboarding freeform input (about_you, protection_blocks, etc.) ──
-    // Intro phase is an exception: freetext during the welcome dwell falls
-    // through to normal channel chat so a fresh user can type
-    // "Book time w/ Danny..." the moment the welcome renders, using the
-    // seeded tz, without being blocked by a phase that no longer asks for
-    // anything.
-    if (isOnboarding && onboardingPhase && onboardingPhase !== "intro") {
-      setInput("");
-      if (textareaRef.current) textareaRef.current.style.height = "auto";
-      addUserMessage(text);
-      setActiveOptions(null);
-      advanceOnboarding(onboardingPhase, text);
       return;
     }
 
@@ -1660,7 +1401,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
 
   // Determine placeholder text — tuning freetext steps override the default
   const placeholder = tuningComposerPlaceholder
-    ?? (isOnboarding && inputPlaceholder ? inputPlaceholder : "Tell Envoy what to schedule...");
+    ?? "Tell Envoy what to schedule...";
 
   if (initialLoading) {
     return (
@@ -1979,17 +1720,6 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
             </div>
           );
         })}
-
-        {/* Quick replies — below the last envoy message */}
-        {activeOptions && activeOptions.length > 0 && (
-          <div className="self-start max-w-[72%] mt-1">
-            <QuickReplies
-              options={activeOptions}
-              onSelect={handleQuickReply}
-              disabled={optionsLocked || loading}
-            />
-          </div>
-        )}
 
         {/* Intent-clarifier quick-replies — rendered after an `unclear`-tier
             turn from the chat intent router. Clicking a pill re-submits the

@@ -9,7 +9,7 @@
  * rather than a project-wide enum. See proposal `2026-04-30_onboarding-and-tuning-as-chat`.
  */
 
-import type { EnvoyMessage, QuickReplyOption } from "@/lib/onboarding-machine";
+import type { EnvoyMessage, QuickReplyOption } from "@/lib/onboarding/types";
 
 export type PrimaryLinkStep =
   | "timezone"

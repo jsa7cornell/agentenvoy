@@ -68,7 +68,6 @@ export async function POST(req: NextRequest) {
         where: { id: user.id },
         data: {
           lastCalibratedAt: freshCalibration,
-          onboardingPhase: null,
           persistentKnowledge: null,
           upcomingSchedulePreferences: null,
           preferences: { explicit: { timezone } },

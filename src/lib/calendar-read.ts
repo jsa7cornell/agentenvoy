@@ -166,57 +166,6 @@ export async function buildCalendarDigest(
 const MODEL_ID = "claude-haiku-4-5-20251001";
 
 /**
- * Generates the short wow paragraph shown at the very top of onboarding.
- * ~3-5 sentences, warm/playful, grounded in real calendar specifics.
- * Returns null on empty calendar or LLM error (caller should skip).
- */
-export async function generateOnboardingCalendarRead(
-  userId: string,
-  timezone: string,
-  userName?: string
-): Promise<string | null> {
-  try {
-    const digest = await buildCalendarDigest(userId, timezone, {
-      backDays: 2,
-      forwardDays: 21,
-      maxEvents: 70,
-    });
-    if (!digest || digest.eventLines.length === 0) return null;
-
-    const firstName = (userName || "").split(" ")[0] || "there";
-    const system = `You are Envoy, an AI scheduling assistant meeting a new user for the first time. You've just been given access to their calendar and you want to show — in a single sentence — that you're paying attention. Write ONE sentence (max ~30 words) that makes a specific, concrete observation about their calendar. This sentence will be embedded in a greeting after the words "For instance," so do NOT start with "For instance" yourself.
-
-Rules:
-- Reference SPECIFIC details from the events (names, event titles, places). Specificity is the whole point.
-- Never invent details. Only use what's in the event list.
-- Frame it as something Envoy would know or do because it's looking at their calendar — e.g. "I can see you've got back-to-back travel this week" or "I'd know to protect your Wednesday morning before that board prep."
-- One sentence only. No paragraph, no list, no preamble.
-- Don't comment on health, legal, or family-sensitive topics.
-- Don't explain yourself. No "I noticed that..." or "Looking at your calendar...".
-- Plain text. No markdown, no bullet points.`;
-
-    const user = `The user's name is ${firstName}. They are in timezone ${timezone}. Here are their upcoming calendar events (one per line):
-
-${digest.eventLines.join("\n")}
-
-Write one sentence now.`;
-
-    const { text } = await generateText({
-      model: envoyModel(MODEL_ID),
-      maxOutputTokens: 1024,
-      system,
-      prompt: user,
-      temperature: 0.9,
-    });
-    const trimmed = text.trim();
-    return trimmed || null;
-  } catch (err) {
-    console.error("[generateOnboardingCalendarRead] failed:", err);
-    return null;
-  }
-}
-
-/**
  * Generates a single-sentence "today's insight" for the dashboard.
  * Regenerated once per day; cached in preferences.explicit.dailyInsight.
  */

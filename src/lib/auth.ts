@@ -296,15 +296,9 @@ export const authOptions: NextAuthOptions = {
         explicit: buildSeededExplicit({ googleSeed }),
       };
 
-      // 2026-04-26: with seed-everything (PR #138), calibration is done
-      // at signup — there's no scalar left to ask. We mark the user
-      // calibrated immediately so the legacy onboarding-machine
-      // (intro→complete with demo-draft auto-fire) is skipped, and the
-      // first-run greeting is owned by `<FirstRunWelcome>` in feed.tsx.
-      // The onboarding-machine code stays in place as a legacy fallback
-      // for any in-flight users whose `lastCalibratedAt` is still null
-      // when this lands; their next /api/onboarding/chat GET sees the
-      // calibrated bounce path and redirects to /dashboard.
+      // Calibration is done at signup (seed-everything, PR #138) — there's
+      // no scalar left to ask. The first-run greeting is owned by
+      // <FirstRunWelcome> in feed.tsx; tuning is opt-in via PrimaryLinkFlow.
       const calibratedAt = new Date();
       logCalibrationWrite({
         userId: user.id,

@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import type { PhaseResult } from "@/lib/onboarding-machine";
+import type { EnvoyMessage } from "@/lib/onboarding/types";
 
 /**
  * Persist one onboarding turn as a `ChannelMessage` so history survives
  * page reload and reviewing past settings decisions is possible.
  *
  * Metadata always tags `kind: "onboarding"`. An optional `subkind` (e.g.
- * `"primary-link-tuning"`) disambiguates which scaffolded flow produced
- * the turn — see SPEC §6.6 "Subkind metadata convention." Legacy callers
- * (the `/api/onboarding/chat` machine) pass no subkind; the field is
- * omitted from metadata in that case so existing rows remain unchanged.
+ * `"primary-link-tuning"`, `"preferences-extended"`) disambiguates which
+ * scaffolded flow produced the turn — see SPEC §6.6 "Subkind metadata
+ * convention."
  */
 export async function persistOnboardingTurn(
   userId: string,
@@ -43,7 +42,7 @@ export async function persistOnboardingTurn(
  */
 export async function respondWithPersist(
   userId: string,
-  result: PhaseResult,
+  result: { messages: EnvoyMessage[]; [k: string]: unknown },
   extras: Record<string, unknown> = {},
   subkind?: string,
 ) {

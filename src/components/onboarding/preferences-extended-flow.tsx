@@ -18,7 +18,7 @@ import {
   THEME_OPTIONS,
   type ExtendedStep,
 } from "@/app/api/onboarding/preferences-extended/_steps";
-import type { QuickReplyOption } from "@/lib/onboarding-machine";
+import type { QuickReplyOption } from "@/lib/onboarding/types";
 
 interface ChannelMsg {
   id: string;

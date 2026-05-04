@@ -27,7 +27,7 @@ import {
   GUEST_FLEX_OPTIONS,
   type PrimaryLinkStep,
 } from "@/app/api/onboarding/primary-link/_steps";
-import type { QuickReplyOption } from "@/lib/onboarding-machine";
+import type { QuickReplyOption } from "@/lib/onboarding/types";
 
 interface ChannelMsg {
   id: string;

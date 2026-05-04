@@ -12,7 +12,7 @@
  *   complete      → terminal summary
  */
 
-import type { EnvoyMessage, QuickReplyOption } from "@/lib/onboarding-machine";
+import type { EnvoyMessage, QuickReplyOption } from "@/lib/onboarding/types";
 
 export type ExtendedStep =
   | "buffer"
