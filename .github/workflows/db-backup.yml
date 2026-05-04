@@ -1,0 +1,114 @@
+name: Daily DB Backup
+
+# Daily pg_dump of the production Supabase DB, uploaded to Cloudflare R2 with
+# 30-day retention. Supabase Free has no scheduled backups; this workflow is
+# the only recovery path against an accidental TRUNCATE/DROP/DELETE.
+#
+# Background: 2026-05-04 incident — integration test suite ran resetDb()
+# against production by mistake (POSTGRES_PRISMA_URL pointed at prod, not the
+# local container). All rows wiped. Recovered by hand. See proposal
+# 2026-05-04_db-backup-github-actions-r2.md for the full rationale.
+#
+# Runs in GitHub Actions (not Vercel) because pg_dump is a system binary not
+# available in Vercel's runtime, and the dump can take longer than Vercel's
+# 60s function limit allows.
+#
+# Required GitHub Actions secrets (Settings → Secrets → Actions):
+#   BACKUP_POSTGRES_URL    Direct non-pooling Postgres URL (same value as
+#                          POSTGRES_URL_NON_POOLING in 1Password vault Secrets).
+#   R2_ENDPOINT_URL        https://<account-id>.r2.cloudflarestorage.com
+#   R2_ACCESS_KEY_ID       R2 API token Access Key ID
+#   R2_SECRET_ACCESS_KEY   R2 API token Secret Key
+#   R2_BUCKET_NAME         Bucket name (e.g. agentenvoy-backups)
+#
+# Failure handling: GitHub auto-emails the repo owner when a scheduled
+# workflow fails. No additional alerting wired in.
+#
+# Restore runbook: app/docs/dev-db-restore.md
+
+on:
+  schedule:
+    # 02:00 UTC daily. Offset from app cron (15:30 UTC) to spread DB load.
+    - cron: "0 2 * * *"
+  workflow_dispatch:  # manual trigger for testing / on-demand backup
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Install PostgreSQL 17 client
+        # Supabase runs Postgres 17.x. Ubuntu's default postgresql-client is
+        # older and can fail to dump newer server versions reliably. Pin to
+        # 17 via the official PGDG apt repo.
+        run: |
+          set -euo pipefail
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          pg_dump --version
+
+      - name: Run pg_dump
+        env:
+          # Pass URL via env (not argv) so it doesn't appear in process listings.
+          BACKUP_POSTGRES_URL: ${{ secrets.BACKUP_POSTGRES_URL }}
+        run: |
+          set -euo pipefail
+          # Full UTC timestamp (not just date) so a manual workflow_dispatch
+          # run on the same day as the scheduled run produces a distinct
+          # filename instead of silently overwriting. ISO 8601 with `-` in
+          # place of `:` for filesystem-safe sorting.
+          STAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
+          FILE="backup-${STAMP}.pgdump"
+          pg_dump \
+            --format=custom \
+            --schema=public \
+            --no-owner \
+            --no-acl \
+            -f "$FILE" \
+            "$BACKUP_POSTGRES_URL"
+          # Verify the dump is readable before we trust it.
+          pg_restore --list "$FILE" > /dev/null
+          echo "DUMP_FILE=$FILE" >> "$GITHUB_ENV"
+          echo "Dump complete: $(du -sh "$FILE" | cut -f1)"
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          set -euo pipefail
+          aws s3 cp "$DUMP_FILE" "s3://$R2_BUCKET_NAME/$DUMP_FILE" \
+            --endpoint-url "$R2_ENDPOINT_URL"
+
+      - name: Prune old backups (keep newest 30)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          set -euo pipefail
+          OBJECTS=$(aws s3 ls "s3://$R2_BUCKET_NAME/" \
+            --endpoint-url "$R2_ENDPOINT_URL" \
+            | awk '{print $4}' | grep '^backup-.*\.pgdump$' | sort)
+          COUNT=$(printf '%s\n' "$OBJECTS" | grep -c '^backup-' || true)
+          echo "Found $COUNT backups in bucket."
+          if [ "$COUNT" -gt 30 ]; then
+            TO_DELETE=$(printf '%s\n' "$OBJECTS" | head -n $((COUNT - 30)))
+            for OBJ in $TO_DELETE; do
+              echo "Pruning $OBJ"
+              aws s3 rm "s3://$R2_BUCKET_NAME/$OBJ" \
+                --endpoint-url "$R2_ENDPOINT_URL"
+            done
+          else
+            echo "Nothing to prune (under 30 backups)."
+          fi
