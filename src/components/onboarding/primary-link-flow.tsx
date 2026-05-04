@@ -91,6 +91,12 @@ interface PrimaryLinkFlowProps {
   hostName: string | null;
   /** Primary-link slug for the celebration headline + summary fallback. */
   meetSlug: string | null;
+  /** Called whenever the active freetext step changes. When a freetext step
+   *  is active (phone, zoom, custom hours), passes { submit, placeholder }
+   *  so the parent's main composer routes text directly here — one fluid
+   *  input rather than an inline box + a main composer. Passes null when
+   *  no freetext step is active. */
+  onComposerBridge?: (state: { submit: (text: string) => void; placeholder: string } | null) => void;
 }
 
 /**
@@ -183,6 +189,7 @@ export function PrimaryLinkFlow({
   onPostFlowSeed,
   hostName,
   meetSlug,
+  onComposerBridge,
 }: PrimaryLinkFlowProps) {
   const { tuningMsgs, step, freetextHint, terminal } = readTuningState(messages);
 
@@ -190,6 +197,34 @@ export function PrimaryLinkFlow({
   const [error, setError] = useState<string | null>(null);
   const [freetextInput, setFreetextInput] = useState("");
   const startedRef = useRef(false);
+
+  // Register/unregister the composer bridge whenever the freetext step changes.
+  // The parent's main composer routes text here on freetext steps — one
+  // input, no ambiguity.
+  useEffect(() => {
+    if (!onComposerBridge) return;
+    if (terminal || !freetextHint) {
+      onComposerBridge(null);
+      return;
+    }
+    const placeholder =
+      freetextHint === "hours-custom"
+        ? "e.g. 8:30 to 5:30"
+        : freetextHint === "zoom-link"
+          ? "https://zoom.us/j/…"
+          : freetextHint === "phone-number"
+            ? "+1 555-1234"
+            : "e.g. America/Phoenix";
+    onComposerBridge({
+      placeholder,
+      submit: (text: string) => {
+        if (!step) return;
+        void postAdvance({ step, freetext: text, label: text, browserTz });
+      },
+    });
+    return () => onComposerBridge(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [freetextHint, terminal, step]);
 
   // Kick-off: if there are no tuning messages yet, POST {start: true} to
   // get the timezone prompt persisted + returned.
@@ -315,7 +350,11 @@ export function PrimaryLinkFlow({
         </div>
       )}
 
-      {!terminal && freetextHint && (
+      {/* Inline freetext — only rendered when the parent composer bridge is
+          NOT active. When onComposerBridge is provided the main composer at
+          the bottom of the page handles the input, keeping one clear entry
+          point for the user. */}
+      {!terminal && freetextHint && !onComposerBridge && (
         <div className="self-start max-w-[72%] mt-2 flex flex-col gap-1.5">
           <form
             onSubmit={(ev) => {
@@ -353,7 +392,8 @@ export function PrimaryLinkFlow({
         </div>
       )}
 
-      {!freetextHint && error && (
+      {/* Error when bridge is active (input lives in parent composer) */}
+      {error && (onComposerBridge || !freetextHint) && (
         <div className="self-start text-xs text-rose-400 px-1 mt-1">{error}</div>
       )}
 

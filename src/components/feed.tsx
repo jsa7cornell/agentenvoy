@@ -234,12 +234,14 @@ function PostureBubble({ p, showLabel }: { p: SeededPosture; showLabel?: boolean
             <span aria-hidden="true">⏰</span>{" "}
             <span className="text-muted">Business hours:</span>{" "}
             <span className="font-medium">{bizRange}</span>
-            {tzLabel && (
-              <>
-                , <span className="font-medium">{tzLabel}</span>
-              </>
-            )}
           </li>
+          {tzLabel && (
+            <li>
+              <span aria-hidden="true">🌍</span>{" "}
+              <span className="text-muted">Timezone:</span>{" "}
+              <span className="font-medium">{tzLabel}</span>
+            </li>
+          )}
           <li>
             <span aria-hidden="true">⏱️</span>{" "}
             <span className="text-muted">Default meetings:</span>{" "}
@@ -269,8 +271,11 @@ function PrimaryLinkReadyCard({ url }: { url: string }) {
     <div className="self-start w-full max-w-lg bg-surface border border-indigo-500/40 rounded-xl px-3.5 py-3 flex flex-col gap-2">
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
         <span aria-hidden="true">🔗</span>
-        Your primary link is ready
+        Primary link
       </div>
+      <p className="text-sm text-primary leading-relaxed">
+        Okay, I&rsquo;ve got what I need, and we&rsquo;ve set you up with your primary bookable meeting link. This is a link you can copy and share with anyone — it lets them book time with you using your primary availability.
+      </p>
       <div className="flex items-center gap-2 bg-surface-secondary border border-border rounded-lg px-3 py-1.5">
         <code className="font-mono text-[11px] text-primary truncate flex-1">
           {url}
@@ -839,6 +844,12 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
   const [inputPlaceholder, setInputPlaceholder] = useState<string | null>(null);
   const pendingSendRef = useRef<string | null>(null);
   const onboardingInitRef = useRef(false);
+  // Tuning-flow composer bridge: PrimaryLinkFlow registers a submit fn here
+  // when a freetext step is active (phone, zoom, custom hours). handleSend
+  // routes to it instead of /api/channel/chat so the main composer works
+  // seamlessly as the input for those steps.
+  const tuningComposerRef = useRef<((text: string) => void) | null>(null);
+  const [tuningComposerPlaceholder, setTuningComposerPlaceholder] = useState<string | null>(null);
 
   const isOnboarding = !isCalibrated && onboardingPhase !== null && onboardingPhase !== "complete";
 
@@ -900,9 +911,35 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
         const res = await fetch("/api/channel/messages");
         if (res.ok) {
           const data = await res.json();
-          setMessages(data.messages || []);
+          const msgs: ChannelMsg[] = data.messages || [];
+          setMessages(msgs);
           if (data.calendarConnected !== undefined) setCalendarConnected(data.calendarConnected);
           if (data.lastCalibratedAt !== undefined) setIsCalibrated(!!data.lastCalibratedAt);
+          // Detect in-progress tuning flows synchronously so the welcome card
+          // never flashes before the tuning UI on resume. The auto-resume
+          // useEffect below is a no-op after this fires.
+          const hasTuning = msgs.some((m) => {
+            const meta = m.metadata as { kind?: string; subkind?: string } | null;
+            return meta?.kind === "onboarding" && meta?.subkind === "primary-link-tuning";
+          });
+          if (hasTuning) {
+            const tuningDone = msgs.some((m) => {
+              const meta = m.metadata as { subkind?: string; terminal?: boolean } | null;
+              return meta?.subkind === "primary-link-tuning" && meta?.terminal === true;
+            });
+            if (!tuningDone) setPrimaryLinkFlowActive(true);
+          }
+          const hasExtended = msgs.some((m) => {
+            const meta = m.metadata as { kind?: string; subkind?: string } | null;
+            return meta?.kind === "onboarding" && meta?.subkind === "preferences-extended";
+          });
+          if (hasExtended) {
+            const extendedDone = msgs.some((m) => {
+              const meta = m.metadata as { subkind?: string; terminal?: boolean } | null;
+              return meta?.subkind === "preferences-extended" && meta?.terminal === true;
+            });
+            if (!extendedDone) setExtendedFlowActive(true);
+          }
         }
       } catch (e) {
         console.error("Failed to load channel messages:", e);
@@ -1347,6 +1384,18 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     // Any new turn invalidates previous clarifier quick-replies.
     setClarifierState(null);
 
+    // ── Tuning-flow freetext intercept ────────────────────────────────────
+    // When a primary-link tuning step expects freetext (phone, zoom, custom
+    // hours), PrimaryLinkFlow registers a submit fn via onComposerBridge.
+    // Route here instead of /api/channel/chat — PrimaryLinkFlow handles its
+    // own saving state and adds the optimistic user bubble.
+    if (tuningComposerRef.current) {
+      setInput("");
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      tuningComposerRef.current(text);
+      return;
+    }
+
     // ── Onboarding freeform input (about_you, protection_blocks, etc.) ──
     // Intro phase is an exception: freetext during the welcome dwell falls
     // through to normal channel chat so a fresh user can type
@@ -1609,10 +1658,9 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     }
   };
 
-  // Determine placeholder text
-  const placeholder = isOnboarding && inputPlaceholder
-    ? inputPlaceholder
-    : "Tell Envoy what to schedule...";
+  // Determine placeholder text — tuning freetext steps override the default
+  const placeholder = tuningComposerPlaceholder
+    ?? (isOnboarding && inputPlaceholder ? inputPlaceholder : "Tell Envoy what to schedule...");
 
   if (initialLoading) {
     return (
@@ -1646,7 +1694,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           });
           const showWelcome =
             !hasRealChat && !loading && isCalibrated && !primaryLinkFlowActive;
-          const showTuning = !loading && isCalibrated && primaryLinkFlowActive;
+          const showTuning = isCalibrated && primaryLinkFlowActive;
           return (
             <>
               {showWelcome && (
@@ -1672,6 +1720,10 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                   onPostFlowSeed={(seed) => {
                     setPrimaryLinkFlowActive(false);
                     handleSend(seed);
+                  }}
+                  onComposerBridge={(state) => {
+                    tuningComposerRef.current = state?.submit ?? null;
+                    setTuningComposerPlaceholder(state?.placeholder ?? null);
                   }}
                 />
               )}
