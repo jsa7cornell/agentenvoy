@@ -13,14 +13,18 @@ import { logCalibrationWrite } from "@/lib/calibration-audit";
  * mode: "create" — create a throwaway test account
  */
 export async function POST(req: NextRequest) {
-  // Guard: dev only
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Not available in production" }, { status: 403 });
-  }
-
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Guard: admin accounts only (same gate as the UI's DevTools section).
+  const caller = await prisma.user.findUnique({
+    where: { email: session.user.email },
+    select: { userClass: true },
+  });
+  if (caller?.userClass !== "admin") {
+    return NextResponse.json({ error: "Admin only" }, { status: 403 });
   }
 
   const body = await req.json();
