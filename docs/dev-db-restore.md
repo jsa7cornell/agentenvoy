@@ -104,6 +104,86 @@ Cross-check counts against expectations. Then run the app against the new DB
 in dev (`POSTGRES_PRISMA_URL` and `POSTGRES_URL_NON_POOLING` both updated)
 and exercise the golden paths before swapping prod.
 
+### 5.1 Post-recovery verification — non-negotiable
+
+> Added 2026-05-04 evening, after a P3009 deploy failure surfaced the gap.
+> Today's incident's "data loss" headline obscured a subtler failure: the
+> recovery left `_prisma_migrations` half-applied (one row with
+> `finished_at = NULL`) and partial unique indexes missing on
+> `CalendarWatchChannel`. The first blocked every Vercel deploy. The second
+> would have permanently weakened a documented invariant if `migrate
+> resolve --applied` had been run without manual index repair first.
+
+Run **all three** of these checks on the recovered DB before declaring the
+restore done. A passing app is not enough — these catch the latent failures
+a passing app won't.
+
+#### 5.1.1 Migrations bookkeeping is clean
+
+```bash
+psql "$TARGET_URL" -c "
+  SELECT migration_name, started_at, finished_at, applied_steps_count
+  FROM _prisma_migrations
+  WHERE finished_at IS NULL
+     OR applied_steps_count = 0;
+"
+```
+
+**Expected: zero rows.** Any row here means Prisma will refuse the next
+`migrate deploy` with `P3009`. Until this returns empty, every Vercel deploy
+will fail. Resolution path:
+
+- If the migration's SQL actually ran (the table/columns/indexes the
+  migration creates all exist), apply additive DDL for anything missing,
+  then `npx prisma migrate resolve --applied <migration_name>`.
+- If it didn't run at all, drop any partial objects manually, then
+  `npx prisma migrate resolve --rolled-back <migration_name>` — next
+  `migrate deploy` will re-attempt the migration cleanly.
+
+#### 5.1.2 Index counts match a reference
+
+For each table the recent migrations touched (or, more conservatively, every
+public table), diff the index list against a known-good reference (a fresh
+`prisma migrate deploy` against a throwaway local Postgres works as the
+reference).
+
+```bash
+psql "$TARGET_URL" -c "
+  SELECT tablename, count(*) AS idx_count
+  FROM pg_indexes
+  WHERE schemaname = 'public'
+  GROUP BY tablename
+  ORDER BY tablename;
+" > /tmp/restored-indexes.txt
+
+# Reference (throwaway local Postgres after running prisma migrate deploy):
+psql "$REFERENCE_URL" -c "..." > /tmp/reference-indexes.txt
+
+diff /tmp/reference-indexes.txt /tmp/restored-indexes.txt
+```
+
+**Expected: empty diff.** Mismatches are silent invariant-weakeners. The
+2026-05-04 `CalendarWatchChannel` partial-unique-indexes case is the example
+to remember: 5 indexes vs 7, and the missing two enforced an idempotency
+constraint the application layer relied on as a safety net.
+
+#### 5.1.3 Foreign key counts match
+
+Same pattern, for FKs:
+
+```bash
+psql "$TARGET_URL" -c "
+  SELECT conrelid::regclass AS table_name, count(*) AS fk_count
+  FROM pg_constraint
+  WHERE contype = 'f' AND connamespace = 'public'::regnamespace
+  GROUP BY conrelid
+  ORDER BY table_name;
+"
+```
+
+Diff against the reference. FKs are part of the schema contract; missing
+ones permit invalid data the app assumes can't exist.
+
 ## 6. Post-restore — reaching a working app
 
 A restored DB is necessary but **not sufficient** for a working AgentEnvoy.
