@@ -1,12 +1,21 @@
 import { PrismaClient } from "@prisma/client";
+import { assertSafeProdWrite } from "../scripts/lib/db-target";
 
 // Use direct connection (port 5432) for short-lived scripts.
 // The pooler (port 6543) uses PgBouncer in transaction mode,
 // which breaks Prisma's prepared statements in scripts that
 // open a connection, run a few queries, and exit.
+const seedUrl = process.env.POSTGRES_URL_NON_POOLING;
+
+// Refuse to seed against a remote DB unless SEED_PROD_OK=1 is set inline.
+// Seed is invoked non-interactively by `prisma db seed`, so a stdin prompt
+// won't work here. Sentinel-env is the right shape. See post-mortem
+// 2026-05-04 §9 (audit of connection-string-bearing scripts).
+assertSafeProdWrite(seedUrl, "prisma/seed", "SEED_PROD_OK");
+
 const prisma = new PrismaClient({
   datasources: {
-    db: { url: process.env.POSTGRES_URL_NON_POOLING },
+    db: { url: seedUrl },
   },
 });
 

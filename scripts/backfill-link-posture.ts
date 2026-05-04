@@ -22,6 +22,7 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { confirmProdWrite } from "./lib/db-target";
 
 // Inline the posture snapshot logic to avoid Next.js path aliases in this
 // plain tsx script. Mirror snapshotPostureFromUser from lib/links/create.ts.
@@ -81,6 +82,21 @@ function snapshotFromPrefs(prefs: Record<string, unknown>) {
 }
 
 async function main() {
+  // Prod-write confirm gate. Dry-run reads only — no confirm needed.
+  // --write against a remote DB requires retyping the database name to
+  // confirm. Local DBs proceed without prompting. See post-mortem
+  // 2026-05-04 §9 (audit of connection-string-bearing scripts).
+  if (!isDryRun) {
+    const url =
+      process.env.POSTGRES_URL_NON_POOLING ?? process.env.POSTGRES_PRISMA_URL;
+    const ok = await confirmProdWrite(url, "backfill-link-posture");
+    if (!ok) {
+      console.error("[backfill-link-posture] aborted by user — no rows changed.");
+      await prisma.$disconnect();
+      process.exit(1);
+    }
+  }
+
   // Fetch all variance links (type != "primary") with their owner's preferences.
   const links = await prisma.negotiationLink.findMany({
     where: { type: { not: "primary" } },
