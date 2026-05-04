@@ -64,6 +64,7 @@ export async function GET(
         where: { userId },
         select: { computedAt: true },
       }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (prisma as any).calendarListCache.findUnique({
         where: { userId },
         select: { fetchedAt: true },

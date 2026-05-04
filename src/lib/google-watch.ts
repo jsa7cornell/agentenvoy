@@ -102,6 +102,7 @@ export async function registerCalendarListWatch(
   const channelId = crypto.randomUUID();
   const token = crypto.randomBytes(32).toString("hex");
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (client.calendarList as any).watch({
     requestBody: {
       id: channelId,
