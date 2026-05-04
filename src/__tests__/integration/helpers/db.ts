@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { assertSafeIntegrationDb } from "./safety";
 
 /**
  * Singleton Prisma client for integration tests. Under
@@ -37,6 +38,13 @@ async function discoverTables(): Promise<string[]> {
  *   state across cases. Prefer a fresh fixture; use this sparingly.
  */
 export async function resetDb(opts: { skipTables?: string[] } = {}): Promise<void> {
+  // Closest-to-the-primitive defense. The 2026-05-04 incident hit prod
+  // because the guard sat one level up in globalSetup; any caller that
+  // imports resetDb directly (a script, a REPL, a hand-run tsx file)
+  // bypassed it. This is the gate that prevents recurrence regardless of
+  // who called us. See helpers/safety.ts and post-mortem 2026-05-04.
+  assertSafeIntegrationDb();
+
   const all = await discoverTables();
   const skip = new Set(opts.skipTables ?? []);
   const tables = all.filter((t) => !skip.has(t));
