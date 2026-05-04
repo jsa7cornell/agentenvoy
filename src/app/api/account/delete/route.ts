@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { stopAllWatchesForUser } from "@/lib/google-watch";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +98,16 @@ export async function POST(request: NextRequest) {
       { ok: false, error: "Deletion failed. No changes were made." },
       { status: 500 }
     );
+  }
+
+  // Best-effort: stop Google Calendar watch channels BEFORE the user row
+  // is gone. The Cascade onDelete removes the DB rows, but the channels
+  // remain live in Google until they expire — they'd send pings we'd 404 on.
+  // Stopping them here avoids that noise. Failure is non-blocking.
+  try {
+    await stopAllWatchesForUser(userId);
+  } catch (err) {
+    console.warn("[account.delete] stopAllWatchesForUser failed (non-blocking)", { userId, err });
   }
 
   // Best-effort: revoke Google tokens AFTER the DB is already consistent.

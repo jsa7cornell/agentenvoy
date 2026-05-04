@@ -30,7 +30,14 @@ import {
   getGoogleCalendarClient,
   isDeadGoogleAuthError,
   clearGoogleRefreshToken,
+  incrementalSyncForUser,
+  invalidateSchedule,
 } from "@/lib/calendar";
+import {
+  listExpiringChannels,
+  renewWatchChannel,
+  stopWatchChannel,
+} from "@/lib/google-watch";
 import { checkEnvDrift, formatEnvDriftSummary } from "@/lib/env-drift";
 import { logRouteError } from "@/lib/route-error";
 import { buildDevStatsEmail } from "@/lib/emails/dev-stats";
@@ -80,6 +87,15 @@ export async function GET(req: NextRequest) {
   // ───────── Phase 7: gcal drift detection ─────────
   const gcalDriftResult = await runGcalDriftCheck(ranAt);
 
+  // ───────── Phase 8: renew Google watch channels ─────────
+  const watchRenewalResult = await runRenewGoogleWatches();
+
+  // ───────── Phase 9: cleanup dead Google watch channels ─────────
+  const watchCleanupResult = await runCleanupGoogleWatches();
+
+  // ───────── Phase 10: push-notification watchdog sweep ─────────
+  const watchdogResult = await runPushWatchdogSweep();
+
   return NextResponse.json({
     ranAt: ranAt.toISOString(),
     holds: holdsResult,
@@ -89,6 +105,9 @@ export async function GET(req: NextRequest) {
     reminders: remindersResult,
     revocations: revocationResult,
     gcalDrift: gcalDriftResult,
+    watchRenewal: watchRenewalResult,
+    watchCleanup: watchCleanupResult,
+    watchdog: watchdogResult,
   });
 }
 
@@ -771,4 +790,193 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 8 — Renew Google watch channels nearing expiry
+//
+// events.watch channels max ~30 days; calendarList.watch ~7 days.
+// We renew events channels with <48h to go and calendarList channels with
+// <96h to go (two missed-run tolerance for the tighter TTL). Each renewal is
+// stop + re-register. On final failure the channel is marked active=false and
+// the backstop polling TTL takes over until the next user sign-in re-registers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runRenewGoogleWatches(): Promise<{
+  checked: number;
+  renewed: number;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let renewed = 0;
+
+  const H48 = 48 * 60 * 60 * 1000;
+  const H96 = 96 * 60 * 60 * 1000;
+
+  const [expiringEvents, expiringCalList] = await Promise.all([
+    listExpiringChannels(H48, "events"),
+    listExpiringChannels(H96, "calendarList"),
+  ]);
+  const expiring = [...expiringEvents, ...expiringCalList];
+
+  for (const channel of expiring) {
+    try {
+      await renewWatchChannel(channel.channelId);
+      renewed++;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${channel.channelId}: ${msg}`);
+      console.error("[cron/phase8] renewWatchChannel failed", { channelId: channel.channelId, err });
+    }
+  }
+
+  return { checked: expiring.length, renewed, errors };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 9 — Cleanup dead Google watch channels
+//
+// Channels with no ping in 7d (events) / 14d (calendarList) are likely dead —
+// either Google stopped delivering or the user revoked OAuth. We probe with a
+// channels.stop call: a 404 response confirms Google no longer knows about the
+// channel; we mark it inactive. A successful stop also marks it inactive.
+// The goal is to prune stale rows and let the daily renewal pass skip them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STALE_EVENTS_MS = 7 * 24 * 60 * 60 * 1000;
+const STALE_CALLIST_MS = 14 * 24 * 60 * 60 * 1000;
+
+async function runCleanupGoogleWatches(): Promise<{
+  checked: number;
+  markedDead: number;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let markedDead = 0;
+
+  const now = new Date();
+  const staleChannels = await prisma.calendarWatchChannel.findMany({
+    where: {
+      active: true,
+      OR: [
+        {
+          kind: "events",
+          lastPingAt: { lt: new Date(now.getTime() - STALE_EVENTS_MS) },
+        },
+        {
+          kind: "calendarList",
+          lastPingAt: { lt: new Date(now.getTime() - STALE_CALLIST_MS) },
+        },
+        // Channels that registered but never received even the initial sync ping
+        {
+          kind: "events",
+          lastPingAt: null,
+          createdAt: { lt: new Date(now.getTime() - STALE_EVENTS_MS) },
+        },
+        {
+          kind: "calendarList",
+          lastPingAt: null,
+          createdAt: { lt: new Date(now.getTime() - STALE_CALLIST_MS) },
+        },
+      ],
+    },
+  });
+
+  for (const channel of staleChannels) {
+    try {
+      await stopWatchChannel(channel.channelId);
+      markedDead++;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${channel.channelId}: ${msg}`);
+      console.error("[cron/phase9] stopWatchChannel failed", { channelId: channel.channelId, err });
+    }
+  }
+
+  return { checked: staleChannels.length, markedDead, errors };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 10 — Push-notification watchdog sweep
+//
+// Belt-and-suspenders: once a day, force incrementalSync for users whose
+// events.watch channel is nominally active but has not produced a diff in
+// >24h AND has had calendar activity in the past 7 days. If the forced sync
+// finds changes the cache didn't have, we log [push-watchdog] missed-ping —
+// a smoking-gun that the webhook is silently broken for that user.
+//
+// This is NOT a general poll across all users — it's a targeted quality check
+// against users whose push channel is suspect. On a healthy system, most runs
+// return missedPings=0.
+//
+// Known blind spot: hosts with no calendar activity in 7d are excluded by
+// design (low-activity hosts are least affected by stale picker data). See
+// proposal §3g for a possible Phase 2.D expansion.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const WATCHDOG_DIFF_STALE_MS = 24 * 60 * 60 * 1000;
+const WATCHDOG_ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function runPushWatchdogSweep(): Promise<{
+  checked: number;
+  missedPings: number;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let missedPings = 0;
+
+  const now = new Date();
+  const diffStaleCutoff = new Date(now.getTime() - WATCHDOG_DIFF_STALE_MS);
+  const activityWindowStart = new Date(now.getTime() - WATCHDOG_ACTIVITY_WINDOW_MS);
+
+  // Find suspect channels: active events.watch, no diff signal in 24h
+  const suspectChannels = await prisma.calendarWatchChannel.findMany({
+    where: {
+      active: true,
+      kind: "events",
+      OR: [
+        { lastSyncDiffAt: { lt: diffStaleCutoff } },
+        { lastSyncDiffAt: null },
+      ],
+    },
+    select: { channelId: true, userId: true, calendarId: true },
+  });
+
+  // Filter: only users with recent calendar activity (proxy: CalendarCache
+  // rewritten within 7d from any source — ensures we only sweep users whose
+  // calendars might actually have changed).
+  const recentlySyncedUserIds = new Set(
+    (
+      await prisma.calendarCache.findMany({
+        where: { lastSyncedAt: { gte: activityWindowStart } },
+        select: { userId: true },
+        distinct: ["userId"],
+      })
+    ).map((r: { userId: string }) => r.userId),
+  );
+
+  const toCheck = suspectChannels.filter(
+    (c) => c.calendarId && recentlySyncedUserIds.has(c.userId),
+  );
+
+  for (const channel of toCheck) {
+    try {
+      const foundChanges = await incrementalSyncForUser(channel.userId, channel.calendarId!);
+      if (foundChanges) {
+        missedPings++;
+        await invalidateSchedule(channel.userId);
+        console.warn("[push-watchdog] missed-ping", {
+          userId: channel.userId,
+          calendarId: channel.calendarId,
+          channelId: channel.channelId,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${channel.channelId}: ${msg}`);
+      console.error("[cron/phase10] watchdog sync failed", { channelId: channel.channelId, err });
+    }
+  }
+
+  return { checked: toCheck.length, missedPings, errors };
 }

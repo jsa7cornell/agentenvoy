@@ -496,6 +496,104 @@ export async function invalidateCalendarListCache(userId: string): Promise<void>
 }
 
 /**
+ * Exported incremental sync entry point for the webhook push path.
+ * Looks up the user's cached syncToken for the given calendarId and performs
+ * a delta sync (events.list with syncToken). Returns true if any events were
+ * upserted or soft-deleted, false otherwise — the boolean drives the
+ * lastSyncDiffAt watchdog signal in CalendarWatchChannel.
+ *
+ * Race protection: takes a session-level Postgres advisory lock OUTSIDE any
+ * transaction so concurrent pings for the same (userId, calendarId) serialize
+ * without holding a connection across the Google round-trip. The lock is
+ * acquired and released per call; the DB write (upsert) is a separate short
+ * transaction that never spans the Google API call.
+ *
+ * Falls back to a full sync on HTTP 410 (syncToken expired) — same semantics
+ * as the inline branch inside syncCalendar.
+ */
+export async function incrementalSyncForUser(
+  userId: string,
+  calendarId: string,
+): Promise<boolean> {
+  const lockKey = `gcal:sync:${userId}:${calendarId}`;
+  await prisma.$executeRawUnsafe(
+    `SELECT pg_advisory_lock(hashtext($1))`,
+    lockKey,
+  );
+  try {
+    const client = await getGoogleCalendarClient(userId);
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    const hostEmail = user?.email || "";
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cached = await (prisma as any).calendarCache.findUnique({
+      where: { userId_calendarId: { userId, calendarId } },
+    });
+
+    let events: StoredCalendarEvent[];
+    let newSyncToken: string | undefined;
+    let changed = false;
+
+    const cal = { id: calendarId, name: (cached?.calendarName as string) || calendarId };
+
+    if (cached?.syncToken) {
+      try {
+        const result = await incrementalSync(client, cal, cached.syncToken as string, cached.events as unknown as StoredCalendarEvent[], hostEmail);
+        events = result.events;
+        newSyncToken = result.syncToken;
+        changed = result.changed;
+      } catch (e: unknown) {
+        // 410 GONE — syncToken expired; fall back to full sync
+        if (e && typeof e === "object" && "code" in e && (e as { code: number }).code === 410) {
+          const result = await fullSync(client, cal, hostEmail);
+          events = result.events;
+          newSyncToken = result.syncToken;
+          changed = true;
+        } else {
+          throw e;
+        }
+      }
+    } else {
+      // No cache row yet — full sync
+      const result = await fullSync(client, cal, hostEmail);
+      events = result.events;
+      newSyncToken = result.syncToken;
+      changed = true;
+    }
+
+    // Short upsert transaction — no network calls inside
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (prisma as any).calendarCache.upsert({
+      where: { userId_calendarId: { userId, calendarId } },
+      create: {
+        userId,
+        calendarId,
+        calendarName: cal.name,
+        syncToken: newSyncToken || null,
+        events: events as unknown as Prisma.InputJsonValue,
+        lastSyncedAt: new Date(),
+      },
+      update: {
+        calendarName: cal.name,
+        syncToken: newSyncToken || null,
+        events: events as unknown as Prisma.InputJsonValue,
+        lastSyncedAt: new Date(),
+      },
+    });
+
+    return changed;
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `SELECT pg_advisory_unlock(hashtext($1))`,
+      lockKey,
+    );
+  }
+}
+
+/**
  * Sync a user's calendars using Google's incremental sync (syncToken).
  * On first call or 410 GONE, performs a full sync.
  * Returns true if events changed (schedule should be recomputed).

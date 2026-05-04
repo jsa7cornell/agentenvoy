@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { invalidateSchedule, invalidateCalendarListCache } from "@/lib/calendar";
+import { reconcileEventsWatches } from "@/lib/google-watch";
 import type { UserPreferences } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
 
@@ -41,6 +42,13 @@ export async function PUT(req: NextRequest) {
   // updated list from Google (Wedge A — proposal 2026-05-02_picker-load-perf).
   await invalidateSchedule(session.user.id);
   await invalidateCalendarListCache(session.user.id);
+
+  // Reconcile watch channels to match the new activeCalendarIds set.
+  // Fire-and-forget: watch registration failures are logged but never surface
+  // to the user — the polling fallback remains in place.
+  void reconcileEventsWatches(session.user.id, activeCalendarIds).catch((e) =>
+    console.error("[calendar-filter] reconcileEventsWatches failed:", e),
+  );
 
   return NextResponse.json({ status: "updated" });
 }

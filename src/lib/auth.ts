@@ -5,6 +5,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { dispatchWelcomeEmailOnce } from "@/lib/emails/welcome";
+import { registerEventsWatch, registerCalendarListWatch } from "@/lib/google-watch";
 import { cookies } from "next/headers";
 import {
   ENTRY_POINT_COOKIE,
@@ -219,6 +220,35 @@ export const authOptions: NextAuthOptions = {
       if (account?.provider !== "google" || isNewUser) return;
       const scopes = (account.scope ?? "").split(" ");
       if (!scopes.includes("https://www.googleapis.com/auth/calendar.events")) return;
+
+      // Register watch channels for returning Google users (fire-and-forget).
+      // registerEventsWatch / registerCalendarListWatch are idempotent — they
+      // early-return if an active channel already exists, so calling this on
+      // every sign-in is safe and handles the case where a channel expired
+      // between the daily renewal cron and the user's next sign-in.
+      void (async () => {
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { preferences: true },
+          });
+          const prefs = (dbUser?.preferences as Record<string, unknown> | null) ?? {};
+          const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
+          const activeCalendarIds = (explicit.activeCalendarIds as string[] | undefined) ?? [];
+
+          await registerCalendarListWatch(user.id).catch((e) =>
+            console.error("[events.signIn] registerCalendarListWatch failed:", e),
+          );
+          for (const calId of activeCalendarIds) {
+            await registerEventsWatch(user.id, calId).catch((e) =>
+              console.error("[events.signIn] registerEventsWatch failed:", { calId, e }),
+            );
+          }
+        } catch (e) {
+          console.error("[events.signIn] watch registration failed:", e);
+        }
+      })();
+
       try {
         const dbUser = await prisma.user.findUnique({
           where: { id: user.id },
@@ -304,6 +334,34 @@ export const authOptions: NextAuthOptions = {
       } catch (e) {
         console.error("[createUser] welcome email dispatch failed:", e);
       }
+
+      // Register Google Calendar push-notification channels for new users.
+      // Fire-and-forget: failures are logged but never block account creation.
+      // registerEventsWatch is called once per active calendar; the seeded
+      // activeCalendarIds from buildSeededExplicit drive which calendars we
+      // watch. Idempotent if called again on a later sign-in.
+      void (async () => {
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { id: user.id },
+            select: { preferences: true },
+          });
+          const prefs = (dbUser?.preferences as Record<string, unknown> | null) ?? {};
+          const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
+          const activeCalendarIds = (explicit.activeCalendarIds as string[] | undefined) ?? [];
+
+          await registerCalendarListWatch(user.id).catch((e) =>
+            console.error("[createUser] registerCalendarListWatch failed:", e),
+          );
+          for (const calId of activeCalendarIds) {
+            await registerEventsWatch(user.id, calId).catch((e) =>
+              console.error("[createUser] registerEventsWatch failed:", { calId, e }),
+            );
+          }
+        } catch (e) {
+          console.error("[createUser] watch registration failed:", e);
+        }
+      })();
 
       // Insurance write of the recognition cookie alongside the primary
       // write in the signIn callback above. Reviewer N1 (proposal 2026-04-28

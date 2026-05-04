@@ -86,6 +86,7 @@ model User {
   calendarCaches    CalendarCache[]
   computedSchedule  ComputedSchedule?
   calendarListCache CalendarListCache?
+  watchChannels     CalendarWatchChannel[]
   adminAccessLogs   AdminAccessLog[]     @relation("AdminAccessLogs")
   feedbackReports   FeedbackReport[]
   agentTokensMinted AgentAccessToken[]   @relation("AgentTokensMinted")
@@ -1080,4 +1081,30 @@ model MCPCallLog {
   @@index([userId, ts])
   @@index([sessionId, ts])
   @@index([tool, ts])
+}
+
+// CalendarWatchChannel: registry of active Google Calendar push-notification
+// channels (events.watch + calendarList.watch). One row per channel. The two
+// partial unique indexes in the migration enforce at-most-one ACTIVE channel
+// per (userId, calendarId) for kind="events" and per (userId) for
+// kind="calendarList". See migration comment for why BOTH indexes are needed.
+model CalendarWatchChannel {
+  id             String    @id @default(cuid())
+  channelId      String    @unique       // Google's channel ID (we generate via crypto.randomUUID)
+  userId         String
+  calendarId     String?                 // null for kind: "calendarList"
+  resourceId     String                  // Google echoes this on every ping; validated in handler
+  token          String                  // per-channel random secret; matches X-Goog-Channel-Token
+  kind           String                  // "events" | "calendarList"
+  expiration     DateTime                // Google-returned channel expiry
+  createdAt      DateTime  @default(now())
+  lastPingAt     DateTime?               // updated on every successful ping
+  lastSyncDiffAt DateTime?               // last time a ping-triggered sync found real changes
+  active         Boolean   @default(true) // false → channel dead, awaiting cleanup
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiration])
+  @@index([active])
 }
