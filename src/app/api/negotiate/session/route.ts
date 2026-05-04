@@ -16,23 +16,14 @@ import { displayStatusLabel } from "@/lib/status-label";
 import {
   getInviteeDisplay,
   getWaitingLabel,
-  getInviteeFirstNamesDisplay,
-  getInviteeNames,
 } from "@/lib/invitee-display";
 import { getUserTimezone } from "@/lib/timezone";
 import {
   resolveSeedGuestTimezoneForCreate,
   resolveEffectiveGuestTimezone,
 } from "@/lib/guest-timezone-seed";
-import {
-  formatLabel,
-  computeCanonicalWeekLabel,
-} from "@/lib/greeting-template";
-import {
-  selectGreeting,
-  type GreetingInput,
-} from "@/agent/greetings/registry";
-import { readRecurrence } from "@/lib/recurrence";
+import { selectGreeting } from "@/agent/greetings/registry";
+import { buildGreetingInput } from "@/lib/greeting/build-input";
 // formatAvailabilitySlotList / formatAvailabilityProse / formatStretchDays /
 // buildOpenWindowGreeting removed 2026-04-23 when the bulleted schedule body
 // and guestPicks open-window template were folded into the unified greeting
@@ -44,11 +35,6 @@ import { readRecurrence } from "@/lib/recurrence";
 //   buildGuestGreeting,
 //   extractGuestPreferencesSummary,
 // } from "@/lib/guest-greeting-template";
-import {
-  deriveLegacy,
-  hasExclusiveOverride,
-  readStoredSteering,
-} from "@/lib/intent";
 import { computeDensityHorizon } from "@/lib/availability-density";
 import { getSchedulingMode } from "@/lib/scheduling-mode";
 import { parseLinkParameters } from "@/lib/link-parameters";
@@ -816,188 +802,21 @@ export async function POST(req: NextRequest) {
     });
   } else {
     // Deterministic template greeting — no LLM, no hallucination risk.
-    // Fallback to "the organizer" (not "Host") preserves greeting read when
-    // user.name is missing — this surface is user-facing prose, not a label.
-    const hostFirstName = user.name ? resolveHostFirstName(user) : "the organizer";
-
-    const rawTopic = link.topic || null;
-
-    // Greeting V2 (Danny spec, 2026-04-18). Multi-invitee-aware: for a 2+
-    // invitee link we greet "Will & Andrew" rather than just the first name
-    // (feedback cmoc4mue0…, 2026-04-23). Single-invitee behavior unchanged.
-    const inviteeNamesArr = getInviteeNames(link);
-    const greeteeName = getInviteeFirstNamesDisplay(link) || "there";
-
-    // Activity (free-form) — set by the host's LLM at create_link time.
-    // Keeps the meeting-type taxonomy expansive rather than discrete.
-    // Format emoji + activityIcon are no longer rendered in the greeting
-    // (activityIcon lives on the thread card; format emoji was dropped with
-    // the 2026-04-23 voice refactor).
-    const activityText =
-      typeof linkRules.activity === "string" && linkRules.activity.trim()
-        ? linkRules.activity.trim()
-        : null;
-
-    // V4 prose-first opener (2026-04-20) — replaces V3's Proposal bar.
-    // Composes two sentences from whatever link-rule fragments are present,
-    // drops quietly when fields are missing. Structured at-a-glance info
-    // lives in the deal-room event card now, not the greeting.
-    //
-    //   1. Opener: "👋 NAME! I'm scheduling time with you and HOST[ for TIMING]."
-    //   2. Proposal: "He's proposing [TIMING and ][DUR min ]for ACTIVITY[ in LOC]."
-    //
-    // If we have no substantive fields (no activity, no timing, no
-    // duration/location) — drop the proposal sentence entirely.
-    const linkLocationForOpener =
-      typeof linkRules.location === "string" && linkRules.location.trim()
-        ? linkRules.location.trim()
-        : null;
-    const durationForOpener =
-      typeof linkRules.duration === "number" ? linkRules.duration : (effectiveDuration ?? null);
-    const rawTimingLabel =
-      typeof linkRules.timingLabel === "string" && linkRules.timingLabel.trim()
-        ? linkRules.timingLabel.trim().slice(0, 80)
-        : null;
-
-    // Week-label hygiene (narration-hygiene-v2 S1, 2026-04-20). The host's
-    // LLM sometimes parrots ambiguous host phrasing into `timingLabel`
-    // (e.g., host said "next week" on a Sunday meaning the week *after*
-    // this one, but create_link wrote "next week" meaning Mon–Fri
-    // starting tomorrow). When the authored label says "this week" /
-    // "next week" / "the week of …", compute the canonical label from the
-    // actual filtered slots and override if they disagree. No external
-    // date library — first-slot date vs today, both normalized to the
-    // host's timezone, bucketed by the Monday-starting week.
-    const canonicalWeekLabel = computeCanonicalWeekLabel(filteredSlots, hostTimezone);
-    const timingLabelLooksLikeWeek =
-      rawTimingLabel && /\b(this|next)\s+week\b|\bthe\s+week\s+of\b/i.test(rawTimingLabel);
-    const timingLabel =
-      timingLabelLooksLikeWeek && canonicalWeekLabel
-        ? canonicalWeekLabel
-        : rawTimingLabel;
-
-    const fmtLabel = formatLabel(effectiveFormat);
-    const durationLabel = (effectiveMinDuration && effectiveMinDuration < (effectiveDuration ?? 30))
-      ? `${effectiveMinDuration}–${effectiveDuration}`
-      : effectiveDuration
-      ? `${effectiveDuration}`
-      : null;
-    const meetingDescShort = durationLabel && fmtLabel
-      ? `${durationLabel}-min ${fmtLabel}`
-      : fmtLabel
-      ? fmtLabel
-      : durationLabel
-      ? `${durationLabel}-min meeting`
-      : "meeting";
-
-    const guestPicks = (linkRules as Record<string, unknown>).guestPicks as
-      | { window?: { startHour: number; endHour: number }; date?: boolean; duration?: boolean | number[]; location?: boolean; format?: boolean | string[] }
-      | undefined;
-    const guestGuidance = (linkRules as Record<string, unknown>).guestGuidance as
-      | { suggestions?: { locations?: string[]; durations?: number[] }; tone?: string }
-      | undefined;
-    // ────────────────────────────────────────────────────────────────────
-    // Greeting render (2026-04-23 unified-branch refactor)
-    //
-    //   Branch A — named invitee + steering=exclusive + single-slot override
-    //              → "Envoy lined up a time" handoff to the offer card.
-    //   Branch B-proposal — named invitee + any structural field set (format,
-    //              duration, activity, or location) → "He's proposing {xxx}"
-    //              voice. Timing is folded into {xxx}.
-    //   Branch B-find-time — named invitee with no structural fields set
-    //              → "{Host} asked me to find time{ timingLabel}" voice.
-    //   Branch C — anonymous link (type=primary OR recurringWindowId!=null, i.e.
-    //              office-hours child) → agent-voice self-intro. Office-hours
-    //              surface `topic` inline; bare primaries use "default is".
-    //
-    // Rules baked in:
-    //   • `link.type === "primary" || link.recurringWindowId != null` is the ONLY
-    //     gate for anonymous voice. Steering does NOT select the branch.
-    //   • Bulleted schedule body (old Branch D) deleted. Calendar widget IS
-    //     the enumeration.
-    //   • guestPicks open-window template (`buildOpenWindowGreeting`) folded
-    //     inline as a "Let me know where/how long works" hint on B-templates.
-    //   • Dimension-aware suggest-alt clause — mentions only the dimensions
-    //     the host actually set; skipped for directive steering (narrow/
-    //     exclusive) and skipped entirely for office-hours links (topic
-    //     defines the offer).
-    //   • Calendar-connect pitch — shown only when there's >1 bookable slot
-    //     AND the viewer is anonymous (logged-in guests already have app-
-    //     level calendar access).
-    // ────────────────────────────────────────────────────────────────────
-
-    const isAnonymousLink = link.type === "primary" || !!link.recurringWindowId;
-    const isPrimaryLink = link.type === "primary";
-    const isBookableChildLink = !!link.recurringWindowId;
-
-    const storedSteering = readStoredSteering(linkRules);
-    const effectiveSteering = storedSteering ?? deriveLegacy(linkRules);
-    if (effectiveSteering === "exclusive" && !hasExclusiveOverride(linkRules)) {
-      console.error(
-        `[greeting] intent=exclusive with no availability.restrictToSlots (sessionId=${session.id}, linkCode=${link.code ?? "?"})`,
-      );
-    }
-    const isDirective =
-      effectiveSteering === "narrow" || effectiveSteering === "exclusive";
-
-    // Bookable-slot count drives the calendar-connect pitch in `clauses.ts`.
-    // "Bookable" = future slot with score ≤ 1 (matches the widget's offerable
-    // predicate). The pitch itself is composed inside the templates via
-    // `buildCalendarPitch`.
-    const nowMs = Date.now();
-    const bookableSlotCount = filteredSlots.filter(
-      (s) =>
-        new Date(s.start).getTime() > nowMs &&
-        typeof s.score === "number" &&
-        s.score <= 1,
-    ).length;
-
-    // Pre-filter `rawTopic` for the registry: the anonymous template surfaces
-    // it inline, but only when it's a real host-authored topic — generic
-    // chat-talk ("meeting", "catch up") gets stripped here so the registry
-    // stays pure. Non-anonymous branches don't read `rawTopic`.
-    const filteredTopicForRegistry =
-      rawTopic && !isGenericTopic(rawTopic) ? rawTopic : null;
-
-    // Clause composition (`guestPickHint`, `suggestAltClause`,
-    // `deferralFieldsList`, `calendarPitch`) lives inside the templates via
-    // `clauses.ts`. The route handler passes raw inputs only — see
-    // [GREETINGS.md §11.A] for the 2026-05-03 refactor that moved this out.
-
-    // Build the registry input bundle. Mirrors the exact shape the previous
-    // inlined branches read; the registry resolver picks the matching
-    // template and renders.
-    const greetingInput: GreetingInput = {
-      hostFirstName,
-      hostTimezone,
-      greeteeName,
-      inviteeCount: inviteeNamesArr.length,
+    // Input bundle assembly extracted to `@/lib/greeting/build-input` so the
+    // pre-engagement re-render path (handleExpandLink) can re-derive without
+    // duplicating the logic. See [GREETINGS.md §11.D].
+    const greetingInput = buildGreetingInput({
+      link,
       linkRules,
-      isAnonymousLink,
-      isPrimaryLink,
-      isBookableChildLink,
-      effectiveSteering,
-      activityText,
-      linkLocationForOpener,
-      durationForOpener,
-      effectiveDuration,
+      user,
+      session,
+      filteredSlots,
+      hostTimezone,
       effectiveFormat,
-      rawTopic: filteredTopicForRegistry,
-      meetingDescShort,
-      timingLabel,
-      guestPicks: guestPicks ?? null,
-      guestGuidance: guestGuidance ?? null,
-      bookableSlotCount,
+      effectiveDuration,
+      effectiveMinDuration,
       isGuest,
-      isDirective,
-      toneLine: guestGuidance?.tone ? guestGuidance.tone : null,
-      // Recurring-meeting fields (§5.6 of the 2026-05-01 recurring proposal).
-      // `recurrence` is parsed from the Prisma JsonValue; null for non-recurring links.
-      // `occurrenceIndex` is null until the LinkOccurrence table lookup is wired —
-      // the recurring-anchor template handles this correctly (null = first-pick visit).
-      recurrence: readRecurrence(link.recurrence),
-      occurrenceIndex: null,
-    };
+    });
     greeting = selectGreeting(greetingInput).render(greetingInput);
   }
 
