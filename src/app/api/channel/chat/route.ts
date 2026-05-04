@@ -37,6 +37,7 @@ import {
   type PrecheckResult,
   type DeterministicCreateArgs,
 } from "@/agent/matcher";
+import { parseLinkParameters } from "@/lib/link-parameters";
 import { voicePlaybook, calendarEventComposer, inquireComposer } from "@/agent/playbooks/index";
 
 function formatUpcomingEvents(events: CalendarEvent[], tz: string): string | null {
@@ -723,7 +724,7 @@ export async function POST(req: NextRequest) {
                 prisma.negotiationSession.findMany({
                   where: { hostId: safeUser.id, archived: false },
                   include: {
-                    link: { select: { inviteeName: true, code: true } },
+                    link: { select: { inviteeName: true, code: true, parameters: true } },
                   },
                   orderBy: { updatedAt: "desc" },
                   take: 20,
@@ -735,13 +736,22 @@ export async function POST(req: NextRequest) {
                   select: { role: true, content: true },
                 }),
               ]);
-              const mapped = precheckSessions.map((s) => ({
-                id: s.id,
-                title: s.title ?? null,
-                guestName: s.link?.inviteeName ?? null,
-                linkCode: s.link?.code ?? null,
-                status: s.status,
-              }));
+              const mapped = precheckSessions.map((s) => {
+                const params = s.link?.parameters
+                  ? parseLinkParameters(s.link.parameters)
+                  : null;
+                return {
+                  id: s.id,
+                  title: s.title ?? null,
+                  guestName: s.link?.inviteeName ?? null,
+                  linkCode: s.link?.code ?? null,
+                  status: s.status,
+                  format: params?.format ?? null,
+                  durationMinutes: params?.duration ?? null,
+                  timingLabel: params?.timingLabel ?? null,
+                  activity: params?.activity ?? null,
+                };
+              });
               precheckResult = schedulingPrecheck({
                 classifiedIntent: intent as
                   | "create_link"
@@ -798,7 +808,7 @@ export async function POST(req: NextRequest) {
                 const list = matchedSessions
                   .map(
                     (m) =>
-                      `- "${m.topic}" (${m.linkCode})`,
+                      `- ${m.label} (${m.linkCode})`,
                   )
                   .join("\n");
                 // Post-2026-04-30: matcher only routes here for modify_link

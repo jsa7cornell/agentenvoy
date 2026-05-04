@@ -77,7 +77,7 @@ export type PrecheckResult =
   | {
       kind: "multi-match-disambiguate";
       matchedLinkIds: string[];
-      matchedSessions: Array<{ linkCode: string; guest: string; topic: string }>;
+      matchedSessions: Array<{ linkCode: string; guest: string; label: string }>;
       originatingIntent: "create_link" | "modify_link" | "cancel_link";
       reason: string;
     }
@@ -114,6 +114,13 @@ export interface PrecheckInput {
     guestName: string | null; // from link.inviteeName
     linkCode: string | null;
     status: string; // "active" | "agreed" | etc
+    // Optional descriptors pulled from `link.parameters` (rulesJson). Used to
+    // build differentiated labels in the multi-match disambiguator. All fields
+    // optional — when absent, label falls back to stripped title.
+    format?: string | null; // "video" | "phone" | "in-person"
+    durationMinutes?: number | null;
+    timingLabel?: string | null; // e.g. "next week"
+    activity?: string | null; // e.g. "hike", "bike ride"
   }>;
   recentThreadTurns: Array<{ role: string; content: string }>; // last ~10
   echoFlag: boolean; // from PR-β's echo detector
@@ -270,27 +277,62 @@ function guestCandidates(sessions: PrecheckInput["activeSessions"]): string[] {
 // Main
 // ---------------------------------------------------------------------------
 
+function formatLabel(format: string | null | undefined): string | null {
+  if (!format) return null;
+  switch (format.toLowerCase()) {
+    case "video": return "video call";
+    case "phone": return "phone call";
+    case "in-person": return "in-person";
+    default: return format;
+  }
+}
+
+function durationLabel(min: number | null | undefined): string | null {
+  if (typeof min !== "number" || !Number.isFinite(min) || min <= 0) return null;
+  if (min % 60 === 0) return `${min / 60}h`;
+  return `${min}m`;
+}
+
+function strippedTitle(title: string | null | undefined, guest: string): string {
+  if (!title) return "";
+  let t = title.replace(new RegExp(`\\b${escapeRegex(guest)}\\b`, "gi"), "");
+  t = t.replace(/\s*\+\s*/g, " ").replace(/\s+/g, " ").trim();
+  return t;
+}
+
 /**
  * Build the `matchedSessions` payload for a multi-match-disambiguate result.
- * Strips the guest's name out of the title to leave a topic-only descriptor;
- * empties become "session" so the marco prose still has something to render.
+ *
+ * Per feedback report cmokrgfly000529unsajrqqli: stripping the guest's name
+ * from the title leaves the host's name (e.g. "Tester" / "VC: Tester"), which
+ * is useless. When `link.parameters` is available, surface meaningful
+ * differentiation — `<activity-or-format>, <duration><optional timing>`,
+ * e.g. `"hike, 45m"` or `"video call, 30m next week"`. Falls back to stripped
+ * title only if rulesJson fields are absent.
+ *
+ * Empties become "session" so the marco prose still has something to render.
  */
 function buildMatchedSessions(
   matched: PrecheckInput["activeSessions"],
   guest: string,
-): Array<{ linkCode: string; guest: string; topic: string }> {
+): Array<{ linkCode: string; guest: string; label: string }> {
   return matched
     .filter((s): s is typeof s & { linkCode: string } => Boolean(s.linkCode))
     .map((s) => {
-      let topic = s.title ?? "";
-      if (topic) {
-        topic = topic.replace(new RegExp(`\\b${escapeRegex(guest)}\\b`, "gi"), "");
-        topic = topic.replace(/\s*\+\s*/g, " ").replace(/\s+/g, " ").trim();
-      }
+      const lead =
+        (s.activity?.trim() || null) ??
+        formatLabel(s.format) ??
+        (strippedTitle(s.title, guest) || null);
+      const dur = durationLabel(s.durationMinutes);
+      const timing = s.timingLabel?.trim() || null;
+
+      const head = [lead, dur].filter((p): p is string => !!p).join(", ");
+      const label = timing ? (head ? `${head} ${timing}` : timing) : head;
+
       return {
         linkCode: s.linkCode,
         guest,
-        topic: topic || "session",
+        label: label || "session",
       };
     });
 }

@@ -723,4 +723,140 @@ describe("schedulingPrecheck", () => {
       expect(result.kind).toBe("fall-through-to-sonnet");
     });
   });
+
+  describe("multi-match disambiguator labels (rulesJson-driven)", () => {
+    it("uses activity + duration + timingLabel when parameters present", () => {
+      const result = schedulingPrecheck(
+        baseInput({
+          classifiedIntent: "modify_link",
+          userMessage: "shift Jon's bike ride to Friday",
+          activeSessions: [
+            {
+              id: "s1",
+              title: "John + Jon",
+              guestName: "Jon",
+              linkCode: "code01",
+              status: "active",
+              activity: "bike ride",
+              durationMinutes: 45,
+              timingLabel: "next week",
+            },
+            {
+              id: "s2",
+              title: "John + Jon",
+              guestName: "Jon",
+              linkCode: "code02",
+              status: "agreed",
+              format: "video",
+              durationMinutes: 30,
+            },
+          ],
+        }),
+      );
+      expect(result.kind).toBe("multi-match-disambiguate");
+      if (result.kind === "multi-match-disambiguate") {
+        const labels = result.matchedSessions.map((m) => m.label);
+        expect(labels).toContain("bike ride, 45m next week");
+        expect(labels).toContain("video call, 30m");
+      }
+    });
+
+    it("renders 60-min and multi-hour durations as Nh", () => {
+      const result = schedulingPrecheck(
+        baseInput({
+          classifiedIntent: "cancel_link",
+          userMessage: "drop Jon's link",
+          activeSessions: [
+            {
+              id: "s1",
+              title: "John + Jon",
+              guestName: "Jon",
+              linkCode: "code01",
+              status: "active",
+              format: "phone",
+              durationMinutes: 60,
+            },
+            {
+              id: "s2",
+              title: "John + Jon",
+              guestName: "Jon",
+              linkCode: "code02",
+              status: "active",
+              format: "in-person",
+              durationMinutes: 120,
+            },
+          ],
+        }),
+      );
+      expect(result.kind).toBe("multi-match-disambiguate");
+      if (result.kind === "multi-match-disambiguate") {
+        const labels = result.matchedSessions.map((m) => m.label);
+        expect(labels).toContain("phone call, 1h");
+        expect(labels).toContain("in-person, 2h");
+      }
+    });
+
+    it("falls back to stripped title when rulesJson fields are absent", () => {
+      const result = schedulingPrecheck(
+        baseInput({
+          classifiedIntent: "modify_link",
+          userMessage: "change Jon's meeting",
+          activeSessions: [
+            {
+              id: "s1",
+              title: "John + Jon (1:1)",
+              guestName: "Jon",
+              linkCode: "code01",
+              status: "active",
+            },
+            {
+              id: "s2",
+              title: "John + Jon (bike ride)",
+              guestName: "Jon",
+              linkCode: "code02",
+              status: "agreed",
+            },
+          ],
+        }),
+      );
+      expect(result.kind).toBe("multi-match-disambiguate");
+      if (result.kind === "multi-match-disambiguate") {
+        const labels = result.matchedSessions.map((m) => m.label);
+        // Stripped-title fallback path; "Jon" is removed, "+" collapsed.
+        expect(labels[0]).toContain("(1:1)");
+        expect(labels[1]).toContain("(bike ride)");
+      }
+    });
+
+    it("yields 'session' when neither rulesJson nor a useful title is available", () => {
+      const result = schedulingPrecheck(
+        baseInput({
+          classifiedIntent: "modify_link",
+          userMessage: "change Jon's meeting",
+          activeSessions: [
+            {
+              id: "s1",
+              title: "Jon",
+              guestName: "Jon",
+              linkCode: "code01",
+              status: "active",
+            },
+            {
+              id: "s2",
+              title: null,
+              guestName: "Jon",
+              linkCode: "code02",
+              status: "agreed",
+            },
+          ],
+        }),
+      );
+      expect(result.kind).toBe("multi-match-disambiguate");
+      if (result.kind === "multi-match-disambiguate") {
+        for (const m of result.matchedSessions) {
+          expect(m.label).toBe("session");
+        }
+      }
+    });
+  });
 });
