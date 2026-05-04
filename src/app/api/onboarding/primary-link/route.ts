@@ -164,8 +164,13 @@ function shortFormat(fmt: FormatValue): string {
   return fmt === "video" ? "VC" : fmt === "phone" ? "phone call" : "in-person";
 }
 
+/** Google-seeded prefs.timezone wins; browser tz is the fallback. */
+function proposedTz(ctx: TuningCtx): string | null {
+  return (ctx.prefs.timezone as string | undefined) ?? ctx.browserTz;
+}
+
 async function startResponse(ctx: TuningCtx): Promise<NextResponse> {
-  const prompt = timezonePrompt(ctx.browserTz);
+  const prompt = timezonePrompt(proposedTz(ctx));
   await persistStepTurns(ctx.userId, null, prompt.messages, "timezone", prompt.freetextHint);
   return NextResponse.json({
     step: prompt.step,
@@ -209,7 +214,7 @@ async function emitNextPrompt(
     prompt = guestFlexPrompt(`${dur}m`, shortFormat(fmt));
   } else {
     // Shouldn't reach here under STEP_ORDER, but be defensive.
-    prompt = timezonePrompt(ctx.browserTz);
+    prompt = timezonePrompt(proposedTz(ctx));
   }
 
   await persistStepTurns(ctx.userId, userLabel, prompt.messages, prompt.step, prompt.freetextHint);
