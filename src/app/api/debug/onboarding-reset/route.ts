@@ -52,24 +52,24 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "User not found" }, { status: 404 });
       }
 
-      // Keep timezone from preferences, clear everything else
+      // Keep timezone + Google-seeded fields; clear explicit tuning choices
+      // so the first-run welcome posture bubble reflects clean defaults.
       const prefs = (user.preferences as Record<string, unknown>) || {};
       const explicit = (prefs.explicit as Record<string, unknown>) || {};
       const timezone = safeTimezone(explicit.timezone as string);
 
-      // Clear calibration + onboarding state
-      logCalibrationWrite({ userId: user.id, value: null, source: "debug-reset" });
+      // Keep lastCalibratedAt set — new users are calibrated at signup and
+      // the legacy /api/onboarding/chat flow must NOT re-run. Resetting to
+      // null triggers the old wall-of-text intro. The first-run welcome is
+      // driven by having no channel messages, not by lastCalibratedAt.
+      const freshCalibration = new Date();
+      logCalibrationWrite({ userId: user.id, value: freshCalibration, source: "debug-reset" });
       await prisma.user.update({
         where: { id: user.id },
         data: {
-          lastCalibratedAt: null,
+          lastCalibratedAt: freshCalibration,
           onboardingPhase: null,
-          persistentKnowledge: [
-            "- This host has not been calibrated yet. Run the onboarding calibration exercise to learn their scheduling preferences.",
-            "- Default posture: balanced — offer open slots, flag flexible blocks, ask before moving anything.",
-            "- Default to 30-minute meetings unless context suggests otherwise.",
-            "- Prefer consolidating meetings on fewer days over spreading them out.",
-          ].join("\n"),
+          persistentKnowledge: null,
           upcomingSchedulePreferences: null,
           preferences: { explicit: { timezone } },
         },
