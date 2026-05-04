@@ -2964,7 +2964,7 @@ async function handleUpdateAvailabilityRule(
     | "add"
     | "update"
     | "remove"
-    | "rename_general"
+    | "rename_primary"
     | undefined;
   const id = typeof params.id === "string" ? params.id : undefined;
   const ruleInput = params.rule as Partial<AvailabilityPreference> | undefined;
@@ -2973,7 +2973,7 @@ async function handleUpdateAvailabilityRule(
     operation !== "add" &&
     operation !== "update" &&
     operation !== "remove" &&
-    operation !== "rename_general"
+    operation !== "rename_primary"
   ) {
     return { success: false, message: `Invalid operation: ${String(operation)}` };
   }
@@ -3001,13 +3001,13 @@ async function handleUpdateAvailabilityRule(
   let addedRuleId: string | undefined;
   let bookableName: string | undefined;
 
-  if (operation === "rename_general") {
+  if (operation === "rename_primary") {
     const newName =
       typeof (params as Record<string, unknown>).name === "string"
         ? ((params as Record<string, unknown>).name as string).trim()
         : "";
     if (!newName) {
-      return { success: false, message: `rename_general requires a "name" param` };
+      return { success: false, message: `rename_primary requires a "name" param` };
     }
     // Uniqueness: new name must not collide with any office-hours rule name.
     const taken = collectNormalizedLinkNames(existing, undefined, { includeGeneral: false });

@@ -42,7 +42,7 @@ import { loadPlaybook, voicePlaybook } from "./runtime-prompts/index";
  *     params: { operation: "add", rule: { action: "bookable", ... } } }
  *
  * We intercept ONLY the `add` case for `bookable` — `update` /
- * `remove` / `rename_general` and non-Bookable rule actions
+ * `remove` / `rename_primary` and non-Bookable rule actions
  * (`block` / `allow` / `buffer` / `prefer` / `limit` / `location` /
  * `no_in_person`) still flow through `actions.ts` unchanged. The
  * `action.params.rule.action === "bookable"` discriminator is
@@ -367,7 +367,7 @@ export async function runDispatchHandler(args: DispatchArgs): Promise<string> {
   await userMsgPersist;
 
   // Append any linkUrl returned from successful actions (e.g. office-hours
-  // rule creation / rename_general) so the host sees the shareable URL in
+  // rule creation / rename_primary) so the host sees the shareable URL in
   // the confirmation. Per reusable-links proposal §Gap 2.
   const linkUrls = actionResults
     .filter((r) => r.success && typeof r.data?.linkUrl === "string")

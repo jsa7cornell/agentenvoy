@@ -139,11 +139,11 @@ describe("isBookableAction", () => {
     ).toBe(false);
   });
 
-  it("does NOT intercept rename_general", () => {
+  it("does NOT intercept rename_primary", () => {
     expect(
       isBookableAction({
         action: "update_availability_rule",
-        params: { operation: "rename_general", name: "Main" },
+        params: { operation: "rename_primary", name: "Main" },
       }),
     ).toBe(false);
   });
