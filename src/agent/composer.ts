@@ -97,6 +97,23 @@ export interface ComposeOptions {
   negotiatedActivity?: string | null;
   negotiatedLocation?: string | null;
   negotiatedFormat?: string | null;
+  /**
+   * F2 of proposal 2026-05-04_update-time-action-state-drift. When non-null,
+   * a Google Calendar event already exists for this session — even if
+   * `status !== "agreed"` (e.g. host has fired update_time, flipping status
+   * to "retime_proposed" while preserving calendarEventId per SPEC §2.3.2).
+   * Surfacing this in the prompt prevents the agent from telling the guest
+   * "this session is in scheduling phase" or "I can only manage the session
+   * John sent you through this link" when the link IS the canonical link
+   * for an already-booked meeting (the Calle / bvfaup transcript).
+   */
+  sessionLiveEvent?: {
+    status: string;
+    calendarEventId: string;
+    /** Last agreedTime before the re-time was proposed, if known. Surfaced
+     *  so the agent can reference the existing booking by date. */
+    priorAgreedTime?: string | null;
+  } | null;
   /** Host-offered activity menu. When present, Envoy presents these options
    *  to the guest and accepts any pick without a ladder check. Injected as
    *  a [MENU] block in the session context. */
@@ -400,6 +417,43 @@ function buildSessionContext(options: ComposeOptions): string {
   if (options.guestName) parts.push(`Guest: ${options.guestName}`);
   if (options.guestEmail) parts.push(`Guest email: ${options.guestEmail}`);
   if (options.guestTimezone) parts.push(`[GROUND TRUTH] Guest timezone (from browser): ${options.guestTimezone} — confirm with guest if different from host timezone`);
+
+  // F2 of proposal 2026-05-04_update-time-action-state-drift.
+  // When a Google Calendar event already exists on this session (regardless
+  // of current status), the guest is reaching us via a link embedded in that
+  // calendar invite. They are NOT a fresh-from-scratch booker — even if the
+  // session row's status currently reads "retime_proposed" / "active" /
+  // "proposed" because the host fired update_time. Surface this as ground
+  // truth so the agent does not refuse with "I can only manage the session
+  // John sent you through this link" or claim the session is in scheduling
+  // phase — that link IS the canonical link for the live event.
+  // Regression fixture: feedback report cmorbq7jl0003gw9f8lp1tv7e (2026-05-04
+  // — guest Calle, link bvfaup).
+  if (options.sessionLiveEvent && options.sessionLiveEvent.calendarEventId) {
+    const lev = options.sessionLiveEvent;
+    const priorTimeStr = lev.priorAgreedTime
+      ? new Date(lev.priorAgreedTime).toLocaleString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          timeZoneName: "short",
+          timeZone: tz,
+        })
+      : null;
+    parts.push(
+      `[GROUND TRUTH — SPEC §2.3.2] A Google Calendar event already exists for this session (calendarEventId=${lev.calendarEventId}). The link the guest used IS the canonical link for that meeting — it was embedded in the calendar invite they received. Even though session.status="${lev.status}" right now, this is NOT a fresh-from-scratch negotiation.`,
+    );
+    if (priorTimeStr) {
+      parts.push(
+        `[GROUND TRUTH] The previously agreed time was ${priorTimeStr}. The host has proposed a re-time — the existing event is still on both calendars and will be patched (not duplicated) when a new time is agreed.`,
+      );
+    }
+    parts.push(
+      `[GROUND TRUTH] If the guest expresses reschedule intent ("I need to reschedule", "the meeting today"), treat it as a re-time on THIS session. Do NOT respond with "I can only manage the session John sent you through this link" or "this session looks like it's still in the scheduling phase" — those refusals are wrong here. The reschedule path patches the existing calendar event via rescheduleSession(); do not attempt to confirm a new event from scratch (the confirm pipeline will refuse with reason="session_already_has_event" anyway).`,
+    );
+  }
 
   // Dual-tz mode — guest-tz-ux-three-primitives decision #8 (2026-04-21).
   // When the viewer has picked a tz different from host, Envoy dual-renders

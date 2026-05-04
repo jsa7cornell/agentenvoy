@@ -27,6 +27,11 @@ const REASON_TO_STATUS: Record<Extract<ConfirmResult, { ok: false }>["reason"], 
   // set (host edited the link, calendar changed, sibling booking consumed
   // it). Client maps this to a one-line narration + transition to negotiate.
   slot_no_longer_offered: 409,
+  // F3 choke-point (proposal 2026-05-04_update-time-action-state-drift §4):
+  // session has a live calendarEventId from a prior confirmation — caller
+  // must route through reschedule, not confirm. 409 conflict is the right
+  // shape (state precondition violated, not malformed input).
+  session_already_has_event: 409,
 };
 
 export async function POST(req: NextRequest) {

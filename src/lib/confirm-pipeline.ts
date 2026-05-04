@@ -120,9 +120,14 @@ export type ConfirmResult =
         | "host_email_missing"
         | "in_person_disallowed"
         | "slot_mismatch"
-        | "slot_no_longer_offered";
+        | "slot_no_longer_offered"
+        | "session_already_has_event";
       message: string;
       attempt: ConfirmAttemptRecord;
+      /** F3 choke-point: when reason="session_already_has_event", the
+       *  caller should route through rescheduleSession() instead. The
+       *  existing event id is surfaced so the caller can pass it through. */
+      existingCalendarEventId?: string | null;
     };
 
 // ---------------------------------------------------------------------------
@@ -220,6 +225,33 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       reason: "session_not_found",
       message: "Session not found",
       attempt: buildAttempt(),
+    };
+  }
+
+  // F3 choke-point (proposal 2026-05-04_update-time-action-state-drift §4):
+  //
+  //  If a Google Calendar event already exists for this session AND status
+  //  is not "agreed", the caller is trying to confirm against a session that
+  //  was previously confirmed and then re-timed (e.g. via update_time which
+  //  writes status="retime_proposed" but preserves calendarEventId per
+  //  SPEC §2.3.2). Going through confirmBooking() here would events.insert
+  //  a duplicate event and overwrite the old calendarEventId — leaving the
+  //  prior event orphaned on both calendars. Re-times must route through
+  //  rescheduleSession() which does events.patch on the existing event.
+  //
+  //  The status === "agreed" case is the idempotent-retry path and is
+  //  handled below by the CAS at line ~607: same slot → already_agreed,
+  //  different slot → slot_mismatch. We do not refuse it here.
+  if (session.calendarEventId && session.status !== "agreed") {
+    attemptOutcome = "validation_failed";
+    attemptError = "session_already_has_event";
+    return {
+      ok: false,
+      reason: "session_already_has_event",
+      message:
+        "This session already has a calendar event from a prior confirmation; route through rescheduleSession() to re-time the existing event instead of creating a duplicate.",
+      attempt: buildAttempt(),
+      existingCalendarEventId: session.calendarEventId,
     };
   }
 

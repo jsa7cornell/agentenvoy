@@ -65,6 +65,13 @@ export interface AgentContext {
   negotiatedFormat?: string | null;
   /** Host-offered activity menu (activityOptions from link.parameters). */
   activityOptions?: string[] | null;
+  /** F2 of proposal 2026-05-04_update-time-action-state-drift. See
+   *  ComposeOptions.sessionLiveEvent in composer.ts. */
+  sessionLiveEvent?: {
+    status: string;
+    calendarEventId: string;
+    priorAgreedTime?: string | null;
+  } | null;
   /**
    * PR3 of the 2026-04-27 chat-decisioning-layer-redesign. When `true`,
    * the speaker for this turn is the deal-room HOST (not the guest), and
@@ -107,6 +114,7 @@ function buildComposeOptions(context: AgentContext) {
     negotiatedFormat: context.negotiatedFormat,
     activityOptions: context.activityOptions,
     isHost: context.isHost,
+    sessionLiveEvent: context.sessionLiveEvent,
   };
 }
 

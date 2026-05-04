@@ -475,7 +475,7 @@ async function handleArchiveBulk(
   };
 
   if (filter === "unconfirmed") {
-    where.status = { in: ["active", "proposed", "escalated"] };
+    where.status = { in: ["active", "proposed", "retime_proposed", "escalated"] };
   } else if (filter === "expired") {
     where.status = "expired";
   } else if (filter === "cancelled") {
@@ -718,17 +718,25 @@ async function handleUpdateTime(
     };
   }
 
-  // Invariant (2026-04-29): clear agreed-state fields whenever status
-  // transitions away from "agreed". Without this, a host's update_time on a
-  // previously-confirmed session leaves stale agreedTime/agreedFormat, and
-  // the deal-room reads them as "pending confirm" against the OLD slot —
-  // disabling the picker. Mirrors the same invariant enforced on
-  // [STATUS_UPDATE] writes in api/negotiate/message/route.ts.
+  // Invariant pair (SPEC §2.3.1 + §2.3.2):
+  //  - §2.3.1: clear agreedTime/agreedFormat whenever status leaves "agreed".
+  //    Without this the deal-room reads stale agreed-state as "pending confirm"
+  //    against the OLD slot, disabling the picker.
+  //  - §2.3.2: preserve calendarEventId — when a session was previously
+  //    confirmed, the live Google Calendar event MUST stay linked to the row
+  //    so readers can recognize "live event exists, re-time in flight" rather
+  //    than mistaking it for a never-confirmed session. Pre-fix bug: F15 /
+  //    feedback report cmorbq7jl0003gw9f8lp1tv7e (2026-05-04) — see proposal
+  //    2026-05-04_update-time-action-state-drift.
+  // Status "retime_proposed" is distinct from "proposed" so the invariant pair
+  // can be enforced cleanly: "retime_proposed" implies calendarEventId != null,
+  // "proposed" makes no such guarantee.
   const updateData: Record<string, unknown> = {
-    status: "proposed",
+    status: "retime_proposed",
     statusLabel: "Time change proposed by host",
     agreedTime: null,
     agreedFormat: null,
+    // calendarEventId deliberately NOT cleared — see invariant note above.
   };
 
   if (duration !== undefined) updateData.duration = duration;

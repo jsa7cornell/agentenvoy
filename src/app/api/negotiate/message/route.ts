@@ -252,6 +252,24 @@ export async function POST(req: NextRequest) {
     activityOptions: parseLinkParameters(session.link.parameters).activityOptions ?? null,
     // PR3: select the deal-room host vs. guest composer in composer.ts.
     isHost,
+    // F2 of proposal 2026-05-04_update-time-action-state-drift. When the
+    // session has a live calendar event (calendarEventId set), surface that
+    // to the composer so it doesn't treat a re-time-in-flight session as a
+    // fresh-from-scratch negotiation. priorAgreedTime is the value cleared
+    // by the most recent update_time; today the row doesn't preserve it
+    // explicitly, so we pass session.agreedTime which is non-null only on
+    // status="agreed" — for "retime_proposed" sessions priorAgreedTime is
+    // null today (a future schema change could persist the prior time, but
+    // F15 ships without it; the calendarEventId alone is sufficient signal).
+    sessionLiveEvent: session.calendarEventId
+      ? {
+          status: session.status,
+          calendarEventId: session.calendarEventId,
+          priorAgreedTime: session.agreedTime
+            ? session.agreedTime.toISOString()
+            : null,
+        }
+      : null,
   };
 
   console.log(`[negotiate/message] start | session=${sessionId} | role=${messageRole} | slots=${scoredSlots.length} | history=${history.length}`);

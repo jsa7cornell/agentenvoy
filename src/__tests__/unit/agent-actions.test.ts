@@ -412,7 +412,7 @@ describe("executeActions", () => {
           where: expect.objectContaining({
             hostId: HOST_USER_ID,
             archived: false,
-            status: { in: ["active", "proposed", "escalated"] },
+            status: { in: ["active", "proposed", "retime_proposed", "escalated"] },
           }),
           data: { archived: true },
         })
@@ -791,12 +791,97 @@ describe("executeActions", () => {
       expect(mockPrisma.negotiationSession.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: "proposed",
+            // F1 of proposal 2026-05-04_update-time-action-state-drift —
+            // status is "retime_proposed" (not "proposed"), distinct so the
+            // SPEC §2.3.2 invariant "calendarEventId preserved" can be
+            // enforced cleanly without conflating with from-scratch proposed.
+            status: "retime_proposed",
             statusLabel: "Time change proposed by host",
+            agreedTime: null,
+            agreedFormat: null,
           }),
         })
       );
       expect(mockPrisma.message.create).toHaveBeenCalled();
+    });
+
+    // F15 / proposal 2026-05-04_update-time-action-state-drift §4a(i):
+    // post-write shape assertion — handleUpdateTime on a previously-confirmed
+    // session must clear agreedTime/agreedFormat (SPEC §2.3.1) and preserve
+    // calendarEventId (SPEC §2.3.2) so the deal-room agent can recognize
+    // "live event exists, re-time in flight" rather than mistaking it for a
+    // fresh-from-scratch booking. Regression for feedback report
+    // cmorbq7jl0003gw9f8lp1tv7e (guest Calle, link bvfaup).
+    it("preserves calendarEventId and clears agreedTime/agreedFormat when re-timing a session with a live event (SPEC §2.3.1 + §2.3.2)", async () => {
+      // F15 bug shape: session was previously confirmed (so calendarEventId
+      // is set) but status has been flipped to non-agreed by some prior
+      // writer (e.g. the message-route [STATUS_UPDATE] handler at
+      // api/negotiate/message/route.ts:422). When update_time fires now, we
+      // hit the route-4 path at actions.ts:~734 — the path F1 fixes. Route 1
+      // (gcal_update_proposal) intercepts when status==="agreed", so we
+      // simulate the post-flip shape here.
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeSession({
+          status: "proposed",
+          agreedTime: null,
+          agreedFormat: null,
+          calendarEventId: "gcal_event_abc123",
+        })
+      );
+      mockPrisma.user.findUnique.mockResolvedValue({ preferences: {} });
+
+      await executeActions(
+        [{
+          action: "update_time",
+          params: {
+            sessionId: "session-1",
+            dateTime: "2026-05-08T14:00:00-07:00",
+            timezone: "America/Los_Angeles",
+          },
+        }],
+        HOST_USER_ID
+      );
+
+      const updateCall = mockPrisma.negotiationSession.update.mock.calls.find(
+        (c) => c[0].where?.id === "session-1"
+      );
+      expect(updateCall).toBeDefined();
+      const data = updateCall![0].data as Record<string, unknown>;
+      expect(data.status).toBe("retime_proposed");
+      expect(data.agreedTime).toBeNull();
+      expect(data.agreedFormat).toBeNull();
+      // SPEC §2.3.2 — calendarEventId MUST NOT be touched here. Asserting
+      // the key is absent from the update payload (Prisma leaves untouched
+      // columns alone when the key isn't present).
+      expect(Object.prototype.hasOwnProperty.call(data, "calendarEventId")).toBe(false);
+    });
+
+    // F15 §4a(i) — duration-drift coverage. The Calle bundle showed a
+    // 60→30 min drift; this asserts duration is unchanged when
+    // params.duration is not supplied.
+    it("does not mutate duration when params.duration is absent", async () => {
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeSession({ status: "proposed", duration: 60, calendarEventId: "gcal_event_abc123" })
+      );
+      mockPrisma.user.findUnique.mockResolvedValue({ preferences: {} });
+
+      await executeActions(
+        [{
+          action: "update_time",
+          params: {
+            sessionId: "session-1",
+            dateTime: "2026-05-08T14:00:00-07:00",
+            timezone: "America/Los_Angeles",
+          },
+        }],
+        HOST_USER_ID
+      );
+
+      const updateCall = mockPrisma.negotiationSession.update.mock.calls.find(
+        (c) => c[0].where?.id === "session-1"
+      );
+      const data = updateCall![0].data as Record<string, unknown>;
+      expect(Object.prototype.hasOwnProperty.call(data, "duration")).toBe(false);
     });
 
     it("rejects when neither dateTime nor duration provided", async () => {

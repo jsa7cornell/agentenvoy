@@ -532,6 +532,10 @@ export const proposeLockOutput = z.discriminatedUnion("ok", [
       "slot_taken_during_handshake",
       "already_confirmed_elsewhere",
       "consent_not_accepted",
+      // F3 choke-point (proposal 2026-05-04_update-time-action-state-drift §4):
+      // session has a live calendarEventId from a prior confirmation; caller
+      // must route through reschedule_meeting instead of propose_lock.
+      "session_already_has_event",
     ])
   ).extend({
     counterProposal: z.array(proposeLockCounterProposalSchema).optional(),

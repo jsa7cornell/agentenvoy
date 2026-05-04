@@ -477,7 +477,7 @@ model NegotiationSession {
   hostId               String
   guestId              String?
   type                 String    @default("calendar") // calendar | rfp
-  status               String    @default("active") // active | agreed | cancelled | escalated | expired
+  status               String    @default("active") // active | proposed | retime_proposed | agreed | cancelled | escalated | expired. retime_proposed is set by update_time after a previously-confirmed session: agreedTime/agreedFormat are cleared (SPEC §2.3.1), calendarEventId is preserved (SPEC §2.3.2). proposed/retime_proposed/escalated all collapse to wire "active" via mapSessionStatus().
   archived             Boolean   @default(false)
   /// Timestamp of cancellation. Null until status flips to "cancelled".
   /// Set by cancelSession() in src/lib/cancel-pipeline.ts.

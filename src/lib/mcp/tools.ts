@@ -461,9 +461,17 @@ export async function handleGetAvailability(
 // Handler: get_session_status
 // ---------------------------------------------------------------------------
 
-/** Map the DB session status string onto the wire enum. "escalated" is an
- *  internal detour; externally it's still an active negotiation. Unknown
- *  values fall back to "active" rather than 500'ing the call. */
+/** Map the DB session status string onto the wire enum. Several DB statuses
+ *  are "internal detours" that collapse to wire "active":
+ *  - "escalated" — host-needs-attention, externally still negotiating.
+ *  - "proposed" — host has proposed a slot, externally still negotiating.
+ *  - "retime_proposed" — host re-timed a previously-confirmed session.
+ *    Externally still negotiating; the live event signal is on the wire as
+ *    `calendarEventId != null` per SPEC §2.3.2, not as a status enum value.
+ *    Mapping to "rescheduled" would be wrong: that wire literal is a
+ *    completed-operation success flag from reschedule_meeting, not a
+ *    lifecycle state — see proposal 2026-05-04_update-time-action-state-drift
+ *    §4b. Unknown values fall back to "active" rather than 500'ing the call. */
 export function mapSessionStatus(
   s: string
 ): "active" | "agreed" | "cancelled" | "rescheduled" | "expired" {
@@ -474,6 +482,8 @@ export function mapSessionStatus(
     case "expired":
       return s;
     case "escalated":
+    case "proposed":
+    case "retime_proposed":
     case "active":
     default:
       return "active";
