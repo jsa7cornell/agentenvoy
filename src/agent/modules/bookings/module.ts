@@ -23,6 +23,7 @@ import { bookingPhaseDiscriminator } from "./pre-emit-checks/booking-phase-discr
 import { resolveContactTool } from "@/agent/modules/_shared/tools/resolve-contact";
 import { intersectAvailabilityTool } from "@/agent/modules/_shared/tools/intersect-availability";
 import { bookTimeWithCommit } from "@/agent/modules/_shared/tools/book-time-with-commit";
+import { forwardProjectionConsistencyGuard } from "@/agent/modules/_shared/post-stream-guards";
 
 export const bookingsModule: IntentModule<BookingsContext> = {
   intent: "book_with_person",
@@ -48,7 +49,10 @@ export const bookingsModule: IntentModule<BookingsContext> = {
 
   preEmitChecks: [bookingPhaseDiscriminator],
 
-  postStreamGuards: [],          // defaults Layer 2a/2b/F6 auto-injected
+  // forward-projection-consistency: cluster-allowlisted opt-in (Mode D, 2026-05-05).
+  // Catches "Want me to widen the window?" bleed on bookings narration.
+  // Defaults Layer 2a/2b/F6/narration-emission auto-injected as before.
+  postStreamGuards: [forwardProjectionConsistencyGuard],
 
   allowedActions: [
     // The bookings flow mints a link + confirms it — no other action types.

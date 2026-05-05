@@ -306,6 +306,98 @@ export function needsNarrationEmissionRetry(
 }
 
 // ---------------------------------------------------------------------------
+// Forward-projection consistency — unsolicited next-step suggestion guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Retry hint when the composer narrates a completed action and then proactively
+ * proposes widening, expanding, or adding scope the host did not request.
+ * Production case (FeedbackReport `cmot63s7x0001k2js8f96655r`, 2026-05-05):
+ * host changed format + location ("f2f coffee at Konditori"); composer
+ * replied with "Want me to open up earlier mornings (7-10 AM) so Larry has
+ * more options?" — unsolicited.
+ *
+ * Three prose-discipline tunes (commits 7f0b6ca / 3a12911 / 4248a08) reduced
+ * forward-projection bleed but did not eliminate it. This guard is the
+ * structural backstop after prose proved insufficient.
+ *
+ * Cluster scope (allowlist — wired via per-module postStreamGuards, NOT in
+ * the default set): event_action, manage_setup, book_with_person.
+ * Inquire / chat / recalibrate are intentionally excluded — they have
+ * legitimate next-step / clarification framings.
+ */
+export const FORWARD_PROJECTION_RETRY_PROMPT =
+  "Your reply ended with an unsolicited next-step proposal (e.g. \"Want me to open up earlier mornings?\", \"Want me to also block Saturday?\"). The host did not ask for that widening. In action-emitting clusters, narrate what you did and stop — do NOT propose expanding scope unless the host signaled they want options. Re-emit the same action(s) but trim the projection tail. If the host's request is genuinely ambiguous, ask a single targeted clarifying question instead of offering to widen.";
+
+/**
+ * Patterns matching unsolicited next-step suggestions where the composer
+ * proactively offers to widen / expand / add scope.
+ *
+ * Discipline: anchor on (a) "Want me to" / "Should I" / "Would you like me to"
+ * / "Want to" PLUS (b) a widening verb (open up, widen, expand, consider,
+ * also). Bare "Want me to send..." or "Should I go ahead..." must NOT match —
+ * those are legitimate follow-ups on a single-action confirmation arc, not
+ * scope-widening.
+ *
+ * Production-observed shapes (Larry case):
+ *   - "Want me to open up earlier mornings (7-10 AM)?"
+ * Triage-shape (Reports 6/10 manage_setup):
+ *   - "Want me to also block Saturday?"
+ *   - "Should I also add Sunday to the block?"
+ */
+const FORWARD_PROJECTION_PATTERNS: Array<{ rx: RegExp; name: string }> = [
+  // "Want me to (open up|widen|expand|add|also) ..."
+  // "also" catches the manage_setup shape "Want me to also block Saturday?".
+  {
+    rx: /\bwant\s+me\s+to\s+(?:open\s+up|widen|expand|add|also)\b/i,
+    name: "want-me-to-widen",
+  },
+  // "Want me to consider ..."
+  {
+    rx: /\bwant\s+me\s+to\s+consider\b/i,
+    name: "want-me-to-consider",
+  },
+  // "Should I (also|consider) ..."
+  {
+    rx: /\bshould\s+I\s+(?:also|consider)\b/i,
+    name: "should-i-also-or-consider",
+  },
+  // "Would you like me to (open up|widen|consider|expand) ..."
+  {
+    rx: /\bwould\s+you\s+like\s+me\s+to\s+(?:open\s+up|widen|consider|expand)\b/i,
+    name: "would-you-like-me-to-widen",
+  },
+  // "Want to (also|widen|expand) ..."
+  {
+    rx: /\bwant\s+to\s+(?:also|widen|expand)\b/i,
+    name: "want-to-also-or-widen",
+  },
+];
+
+/**
+ * Returns a retry hint when the composer's prose contains an unsolicited
+ * next-step / scope-widening proposal. Stateless — text only.
+ *
+ * Cluster scope is enforced at the module wiring layer (this guard ships
+ * only in event_action / manage_setup / book_with_person modules'
+ * postStreamGuards arrays, not in DEFAULT_POST_STREAM_GUARDS).
+ */
+export function needsForwardProjectionRetry(
+  text: string,
+): { hint: string; flaggedReason: string } | null {
+  if (!text) return null;
+  for (const { rx, name } of FORWARD_PROJECTION_PATTERNS) {
+    const match = text.match(rx);
+    if (!match) continue;
+    return {
+      flaggedReason: `forward-projection:${name}`,
+      hint: FORWARD_PROJECTION_RETRY_PROMPT,
+    };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // PostStreamGuard wrappers
 // ---------------------------------------------------------------------------
 
@@ -371,6 +463,31 @@ export const narrationEmissionConsistencyGuard: PostStreamGuard = {
   name: "narration-emission-consistency",
   check: ({ text, parsedActions }) => {
     const result = needsNarrationEmissionRetry(text, parsedActions);
+    if (!result) return null;
+    return { flaggedReason: result.flaggedReason, hint: result.hint };
+  },
+};
+
+/**
+ * Forward-projection consistency guard. Catches unsolicited next-step
+ * suggestions ("Want me to open up earlier mornings?", "Should I also
+ * block Saturday?") in action-emitting clusters that should narrate-and-stop.
+ *
+ * Added 2026-05-05 per FeedbackReport `cmot63s7x0001k2js8f96655r`. Structural
+ * backstop after prose tunes (commits 7f0b6ca / 3a12911 / 4248a08) proved
+ * insufficient.
+ *
+ * Cluster scope discipline: this guard is NOT in DEFAULT_POST_STREAM_GUARDS.
+ * It must be opted-into per cluster via the module's `postStreamGuards`
+ * array. Allowlisted clusters: `event_action`, `manage_setup`,
+ * `book_with_person`. Excluded: `inquire` (clarifications are legit),
+ * `chat` (free-form fallthrough), `recalibrate` (structured next-step
+ * framing per the conversational-onboarding-vision proposal §2.7a).
+ */
+export const forwardProjectionConsistencyGuard: PostStreamGuard = {
+  name: "forward-projection-consistency",
+  check: ({ text }) => {
+    const result = needsForwardProjectionRetry(text);
     if (!result) return null;
     return { flaggedReason: result.flaggedReason, hint: result.hint };
   },

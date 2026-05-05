@@ -30,6 +30,7 @@ import { loadManageSetupContext, type ManageSetupContext } from "./context-loade
 import { fabricatedIdCheck } from "@/agent/modules/rule/pre-emit-checks/fabricated-id";
 import { conflictAwarenessGuard } from "@/agent/modules/rule/pre-emit-checks/conflict-awareness";
 import { checkConflictsForRule } from "@/agent/modules/_shared/tools/check-conflicts-for-rule";
+import { forwardProjectionConsistencyGuard } from "@/agent/modules/_shared/post-stream-guards";
 
 export const manageSetupModule: IntentModule<ManageSetupContext> = {
   intent: "manage_setup",
@@ -49,7 +50,10 @@ export const manageSetupModule: IntentModule<ManageSetupContext> = {
     fabricatedIdCheck,         // F14 absorbed — catches fabricated rule ids
     conflictAwarenessGuard,    // catches conflict-unaware rule proposals
   ],
-  postStreamGuards: [],
+  // forward-projection-consistency: cluster-allowlisted opt-in (Mode D, 2026-05-05).
+  // Catches "Want me to also block Saturday?" projection bleed on rule writes.
+  // Structural backstop after prose tunes proved insufficient.
+  postStreamGuards: [forwardProjectionConsistencyGuard],
   // Union of profile + rule + create_bookable_link allowedActions.
   // Includes both profile writes and rule writes so cross-cutting commands
   // (e.g., buffer affecting both profile defaults and per-link rules) can

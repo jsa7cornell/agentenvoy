@@ -29,6 +29,7 @@
 import type { IntentModule } from "@/agent/modules/types";
 import { loadEventIntentContext } from "@/agent/modules/event-intents/context-loader";
 import type { ScheduleContext } from "@/agent/modules/_shared/schedule-context";
+import { forwardProjectionConsistencyGuard } from "@/agent/modules/_shared/post-stream-guards";
 
 export const eventActionModule: IntentModule<ScheduleContext> = {
   intent: "event_action",
@@ -44,7 +45,11 @@ export const eventActionModule: IntentModule<ScheduleContext> = {
   contextLoader: loadEventIntentContext,
   composerTools: [],
   preEmitChecks: [],
-  postStreamGuards: [],
+  // forward-projection-consistency: cluster-allowlisted opt-in (Mode D, 2026-05-05).
+  // Catches unsolicited "Want me to open up earlier mornings?" projection bleed
+  // (FeedbackReport `cmot63s7x0001k2js8f96655r`). Structural backstop after
+  // prose tunes (7f0b6ca / 3a12911 / 4248a08) proved insufficient.
+  postStreamGuards: [forwardProjectionConsistencyGuard],
   // Union of all four absorbed modules' allowedActions (deduplicated).
   // Includes update_time / update_format / update_location from modify_link
   // so within-thread drift (create→modify) no longer triggers silent-strip
