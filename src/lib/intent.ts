@@ -349,6 +349,7 @@ export const HOST_CHAT_INTENT_VALUES = [
   "query_event",
   "chat",
   "book_with_person",       // PR4 — bookings module (book_with_person)
+  "recalibrate",            // PR-A onboarding — multi-field calibration retune (6th module, distinct from clusters)
 ] as const;
 
 export type GuestChatIntent = (typeof CHAT_INTENT_VALUES)[number];
@@ -395,6 +396,9 @@ export const INTENT_TO_CLUSTER: Record<string, string> = {
   inquire:          "inquire",
   chat:             "chat",
   book_with_person: "book_with_person",
+  // recalibrate — 6th module on dashboard-host; 1:1 identity mapping
+  // (new module, not a cluster collapse; per §9.8 of the onboarding proposal)
+  recalibrate: "recalibrate",
   // manage_setup also covers the legacy "profile" and "rule" intent names
   // so that any legacy code paths still dispatching those names get routed
   // to the manage_setup cluster (PR-C activates the module registration).

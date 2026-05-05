@@ -621,6 +621,31 @@ export async function POST(req: NextRequest) {
             }
           }
 
+          // recalibrate — PR-A onboarding module. Multi-field calibration retune.
+          // Dispatched BEFORE the precheck block (no event-entity to resolve).
+          // Pattern matches book_with_person's branch.
+          if (intent === "recalibrate") {
+            await dispatchModuleAndStream({
+              surface: "dashboard-host",
+              intent: "recalibrate",
+              channelId: safeChannel.id,
+              userId: safeUser.id,
+              userName: user.name ?? null,
+              userEmail: user.email ?? "",
+              message,
+              userMsgPersist,
+              controller,
+              encoder,
+              emitStatus: (stage) => emitStatus(stage),
+              matchResult: {
+                kind: "deterministic",
+                resolved: {},
+              },
+            });
+            controller.close();
+            return;
+          }
+
           // book_with_person — PR4 bookings module. Bilateral identity-resolve
           // + availability intersection + commit flow. Dispatched BEFORE the
           // precheck block (precheck only fires for event-shaping intents).
