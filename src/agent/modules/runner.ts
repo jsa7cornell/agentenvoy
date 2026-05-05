@@ -10,6 +10,32 @@
  * runner falls back to `defaultComposerInvoker`). This DI seam replaces the
  * spike's `__SPIKE_LLM_OVERRIDE` field — tests + bench fixtures pass mock
  * invokers; production code uses the default.
+ *
+ * ---------------------------------------------------------------------------
+ * PR-A: Cluster-collapse foundation (proposal §4.1.1)
+ *
+ * Two infrastructure additions in this file:
+ *
+ * 1. DUAL-WRITE INFRA — `moduleGuard.emittedActions` is populated from the
+ *    filtered `parsedActions` list (post-allowedActions) after step 7. This
+ *    field provides per-action corpus segmentation independent of bucket-level
+ *    granularity, and is the primary mechanism that preserves per-intent insight
+ *    across the bucket-rename window (PR-B onward). `legacyBucket` is left
+ *    undefined in PR-A (no clusters exist yet; population begins with PR-B).
+ *
+ * 2. SILENT-STRIP NARRATION — when the allowedActions filter strips actions
+ *    (step 7), the runner injects a user-visible fallback instead of silently
+ *    dropping. Two sub-cases:
+ *
+ *    (a) ALL actions stripped: return "Hmm, I got turned around — could you
+ *        say what you'd like differently?" so the user knows nothing happened.
+ *    (b) SOME actions stripped, rest survive: append a brief note to
+ *        displayText: "(Note: I skipped a {action} step that didn't fit this
+ *        turn.)" — surface-level only, no architecture vocab.
+ *
+ *    Both cases add a `silent-strip-fallback` guard entry so corpus telemetry
+ *    can identify these turns.
+ * ---------------------------------------------------------------------------
  */
 import { generateText, tool, type Tool } from "ai";
 import { readFileSync } from "fs";
@@ -361,8 +387,15 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
   }
 
   // 7. Validate parsedActions ⊆ allowedActions. Strip out-of-bounds emissions.
+  //
+  //    PR-A: Silent-strip narration — when actions are stripped, inject a
+  //    user-visible fallback rather than silently discarding. Two sub-cases:
+  //    (a) all stripped → replace displayText with a "couldn't do that" message.
+  //    (b) some stripped, some survive → append a brief note to displayText.
+  //    Both cases record a `silent-strip-fallback` guard entry for telemetry.
   const allowed = new Set(intentModule.allowedActions);
   const stripped = parsedActions.filter((a) => !allowed.has(a.action));
+  let silentStripNarration: { kind: "full" | "partial"; actionName: string } | null = null;
   if (stripped.length > 0) {
     for (const a of stripped) {
       moduleGuard.guardsFired.push({
@@ -372,7 +405,32 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
       });
     }
     parsedActions = parsedActions.filter((a) => allowed.has(a.action));
+
+    // Determine narration sub-case.
+    if (parsedActions.length === 0) {
+      // (a) All actions stripped — user would see prose claiming success but
+      //     nothing happened. Surface a gentle re-prompt instead.
+      silentStripNarration = { kind: "full", actionName: stripped[0].action };
+      moduleGuard.guardsFired.push({
+        name: "silent-strip-fallback",
+        phase: "postStream",
+        flaggedReason: `all ${stripped.length} action(s) stripped; full-fallback narration injected`,
+      });
+    } else {
+      // (b) Some actions stripped, rest survive — append a brief note so the
+      //     user knows part of the request didn't go through.
+      silentStripNarration = { kind: "partial", actionName: stripped[0].action };
+      moduleGuard.guardsFired.push({
+        name: "silent-strip-fallback",
+        phase: "postStream",
+        flaggedReason: `${stripped.length} action(s) stripped alongside ${parsedActions.length} allowed; partial-strip note appended`,
+      });
+    }
   }
+
+  // PR-A: Populate emittedActions with post-filter action names (dual-write
+  // infra for corpus-continuity across the cluster-collapse rename window).
+  moduleGuard.emittedActions = parsedActions.map((a) => a.action);
 
   // 8. Action dispatch via canonical actions.ts. PR3b-iii adds an optional
   //    timeout race; on timeout the late completion is logged in the
@@ -423,6 +481,24 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
       prose: blockingExhaustion.fallbackProse,
     };
     parsedActions = [];
+  }
+
+  // PR-A: Apply silent-strip narration (step 7 above). Only applies when
+  // blockingExhaustion didn't already replace the text (that case is higher
+  // priority — user already has a clear fallback message).
+  if (silentStripNarration && !blockingExhaustion) {
+    if (silentStripNarration.kind === "full") {
+      // All actions stripped — replace prose entirely with a re-prompt.
+      displayText =
+        "Hmm, I got turned around there — could you say what you'd like differently?";
+    } else {
+      // Some actions stripped — append a brief note. Keep the LLM's prose
+      // (it may still be meaningful for the surviving actions).
+      const trimmed = displayText.trim();
+      displayText = trimmed
+        ? `${trimmed}\n\n(Note: I skipped a step that didn't fit this turn — try rephrasing if something looks missing.)`
+        : "(Note: I skipped a step that didn't fit this turn — try rephrasing if something looks missing.)";
+    }
   }
 
   return {

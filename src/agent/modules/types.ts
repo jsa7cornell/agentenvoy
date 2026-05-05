@@ -312,6 +312,38 @@ export interface ModuleGuardRecord {
   /** Per N3: blocking exhaustion → action emission was skipped, fallbackProse shipped. */
   blockingFallbackShipped?: { checkName: string; prose: string };
   toolCalls: Array<{ name: string; durationMs: number; success: boolean }>;
+
+  // ---------------------------------------------------------------------------
+  // PR-A: Corpus-continuity dual-write fields (proposal §4.1.1)
+  //
+  // These two fields support the cluster-collapse window (PR-B through PR-E).
+  // During the collapse, the runner writes the cluster name to `bucket` and
+  // preserves the pre-collapse intent-level name in `legacyBucket` so corpus
+  // queries remain backward-compatible across the rename window.
+  //
+  // After the dual-write window (14 days post-PR-E), `legacyBucket` writes
+  // stop (PR-F); historical rows remain queryable via the field's stored values.
+  //
+  // For PR-A, `legacyBucket` is left undefined — no clusters exist yet; the
+  // actual population begins with the cluster-collapse PRs (PR-B onward).
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Pre-collapse intent-level bucket name (e.g., `"rule"`, `"edit_preference"`).
+   * Populated during the dual-write window only; undefined before collapse and
+   * after the window expires. Rule 25(l): never rename a bucket without a
+   * dual-write window.
+   */
+  legacyBucket?: string;
+
+  /**
+   * Per-turn action type names emitted after the allowedActions filter runs
+   * (e.g., `["update_availability_rule", "update_meeting_settings"]`).
+   * This is the new mechanism restoring per-action corpus insight even after
+   * bucket-level renames: queries that today key on intent name move to keying
+   * on `emittedActions`, which is strictly finer than per-intent granularity.
+   */
+  emittedActions?: string[];
 }
 
 export type RunnerOutput =

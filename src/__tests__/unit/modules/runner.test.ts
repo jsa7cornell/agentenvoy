@@ -204,6 +204,103 @@ describe("runModule — orchestration", () => {
     expect(violation!.flaggedReason).toContain("create_link");
   });
 
+  // PR-A: Silent-strip narration tests
+  it("silent-strip: all actions stripped → full-fallback narration injected, not blank/false-success", async () => {
+    registerModule(
+      makeBasicModule({
+        allowedActions: ["update_availability_rule"], // not "create_link"
+      }),
+    );
+    // Composer emits only an out-of-scope action + confident prose.
+    const oob = `Sure, I've updated the link!\n[ACTION]{"action":"create_link","params":{"foo":"bar"}}[/ACTION]`;
+    const result = await runModule({
+      surface: "dashboard-host",
+      intent: "test-intent",
+      moduleContext: TEST_CTX,
+      matchResult: { kind: "deterministic", resolved: {} },
+      userMessage: "create a link",
+      conversationHistory: [],
+      composerInvoker: makeMockInvoker([oob]),
+    });
+
+    expect(result.kind).toBe("buffered");
+    if (result.kind !== "buffered") return;
+
+    // Action was stripped — parsedActions should be empty.
+    expect(result.parsedActions).toEqual([]);
+
+    // User should NOT see "Sure, I've updated the link!" — that would be a
+    // false-success narration. They should see the re-prompt fallback instead.
+    expect(result.text).not.toContain("updated the link");
+    expect(result.text).toContain("turned around");
+
+    // Guard entries: allowed-actions-violation + silent-strip-fallback.
+    const violation = result.moduleGuard.guardsFired.find((g) => g.name === "allowed-actions-violation");
+    expect(violation).toBeDefined();
+    const fallbackEntry = result.moduleGuard.guardsFired.find((g) => g.name === "silent-strip-fallback");
+    expect(fallbackEntry).toBeDefined();
+    expect(fallbackEntry!.flaggedReason).toContain("full-fallback");
+  });
+
+  it("silent-strip: some actions stripped, some survive → partial note appended, surviving actions dispatched", async () => {
+    registerModule(
+      makeBasicModule({
+        allowedActions: ["update_availability_rule"], // not "create_link"
+      }),
+    );
+    // Composer emits one allowed + one out-of-scope action.
+    const mixed =
+      `Got it!\n` +
+      `[ACTION]{"action":"update_availability_rule","params":{"operation":"add","rule":{}}}[/ACTION]\n` +
+      `[ACTION]{"action":"create_link","params":{"foo":"bar"}}[/ACTION]`;
+    const result = await runModule({
+      surface: "dashboard-host",
+      intent: "test-intent",
+      moduleContext: TEST_CTX,
+      matchResult: { kind: "deterministic", resolved: {} },
+      userMessage: "add rule and create link",
+      conversationHistory: [],
+      composerInvoker: makeMockInvoker([mixed]),
+    });
+
+    expect(result.kind).toBe("buffered");
+    if (result.kind !== "buffered") return;
+
+    // Allowed action survives.
+    expect(result.parsedActions).toHaveLength(1);
+    expect(result.parsedActions[0].action).toBe("update_availability_rule");
+
+    // Text should contain the partial-strip note.
+    expect(result.text).toContain("skipped a step");
+
+    // Guard entries: allowed-actions-violation + silent-strip-fallback (partial).
+    const fallbackEntry = result.moduleGuard.guardsFired.find((g) => g.name === "silent-strip-fallback");
+    expect(fallbackEntry).toBeDefined();
+    expect(fallbackEntry!.flaggedReason).toContain("partial-strip");
+  });
+
+  it("emittedActions populated with post-filter action type names", async () => {
+    registerModule(
+      makeBasicModule({
+        allowedActions: ["update_availability_rule"],
+      }),
+    );
+    const action = `[ACTION]{"action":"update_availability_rule","params":{"operation":"add","rule":{}}}[/ACTION]`;
+    const result = await runModule({
+      surface: "dashboard-host",
+      intent: "test-intent",
+      moduleContext: TEST_CTX,
+      matchResult: { kind: "deterministic", resolved: {} },
+      userMessage: "add rule",
+      conversationHistory: [],
+      composerInvoker: makeMockInvoker([action]),
+    });
+
+    expect(result.kind).toBe("buffered");
+    if (result.kind !== "buffered") return;
+    expect(result.moduleGuard.emittedActions).toEqual(["update_availability_rule"]);
+  });
+
   it("module-not-registered throws", async () => {
     await expect(
       runModule({
