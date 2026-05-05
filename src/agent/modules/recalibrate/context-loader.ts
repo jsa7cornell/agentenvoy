@@ -13,7 +13,11 @@
  * §3.2 PR-B.
  */
 import { prisma } from "@/lib/prisma";
-import { computeCalibrationDrift, type DriftAnalysis } from "@/lib/onboarding/drift";
+import {
+  computeCalibrationDrift,
+  isFirstTimeCalibration,
+  type DriftAnalysis,
+} from "@/lib/onboarding/drift";
 import { computeProfileGaps, type ProfileGap } from "@/lib/profile-gaps";
 import type {
   ModuleContext,
@@ -37,6 +41,24 @@ export interface RecalibrateContext extends ModuleContextOutput {
     medianDurationLast30Days: number | null;
     overrideCount: number;
   };
+  /**
+   * Whether the host is in the first-time conversational-calibration
+   * window (fresh signup; lastCalibratedAt within ~24h of createdAt;
+   * no manage_setup writes yet). Per proposal
+   * `2026-05-05_conversational-onboarding-vision` §2.4 (N1):
+   * isFirstTime is the only first-time flag — speculative shapes
+   * `seededFields`, `capabilitiesNotYetIntroduced`,
+   * `bookableLinksOwnedCount` were dropped per the Author Response.
+   */
+  isFirstTime: boolean;
+  /**
+   * The current host turn's raw text. Carried on context output so the
+   * `requiredFieldExtractionCheck` preEmitCheck (PR-A) can run lexical
+   * matching against the input that drove the emission. The runner
+   * doesn't thread `userMessage` directly into preEmitCheck args; passing
+   * it on the contextOutput keeps the seam module-local.
+   */
+  currentUserMessage: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,16 +132,34 @@ export async function loadRecalibrateContext(
   // matchResult unused in v1; PR-B+ could use playbookVariant from it.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _matchResult: MatchResult,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _userMessage: string,
+  userMessage: string,
 ): Promise<RecalibrateContext> {
   const userId = moduleContext.user.id;
 
-  // Run drift detection + profile gaps in parallel.
-  const [driftAnalysis, profileGaps] = await Promise.all([
+  // Run drift detection + profile gaps + first-time gate inputs in parallel.
+  const [driftAnalysis, profileGaps, userTimestamps, channelMessages] = await Promise.all([
     computeCalibrationDrift(userId),
     computeProfileGaps(userId),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { createdAt: true, lastCalibratedAt: true },
+    }),
+    moduleContext.channel?.id
+      ? prisma.channelMessage.findMany({
+          where: { channelId: moduleContext.channel.id },
+          select: { metadata: true },
+          orderBy: { createdAt: "asc" },
+        })
+      : Promise.resolve([] as Array<{ metadata: unknown }>),
   ]);
+
+  const isFirstTime = userTimestamps
+    ? isFirstTimeCalibration(
+        userTimestamps,
+        driftAnalysis.daysSinceCalibration,
+        channelMessages,
+      )
+    : false;
 
   // Recent meeting pattern — last 30 days of agreed sessions.
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -177,5 +217,7 @@ export async function loadRecalibrateContext(
     driftAnalysis,
     profileGaps,
     recentMeetingPattern,
+    isFirstTime,
+    currentUserMessage: userMessage,
   };
 }
