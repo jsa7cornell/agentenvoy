@@ -1,5 +1,9 @@
 /**
- * Rule module bench fixtures — six scenarios per the spike-and-bench plan.
+ * Rule / manage_setup module bench fixtures — six scenarios per the spike-and-bench plan.
+ *
+ * PR-G: Updated to use `intent: "manage_setup"` (the cluster name) instead of
+ * `intent: "rule"`. The rule module is absorbed into the manage_setup cluster
+ * in PR-C; the bench runner calls runModule directly so it needs the cluster name.
  *
  * Each fixture validates one or more of the four LLM-behavior assumptions:
  *   1. Fragmented playbooks vs flat (composer reads multi-fragment system prompt)
@@ -12,7 +16,9 @@
  *   op run --env-file=.env.tpl -- npx tsx scripts/bench-modules/run.ts --name=F14
  */
 import type { ModuleContext } from "@/agent/modules/types";
-import type { RuleSummary, UpcomingEvent } from "@/agent/modules/rule/context-loader";
+// RuleSummary + UpcomingEvent are re-exported from manage-setup/context-loader
+// (which imports them from rule/context-loader). Use that path going forward.
+import type { RuleSummary, UpcomingEvent } from "@/agent/modules/manage-setup/context-loader";
 import type { ModuleFixture } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -92,7 +98,7 @@ export const fixture1_F14_reproduction: ModuleFixture = {
     "F14 trigger transcript Turn 1 — Sales Discovery thread + 'Create a recurring coaching bookable link — 45 min, weekly' prefill. " +
     "Per HARD RULE, Turn 1 is propose-only. Composer should NOT fabricate id, NOT emit a scrambled add, AND mention Coaching with 45-min not 60-min.",
   surface: "dashboard-host",
-  intent: "rule",
+  intent: "manage_setup",
   moduleContext: {
     user: TEST_USER,
     channel: TEST_CHANNEL,
@@ -152,7 +158,7 @@ export const fixture2_F14_drift_retry: ModuleFixture = {
     "Synthetic injection: composer's first emission is F14-shape (fabricated id:'general'). " +
     "Verifies fabricatedIdCheck fires + retry hint produces a correct operation:'add' emission.",
   surface: "dashboard-host",
-  intent: "rule",
+  intent: "manage_setup",
   moduleContext: {
     user: TEST_USER,
     channel: TEST_CHANNEL,
@@ -213,7 +219,7 @@ export const fixture3_conflict_awareness_happy: ModuleFixture = {
     "Host says 'block 2pm every Tuesday' with 8 confirmed Tuesday 2pm meetings. " +
     "Composer should call check_conflicts_for_rule and narrate the conflicts; should not emit immediately without surfacing.",
   surface: "dashboard-host",
-  intent: "rule",
+  intent: "manage_setup",
   moduleContext: {
     user: TEST_USER,
     channel: TEST_CHANNEL,
@@ -253,7 +259,7 @@ export const fixture4_conflict_awareness_drift: ModuleFixture = {
     "while 8 confirmed meetings would be shadowed. Verifies conflictAwarenessGuard fires, retries fail, " +
     "blocking-severity fallbackProse ships and action is suppressed.",
   surface: "dashboard-host",
-  intent: "rule",
+  intent: "manage_setup",
   moduleContext: {
     user: TEST_USER,
     channel: TEST_CHANNEL,
@@ -298,7 +304,7 @@ export const fixture5_standard_create: ModuleFixture = {
     "Host says 'block lunch every weekday 12-1' with no calendar conflicts. " +
     "Composer should emit cleanly; no guards fire; behaviour matches today's legacy path.",
   surface: "dashboard-host",
-  intent: "rule",
+  intent: "manage_setup",
   moduleContext: {
     user: TEST_USER,
     channel: TEST_CHANNEL,
@@ -340,7 +346,7 @@ export const fixture6_update_existing: ModuleFixture = {
     "Host has rule_a3b9c2d1 'Sales pitch' in [GROUND TRUTH]. Says 'extend Sales pitch hours to Wednesday too.' " +
     "Composer should emit operation:'update' with id:'rule_a3b9c2d1' (real id, not fabricated).",
   surface: "dashboard-host",
-  intent: "rule",
+  intent: "manage_setup",
   moduleContext: {
     user: TEST_USER,
     channel: TEST_CHANNEL,
