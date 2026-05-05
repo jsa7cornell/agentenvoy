@@ -157,11 +157,38 @@ export const defaultComposerInvoker: ComposerInvoker = async ({
   userMessage,
   tools: composerTools,
   moduleContext,
+  fewshot,
 }) => {
   const toolCalls: ModuleGuardRecord["toolCalls"] = [];
   const tools = wireTools(composerTools, moduleContext, toolCalls);
 
-  const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
+  // Per Rule 27 / proposal §3.1+§7-Q3: messages order is
+  //   [few-shot turns (cached)] → [conversationHistory] → [current user message]
+  // Cache_control breakpoint sits on the LAST few-shot assistant turn so the
+  // static system prompt + few-shot share one cache prefix; per-host context
+  // (history + current message) lives below the breakpoint.
+  type Msg = {
+    role: "user" | "assistant";
+    content: string;
+    providerOptions?: Record<string, unknown>;
+  };
+  const messages: Msg[] = [];
+
+  if (fewshot && fewshot.length > 0) {
+    for (let i = 0; i < fewshot.length; i++) {
+      const turn = fewshot[i];
+      messages.push({ role: "user", content: turn.user });
+      const assistantMsg: Msg = { role: "assistant", content: turn.assistant };
+      if (i === fewshot.length - 1) {
+        // Cache breakpoint on the LAST few-shot assistant turn.
+        assistantMsg.providerOptions = {
+          anthropic: { cacheControl: { type: "ephemeral" } },
+        };
+      }
+      messages.push(assistantMsg);
+    }
+  }
+
   for (const m of history) {
     if (m.role === "user" || m.role === "host" || m.role === "guest") {
       messages.push({ role: "user", content: m.content });
@@ -270,6 +297,7 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
     userMessage: input.userMessage,
     tools: intentModule.composerTools,
     moduleContext: input.moduleContext,
+    fewshot: intentModule.fewshot,
   });
 
   let text = initialResult.text;
@@ -378,6 +406,7 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
       userMessage: fire.hint,
       tools: intentModule.composerTools,
       moduleContext: input.moduleContext,
+      fewshot: intentModule.fewshot,
     });
     text = retryResult.text;
     if (retryResult.toolCalls) {
