@@ -1,0 +1,414 @@
+/**
+ * Shared schedule-path context loader.
+ *
+ * Replicates the inline context-build at chat/route.ts:968-1089 (pre-PR3b-i)
+ * so every schedule-path module (`inquire`, `query_calendar`, `query_event`,
+ * `chat`, `create_link`, `modify_link`, `cancel_link`, `schedule`) reads
+ * identical truth from one helper.
+ *
+ * Returns context lines in the canonical order:
+ *  1. Calendar slots (formatComputedSchedule + formatOfferableSlots) when connected
+ *  2. Upcoming events (14-day window) when connected
+ *  3. "Calendar: Not connected" otherwise
+ *  4. Persistent preferences
+ *  5. Situational context (near-term)
+ *  6. Host directives
+ *  7. Reusable links (primary + active bookable)
+ *  8. Active sessions list
+ *  9. Current time
+ * 10. Calibration status
+ *
+ * Channel session lifecycle (3-day rolling window for history) is NOT loaded
+ * here — that's the route layer's responsibility (channel session create/expire
+ * is a side-effect that runs unconditionally for schedule-path intents).
+ *
+ * Test seam: `__testScheduleContext` lets tests + bench fixtures inject
+ * pre-loaded state without prisma + getOrComputeSchedule. Production
+ * code paths NEVER set this field.
+ */
+import { prisma } from "@/lib/prisma";
+import { getOrComputeSchedule, type CalendarEvent } from "@/lib/calendar";
+import {
+  formatComputedSchedule,
+  formatOfferableSlots,
+} from "@/agent/composer";
+import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
+import type {
+  ModuleContext,
+  ModuleContextOutput,
+  MatchResult,
+} from "@/agent/modules/types";
+
+export interface ScheduleContext extends ModuleContextOutput {
+  /** Whether the host's calendar is connected. Modules can branch on this. */
+  calendarConnected: boolean;
+  /** Number of scored slots — surfaced for the route's `emitStatus("scoring", { slots: { count } })`. */
+  scoredSlotCount: number;
+  /** Host timezone label (e.g., "PT", "ET") for status copy interpolation. */
+  tzLabel: string | null;
+  /** Active session count for telemetry. */
+  activeSessionCount: number;
+}
+
+/**
+ * Test-seam fields on ModuleContext. Tests + bench fixtures inject these to
+ * skip prisma + getOrComputeSchedule. Production callers NEVER set them.
+ */
+export interface ScheduleContextTestInjection {
+  __testScheduleContext?: {
+    user: {
+      name: string | null;
+      preferences: unknown;
+      meetSlug: string | null;
+      persistentKnowledge: string | null;
+      upcomingSchedulePreferences: string | null;
+      hostDirectives: unknown;
+      lastCalibratedAt: Date | null;
+    };
+    scheduleResult: {
+      connected: boolean;
+      canWrite: boolean;
+      slots?: unknown[];
+      events?: CalendarEvent[];
+    } | null;
+    activeSessions: Array<{
+      id: string;
+      title: string | null;
+      status: string;
+      statusLabel: string | null;
+      guestEmail: string | null;
+      link: { inviteeName: string | null; code: string | null; slug: string | null };
+    }>;
+    now?: Date;
+  };
+}
+
+/**
+ * Format upcoming named calendar events (14-day window) so the composer can
+ * resolve "cancel my meeting with Katie" even when the NegotiationSession is
+ * old or below the take:20 limit. Pulled out of the route so PR3b-i and
+ * PR3b-iii share the same formatter.
+ */
+export function formatUpcomingEvents(
+  events: CalendarEvent[],
+  tz: string,
+): string | null {
+  const now = Date.now();
+  const cutoff = now + 14 * 24 * 60 * 60 * 1000;
+  const dateFmt = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: tz,
+    hour12: true,
+  });
+  const relevant = events
+    .filter((e) => {
+      if (!e.summary || e.summary === "(no title)") return false;
+      const start = new Date(e.start).getTime();
+      return start >= now && start <= cutoff;
+    })
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+    .slice(0, 15);
+  if (relevant.length === 0) return null;
+  const lines = relevant.map((e) => {
+    const startLabel = dateFmt.format(new Date(e.start));
+    const attendeePart = (e.attendeeCount ?? 0) > 1
+      ? ` (${e.attendeeCount} guests)`
+      : "";
+    return `- "${e.summary}" — ${startLabel}${attendeePart}`;
+  });
+  return `Upcoming calendar events (next 14 days — use these to resolve cancel/reschedule requests by name):\n${lines.join("\n")}`;
+}
+
+/**
+ * Build the contextLines for a schedule-path module from the loaded state.
+ * Pure function; no I/O. Pulled out so the production loader and the
+ * test-seam injection share the same formatting.
+ */
+function buildContextLines(args: {
+  user: {
+    preferences: unknown;
+    meetSlug: string | null;
+    persistentKnowledge: string | null;
+    upcomingSchedulePreferences: string | null;
+    hostDirectives: unknown;
+    lastCalibratedAt: Date | null;
+  };
+  scheduleResult: {
+    connected: boolean;
+    canWrite: boolean;
+    slots?: unknown[];
+    events?: CalendarEvent[];
+  } | null;
+  activeSessions: Array<{
+    id: string;
+    title: string | null;
+    status: string;
+    statusLabel: string | null;
+    guestEmail: string | null;
+    link: { inviteeName: string | null; code: string | null; slug: string | null };
+  }>;
+  now: Date;
+  userId: string;
+}): {
+  contextLines: string[];
+  calendarConnected: boolean;
+  scoredSlotCount: number;
+  tzLabel: string | null;
+} {
+  const { user, scheduleResult, activeSessions, now } = args;
+  const contextParts: string[] = [];
+  const hostPrefs = user.preferences as Record<string, unknown> | null;
+  const tz = getUserTimezone(hostPrefs);
+  const tzLabel = shortTimezoneLabel(tz);
+
+  let calendarConnected = false;
+  let scoredSlotCount = 0;
+  if (scheduleResult?.connected) {
+    calendarConnected = true;
+    scoredSlotCount = scheduleResult.slots?.length ?? 0;
+    contextParts.push(
+      formatComputedSchedule(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        scheduleResult.slots as any,
+        tz,
+        scheduleResult.canWrite,
+        undefined,
+        { weekConvention: "sun_start" },
+      ),
+    );
+    contextParts.push(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      formatOfferableSlots(scheduleResult.slots as any, tz, scheduleResult.canWrite),
+    );
+    if (scheduleResult.events) {
+      const upcomingLines = formatUpcomingEvents(scheduleResult.events, tz);
+      if (upcomingLines) contextParts.push(upcomingLines);
+    }
+  }
+  if (!calendarConnected) {
+    contextParts.push("Calendar: Not connected");
+  }
+
+  if (user.persistentKnowledge) {
+    contextParts.push(`Host's persistent preferences:\n${user.persistentKnowledge}`);
+  }
+  if (user.upcomingSchedulePreferences) {
+    contextParts.push(`Host's situational context (near-term):\n${user.upcomingSchedulePreferences}`);
+  }
+  if (user.hostDirectives && (user.hostDirectives as string[]).length > 0) {
+    contextParts.push(
+      `Host directives (highest priority):\n${(user.hostDirectives as string[])
+        .map((d) => `- ${d}`)
+        .join("\n")}`,
+    );
+  }
+
+  // Reusable links (primary + active bookable links).
+  {
+    const explicitPrefs = (hostPrefs?.explicit as Record<string, unknown> | undefined) ?? {};
+    const structuredRules =
+      (explicitPrefs.structuredRules as Array<{
+        action?: string;
+        status?: string;
+        bookable?: { name?: string; title?: string; linkSlug?: string; linkCode?: string };
+      }> | undefined) ?? [];
+    const primaryLinkName =
+      typeof explicitPrefs.primaryLinkName === "string" &&
+      (explicitPrefs.primaryLinkName as string).trim()
+        ? (explicitPrefs.primaryLinkName as string)
+        : "Primary link";
+    const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
+    const lines: string[] = [];
+    if (user.meetSlug) {
+      lines.push(`- "${primaryLinkName}" (default): ${origin}/meet/${user.meetSlug}`);
+    }
+    for (const r of structuredRules) {
+      if (r.action !== "bookable" || r.status !== "active") continue;
+      const linkData = r.bookable;
+      if (!linkData) continue;
+      const name = linkData.name ?? linkData.title ?? "Drop-in Hours";
+      const url =
+        linkData.linkSlug && linkData.linkCode
+          ? `${origin}/meet/${linkData.linkSlug}/${linkData.linkCode}`
+          : "(url unavailable)";
+      lines.push(`- "${name}": ${url}`);
+    }
+    if (lines.length > 0) {
+      contextParts.push(
+        `Host's reusable links (answer "what's my X link" / "share my X link" from this list — match by name fuzzy, case-insensitive; if the host asks generally for "my links" reply with the full list):\n${lines.join("\n")}`,
+      );
+    }
+  }
+
+  // Active sessions list.
+  if (activeSessions.length > 0) {
+    const sessionList = activeSessions
+      .map((s) => {
+        const guest = s.link.inviteeName || s.guestEmail || "unknown";
+        const note = s.statusLabel ? `, note: ${s.statusLabel}` : "";
+        const code = s.link.code ?? null;
+        const url = s.link.slug && s.link.code
+          ? `/meet/${s.link.slug}/${s.link.code}`
+          : null;
+        const ids = [
+          `sessionId: ${s.id}`,
+          code ? `linkCode: ${code}` : null,
+          url ? `url: ${url}` : null,
+        ]
+          .filter(Boolean)
+          .join(", ");
+        return `- "${s.title || "Untitled"}" (${ids}) — status: ${s.status}, guest: ${guest}${note}`;
+      })
+      .join("\n");
+    contextParts.push(
+      `Sessions (active and confirmed — "agreed" sessions have a confirmed calendar event and can be cancelled or rescheduled):\n${sessionList}\n\n` +
+        `You can execute actions on these sessions using [ACTION] blocks. ` +
+        `For session-scoped actions (update_format / update_time / update_location / cancel / hold_slot / archive) pass sessionId. ` +
+        `For link-scoped actions (update_link / expand_link) pass linkCode — it's the 6-char string after /meet/{slug}/ in the url above.`,
+    );
+  } else {
+    contextParts.push("Active sessions: None");
+  }
+
+  // Current time.
+  const timeStr = now.toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+    timeZone: tz,
+  });
+  contextParts.push(`Current time: ${timeStr}`);
+
+  // Calibration status.
+  if (!user.lastCalibratedAt) {
+    contextParts.push(
+      "Calibration: NEVER — this host has not been calibrated. Run onboarding calibration (see ONBOARDING CALIBRATION below).",
+    );
+  } else {
+    const daysSince = Math.floor(
+      (Date.now() - new Date(user.lastCalibratedAt).getTime()) / (1000 * 60 * 60 * 24),
+    );
+    if (daysSince >= 10) {
+      contextParts.push(
+        `Calibration: Last calibrated ${daysSince} days ago. Consider running a check-in (see CHECK-IN CALIBRATION below).`,
+      );
+    } else {
+      contextParts.push(
+        `Calibration: Last calibrated ${daysSince} day${daysSince !== 1 ? "s" : ""} ago.`,
+      );
+    }
+  }
+
+  return {
+    contextLines: contextParts,
+    calendarConnected,
+    scoredSlotCount,
+    tzLabel,
+  };
+}
+
+/**
+ * Production loader. Reads from prisma + getOrComputeSchedule. Tests + bench
+ * fixtures override via `__testScheduleContext` on ModuleContext.
+ */
+export async function loadScheduleContext(
+  moduleContext: ModuleContext,
+  matchResult: MatchResult,
+  userMessage: string,
+): Promise<ScheduleContext> {
+  void matchResult;
+  void userMessage;
+
+  const ctx = moduleContext as ModuleContext & ScheduleContextTestInjection;
+  if (ctx.__testScheduleContext) {
+    const t = ctx.__testScheduleContext;
+    const built = buildContextLines({
+      user: t.user,
+      scheduleResult: t.scheduleResult,
+      activeSessions: t.activeSessions,
+      now: t.now ?? new Date(),
+      userId: moduleContext.user.id,
+    });
+    return {
+      contextLines: built.contextLines,
+      calendarConnected: built.calendarConnected,
+      scoredSlotCount: built.scoredSlotCount,
+      tzLabel: built.tzLabel,
+      activeSessionCount: t.activeSessions.length,
+    };
+  }
+
+  const userId = moduleContext.user.id;
+  const [user, scheduleResult, activeSessions] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        name: true,
+        preferences: true,
+        meetSlug: true,
+        persistentKnowledge: true,
+        upcomingSchedulePreferences: true,
+        hostDirectives: true,
+        lastCalibratedAt: true,
+      },
+    }),
+    getOrComputeSchedule(userId).catch((e) => {
+      console.warn(`[schedule-context] getOrComputeSchedule failed for ${userId}:`, e);
+      return null;
+    }),
+    prisma.negotiationSession.findMany({
+      where: { hostId: userId, archived: false, status: { not: "cancelled" } },
+      include: {
+        link: {
+          select: {
+            inviteeName: true,
+            inviteeEmail: true,
+            topic: true,
+            code: true,
+            slug: true,
+          },
+        },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 20,
+    }),
+  ]);
+
+  if (!user) {
+    throw new Error(`[schedule-context] user ${userId} not found`);
+  }
+
+  const built = buildContextLines({
+    user,
+    scheduleResult,
+    activeSessions: activeSessions.map((s) => ({
+      id: s.id,
+      title: s.title,
+      status: s.status,
+      statusLabel: s.statusLabel,
+      guestEmail: s.guestEmail,
+      link: {
+        inviteeName: s.link.inviteeName,
+        code: s.link.code,
+        slug: s.link.slug,
+      },
+    })),
+    now: new Date(),
+    userId,
+  });
+
+  return {
+    contextLines: built.contextLines,
+    calendarConnected: built.calendarConnected,
+    scoredSlotCount: built.scoredSlotCount,
+    tzLabel: built.tzLabel,
+    activeSessionCount: activeSessions.length,
+  };
+}

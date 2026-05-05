@@ -26,17 +26,16 @@ import { lookupModule, getRegistry } from "@/agent/modules";
  * Order matches the migration roadmap in the proposal's §3 PR plan.
  */
 const STILL_MIGRATING_HOST_INTENTS: ReadonlySet<string> = new Set([
-  // "rule" — migrated in PR1c (composer-modules-pr1c)
+  // "rule" — migrated in PR1c
   // "profile", "create_bookable_link" — migrated in PR2
+  // "inquire", "query_calendar", "query_event" — migrated in PR3b-i
   // "edit_preference" — left unregistered by design in PR2 (Open Question 1
   //   of the composer-modules proposal remains open). The route layer
   //   delegates to either the profile or rule module via a keyword regex.
   "edit_preference",
-  "create_link",                                // PR3
-  "modify_link",                                // PR3
-  "cancel_link",                                // PR3
-  "query_calendar",                             // PR3
-  "query_event",                                // PR3
+  "create_link",                                // PR3b-iii
+  "modify_link",                                // PR3b-iii
+  "cancel_link",                                // PR3b-iii
 ]);
 
 describe("intent module contract", () => {

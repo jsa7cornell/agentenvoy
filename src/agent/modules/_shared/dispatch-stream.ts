@@ -47,6 +47,14 @@ export interface DispatchModuleAndStreamArgs {
   matchResult?: MatchResult;
   /** Channel-message lookback for the composer's conversation history. */
   historyLimit?: number;
+  /**
+   * Pre-built conversation history. When provided, bypasses the internal
+   * `prisma.channelMessage.findMany` + `sanitizeHistory`. The schedule path
+   * (PR3b-i onward) builds history from a 3-day rolling window keyed off the
+   * channel session's `startedAt`; passing the pre-built array preserves that
+   * semantic without duplicating the lifecycle logic in this helper.
+   */
+  conversationHistory?: Array<{ role: string; content: string }>;
   /** Log prefix for failures. Defaults to `intent`. */
   errorTag?: string;
 }
@@ -81,7 +89,9 @@ export async function dispatchModuleAndStream(
     emitStatus("thinking");
 
     let sanitizedHistory: Array<{ role: string; content: string }> = [];
-    if (historyLimit > 0) {
+    if (args.conversationHistory) {
+      sanitizedHistory = args.conversationHistory;
+    } else if (historyLimit > 0) {
       const recentMessages = await prisma.channelMessage.findMany({
         where: { channelId },
         orderBy: { createdAt: "desc" },

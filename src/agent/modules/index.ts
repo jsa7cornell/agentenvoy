@@ -18,6 +18,11 @@ import { chatModule } from "./chat/module";
 import { ruleModule } from "./rule/module";
 import { profileModule } from "./profile/module";
 import { createBookableLinkModule } from "./create-bookable-link/module";
+import {
+  inquireModule,
+  queryCalendarModule,
+  queryEventModule,
+} from "./inquire/module";
 
 let _registered = false;
 
@@ -33,6 +38,9 @@ export function ensureModulesRegistered(): void {
   registerModule(ruleModule);
   registerModule(profileModule);
   registerModule(createBookableLinkModule);
+  registerModule(inquireModule);
+  registerModule(queryCalendarModule);
+  registerModule(queryEventModule);
 }
 
 // Auto-register on first import. Production code paths that import any

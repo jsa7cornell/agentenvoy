@@ -46,7 +46,7 @@ import {
   type DeterministicCreateArgs,
 } from "@/agent/matcher";
 import { parseLinkParameters } from "@/lib/link-parameters";
-import { voicePlaybook, calendarEventComposer, inquireComposer } from "@/agent/runtime-prompts/index";
+import { voicePlaybook, calendarEventComposer } from "@/agent/runtime-prompts/index";
 
 function formatUpcomingEvents(events: CalendarEvent[], tz: string): string | null {
   const now = Date.now();
@@ -81,11 +81,6 @@ function buildChannelSystem(): string {
   const persona = voicePlaybook();
   const channel = calendarEventComposer();
   return `${persona ? persona + "\n\n---\n\n" : ""}${channel}`;
-}
-function buildInquireSystem(): string {
-  const persona = voicePlaybook();
-  const inquire = inquireComposer();
-  return `${persona ? persona + "\n\n---\n\n" : ""}${inquire}`;
 }
 
 // Profile + rule + create_bookable_link branches dispatch via runModule
@@ -666,12 +661,41 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // Schedule + inquire both need calendar context. Continue into
-          // the existing load pipeline.
+          // Schedule + inquire both need calendar context. The inquire-tier
+          // branch (PR3b-i) dispatches via runModule before the precheck
+          // block; precheck only fires for event-shaping intents.
           const isInquireTier =
             intent === "inquire" ||
             intent === "query_calendar" ||
             intent === "query_event";
+
+          if (isInquireTier) {
+            // Inquire-tier modules: read-only, no precheck, no actions, no
+            // channel-session lifecycle (the lifecycle stays at the route
+            // layer for event-tier paths until PR3b-iii). historyLimit:50
+            // is a minor fidelity drop vs the legacy 3-day-session-bounded
+            // window — defensible for stateless read-only questions.
+            await dispatchModuleAndStream({
+              surface: "dashboard-host",
+              intent,
+              channelId: safeChannel.id,
+              userId: safeUser.id,
+              userName: user.name ?? null,
+              userEmail: user.email ?? "",
+              message,
+              userMsgPersist,
+              controller,
+              encoder,
+              emitStatus: (stage) => emitStatus(stage),
+              historyLimit: 50,
+              matchResult: {
+                kind: "deterministic",
+                resolved: {},
+              },
+            });
+            controller.close();
+            return;
+          }
 
           // ------------------------------------------------------------
           // Deterministic scheduling precheck (PR-δ, §9.3.3).
@@ -1118,10 +1142,10 @@ export async function POST(req: NextRequest) {
             console.warn(`[channel/chat] History sanitized | userId=${safeUser.id} | ${warnings.join("; ")}`);
           }
 
-          // Inquire tier uses a narrower readonly playbook. §2.5 — runtime
-          // playbook selection per dispatched tier. Proposal 3 will extend
-          // this pattern (update_profile + rule handlers).
-          const systemBase = isInquireTier ? buildInquireSystem() : buildChannelSystem();
+          // Inquire-tier short-circuits at line 677 (PR3b-i). Reaching here
+          // means this is a chat or event-shaped intent on the legacy
+          // schedule path; both use the channel composer.
+          const systemBase = buildChannelSystem();
           const precheckHintBlock = precheckCreateHint
             ? "\n\n" + precheckCreateHint
             : "";
@@ -1145,10 +1169,10 @@ export async function POST(req: NextRequest) {
           // fires. Read by future eval rig (proposal §2 Layer 4).
           let selfCheckRecord: SelfCheckRecord | null = null;
 
-          // Skip the action-emission retry for inquire — the inquire
-          // playbook forbids [ACTION] blocks by contract. A missing ACTION
-          // block is expected, not a drift signal.
-          if (!isInquireTier) {
+          // Inquire-tier short-circuits earlier (PR3b-i). Reaching here means
+          // this is a chat or event-shaped intent; run the action-fidelity
+          // guards.
+          {
             // Layer 2a — existing emission guard (no [ACTION] block at all).
             const emissionFired = needsActionEmissionRetry(fullText);
             // Parse actions once so the shape + redundancy checks can both
@@ -1268,15 +1292,9 @@ export async function POST(req: NextRequest) {
           const finalizeResponse = async (text: string): Promise<string> => {
             try {
               const parsed = parseActions(text);
-              // Inquire contract: no [ACTION] blocks allowed. Strip + log
-              // if any slipped through — the playbook forbids them, but
-              // defend against drift so we don't dispatch a create_link
-              // during a readonly turn.
-              if (isInquireTier && parsed.length > 0) {
-                console.warn(
-                  `[channel/chat] inquire tier emitted ${parsed.length} action block(s); stripping. userId=${safeUser.id}`,
-                );
-              }
+              // Inquire-tier short-circuits earlier (PR3b-i); the runner's
+              // allowed-actions enforcement strips any [ACTION] blocks for
+              // those intents. Reaching here means chat or event-shaped.
               // Silent-drift telemetry (Round-2 fix on PR #83, 2026-04-27;
               // extended for PR1 of the chat-decisioning-layer-redesign).
               // The matcher has decided this turn is a deterministic
@@ -1339,7 +1357,7 @@ export async function POST(req: NextRequest) {
                   );
                 }
               }
-              const actions = isInquireTier ? [] : parsed;
+              const actions = parsed;
               let actionResults: ActionResult[] = [];
               let timedOut = false;
               if (actions.length > 0) {
