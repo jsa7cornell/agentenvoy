@@ -275,7 +275,7 @@ describe("unclear + missing/fabricated clarifier → closed-set fallback", () =>
 // ---------------------------------------------------------------------------
 
 describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3 + chat-decisioning-layer-redesign PR1)", () => {
-  it("contains exactly the 8 host-side values in order (PR1 split create_link → create/modify/cancel; create_bookable_link added)", () => {
+  it("contains exactly the 9 host-side values in order (PR1 split create_link → create/modify/cancel; create_bookable_link added; PR4 adds book_with_person)", () => {
     expect([...HOST_CHAT_INTENT_VALUES]).toEqual([
       "edit_preference",
       "create_bookable_link",
@@ -285,8 +285,9 @@ describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3 + chat-decisioning-layer-redesig
       "query_calendar",
       "query_event",
       "chat",
+      "book_with_person",
     ]);
-    expect(HOST_CHAT_INTENT_VALUES).toHaveLength(8);
+    expect(HOST_CHAT_INTENT_VALUES).toHaveLength(9);
   });
 
   it("every host value normalizes via the full-union normalizeChatIntent", () => {
@@ -338,6 +339,9 @@ describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3 + chat-decisioning-layer-redesig
       kind: "query_event",
     });
     expect(validateChatIntent({ kind: "chat" })).toEqual({ kind: "chat" });
+    expect(validateChatIntent({ kind: "book_with_person" })).toEqual({
+      kind: "book_with_person",
+    });
   });
 
   it("validateChatIntent strips clarifier/quickReplies/emoji from host kinds (default-branch behavior)", () => {

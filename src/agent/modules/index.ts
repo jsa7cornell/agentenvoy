@@ -9,7 +9,7 @@
  *   PR1c: rule, create_bookable_link
  *   PR2:  profile, edit_preference (split into profile/rule routes)
  *   PR3:  create_link, modify_link, cancel_link, schedule, inquire, query_calendar, query_event
- *   PR4:  bookings (book_with_person)
+ *   PR4:  bookings (book_with_person) ← shipped
  *   PR5:  dealroom-host/*, dealroom-guest/*
  *   PR6:  no new modules; PR6 is MCP exposure layer
  */
@@ -29,6 +29,7 @@ import {
   cancelLinkModule,
   scheduleModule,
 } from "./event-intents/module";
+import { bookingsModule } from "./bookings/module";
 
 let _registered = false;
 
@@ -51,6 +52,7 @@ export function ensureModulesRegistered(): void {
   registerModule(modifyLinkModule);
   registerModule(cancelLinkModule);
   registerModule(scheduleModule);
+  registerModule(bookingsModule);      // PR4 — bookings module
 }
 
 // Auto-register on first import. Production code paths that import any

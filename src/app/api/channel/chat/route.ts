@@ -609,6 +609,32 @@ export async function POST(req: NextRequest) {
             }
           }
 
+          // book_with_person — PR4 bookings module. Bilateral identity-resolve
+          // + availability intersection + commit flow. Dispatched BEFORE the
+          // precheck block (precheck only fires for event-shaping intents).
+          // Pattern matches PR2's profile/rule branches.
+          if (intent === "book_with_person") {
+            await dispatchModuleAndStream({
+              surface: "dashboard-host",
+              intent: "book_with_person",
+              channelId: safeChannel.id,
+              userId: safeUser.id,
+              userName: user.name ?? null,
+              userEmail: user.email ?? "",
+              message,
+              userMsgPersist,
+              controller,
+              encoder,
+              emitStatus: (stage) => emitStatus(stage),
+              matchResult: {
+                kind: "deterministic",
+                resolved: {},
+              },
+            });
+            controller.close();
+            return;
+          }
+
           // Schedule + inquire both need calendar context. The inquire-tier
           // branch (PR3b-i) dispatches via runModule before the precheck
           // block; precheck only fires for event-shaping intents.
