@@ -251,6 +251,14 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
     input.userMessage,
   );
 
+  // PR-C: progressive-profiling telemetry. If the contextLoader returned
+  // profileGaps (schedule-context modules), record their IDs in moduleGuard
+  // so telemetry can track "gaps surfaced but not acted on" (N1 fold).
+  const gaps = (contextOutput as { profileGaps?: Array<{ id: string }> }).profileGaps;
+  if (gaps && gaps.length > 0) {
+    moduleGuard.gapsSurfaced = gaps.map((g) => g.id);
+  }
+
   // 2. Compose system prompt.
   const fragments = resolvePlaybook(intentModule, input.matchResult);
   const systemPrompt = composeSystemPrompt(fragments, contextOutput, input.moduleContext);

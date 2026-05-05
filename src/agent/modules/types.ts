@@ -352,6 +352,15 @@ export interface ModuleGuardRecord {
    * on `emittedActions`, which is strictly finer than per-intent granularity.
    */
   emittedActions?: string[];
+
+  /**
+   * PR-C: progressive-profiling telemetry. Gap IDs that were injected into
+   * the system prompt on this turn (from `ScheduleContext.profileGaps`).
+   * Undefined when no gaps were surfaced or the module does not use
+   * schedule-context. Used to track which gaps are being offered to hosts
+   * vs. landing (2-week threshold check per proposal N1 fold).
+   */
+  gapsSurfaced?: string[];
 }
 
 export type RunnerOutput =

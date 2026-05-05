@@ -33,6 +33,7 @@ import {
   formatOfferableSlots,
 } from "@/agent/composer";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
+import { computeProfileGaps, type ProfileGap } from "@/lib/profile-gaps";
 import type {
   ModuleContext,
   ModuleContextOutput,
@@ -48,6 +49,13 @@ export interface ScheduleContext extends ModuleContextOutput {
   tzLabel: string | null;
   /** Active session count for telemetry. */
   activeSessionCount: number;
+  /**
+   * Profile gaps active on this turn (PR-C — progressive-profiling fold-in).
+   * Gaps whose hint strings were injected into contextLines. The runner
+   * reads this to populate `moduleGuard.gapsSurfaced` for telemetry.
+   * Empty array when no gaps are active; never undefined in production loader.
+   */
+  profileGaps: ProfileGap[];
 }
 
 /**
@@ -315,6 +323,28 @@ function buildContextLines(args: {
 }
 
 /**
+ * Format profile gap hints for injection into the context.
+ *
+ * Mirrors the legacy chat-route injection pattern. The meta-rule at the top
+ * is load-bearing: it prevents the LLM from doing silent writes (B1 fold per
+ * progressive-profiling proposal §2.4). Never remove it.
+ */
+function buildGapContextLines(gaps: ProfileGap[]): string[] {
+  if (gaps.length === 0) return [];
+  const hintLines = gaps.map((g) => `- ${g.hint}`).join("\n");
+  return [
+    [
+      "PROFILE GAPS (progressive-profiling — IMPORTANT RULES):",
+      "  1. You MAY ask about a gap on a NATURAL turn when it is relevant.",
+      "  2. You MUST NOT write a value unless the host explicitly confirms on the FOLLOWING turn.",
+      "  3. Only surface one gap per turn — don't dump a list of questions.",
+      "",
+      hintLines,
+    ].join("\n"),
+  ];
+}
+
+/**
  * Production loader. Reads from prisma + getOrComputeSchedule. Tests + bench
  * fixtures override via `__testScheduleContext` on ModuleContext.
  */
@@ -336,17 +366,20 @@ export async function loadScheduleContext(
       now: t.now ?? new Date(),
       userId: moduleContext.user.id,
     });
+    // Tests that inject __testScheduleContext get an empty gap list — they
+    // control the context explicitly and don't need live gap computation.
     return {
       contextLines: built.contextLines,
       calendarConnected: built.calendarConnected,
       scoredSlotCount: built.scoredSlotCount,
       tzLabel: built.tzLabel,
       activeSessionCount: t.activeSessions.length,
+      profileGaps: [],
     };
   }
 
   const userId = moduleContext.user.id;
-  const [user, scheduleResult, activeSessions] = await Promise.all([
+  const [user, scheduleResult, activeSessions, profileGaps] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -379,6 +412,14 @@ export async function loadScheduleContext(
       orderBy: { updatedAt: "desc" },
       take: 20,
     }),
+    // PR-C: progressive-profiling fold-in. Compute gaps alongside the schedule
+    // so the hints are module-resident and route through moduleGuardBucket
+    // telemetry. Defensive: gap failure is non-fatal; empty array degrades
+    // gracefully (no hints, no telemetry for this turn).
+    computeProfileGaps(userId).catch((e) => {
+      console.warn(`[schedule-context] computeProfileGaps failed for ${userId}:`, e);
+      return [] as ProfileGap[];
+    }),
   ]);
 
   if (!user) {
@@ -404,11 +445,17 @@ export async function loadScheduleContext(
     userId,
   });
 
+  // Inject profile gap hints after the base context lines. The hints live
+  // in a separate section so the composer can read calibration status first.
+  const gapLines = buildGapContextLines(profileGaps);
+  const contextLines = [...built.contextLines, ...gapLines];
+
   return {
-    contextLines: built.contextLines,
+    contextLines,
     calendarConnected: built.calendarConnected,
     scoredSlotCount: built.scoredSlotCount,
     tzLabel: built.tzLabel,
     activeSessionCount: activeSessions.length,
+    profileGaps,
   };
 }
