@@ -21,6 +21,19 @@
  *   4. Additive-connective: "and also", "plus", "as well", "also book"
  *      suppress `pivot` regardless of fresh-name — host is extending,
  *      not pivoting. Strongest continuation signal.
+ *   5. Abandoned-clarification: prior assistant turn ended with a
+ *      clarification request (no successful action could be inferred — turn
+ *      ends with "?" or contains characteristic clarification phrases) AND
+ *      the current user turn does NOT address it (no email-format string
+ *      AND introduces a new action verb / pivot intent). Triggered by
+ *      FeedbackReports cmot8wq9b0003qqwgv3euiiwy (June 3 → Jimmy bleed) and
+ *      cmot66ofp001dj35x05v20c1u (Friday-protect → timezone bleed). A literal
+ *      direct answer (email reply to "share his email") suppresses the
+ *      signal; anaphora alone does NOT (an unrelated "yeah do that" still
+ *      abandons the prior thread). Acknowledged false-positive risk: a user
+ *      who briefly pivots and returns will lose the prior context — accepted
+ *      for v1, since the detector is advisory and the failure mode is at
+ *      worst a retry, never broken state.
  *
  * K=10 matches DEFAULT_HISTORY_LIMIT so the detector and the model agree
  * on what counts as "in context".
@@ -117,6 +130,78 @@ const COMMON_SENTENCE_INITIAL = new Set([
   "tutoring", "lunch", "dinner", "breakfast", "coffee",
   "want",
 ]);
+
+// ─── Signal-5 sources (abandoned-clarification) ─────────────────────────────
+
+const CLARIFICATION_PHRASES = [
+  "share his email",
+  "share her email",
+  "share their email",
+  "do you have",
+  "tell me",
+  "could you",
+  "could you share",
+  "can you share",
+  "let me know",
+  "what's",
+  "what is",
+  "which one",
+  "want me to",
+  "should i",
+];
+
+// New action-verb cues indicating the user turn is starting a fresh task
+// rather than answering the prior clarification. Reuses the pivot-intent
+// regex set, plus a few additional verbs that are not by themselves
+// pivot-intent (e.g., "what's my timezone?", a question asking for info).
+const FRESH_ACTION_CUES: RegExp[] = [
+  /\bprotect\b/,
+  /\bblock\b/,
+  /\bcancel\b/,
+  /\breschedul/,
+  /\bmove\b/,
+  /\bset\b/,
+  /\bcreate\b/,
+  /\bschedule\b/,
+  /\bbook\b/,
+  /\binvite\b/,
+  /\bwhat'?s\b/,
+  /\bwhat is\b/,
+  /\btell me\b/,
+  /\bshow me\b/,
+  /\bremove\b/,
+  /\bdelete\b/,
+  /\badd\b/,
+  /\bupdate\b/,
+];
+
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+
+export function looksLikeClarificationRequest(content: string): boolean {
+  if (typeof content !== "string") return false;
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  if (trimmed.endsWith("?")) return true;
+  const lower = trimmed.toLowerCase();
+  for (const phrase of CLARIFICATION_PHRASES) {
+    if (lower.includes(phrase)) return true;
+  }
+  return false;
+}
+
+export function addressesClarification(message: string): boolean {
+  // A literal email address is a strong direct answer to "share his email".
+  if (EMAIL_RE.test(message)) return true;
+  return false;
+}
+
+export function looksLikeFreshAction(message: string): boolean {
+  const lower = message.toLowerCase();
+  for (const re of FRESH_ACTION_CUES) {
+    if (re.test(lower)) return true;
+  }
+  return false;
+}
 
 // ─── Closed-task narration detection ────────────────────────────────────────
 
@@ -302,10 +387,32 @@ export function scopeHistory(
     }
   }
 
+  // Signal 5: abandoned-clarification pivot. Prior assistant turn asked a
+  // clarifying question (no successful action emitted, surfaced via the "?"-
+  // ending or characteristic clarification phrases), and current user turn
+  // does NOT address it (no email-format string AND introduces a fresh
+  // action verb). Per spec: a direct answer (literal email reply) MUST
+  // suppress this signal; anaphora alone does NOT.
+  // FeedbackReports cmot8wq9b0003qqwgv3euiiwy + cmot66ofp001dj35x05v20c1u.
+  let pivotByAbandonedClarification = false;
+  const priorClarification = lastAssistant
+    ? looksLikeClarificationRequest(lastAssistant.content || "")
+    : false;
+  if (
+    priorClarification &&
+    !addressesClarification(currentUserMessage) &&
+    looksLikeFreshAction(currentUserMessage)
+  ) {
+    pivotByAbandonedClarification = true;
+  }
+
   // Signal 3: anaphora — strong continuation signal. Overrides default but
   // yields to ANY pivot signal that already fired (in those cases the
   // pronoun refers FORWARD to the pivot target, not back to history).
-  const isPivot = pivotByFreshName || pivotByClosedTask;
+  // Spec: anaphora alone does NOT override Signal 5 — an unrelated
+  // "yeah do that" still abandons the clarification.
+  const isPivot =
+    pivotByFreshName || pivotByClosedTask || pivotByAbandonedClarification;
   if (!isPivot && hasAnaphora(currentUserMessage)) {
     return { messages: history, mode: "continue", prunedCount: 0, closedTasks: [] };
   }
@@ -320,6 +427,15 @@ export function scopeHistory(
   }
 
   if (pivotByClosedTask) {
+    return {
+      messages: [],
+      mode: "pivot",
+      prunedCount: history.length,
+      closedTasks: priorNounsLastTurn,
+    };
+  }
+
+  if (pivotByAbandonedClarification) {
     return {
       messages: [],
       mode: "pivot",

@@ -474,3 +474,72 @@ describe("scopeHistory — edge cases", () => {
     expect(result.mode).toBe("continue");
   });
 });
+
+// ─── Signal 5: abandoned-clarification pivot ────────────────────────────────
+//
+// FeedbackReports cmot8wq9b0003qqwgv3euiiwy (June 3 → Jimmy bleed) and
+// cmot66ofp001dj35x05v20c1u (Friday-protect → timezone). Prior assistant turn
+// asked a clarifying question (no successful action emitted) and current user
+// turn moves on instead of answering it → pivot, prune the abandoned thread.
+
+describe("scopeHistory — Signal 5: abandoned-clarification pivot", () => {
+  it("Case A: pending Jimmy clarification → unrelated 'protect June 3rd' pivots", () => {
+    const history: HistoryMessage[] = [
+      user("get me time with Jimmy next week"),
+      envoy(
+        "I couldn't find a Jimmy in your meeting history. Do you have his email so I can look him up?",
+      ),
+    ];
+    const result = scopeHistory(history, "protect June 3rd all day");
+    expect(result.mode).toBe("pivot");
+    expect(result.prunedCount).toBe(history.length);
+    expect(result.messages).toEqual([]);
+  });
+
+  it("Case B: pending shadow-confirm clarification → 'whats my timezone?' pivots", () => {
+    const history: HistoryMessage[] = [
+      user("protect Friday May 8"),
+      envoy(
+        "This would shadow 1 confirmed meeting on Friday May 8 (a workout). Confirm to proceed?",
+      ),
+    ];
+    const result = scopeHistory(history, "whats my timezone?");
+    expect(result.mode).toBe("pivot");
+    expect(result.prunedCount).toBe(history.length);
+    expect(result.messages).toEqual([]);
+  });
+
+  it("does NOT pivot when user answers the clarification with an email", () => {
+    const history: HistoryMessage[] = [
+      user("get me time with Jimmy next week"),
+      envoy("I couldn't find a Jimmy. Could you share his email?"),
+    ];
+    const result = scopeHistory(history, "jimmy@acme.com");
+    expect(result.mode).toBe("continue");
+    expect(result.prunedCount).toBe(0);
+  });
+
+  it("does NOT pivot when user answers a generic clarifier ('Want me to use Tuesday at 12?' → 'yes, go ahead')", () => {
+    // Already covered in continuation suite — re-asserts here for Signal 5
+    // boundary: ambiguous affirmative without a fresh action verb must not
+    // trigger Signal 5.
+    const history: HistoryMessage[] = [
+      user("invite katie to lunch next week"),
+      envoy("Want me to use Tuesday at 12?"),
+    ];
+    const result = scopeHistory(history, "yes, go ahead");
+    expect(result.mode).toBe("continue");
+  });
+
+  it("anaphora alone does not suppress Signal 5 (per spec)", () => {
+    // "yeah, do that" on an unrelated topic still abandons the clarification.
+    // Here the user pivots to a new action verb with anaphora present.
+    const history: HistoryMessage[] = [
+      user("get me time with Jimmy"),
+      envoy("Do you have his email so I can look him up?"),
+    ];
+    const result = scopeHistory(history, "block off that whole afternoon for me");
+    expect(result.mode).toBe("pivot");
+    expect(result.prunedCount).toBe(history.length);
+  });
+});
