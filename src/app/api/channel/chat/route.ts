@@ -540,7 +540,7 @@ export async function POST(req: NextRequest) {
           if (intent === "edit_preference") {
             const lowerMessage = message.toLowerCase();
             const isRuleShape =
-              /\b(buffer|hours?|days?|am|pm|window|availability)\b/.test(
+              /\b(buffer|hours?|days?|am|pm|window|availability|protect|block|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening)\b/.test(
                 lowerMessage,
               );
             const routedIntent: "profile" | "rule" = isRuleShape ? "rule" : "profile";

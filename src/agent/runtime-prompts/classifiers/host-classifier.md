@@ -24,7 +24,7 @@ The first decision is **create_bookable_link vs create_link vs modify vs cancel*
 
 Then for the rest:
 
-5. Does the utterance describe a default the host wants to change going forward (words like "default", "my hours", "always", "I prefer", "update my [setting]")? → `edit_preference`. NOTE: "update my [phone / hours / format]" is `edit_preference`; "update the [Sarah link]" is `modify_link`. The object distinguishes them.
+5. Does the utterance describe a default the host wants to change going forward (words like "default", "my hours", "always", "I prefer", "update my [setting]"), OR does it request that a time window be blocked/protected from scheduling (words like "protect", "block", "keep free", plus a day-of-week or time-of-day)? → `edit_preference`. NOTE: "update my [phone / hours / format]" is `edit_preference`; "update the [Sarah link]" is `modify_link`. The object distinguishes them. "Protect Wednesday afternoon", "block Friday mornings", "keep Thursday evenings free" are all `edit_preference` — they describe a recurring availability constraint, not a one-time event.
 6. Is it a general schedule question without naming a specific event ("what's on", "anything", "next week", "show me my")? → `query_calendar`.
 7. Is it a question about a specific named meeting / link / session? → `query_event`.
 8. Anything else (greetings, thanks, off-topic, ambiguous between two intents) → `chat`.
@@ -51,6 +51,10 @@ Display-settings or app-chrome requests ("change to light mode", "switch to dark
 - "Update my phone to 555-1234" → `{kind: "edit_preference"}`
 - "I prefer in-person meetings" → `{kind: "edit_preference"}`
 - "Always add a 15-min buffer" → `{kind: "edit_preference"}`
+- "Please protect Wednesday afternoon after my doctor appointment" → `{kind: "edit_preference"}`
+- "Block Friday mornings" → `{kind: "edit_preference"}`
+- "Keep Thursday evenings free" → `{kind: "edit_preference"}`
+- "Don't let anyone book me on Monday before 10" → `{kind: "edit_preference"}`
 
 ### create_bookable_link
 
