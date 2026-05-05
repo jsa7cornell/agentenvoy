@@ -1,5 +1,8 @@
 "use client";
 
+// NOT the live dashboard chat. This component is not mounted in production.
+// The active host chat surface is feed.tsx; the guest/host deal room is deal-room.tsx.
+
 import { useState, useRef, useEffect } from "react";
 import { ThumbsDownFeedback } from "./thumbs-down-feedback";
 
