@@ -110,6 +110,10 @@ interface SeededPosture {
   /** §1n followup (b): true iff the user's Google Account has calendar.events
    *  write scope. Drives the guest-first "Connect/Grant write" CTA. */
   hasCalendarWriteScope: boolean;
+  /** True when the user has explicitly Submitted their calendar picker.
+   *  Gates the posture-readback bubble and primary-link card in
+   *  FirstRunWelcome — until confirmed, only the welcome + picker show. */
+  calendarSelectionConfirmed: boolean;
 }
 
 const VIDEO_PROVIDER_DISPLAY: Record<string, string> = {
@@ -332,10 +336,21 @@ type CalendarRole = "primary" | "include" | "ignore";
  * actual ID and PUT to calendar-filter so downstream surfaces (Calendars
  * dropdown, scoring) all see the same resolved ID.
  */
-function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
+function CalendarPickerBubble({
+  showLabel,
+  alreadyConfirmed,
+  onConfirm,
+}: {
+  showLabel?: boolean;
+  /** When true, the picker renders in a read-only summary mode (no Submit). */
+  alreadyConfirmed?: boolean;
+  /** Fires after a successful Submit (server-side confirm + schedule warmup). */
+  onConfirm?: () => void;
+}) {
   const [calendars, setCalendars] = useState<ConnectedCalendar[] | null>(null);
   const [activeIds, setActiveIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -381,6 +396,22 @@ function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
       cancelled = true;
     };
   }, []);
+
+  // Auto-confirm for users with 0 or 1 calendar — there's nothing to pick.
+  // POSTs the confirm flag too so the parent's state stays in sync after
+  // reload. Best-effort (POST failure is harmless; parent re-confirms).
+  useEffect(() => {
+    if (alreadyConfirmed) return;
+    if (!calendars) return;
+    if (calendars.length >= 2) return;
+    let cancelled = false;
+    void fetch("/api/me/calendar-confirmation", { method: "POST" })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) onConfirm?.();
+      });
+    return () => { cancelled = true; };
+  }, [calendars, alreadyConfirmed, onConfirm]);
 
   if (!calendars || calendars.length < 2) return null;
 
@@ -453,16 +484,48 @@ function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
     setBusy(false);
   }
 
+  // Sort: Primary first (activeIds[0]), then Included calendars in their
+  // saved order, then Ignored calendars last. Stable across re-renders so
+  // the user's selected primary doesn't bounce around as they pick.
+  const sortedCalendars = (() => {
+    const byId = new Map(calendars.map((c) => [c.id, c]));
+    const out: ConnectedCalendar[] = [];
+    for (const id of activeIds) {
+      const cal = byId.get(id);
+      if (cal) out.push(cal);
+    }
+    for (const cal of calendars) {
+      if (!activeIds.includes(cal.id)) out.push(cal);
+    }
+    return out;
+  })();
+
+  async function handleSubmit() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      // Stamp the explicit confirmation flag — drives the next render in
+      // FirstRunWelcome.
+      await fetch("/api/me/calendar-confirmation", { method: "POST" }).catch(() => {});
+      // Warm the schedule cache so the calendar widget has events ready
+      // before the next bubble renders. Best-effort — failure here just
+      // means the widget will refetch later.
+      await fetch("/api/tuner/schedule").catch(() => {});
+    } finally {
+      setSubmitting(false);
+      onConfirm?.();
+    }
+  }
+
   return (
     <EnvoyBubble showLabel={showLabel}>
         <div className="mb-2">
-          I use your Google calendar(s) to determine your availability and
-          send invites. You&rsquo;ve got {calendars.length} Google calendars
-          — we&rsquo;ve selected your primary calendar, but let me know if I
-          should add others or make a different calendar your primary.
+          {alreadyConfirmed
+            ? <>I&rsquo;m reading from your selected Google calendar(s). You can change this any time.</>
+            : <>I use your Google calendar(s) to determine your availability and send invites. You&rsquo;ve got {calendars.length} Google calendars — your primary is at the top. Add or change as needed, then hit Submit.</>}
         </div>
         <ul className="space-y-1.5">
-          {calendars.map((cal) => {
+          {sortedCalendars.map((cal) => {
             const role = roleOf(cal.id);
             return (
               <li
@@ -484,7 +547,7 @@ function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
                   onChange={(ev) =>
                     handleRoleChange(cal.id, ev.target.value as CalendarRole)
                   }
-                  disabled={busy}
+                  disabled={busy || submitting || alreadyConfirmed}
                   aria-label={`Role for ${cal.name}`}
                   className="text-[11px] bg-surface-secondary border border-border rounded px-2 py-0.5 text-primary disabled:opacity-50 transition flex-shrink-0"
                 >
@@ -496,6 +559,21 @@ function CalendarPickerBubble({ showLabel }: { showLabel?: boolean }) {
             );
           })}
         </ul>
+        {!alreadyConfirmed && (
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting || busy}
+              className="text-xs px-4 py-1.5 rounded-full bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-medium transition"
+            >
+              {submitting ? "Loading your calendar…" : "Submit"}
+            </button>
+            {submitting && (
+              <span className="text-[11px] text-muted">Reading events from Google…</span>
+            )}
+          </div>
+        )}
     </EnvoyBubble>
   );
 }
@@ -601,6 +679,13 @@ function GuestFirstVariant({
 
 function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
   const [posture, setPosture] = useState<SeededPosture | null>(null);
+  // Local "calendar confirmed" state — initial value comes from
+  // posture.calendarSelectionConfirmed once the fetch lands; flips to true
+  // when the user clicks Submit on the picker. Once true, the rest of the
+  // first-run flow (posture readback + primary link card + tuning CTA)
+  // unlocks. Single-calendar users auto-confirm via an effect inside
+  // CalendarPickerBubble.
+  const [calendarConfirmed, setCalendarConfirmed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -619,7 +704,9 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
           welcomeVariant: (data.welcomeVariant as WelcomeVariant) ?? "first-run",
           guestFirstContext: data.guestFirstContext ?? null,
           hasCalendarWriteScope: !!data.hasCalendarWriteScope,
+          calendarSelectionConfirmed: !!data.calendarSelectionConfirmed,
         });
+        if (data.calendarSelectionConfirmed) setCalendarConfirmed(true);
       })
       .catch(() => {});
     return () => {
@@ -653,6 +740,10 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
   }
 
   // first-run (default): full intro.
+  // Render order is gated on calendarConfirmed:
+  //   1. Always: H1 + welcome bubble + calendar picker
+  //   2. After Submit (or auto-confirm for <2 calendars): "Great, I now have
+  //      what I need" bubble + posture readback + primary link card + tuning CTA
   return (
     <div className="flex-1 flex flex-col justify-center py-6 gap-4">
       {/* Welcome — H1 for the page itself. Pin at top, not in the chat
@@ -661,9 +752,8 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
         🎉 Welcome to AgentEnvoy.
       </h1>
 
-      {/* Combined intro + posture readback — one bubble (one ENVOY label).
-          The seeded posture is the load-bearing info; the brand-pitch line
-          opens it but doesn't deserve its own labeled bubble. */}
+      {/* Intro bubble — brand pitch only. Posture readback now lives below,
+          gated on the calendar-picker Submit. */}
       <EnvoyBubble>
           <div className="mb-2">
             👋 Hey {firstNameOf(posture.name)} — I&rsquo;m Envoy. I run{" "}
@@ -672,40 +762,53 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
             calendars. Share a link, your invitee chats with me, I work out
             a time tailored to each guest.
           </div>
+          <div>
+            First, let me know which Google calendar(s) I should read for
+            your availability. Once you submit, I&rsquo;ll load your events
+            and we&rsquo;ll keep going.
+          </div>
       </EnvoyBubble>
 
-      {/* Posture readback — same speaker, label suppressed. */}
-      <PostureBubble p={posture} showLabel={false} />
+      {/* Calendar picker — always shown. Self-hides for users with <2
+          calendars and auto-fires onConfirm. Submit button confirms +
+          warms the schedule cache. Same speaker, label suppressed. */}
+      <CalendarPickerBubble
+        showLabel={false}
+        alreadyConfirmed={calendarConfirmed}
+        onConfirm={() => setCalendarConfirmed(true)}
+      />
 
-      {/* Calendar picker — only renders when the user has 2+ connected
-          calendars; otherwise silent. WISHLIST §1n item 1. Same speaker,
-          label suppressed. */}
-      <CalendarPickerBubble showLabel={false} />
+      {/* Everything below is gated on the Submit click (or auto-confirm
+          for single-calendar users). */}
+      {calendarConfirmed && (
+        <>
+          <EnvoyBubble showLabel={false}>
+            Great — I now have what I need from your calendar! Here&rsquo;s
+            how I&rsquo;m set up by default:
+          </EnvoyBubble>
 
-      {/* Standalone link-card — pulled out of the posture bubble per the
-          mockup so the link reads as its own "ready to share" affordance
-          rather than a footnote. Only rendered for first-run (existing
-          users on the dormant variant haven't been issued a fresh link). */}
-      {posture.meetSlug && (
-        <PrimaryLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
+          <PostureBubble p={posture} showLabel={false} />
+
+          {posture.meetSlug && (
+            <PrimaryLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
+          )}
+
+          <EnvoyBubble showLabel={false}>
+              Take 2 minutes to tune your preferences — it makes every meeting
+              better.
+          </EnvoyBubble>
+
+          <div className="px-1">
+            <button
+              type="button"
+              onClick={() => onSeed("__primary_link_flow__")}
+              className="text-xs px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition"
+            >
+              Continue tuning my preferences →
+            </button>
+          </div>
+        </>
       )}
-
-      {/* Single CTA — nudge new hosts into the preference-tuning flow.
-          Other options removed so there is one clear next step. */}
-      <EnvoyBubble showLabel={false}>
-          Take 2 minutes to tune your preferences — it makes every meeting
-          better.
-      </EnvoyBubble>
-
-      <div className="px-1">
-        <button
-          type="button"
-          onClick={() => onSeed("__primary_link_flow__")}
-          className="text-xs px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition"
-        >
-          Continue tuning my preferences →
-        </button>
-      </div>
     </div>
   );
 }

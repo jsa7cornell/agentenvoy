@@ -209,6 +209,13 @@ export async function GET() {
     // granted; false (or null account) means we still need to ask.
     hasCalendarWriteScope:
       !!googleAccount?.scope && googleAccount.scope.includes(HOST_WRITE_SCOPE),
+    // Calendar-selection confirmation flag (2026-05-04). FirstRunWelcome
+    // gates the posture-readback bubble on this — users with 2+ calendars
+    // must explicitly Submit their picker selections before we show
+    // "Great, I now have what I need from your calendar." Single-calendar
+    // users effectively auto-confirm in the UI.
+    calendarSelectionConfirmed:
+      !!(e as { calendarSelectionConfirmed?: boolean }).calendarSelectionConfirmed,
   });
 }
 
