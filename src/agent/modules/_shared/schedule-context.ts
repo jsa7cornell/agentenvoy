@@ -34,6 +34,10 @@ import {
 } from "@/agent/composer";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
 import { computeProfileGaps, type ProfileGap } from "@/lib/profile-gaps";
+import {
+  computeOnboardingState,
+  type OnboardingState,
+} from "@/lib/onboarding/dormant-eligibility";
 import type {
   ModuleContext,
   ModuleContextOutput,
@@ -56,6 +60,15 @@ export interface ScheduleContext extends ModuleContextOutput {
    * Empty array when no gaps are active; never undefined in production loader.
    */
   profileGaps: ProfileGap[];
+  /**
+   * Aggregated onboarding state (PR-C of
+   * `2026-05-05_conversational-onboarding-vision`). Populated by the
+   * production loader; absent on the test-injection path unless a fixture
+   * supplies it. Modules that branch on onboarding-state (chat
+   * `post-calibration`, future PR-D variants) read this field; modules that
+   * don't can ignore it.
+   */
+  onboardingState?: OnboardingState;
 }
 
 /**
@@ -379,48 +392,78 @@ export async function loadScheduleContext(
   }
 
   const userId = moduleContext.user.id;
-  const [user, scheduleResult, activeSessions, profileGaps] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        name: true,
-        preferences: true,
-        meetSlug: true,
-        persistentKnowledge: true,
-        upcomingSchedulePreferences: true,
-        hostDirectives: true,
-        lastCalibratedAt: true,
-      },
-    }),
-    getOrComputeSchedule(userId).catch((e) => {
-      console.warn(`[schedule-context] getOrComputeSchedule failed for ${userId}:`, e);
-      return null;
-    }),
-    prisma.negotiationSession.findMany({
-      where: { hostId: userId, archived: false, status: { not: "cancelled" } },
-      include: {
-        link: {
-          select: {
-            inviteeName: true,
-            inviteeEmail: true,
-            topic: true,
-            code: true,
-            slug: true,
+  // PR-C (conversational-onboarding §3.3): scan recent channel messages for
+  // onboarding terminal markers. 30d window so terminal markers from a
+  // completed calibrate arc remain visible across vacation gaps; the actual
+  // 5-minute `post-calibration` window is enforced by the chat-module
+  // variant selector reading `lastCalibrationCompletionAt`.
+  const onboardingMessageCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const [user, scheduleResult, activeSessions, profileGaps, onboardingMessages] =
+    await Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          name: true,
+          preferences: true,
+          meetSlug: true,
+          persistentKnowledge: true,
+          upcomingSchedulePreferences: true,
+          hostDirectives: true,
+          lastCalibratedAt: true,
+        },
+      }),
+      getOrComputeSchedule(userId).catch((e) => {
+        console.warn(`[schedule-context] getOrComputeSchedule failed for ${userId}:`, e);
+        return null;
+      }),
+      prisma.negotiationSession.findMany({
+        where: { hostId: userId, archived: false, status: { not: "cancelled" } },
+        include: {
+          link: {
+            select: {
+              inviteeName: true,
+              inviteeEmail: true,
+              topic: true,
+              code: true,
+              slug: true,
+            },
           },
         },
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 20,
-    }),
-    // PR-C: progressive-profiling fold-in. Compute gaps alongside the schedule
-    // so the hints are module-resident and route through moduleGuardBucket
-    // telemetry. Defensive: gap failure is non-fatal; empty array degrades
-    // gracefully (no hints, no telemetry for this turn).
-    computeProfileGaps(userId).catch((e) => {
-      console.warn(`[schedule-context] computeProfileGaps failed for ${userId}:`, e);
-      return [] as ProfileGap[];
-    }),
-  ]);
+        orderBy: { updatedAt: "desc" },
+        take: 20,
+      }),
+      // PR-C: progressive-profiling fold-in. Compute gaps alongside the schedule
+      // so the hints are module-resident and route through moduleGuardBucket
+      // telemetry. Defensive: gap failure is non-fatal; empty array degrades
+      // gracefully (no hints, no telemetry for this turn).
+      computeProfileGaps(userId).catch((e) => {
+        console.warn(`[schedule-context] computeProfileGaps failed for ${userId}:`, e);
+        return [] as ProfileGap[];
+      }),
+      // PR-C: terminal-marker scan for OnboardingState. Scoped to active
+      // channel; non-dashboard surfaces (no channel) get []. Defensive
+      // catch — onboardingState aggregation degrades gracefully if the
+      // scan fails (chat module's selector treats null timestamps as
+      // "no completion ever").
+      moduleContext.channel?.id
+        ? prisma.channelMessage
+            .findMany({
+              where: {
+                channelId: moduleContext.channel.id,
+                createdAt: { gte: onboardingMessageCutoff },
+              },
+              select: { metadata: true, createdAt: true },
+              orderBy: { createdAt: "desc" },
+            })
+            .catch((e) => {
+              console.warn(
+                `[schedule-context] onboarding-message scan failed for ${userId}:`,
+                e,
+              );
+              return [] as Array<{ metadata: unknown; createdAt: Date }>;
+            })
+        : Promise.resolve([] as Array<{ metadata: unknown; createdAt: Date }>),
+    ]);
 
   if (!user) {
     throw new Error(`[schedule-context] user ${userId} not found`);
@@ -450,6 +493,37 @@ export async function loadScheduleContext(
   const gapLines = buildGapContextLines(profileGaps);
   const contextLines = [...built.contextLines, ...gapLines];
 
+  // PR-C: aggregate OnboardingState. Defensive: any failure here MUST NOT
+  // fail the whole loader (the chat / recalibrate base paths still work
+  // without onboardingState). On error, omit the field — modules that
+  // branch on it treat undefined as "no signal."
+  let onboardingState: OnboardingState | undefined;
+  try {
+    onboardingState = await computeOnboardingState(
+      userId,
+      // Prisma's metadata column is `JsonValue` which is wider than the
+      // `Record<string, unknown> | null | undefined` shape DatedMessageMetaSlice
+      // requires. The reader-side helpers in dormant-eligibility.ts only
+      // touch `metadata?.kind` / `metadata?.subkind` / `metadata?.terminal`
+      // (with optional chaining), so non-object JsonValues degrade cleanly
+      // (treated as "no marker"). Cast to keep the helper interface tight.
+      onboardingMessages.map((m) => ({
+        createdAt: m.createdAt,
+        metadata:
+          m.metadata && typeof m.metadata === "object" && !Array.isArray(m.metadata)
+            ? (m.metadata as Record<string, unknown>)
+            : null,
+      })),
+      profileGaps.length,
+    );
+  } catch (e) {
+    console.warn(
+      `[schedule-context] computeOnboardingState failed for ${userId}:`,
+      e,
+    );
+    onboardingState = undefined;
+  }
+
   return {
     contextLines,
     calendarConnected: built.calendarConnected,
@@ -457,5 +531,6 @@ export async function loadScheduleContext(
     tzLabel: built.tzLabel,
     activeSessionCount: activeSessions.length,
     profileGaps,
+    onboardingState,
   };
 }

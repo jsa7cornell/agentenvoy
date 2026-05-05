@@ -220,9 +220,20 @@ export interface IntentModule<C extends ModuleContextOutput = ModuleContextOutpu
    *
    * Static for most modules; can be a function for matcher-conditional
    * composition (Ni2 — e.g., rule module loads `add` vs `update` fragment
-   * based on `matchResult.playbookVariant`).
+   * based on `matchResult.playbookVariant`). The optional `contextOutput`
+   * second arg (PR-C of `2026-05-05_conversational-onboarding-vision`) lets
+   * a selector branch on the loaded context — used by the chat module to
+   * fire `post-calibration` based on `OnboardingState`. Modules that don't
+   * need context (e.g., recalibrate's matcher-driven variant) can ignore
+   * the second arg; backward-compatible because the runner always passes
+   * it but selectors can accept a single arg.
    */
-  composerPlaybook: readonly string[] | ((match: MatchResult) => readonly string[]);
+  composerPlaybook:
+    | readonly string[]
+    | ((
+        match: MatchResult,
+        contextOutput?: ModuleContextOutput,
+      ) => readonly string[]);
 
   contextLoader: (
     moduleContext: ModuleContext,

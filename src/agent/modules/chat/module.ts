@@ -17,12 +17,31 @@
  * action narrowing happens in PR3b-iii's per-event-intent modules
  * (create_link gets just `create_link`; modify_link gets the update_*
  * family; etc.). Chat's permissive set matches the legacy schedule path.
+ *
+ * Variants (PR-C of `2026-05-05_conversational-onboarding-vision`):
+ *   - `post-calibration` — fires when `OnboardingState.lastCalibrationCompletionAt`
+ *                         (or `lastTuningCompletionAt` for legacy auto-resume)
+ *                         is within 5 minutes of the current turn. Loads the
+ *                         `composers/chat/post-calibration.md` fragment on top
+ *                         of the base playbook. Per Author Response B3, no
+ *                         chip-fallback. Per Author Response B2, no chat
+ *                         variant for sub-dormant return in v1 (PR-D ships it).
+ *   - `base` — fallthrough; uses the existing playbook unchanged.
  */
 import type { IntentModule } from "@/agent/modules/types";
 import {
   loadScheduleContext,
   type ScheduleContext,
 } from "@/agent/modules/_shared/schedule-context";
+import {
+  playbookForVariant,
+  selectChatVariant,
+  type ChatVariant,
+} from "./playbook-variants";
+
+// Re-export for tests + future dispatch wrappers.
+export { selectChatVariant };
+export type { ChatVariant };
 
 export const chatModule: IntentModule<ScheduleContext> = {
   intent: "chat",
@@ -31,12 +50,16 @@ export const chatModule: IntentModule<ScheduleContext> = {
     "Free-form host turn — fall-through composer. Loads full schedule context " +
     "(calendar, sessions, preferences, reusable links) and runs through the " +
     "channel composer playbook. Skips precheck; the matcher fires only for " +
-    "explicitly event-shaped intents.",
+    "explicitly event-shaped intents. PR-C variant: `post-calibration` fires " +
+    "within 5 minutes of recalibrate-arc completion (also legacy " +
+    "PrimaryLinkFlow auto-resume terminal) and surfaces orientation framing.",
 
-  composerPlaybook: [
-    "fragments/voice",
-    "composers/calendar-event-composer",
-  ],
+  composerPlaybook: (matchResult, contextOutput) =>
+    contextOutput
+      ? playbookForVariant(
+          selectChatVariant(matchResult, contextOutput as ScheduleContext),
+        )
+      : playbookForVariant("base"),
 
   contextLoader: loadScheduleContext,
 
