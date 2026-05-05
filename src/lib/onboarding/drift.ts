@@ -18,6 +18,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import { fetchGoogleOnboardingSeed } from "@/lib/google-onboarding-seed";
+import { parseChannelMessageMetadata } from "@/lib/channel/metadata-schema";
 import type { UserPreferences } from "@/lib/scoring";
 
 // ---------------------------------------------------------------------------
@@ -136,4 +137,92 @@ export async function computeCalibrationDrift(userId: string): Promise<DriftAnal
     googleDuration,
     storedDuration,
   };
+}
+
+// ---------------------------------------------------------------------------
+// First-time calibration detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Action types written by the `manage_setup` cluster (and its absorbed
+ * intents). When ANY of these have been emitted by Envoy in the host's
+ * channel history, the host has begun managing their setup post-seed —
+ * which means they are no longer in the "first-time" calibration window
+ * even if `lastCalibratedAt` is still recent.
+ *
+ * Per proposal `2026-05-05_conversational-onboarding-vision` §2.4a (B2):
+ * `recalibrate.first-time` fires only when no manage_setup writes have
+ * happened yet. Multi-field edits on calibrated hosts route to
+ * `manage_setup` instead.
+ */
+const MANAGE_SETUP_ACTION_TYPES: ReadonlySet<string> = new Set([
+  "update_meeting_settings",
+  "update_business_hours",
+  "update_availability_rule",
+  "update_knowledge",
+  "rename_primary",
+]);
+
+/** Window after `User.createdAt` during which a host can be considered
+ *  in the first-time calibration arc. The seed-everything path stamps
+ *  `lastCalibratedAt` at signup, so `daysSinceCalibration === 0` aligns
+ *  with `now - createdAt` being well within 24h for fresh signups. */
+const FIRST_TIME_GRACE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Minimal shape of a ChannelMessage needed for first-time detection.
+ *  Uses `metadata.actions: ActionCall[]` populated by the runner after
+ *  every Envoy turn that emitted actions. */
+export interface FirstTimeMessageSlice {
+  metadata?: unknown;
+}
+
+/**
+ * Returns true when the host is in the first-time conversational
+ * calibration window:
+ *
+ *  (a) `lastCalibratedAt` is set AND within ~24h of `createdAt` AND today
+ *      (`daysSinceCalibration === 0`), AND
+ *  (b) no Envoy turn in the channel history has emitted any
+ *      `manage_setup`-bucket action.
+ *
+ * Conservative: returns false when any required input is missing.
+ *
+ * The optional `messages` arg lets callers avoid a second DB read when
+ * they already loaded the channel history. When omitted, the predicate
+ * still returns true on (a) alone IF the caller has a separate guarantee
+ * that no manage_setup writes exist (e.g., a fresh signup where no
+ * channel exists yet). Today's only caller (`recalibrate` contextLoader)
+ * passes the messages it already has.
+ */
+export function isFirstTimeCalibration(
+  user: {
+    createdAt: Date | null;
+    lastCalibratedAt: Date | null;
+  },
+  daysSinceCalibration: number | null,
+  messages?: FirstTimeMessageSlice[],
+): boolean {
+  if (!user.createdAt || !user.lastCalibratedAt) return false;
+  if (daysSinceCalibration === null || daysSinceCalibration !== 0) return false;
+
+  const ageMs = user.lastCalibratedAt.getTime() - user.createdAt.getTime();
+  if (ageMs < 0 || ageMs > FIRST_TIME_GRACE_WINDOW_MS) return false;
+
+  // Also gate on now-vs-createdAt — `daysSinceCalibration === 0` already
+  // covers "today" but signup grace is the stricter fence.
+  const sinceSignupMs = Date.now() - user.createdAt.getTime();
+  if (sinceSignupMs > FIRST_TIME_GRACE_WINDOW_MS) return false;
+
+  if (messages && messages.length > 0) {
+    for (const m of messages) {
+      const meta = parseChannelMessageMetadata(m.metadata);
+      const actions = meta.actions;
+      if (!actions || actions.length === 0) continue;
+      for (const a of actions) {
+        if (MANAGE_SETUP_ACTION_TYPES.has(a.action)) return false;
+      }
+    }
+  }
+
+  return true;
 }
