@@ -224,6 +224,88 @@ export function needsActionRedundancyRetry(
 }
 
 // ---------------------------------------------------------------------------
+// Narration↔emission consistency — claim-without-emit guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Retry hint when prose claims a state-changing effect ("now blocked",
+ * "is now protected", "the action I emitted stands") but no action was
+ * emitted. Typical cause: a preEmit guard suppressed the action on a
+ * prior retry and the composer re-narrated as if the action stood.
+ *
+ * Cross-reference: `proposals/2026-05-05_state-integrity-and-architectural-attention-bias.md`.
+ */
+export const NARRATION_EMISSION_CONSISTENCY_RETRY_PROMPT =
+  "Your previous reply claimed a state change (e.g. \"now blocked\", \"is updated\", \"the action I emitted stands\") but you did not emit a corresponding `[ACTION]` block — likely because a pre-emit guard suppressed it earlier this turn, or you forgot to emit. Re-narrate WITHOUT claiming the effect happened. Either (a) surface the conflict / blocker honestly and ask the host to confirm, or (b) ask a clarifying question. Do NOT assert that the change is already done.";
+
+/**
+ * Patterns that match composer prose CLAIMING a state-change effect already
+ * happened. Verb-shaped only — passive read-only narration like
+ * "Your timezone is set to EDT" must NOT match (that's a state report,
+ * not a write claim).
+ *
+ * Production-observed shapes (FeedbackReport `cmot66ofp`, `cmot69r49`):
+ *   - "Friday May 8 is now fully protected"
+ *   - "Tuesday May 12, 9 AM-noon is blocked... The action I emitted stands"
+ *
+ * Discipline: limit to write-effect verbs (blocked/protected/locked/updated/
+ * created/cancelled/archived/rescheduled). Skip read verbs ("set to", "shows",
+ * "looks like"). Anchor on "now <verb>" or "<verb>. The action I emitted ...".
+ */
+const NARRATION_CLAIM_PATTERNS: Array<{ rx: RegExp; name: string }> = [
+  // "X is now (fully) blocked|protected|locked|updated|created|cancelled|archived|rescheduled|set up|in place"
+  {
+    rx: /\bis\s+now\s+(?:fully\s+)?(?:blocked|protected|locked|updated|created|cancell?ed|archived|rescheduled|set\s+up|in\s+place)\b/i,
+    name: "is-now-effect",
+  },
+  // "now fully blocked|protected|locked|updated|in place" (e.g. "Friday is now fully protected")
+  {
+    rx: /\bnow\s+fully\s+(?:blocked|protected|locked|updated|in\s+place)\b/i,
+    name: "now-fully-effect",
+  },
+  // "the action I emitted (stands|landed|went through|is in place)"
+  {
+    rx: /\bthe\s+action\s+I\s+emitted\s+(?:stands|landed|went\s+through|is\s+in\s+place)\b/i,
+    name: "action-i-emitted-stands",
+  },
+  // "I've|I have (just) blocked|protected|locked|cancelled|archived|rescheduled X"
+  // Layer 2a covers other write-verb phrasings text-only; we add the parity
+  // check (no parsedActions) for these tighter write verbs.
+  {
+    rx: /\bI(?:['’]?ve|\s+have)\s+(?:just\s+)?(?:blocked|protected|locked|cancell?ed|archived|rescheduled)\b/i,
+    name: "i-have-write-verb",
+  },
+];
+
+/**
+ * Returns a retry hint when the composer's prose makes a write-effect claim
+ * but no action was parsed from the response. Stateless — consults only the
+ * text and the parsed actions.
+ *
+ * The runner runs this guard BEFORE action dispatch, so we can't check
+ * `actionResults` for success. But the failure mode (preEmit suppressed the
+ * action on a prior retry; composer re-narrates as if the action stood) is
+ * fully captured by `parsedActions.length === 0` + claim prose: the retry's
+ * `parsedActions` IS empty in those cases.
+ */
+export function needsNarrationEmissionRetry(
+  text: string,
+  parsedActions: ActionRequest[],
+): { hint: string; flaggedReason: string } | null {
+  if (!text) return null;
+  if (parsedActions.length > 0) return null;
+
+  for (const { rx, name } of NARRATION_CLAIM_PATTERNS) {
+    if (!rx.test(text)) continue;
+    return {
+      flaggedReason: `claim-without-emit:${name}`,
+      hint: NARRATION_EMISSION_CONSISTENCY_RETRY_PROMPT,
+    };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // PostStreamGuard wrappers
 // ---------------------------------------------------------------------------
 
@@ -271,15 +353,41 @@ export const f6RedundancyGuard: PostStreamGuard = {
 };
 
 /**
+ * Narration↔emission consistency guard. Catches the
+ * "Friday is now fully protected" + `parsedActions: []` shape — composer
+ * narrating a write effect that didn't emit (typically because a preEmit
+ * guard suppressed the prior emission and the composer didn't propagate
+ * that into its retry prose).
+ *
+ * Added 2026-05-05 per FeedbackReport `cmot66ofp` / `cmot69r49`. Cross-ref
+ * `proposals/2026-05-05_state-integrity-and-architectural-attention-bias.md`.
+ *
+ * Scope discipline: this guard ships in the default set, and inquire (the
+ * cluster most prone to read-only "is set to" narration) opts out via
+ * `useDefaultPostStreamGuards: false`. The regex set is also verb-shaped
+ * (write verbs only) as a second line of defense against false positives.
+ */
+export const narrationEmissionConsistencyGuard: PostStreamGuard = {
+  name: "narration-emission-consistency",
+  check: ({ text, parsedActions }) => {
+    const result = needsNarrationEmissionRetry(text, parsedActions);
+    if (!result) return null;
+    return { flaggedReason: result.flaggedReason, hint: result.hint };
+  },
+};
+
+/**
  * Default guard set auto-injected by the runner unless the module sets
  * `useDefaultPostStreamGuards: false`.
  *
- * Order matters: emission first (loudest case), then shape, then redundancy.
- * The runner short-circuits on the first firing, so earlier-listed guards
- * have priority.
+ * Order matters: emission first (loudest case), then shape, then redundancy,
+ * then narration↔emission consistency (catches the residual "claim survived
+ * the retry but no action did" case the others don't cover). The runner
+ * short-circuits on the first firing, so earlier-listed guards have priority.
  */
 export const DEFAULT_POST_STREAM_GUARDS: readonly PostStreamGuard[] = [
   layer2aEmissionGuard,
   layer2bShapeGuard,
   f6RedundancyGuard,
+  narrationEmissionConsistencyGuard,
 ];
