@@ -37,7 +37,7 @@
  *    can identify these turns.
  * ---------------------------------------------------------------------------
  */
-import { generateText, tool, type Tool } from "ai";
+import { generateText, tool, type ModelMessage, type Tool } from "ai";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { envoyModel } from "@/lib/model";
@@ -167,25 +167,26 @@ export const defaultComposerInvoker: ComposerInvoker = async ({
   // Cache_control breakpoint sits on the LAST few-shot assistant turn so the
   // static system prompt + few-shot share one cache prefix; per-host context
   // (history + current message) lives below the breakpoint.
-  type Msg = {
-    role: "user" | "assistant";
-    content: string;
-    providerOptions?: Record<string, unknown>;
-  };
-  const messages: Msg[] = [];
+  const messages: ModelMessage[] = [];
 
   if (fewshot && fewshot.length > 0) {
     for (let i = 0; i < fewshot.length; i++) {
       const turn = fewshot[i];
       messages.push({ role: "user", content: turn.user });
-      const assistantMsg: Msg = { role: "assistant", content: turn.assistant };
-      if (i === fewshot.length - 1) {
-        // Cache breakpoint on the LAST few-shot assistant turn.
-        assistantMsg.providerOptions = {
-          anthropic: { cacheControl: { type: "ephemeral" } },
-        };
-      }
-      messages.push(assistantMsg);
+      const isLast = i === fewshot.length - 1;
+      messages.push({
+        role: "assistant",
+        content: turn.assistant,
+        // Cache breakpoint on the LAST few-shot assistant turn so the static
+        // system prompt + few-shot share one cache prefix.
+        ...(isLast
+          ? {
+              providerOptions: {
+                anthropic: { cacheControl: { type: "ephemeral" } },
+              },
+            }
+          : {}),
+      });
     }
   }
 
