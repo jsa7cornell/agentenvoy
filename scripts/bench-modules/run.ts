@@ -30,9 +30,10 @@ import type { BenchOutput, FixtureResult, ModuleFixture } from "./types";
 // PRs add the real modules.
 import "@/agent/modules";
 
-// Fixture imports — empty in PR1a; PR1c adds rule fixtures, PR4 adds
-// bookings, PR5 adds dealroom-host/* + dealroom-guest/*.
-const FIXTURES: ModuleFixture[] = [];
+// Fixture imports — PR1c adds rule (six fixtures from spike).
+import { ruleFixtures } from "./fixtures/rule";
+
+const FIXTURES: ModuleFixture[] = [...ruleFixtures];
 
 // ---------------------------------------------------------------------------
 // Assertion helpers

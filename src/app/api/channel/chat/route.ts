@@ -30,6 +30,9 @@ import { classifyChatIntent } from "@/agent/intent-classifier";
 import { isEchoOfRecentEnvoy } from "@/lib/echo-detect";
 import { normalizeChatIntent, type ChatIntent, type ChatIntentBlock } from "@/lib/intent";
 import { runDispatchHandler } from "@/agent/dispatch-handler";
+import { runModule } from "@/agent/modules";
+// Import the modules registry side-effects (registers chat smoke + rule).
+import "@/agent/modules";
 import { computeProfileGaps } from "@/lib/profile-gaps";
 import type { CalendarEvent } from "@/lib/calendar";
 import {
@@ -414,25 +417,22 @@ export async function POST(req: NextRequest) {
           );
 
           // Tier dispatch — profile + rule short-circuit before the
-          // calendar load and run against their own narrower playbook
-          // via runDispatchHandler. Unclear also short-circuits below.
-          if (intent === "profile" || intent === "rule") {
+          // calendar load. Profile keeps the legacy runDispatchHandler
+          // path (migrates to runModule in PR2). Rule routes through the
+          // new module runner (PR1c — composer-modules architecture).
+          if (intent === "profile") {
             const playbookRelativePath =
-              intent === "profile"
-                ? "src/agent/runtime-prompts/composers/profile-composer.md"
-                : "src/agent/runtime-prompts/composers/calendar-rule-composer.md";
+              "src/agent/runtime-prompts/composers/profile-composer.md";
             let profileGapHints: string[] | undefined;
-            if (intent === "profile") {
-              try {
-                const gaps = await computeProfileGaps(safeUser.id);
-                profileGapHints = gaps.map((g) => g.hint);
-              } catch (e) {
-                console.warn(`[channel/chat] computeProfileGaps failed for ${safeUser.id}:`, e);
-              }
+            try {
+              const gaps = await computeProfileGaps(safeUser.id);
+              profileGapHints = gaps.map((g) => g.hint);
+            } catch (e) {
+              console.warn(`[channel/chat] computeProfileGaps failed for ${safeUser.id}:`, e);
             }
             try {
               await runDispatchHandler({
-                tier: intent,
+                tier: "profile",
                 playbookRelativePath,
                 userId: safeUser.id,
                 userName: user.name ?? null,
@@ -447,7 +447,127 @@ export async function POST(req: NextRequest) {
                 },
               });
             } catch (e) {
-              console.error(`[channel/chat] dispatch-handler ${intent} failed:`, e);
+              console.error(`[channel/chat] dispatch-handler profile failed:`, e);
+            }
+            controller.close();
+            return;
+          }
+
+          if (intent === "rule") {
+            // PR1c — composer-modules architecture wiring. Rule intent
+            // dispatches through `runModule` instead of `runDispatchHandler`.
+            // The rule module declares its own contextLoader (loads recent
+            // rules + upcoming events for conflict-awareness), composerTools
+            // (`check_conflicts_for_rule`), and preEmitChecks (fabricated-id +
+            // conflict-awareness). See `src/agent/modules/rule/module.ts`.
+            try {
+              emitStatus("thinking");
+
+              // Load conversation history for the rule turn (last 10 channel
+              // messages, sanitized — mirror of dispatch-handler.ts:218-248).
+              const recentMessages = await prisma.channelMessage.findMany({
+                where: { channelId: safeChannel.id },
+                orderBy: { createdAt: "desc" },
+                take: 10,
+              });
+              recentMessages.reverse();
+              const { messages: sanitizedHistory } = sanitizeHistory(
+                recentMessages.map((m) => ({ role: m.role, content: m.content })),
+                ["envoy", "assistant"],
+              );
+
+              const ruleResult = await runModule({
+                surface: "dashboard-host",
+                intent: "rule",
+                moduleContext: {
+                  user: {
+                    id: safeUser.id,
+                    name: user.name ?? null,
+                    email: user.email ?? "",
+                  },
+                  channel: { id: safeChannel.id },
+                  surface: "dashboard-host",
+                },
+                // Trivial matcher for PR1c: rule intent is mostly fresh-create.
+                // F14 Phase 3.B fresh-create gate + matcher refinement (NLP
+                // rule-name resolution for "extend Sales pitch hours") are
+                // future work; the rule module already handles update vs add
+                // via fabricatedIdCheck.
+                matchResult: {
+                  kind: "deterministic",
+                  resolved: { freshCreate: true },
+                  playbookVariant: "add",
+                },
+                userMessage: message,
+                conversationHistory: sanitizedHistory,
+              });
+
+              if (ruleResult.kind !== "buffered") {
+                throw new Error("rule module returned non-buffered result");
+              }
+
+              emitStatus("finalizing");
+
+              // Persist envoy turn with moduleGuard metadata for the corpus.
+              await userMsgPersist;
+              const moduleMetadata: Partial<ChannelMessageMetadata> = {};
+              if (ruleResult.parsedActions.length > 0) {
+                moduleMetadata.actions = ruleResult.parsedActions.map((a) => ({
+                  action: a.action,
+                  params: (a.params ?? {}) as Record<string, unknown>,
+                }));
+                moduleMetadata.actionResults = ruleResult.parsedActions.map((a, i) => {
+                  const r = ruleResult.actionResults[i];
+                  if (!r) return { action: a.action, success: false, message: "no_result" };
+                  return {
+                    action: a.action,
+                    success: r.success,
+                    message: r.message,
+                    ...(r.data ? { data: r.data } : {}),
+                  };
+                });
+              }
+              // moduleGuard — corpus-bucketed guard-firing record.
+              (moduleMetadata as Record<string, unknown>).moduleGuard = ruleResult.moduleGuard;
+
+              // Append linkUrl from successful action results so host sees the URL.
+              const linkUrls = ruleResult.actionResults
+                .filter((r) => r.success && typeof r.data?.linkUrl === "string")
+                .map((r) => r.data!.linkUrl as string);
+              let finalText = ruleResult.text || "Done.";
+              if (linkUrls.length > 0) {
+                finalText = (ruleResult.text || "").trim();
+                finalText = finalText
+                  ? `${finalText}\n\n${linkUrls.join("\n\n")}`
+                  : linkUrls.join("\n\n");
+              }
+
+              await prisma.channelMessage.create({
+                data: {
+                  channelId: safeChannel.id,
+                  role: "envoy",
+                  content: finalText,
+                  metadata: mergeChannelMetadata(null, moduleMetadata) as Prisma.InputJsonValue,
+                },
+              });
+
+              controller.enqueue(
+                encoder.encode(JSON.stringify({ type: "text", content: finalText }) + "\n"),
+              );
+            } catch (e) {
+              console.error(`[channel/chat] rule module failed:`, e);
+              const fallback = narrateFinalizeError();
+              try {
+                await userMsgPersist;
+                await prisma.channelMessage.create({
+                  data: { channelId: safeChannel.id, role: "envoy", content: fallback },
+                });
+                controller.enqueue(
+                  encoder.encode(JSON.stringify({ type: "text", content: fallback }) + "\n"),
+                );
+              } catch (persistErr) {
+                console.error(`[channel/chat] rule fallback persist failed:`, persistErr);
+              }
             }
             controller.close();
             return;

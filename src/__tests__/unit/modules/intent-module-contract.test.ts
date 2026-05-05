@@ -26,8 +26,8 @@ import { lookupModule, getRegistry } from "@/agent/modules";
  * Order matches the migration roadmap in the proposal's §3 PR plan.
  */
 const STILL_MIGRATING_HOST_INTENTS: ReadonlySet<string> = new Set([
-  "rule",                                       // PR1c
-  "create_bookable_link",                       // PR1c (or PR2)
+  // "rule" — migrated in PR1c (composer-modules-pr1c)
+  "create_bookable_link",                       // PR1c follow-on (or PR2)
   "profile",                                    // PR2
   "edit_preference",                            // PR2
   "create_link",                                // PR3
