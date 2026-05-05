@@ -1333,12 +1333,34 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     return () => window.removeEventListener("envoy:calendar-confirmed", onConfirmed);
   }, []);
 
+  // PR-B telemetry seam (Author Response N2): record when the posture
+  // readback first paints in the FirstRunWelcome flow so we can measure
+  // `time_from_posture_render_to_first_keystroke`. Single-fire. Stamped
+  // from the `onCalendarConfirmed` callback below; read on first
+  // keystroke. Success criterion: <10% within 200ms (animation isn't
+  // being skipped past). Failure: >50% within 200ms (animation wasting
+  // time; revisit duration). Logged via console for PR-B; no client-side
+  // product-event pipeline exists today (a future PR-E telemetry pass
+  // can swap in a beacon).
+  const posturePaintedAtRef = useRef<number | null>(null);
+  const firstKeystrokeLoggedRef = useRef(false);
+
   // Auto-resize textarea
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     const el = e.target;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 120) + "px";
+    if (
+      !firstKeystrokeLoggedRef.current &&
+      posturePaintedAtRef.current !== null
+    ) {
+      firstKeystrokeLoggedRef.current = true;
+      const elapsedMs = Date.now() - posturePaintedAtRef.current;
+      console.info("[telemetry] onboarding.first_keystroke_after_posture", {
+        time_from_posture_render_to_first_keystroke_ms: elapsedMs,
+      });
+    }
   }, []);
 
   // Open deal room in a new tab so host doesn't lose the dashboard context.
@@ -1687,6 +1709,32 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     }
                     // §1n item 6: chips auto-SUBMIT (not just fill the composer).
                     handleSend(seed);
+                  }}
+                  onCalendarConfirmed={() => {
+                    // PR-B (conversational-onboarding §3.2): mirror the
+                    // <DormantReturnBubble> "Yes, retune" chip pattern —
+                    // synthetically dispatch an invitational host message
+                    // that classifies to `recalibrate`. The contextLoader
+                    // computes `isFirstTime` (true for a host who just
+                    // submitted the picker), and the playbook variant
+                    // resolves to `first-time` → the first-time.md
+                    // fragment produces the conversational opener.
+                    //
+                    // Q5 beat: a 300ms timer between the posture-bubble
+                    // render and the dispatch. The user gets a brief
+                    // moment to read the readback; the chat's natural
+                    // loading-dots indicator (existing thinking-animation
+                    // in the turn-loading bubble — see ~line 2030 of this
+                    // file — reused, not rebuilt) follows. The beat also
+                    // stamps `posturePaintedAtRef` for Author Response N2
+                    // telemetry (`time_from_posture_render_to_first_keystroke`).
+                    const POSTURE_TO_DISPATCH_BEAT_MS = 300;
+                    posturePaintedAtRef.current = Date.now();
+                    const syntheticHostMessage =
+                      "I just connected my calendar — can we set things up?";
+                    setTimeout(() => {
+                      handleSend(syntheticHostMessage);
+                    }, POSTURE_TO_DISPATCH_BEAT_MS);
                   }}
                 />
               )}
