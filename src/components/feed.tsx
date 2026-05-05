@@ -851,12 +851,19 @@ function FirstRunWelcome({
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-/** Render **bold** and [link](url) markdown in message content */
+/** Render **bold**, _italic_, and [link](url) markdown in message content.
+ *  Italic support added in PR-B (conversational-onboarding) so the
+ *  recalibrate.first-time fragment's worked-example sentence renders in
+ *  italics per Q5b — visually separates the user-could-say demonstration
+ *  from Envoy's voice. Mirrors `renderTuningMarkdown` in primary-link-flow.tsx. */
 function renderMarkdown(text: string): React.ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
+  const parts = text.split(/(\*\*[^*]+\*\*|_[^_\n]+_|\[[^\]]+\]\([^)]+\))/g);
   return parts.map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("_") && part.endsWith("_") && part.length > 2) {
+      return <em key={i} className="text-secondary">{part.slice(1, -1)}</em>;
     }
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch) {
