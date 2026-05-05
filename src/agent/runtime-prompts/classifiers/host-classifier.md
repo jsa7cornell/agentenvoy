@@ -144,3 +144,40 @@ Setup continuations (prior turn was a bookable link proposal):
 - "Schedule a 45-min strategy session with Sarah that works for her too" → {kind: "book_with_person"}
 - "Book a call with Bryan next week — find a mutual time" → {kind: "book_with_person"}
 - "Get on Bryan's calendar for a quick coffee" → {kind: "book_with_person"}
+
+---
+
+## INTENT_TO_CLUSTER mapping (runtime — do not change your output)
+
+**You always emit one of the nine intent names above.** The runtime translates your output to a cluster name before dispatching to a module. This section documents the mapping so you understand why some boundary cases don't need fine-grained disambiguation.
+
+| Your output | Cluster dispatched | What it means |
+|---|---|---|
+| `edit_preference`, `create_bookable_link` | `manage_setup` | Both land in one module; no distinction needed at dispatch |
+| `create_link`, `modify_link`, `cancel_link` | `event_action` | One module handles all event writes; within-thread drift is absorbed |
+| `query_calendar`, `query_event` | `inquire` | Read-only; same composer for both |
+| `chat` | `chat` | Unchanged |
+| `book_with_person` | `book_with_person` | Unchanged — bilateral flow is genuinely distinct |
+
+**What this means for you:**
+
+- **Buffer commands** ("set buffer to 15 minutes"): emit `edit_preference`. The runtime cluster (`manage_setup`) can emit BOTH `update_meeting_settings` (global default) and `update_availability_rule` (per-link) without stripping. You do NOT need to split the turn; one intent is correct.
+- **Create→modify drift**: if a thread starts with a create intent and the user then says "change it to Thursday", it's fine to emit `modify_link`. The runtime will dispatch to the same `event_action` cluster either way; the precheckHint guides the composer toward modify vs create behavior.
+- **Bookable link setup continuations**: emit `create_bookable_link` for every follow-up in a bookable link setup thread. The `manage_setup` cluster handles the full multi-turn dialog.
+- **"cancel AND block this day"**: cross-cluster compound (event_action + manage_setup). Emit the primary intent (`cancel_link`). The composer is taught to narrate the secondary operation and ask for confirmation in the next turn (polite handoff — §2.5 of the cluster-collapse proposal).
+
+### Boundary case examples
+
+**Buffer (emit edit_preference — cluster handles both sides):**
+- "Set 15 minutes of buffer between meetings" → {kind: "edit_preference"}
+- "Give me buffer time between all my calls" → {kind: "edit_preference"}
+- "Add a 10-minute buffer to my Tutoring sessions" → {kind: "edit_preference"}
+
+**Bookable link setup follow-up (always create_bookable_link):**
+- [prior turn proposed "Sales Pitch" link] "Yes, go for it" → {kind: "create_bookable_link"}
+- [prior turn proposed link] "Make it 45 min instead" → {kind: "create_bookable_link"}
+- [prior turn proposed link] "Also add Thursdays" → {kind: "create_bookable_link"}
+
+**Cross-cluster compound (emit primary intent):**
+- "Cancel the Bryan meeting and block Thursday for me" → {kind: "cancel_link"} (primary)
+- "Reschedule Sarah to Friday and update my buffer to 30 min" → {kind: "modify_link"} (primary)
