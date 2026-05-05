@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { ThumbsDownFeedback } from "./thumbs-down-feedback";
 
 interface Message {
   id: string;
@@ -126,7 +127,7 @@ export function Chat({
         {messages.map((message) => (
           <div
             key={message.id}
-            className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+            className={`flex items-end gap-1 group ${message.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
               className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
@@ -146,6 +147,12 @@ export function Chat({
                   .trim()}
               </div>
             </div>
+            {message.role === "assistant" && (
+              <ThumbsDownFeedback
+                sessionId={null}
+                messageContent={message.content}
+              />
+            )}
           </div>
         ))}
         {isLoading && messages[messages.length - 1]?.role === "user" && (
