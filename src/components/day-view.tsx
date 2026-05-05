@@ -41,7 +41,7 @@ function toDateStr(d: Date): string {
 export function DayView({
   events,
   slots,
-  locationByDay: _locationByDay,
+  locationByDay: _locationByDay, // eslint-disable-line @typescript-eslint/no-unused-vars
   timezone,
   weekStart,
   primaryCalendar,

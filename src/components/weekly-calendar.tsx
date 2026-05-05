@@ -187,7 +187,7 @@ interface WeeklyCalendarProps {
 export function WeeklyCalendar({
   events,
   slots,
-  locationByDay: _locationByDay,
+  locationByDay: _locationByDay, // eslint-disable-line @typescript-eslint/no-unused-vars
   timezone,
   weekStart,
   primaryCalendar,
