@@ -7,7 +7,10 @@ import { envoyModel } from "@/lib/model";
 import { getOrComputeSchedule } from "@/lib/calendar";
 import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
 import { getUserTimezone } from "@/lib/timezone";
-import { needsActionEmissionRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
+import {
+  needsActionEmissionRetry,
+  ACTION_EMISSION_RETRY_PROMPT,
+} from "@/agent/modules/_shared/post-stream-guards";
 
 const DASHBOARD_SYSTEM = `You are Envoy, the user's scheduling agent. You help them:
 1. Create meeting links from natural language

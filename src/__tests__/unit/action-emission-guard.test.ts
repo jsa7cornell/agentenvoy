@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { needsActionEmissionRetry, needsActionShapeRetry, needsActionRedundancyRetry } from "@/agent/action-emission-guard";
+import {
+  needsActionEmissionRetry,
+  needsActionShapeRetry,
+  needsActionRedundancyRetry,
+} from "@/agent/modules/_shared/post-stream-guards";
 import type { ActionRequest } from "@/agent/actions";
 
 describe("needsActionEmissionRetry", () => {

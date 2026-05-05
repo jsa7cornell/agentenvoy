@@ -17,7 +17,12 @@ import {
   parseChannelMessageMetadata,
 } from "@/lib/channel/metadata-schema";
 import type { ChannelMessageMetadata } from "@/lib/channel/metadata-schema";
-import { needsActionEmissionRetry, needsActionShapeRetry, needsActionRedundancyRetry, ACTION_EMISSION_RETRY_PROMPT } from "@/agent/action-emission-guard";
+import {
+  needsActionEmissionRetry,
+  needsActionShapeRetry,
+  needsActionRedundancyRetry,
+  ACTION_EMISSION_RETRY_PROMPT,
+} from "@/agent/modules/_shared/post-stream-guards";
 import type { SelfCheckRecord } from "@/lib/channel/metadata-schema";
 import {
   selectVariant,
