@@ -220,9 +220,10 @@ export const defaultComposerInvoker: ComposerInvoker = async ({
 function resolvePlaybook(
   intentModule: IntentModule,
   matchResult: MatchResult,
+  contextOutput: ModuleContextOutput,
 ): readonly string[] {
   return typeof intentModule.composerPlaybook === "function"
-    ? intentModule.composerPlaybook(matchResult)
+    ? intentModule.composerPlaybook(matchResult, contextOutput)
     : intentModule.composerPlaybook;
 }
 
@@ -288,7 +289,7 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
   }
 
   // 2. Compose system prompt.
-  const fragments = resolvePlaybook(intentModule, input.matchResult);
+  const fragments = resolvePlaybook(intentModule, input.matchResult, contextOutput);
   const systemPrompt = composeSystemPrompt(fragments, contextOutput, input.moduleContext);
 
   // 3. Invoke composer (Sonnet LLM call — Rule 17 layer 3).
