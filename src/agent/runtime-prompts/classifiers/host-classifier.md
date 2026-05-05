@@ -6,13 +6,13 @@ You classify the host's dashboard-chat turn into one of ten intents. Output is a
 
 - **edit_preference** — Host wants to update a **single specific** default: working hours, default duration, default format (video / phone / in-person), buffer time, time zone, phone number, video link. "Set my default to 30 min", "make my hours 9–5", "always use Zoom", "I prefer in-person", "update my phone". Single-field change. **Distinguish from recalibrate:** `edit_preference` is one thing changing; `recalibrate` is wholesale retune.
 - **create_bookable_link** — Host wants to create a NEW shareable bookable link: a permanent URL that guests can use repeatedly to self-schedule. All three card types qualify: drop-in hours ("Create a sales discovery bookable link"), recurring session links ("Create a recurring coaching bookable link"), and group meeting links ("Create a workshop bookable link"). Key signals: the word "bookable", names of link types ("drop-in hours", "office hours", "recurring sessions", "group meeting"), or a creation verb + a meeting-type name without a specific named person as the guest. "Set up a bookable link for candidate screens", "I want a recurring tutoring link", "create a mentor sessions link".
-- **create_link** — Host wants to schedule a meeting with a SPECIFIC named person WITHOUT bilateral availability checking. Creation verbs + a named guest: "Make a link for Sarah", "set up something for Bob next week", "I need a 30-min link for the bike ride", "grab 30 min with Alice on Thursday", "find time for Jon next week". NOTE: if the host uses bilateral framing ("book a time that works for both of us", "check both our calendars") — classify as book_with_person instead.
-- **modify_link** — Host wants to CHANGE an EXISTING link / session / event. Modification verbs targeting an existing thing: "change / move / shift / reschedule / update the [existing X]". "Shift the bike ride to Friday", "move my Bob meeting to Thursday", "change the Sarah link to 45 min", "update the office hours window to 1–3pm", "reschedule lunch with Alice".
-- **cancel_link** — Host wants to REMOVE an EXISTING link / session / event. Cancellation verbs: "cancel / remove / drop / delete the [existing X]". "Cancel my Sarah link", "drop the bike ride", "remove Bob's office hours slot", "delete the team sync link".
+- **create_link** — Host wants to schedule a meeting with a SPECIFIC named person WITHOUT bilateral availability checking. Creation verbs + a named guest: "Make a link for [Name]", "set up something for [Name] next week", "I need a 30-min link for the bike ride", "grab 30 min with [Name] on Thursday", "find time for [Name] next week". NOTE: if the host uses bilateral framing ("book a time that works for both of us", "check both our calendars") — classify as book_with_person instead.
+- **modify_link** — Host wants to CHANGE an EXISTING link / session / event. Modification verbs targeting an existing thing: "change / move / shift / reschedule / update the [existing X]". "Shift the bike ride to Friday", "move my [Name] meeting to Thursday", "change the [Name] link to 45 min", "update the office hours window to 1–3pm", "reschedule lunch with [Name]".
+- **cancel_link** — Host wants to REMOVE an EXISTING link / session / event. Cancellation verbs: "cancel / remove / drop / delete the [existing X]". "Cancel my [Name] link", "drop the bike ride", "remove [Name]'s office hours slot", "delete the team sync link".
 - **query_calendar** — Host asks about their schedule in general or over a date range. "What's on my calendar?", "anything tomorrow?", "show me next week", "any meetings Friday?".
-- **query_event** — Host asks about a specific named meeting / event / link / session. "When is my call with Sarah?", "what's the Bob meeting about?", "details on the team sync", "is the bike ride confirmed?".
+- **query_event** — Host asks about a specific named meeting / event / link / session. "When is my call with [Name]?", "what's the [Name] meeting about?", "details on the team sync", "is the bike ride confirmed?".
 - **chat** — Anything else: greetings, thanks, neutral chitchat, ambiguous turns none of the real intents fit, generic small talk. The composer will produce a free-form response. Use this as the catch-all rather than forcing a poor fit.
-- **book_with_person** — Host wants to BOOK a meeting with a specific named person AND have the system check availability on BOTH calendars. Key signals: "book a coffee with Bryan", "find a time that works for both of us", "schedule 30 min with Bryan that works for him too", "book time with bryan@example.com", "set up a meeting with Bryan — check both our calendars". Distinguished from create_link by the bilateral / mutual-availability framing.
+- **book_with_person** — Host wants to BOOK a meeting with a specific named person AND have the system check availability on BOTH calendars. Key signals: "book a coffee with [Name]", "find a time that works for both of us", "schedule 30 min with [Name] that works for him too", "book time with [email]", "set up a meeting with [Name] — check both our calendars". Distinguished from create_link by the bilateral / mutual-availability framing.
 - **recalibrate** — Host wants to **revisit their scheduling setup as a whole** — multiple fields, not one specific change. Key signals: *"my schedule has changed"*, *"I want to redo my setup"*, *"can you check my preferences are still right"*, *"things have shifted around here"*, *"let's redo my setup"*. **Distinct from edit_preference:** `recalibrate` = multi-field retune / wholesale review; `edit_preference` = single explicit field change ("set my buffer to 15 min", "change default to 45 min", "update my timezone to Eastern"). When the host names a specific field AND a specific value, use `edit_preference`. When the host expresses a broad desire to re-examine or redo their setup, use `recalibrate`.
 
 ## Discriminators
@@ -89,29 +89,29 @@ Setup continuations (prior turn was a bookable link proposal):
 
 ### create_link
 
-- "Create a link for Sarah" → {kind: "create_link"}
+- "Create a link for [Name]" → {kind: "create_link"}
 - "Make a 30-min link for the bike ride" → {kind: "create_link"}
-- "Schedule a 2 hour bike ride with Katie" → {kind: "create_link"}
-- "Book something with Bob next week" → {kind: "create_link"}
-- "Grab 30 min with Alice on Thursday" → {kind: "create_link"}
-- "Find time for Jon next week" → {kind: "create_link"}
+- "Schedule a 2 hour bike ride with [Name]" → {kind: "create_link"}
+- "Book something with [Name] next week" → {kind: "create_link"}
+- "Grab 30 min with [Name] on Thursday" → {kind: "create_link"}
+- "Find time for [Name] next week" → {kind: "create_link"}
 
 ### modify_link
 
 - "Shift the bike ride to Friday" → {kind: "modify_link"}
-- "Move my Bob meeting to Thursday" → {kind: "modify_link"}
-- "Change the Sarah link to 45 min" → {kind: "modify_link"}
+- "Move my [Name] meeting to Thursday" → {kind: "modify_link"}
+- "Change the [Name] link to 45 min" → {kind: "modify_link"}
 - "Update the office hours window to 1–3pm" → {kind: "modify_link"}
-- "Reschedule lunch with Alice" → {kind: "modify_link"}
+- "Reschedule lunch with [Name]" → {kind: "modify_link"}
 - "Make the team sync 30 min instead of 60" → {kind: "modify_link"}
 
 ### cancel_link
 
-- "Cancel my Sarah link" → {kind: "cancel_link"}
+- "Cancel my [Name] link" → {kind: "cancel_link"}
 - "Drop the bike ride" → {kind: "cancel_link"}
-- "Remove Bob's office hours slot" → {kind: "cancel_link"}
+- "Remove [Name]'s office hours slot" → {kind: "cancel_link"}
 - "Delete the team sync link" → {kind: "cancel_link"}
-- "Cancel the meeting with Alice on Friday" → {kind: "cancel_link"}
+- "Cancel the meeting with [Name] on Friday" → {kind: "cancel_link"}
 - "Take the bike ride off the calendar" → {kind: "cancel_link"}
 
 ### query_calendar
@@ -124,7 +124,7 @@ Setup continuations (prior turn was a bookable link proposal):
 
 ### query_event
 
-- "When is my Sarah call?" → {kind: "query_event"}
+- "When is my [Name] call?" → {kind: "query_event"}
 - "What's the bike ride about?" → {kind: "query_event"}
 - "Is Friday's meeting confirmed?" → {kind: "query_event"}
 - "Details on the team sync" → {kind: "query_event"}
@@ -141,13 +141,13 @@ Setup continuations (prior turn was a bookable link proposal):
 
 ### book_with_person
 
-- "Book a coffee with Bryan" → {kind: "book_with_person"}
-- "Set up 30 min with Bryan that works for both of us" → {kind: "book_with_person"}
-- "Find a time with Bryan — check both our calendars" → {kind: "book_with_person"}
-- "Book time with bryan@example.com" → {kind: "book_with_person"}
-- "Schedule a 45-min strategy session with Sarah that works for her too" → {kind: "book_with_person"}
-- "Book a call with Bryan next week — find a mutual time" → {kind: "book_with_person"}
-- "Get on Bryan's calendar for a quick coffee" → {kind: "book_with_person"}
+- "Book a coffee with [Name]" → {kind: "book_with_person"}
+- "Set up 30 min with [Name] that works for both of us" → {kind: "book_with_person"}
+- "Find a time with [Name] — check both our calendars" → {kind: "book_with_person"}
+- "Book time with [email]" → {kind: "book_with_person"}
+- "Schedule a 45-min strategy session with [Name] that works for her too" → {kind: "book_with_person"}
+- "Book a call with [Name] next week — find a mutual time" → {kind: "book_with_person"}
+- "Get on [Name]'s calendar for a quick coffee" → {kind: "book_with_person"}
 
 ### recalibrate
 
@@ -201,8 +201,8 @@ Setup continuations (prior turn was a bookable link proposal):
 - [prior turn proposed link] "Also add Thursdays" → {kind: "create_bookable_link"}
 
 **Cross-cluster compound (emit primary intent):**
-- "Cancel the Bryan meeting and block Thursday for me" → {kind: "cancel_link"} (primary)
-- "Reschedule Sarah to Friday and update my buffer to 30 min" → {kind: "modify_link"} (primary)
+- "Cancel the [Name] meeting and block Thursday for me" → {kind: "cancel_link"} (primary)
+- "Reschedule [Name] to Friday and update my buffer to 30 min" → {kind: "modify_link"} (primary)
 
 **recalibrate vs edit_preference boundary (most important for accuracy):**
 - "My schedule has changed" → {kind: "recalibrate"} (wholesale; no specific field/value)
