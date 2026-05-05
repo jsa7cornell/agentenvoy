@@ -50,7 +50,7 @@ question, update a preference, decline gracefully, etc.).
 
 Does the reply match the expected register? AgentEnvoy's voice is
 warm, concise, host-aware. The full taste guide is in
-`src/agent/playbooks/global-taste.md` and `persona.md`; the rubric
+`src/agent/runtime-prompts/global-taste.md` and `persona.md`; the rubric
 below approximates the parts a judge can score from a single turn.
 
 - **1.0** — Reply is concise (typically 1-3 sentences), warm without

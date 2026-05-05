@@ -9,7 +9,7 @@ This file is intentionally short — it's a pointer to the decision record plus 
 
 ## Why this surface exists (pointer)
 
-The MCP surface is how non-Envoy **delegates** — Claude, a guest's EA, a future third-party agent — participate in AgentEnvoy coordination on equal footing with Envoy. Today's surface is **guest-side only** (`/api/mcp`, public, scoped to a meeting link); a **host-side** surface where a principal's own LLM acts as them (OAuth-authenticated, scoped by consent) is on the roadmap — see `WISHLIST.md` item 39, and item 41 for the downstream Anthropic Connector Directory goal. The "why" for all of this lives in `AGENTENVOY-VISION.md` §1, §7 (terminology: Principal, Delegate, Envoy, External agent, MCP surface), and §10. Invariants and contracts below are the *how*; the vision doc owns the *why* and the vocabulary.
+The MCP surface is how non-Envoy **delegates** — Claude, a guest's EA, a future third-party agent — participate in AgentEnvoy coordination on equal footing with Envoy. Today's surface is **guest-side only** (`/api/mcp`, public, scoped to a meeting link); a **host-side** surface where a principal's own LLM acts as them (OAuth-authenticated, scoped by consent) is on the roadmap — see `WISHLIST.md` item 39, and item 41 for the downstream Anthropic Connector Directory goal. The "why" for all of this lives in `VISION.md` §1, §7 (terminology: Principal, Delegate, Envoy, External agent, MCP surface), and §10. Invariants and contracts below are the *how*; the vision doc owns the *why* and the vocabulary.
 
 ## Agent platform — status & roadmap
 

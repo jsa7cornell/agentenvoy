@@ -88,6 +88,7 @@ model User {
   watchChannels     CalendarWatchChannel[]
   adminAccessLogs   AdminAccessLog[]     @relation("AdminAccessLogs")
   feedbackReports   FeedbackReport[]
+  composerReports   ComposerReport[]
   agentTokensMinted AgentAccessToken[]   @relation("AgentTokensMinted")
   productEvents     ProductEvent[]
   onboardingEvents  OnboardingEvent[]
@@ -940,6 +941,38 @@ model ConfirmAttempt {
 /// `logRouteError()` (`src/lib/route-error.ts`) to persist a server-side
 /// error. Shown on `/admin/failures` alongside ConfirmAttempt and
 /// SideEffectLog failures.
+/// Admin-flagged Envoy response. Created via the 👎 button (host-only).
+/// Self-contained: bundle carries full conversation history, actions,
+/// actionResults, promptContext, route errors, and user preferences so an
+/// agent can debug cold without joining other tables.
+/// Review: agentenvoy/COMPOSERREPORTS.md  Query: prisma.composerReport.findMany()
+model ComposerReport {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// NegotiationSession.id when flagged from a deal room; null for dashboard.
+  sessionId      String?
+  /// The exact Envoy message text that was flagged.
+  messageContent String   @db.Text
+  /// Admin's free-text note on what was wrong.
+  adminNote      String?  @db.Text
+  /// Page URL at time of flag.
+  url            String?
+  /// open | actioned | wontfix
+  status         String   @default("open")
+  /// Free-text record of what was done in response (filled during triage).
+  actionTaken    String?  @db.Text
+  /// Full debug context: conversationHistory (with actions/actionResults/
+  /// promptContext per turn), filingContext, userPreferences, activeSessions,
+  /// routeErrors. Everything needed to debug the flagged turn cold.
+  bundle         Json
+
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([userId])
+}
+
 model RouteError {
   id          String   @id @default(cuid())
   route       String

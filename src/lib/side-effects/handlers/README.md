@@ -30,7 +30,7 @@ use based on `EFFECT_MODE_<KIND>` env vars.
    - Production: usually `live`
    - Preview: usually `log` (or `dryrun` if the caller needs a response shape)
    - Local dev: `log` by default in `.env.tpl`
-   - Add a row to the "Per-environment defaults" table in `RISK-MANAGEMENT.md`
+   - Add a row to the "Per-environment defaults" table in `~/AI Brain/agentenvoy/PLAYBOOK.md` § Outbound Side Effects
 
 5. **Write tests**
    - Unit tests at `src/__tests__/unit/side-effects/<kind>.test.ts`
