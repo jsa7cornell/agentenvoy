@@ -3164,6 +3164,22 @@ async function handleUpdateAvailabilityRule(
   await invalidateSchedule(userId);
   invalidateBehaviorSnapshot(userId);
 
+  // For bookable add path: include schedule fields so dispatch-stream.ts can
+  // populate bookableMeta for BookableLinkCard (B4). The rule variable is in
+  // scope for both add and update paths; bookable fields only apply when
+  // action === "bookable" and the rule exists.
+  const addedRule = addedRuleId ? nextRules.find((r) => r.id === addedRuleId) : undefined;
+  const bookableScheduleFields =
+    addedRule && addedRule.action === "bookable" && addedRule.bookable
+      ? {
+          daysOfWeek: addedRule.daysOfWeek ?? [],
+          timeStart: addedRule.timeStart ?? null,
+          timeEnd: addedRule.timeEnd ?? null,
+          durationMinutes: addedRule.bookable.durationMinutes ?? null,
+          format: addedRule.bookable.format ?? null,
+        }
+      : {};
+
   return {
     success: true,
     message: summary,
@@ -3171,6 +3187,7 @@ async function handleUpdateAvailabilityRule(
       ...(addedRuleId ? { id: addedRuleId } : id ? { id } : {}),
       ...(linkUrl ? { linkUrl } : {}),
       ...(bookableName ? { bookableName } : {}),
+      ...bookableScheduleFields,
     },
   };
 }

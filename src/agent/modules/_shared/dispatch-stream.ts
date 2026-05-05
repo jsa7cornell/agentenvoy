@@ -198,7 +198,30 @@ export async function dispatchModuleAndStream(
       // Tag the link kind so the feed renders the bookable card. Same logic
       // as dispatch-handler.ts:359 pre-PR2.
       const hasBookable = result.parsedActions.some((a) => isBookableAction(a));
-      if (hasBookable) (additions as Record<string, unknown>).linkKind = "bookable";
+      if (hasBookable) {
+        (additions as Record<string, unknown>).linkKind = "bookable";
+        // B4: populate bookableMeta from the action result so BookableLinkCard
+        // can render title + schedule summary. Correlate parsedActions[i] with
+        // actionResults[i] (parallel arrays) — getActionData() does not exist;
+        // the result data lives in result.actionResults[i].data.
+        let bookableMeta: Record<string, unknown> | null = null;
+        for (let i = 0; i < result.parsedActions.length; i++) {
+          if (!isBookableAction(result.parsedActions[i])) continue;
+          const r = result.actionResults[i];
+          if (!r?.success || !r.data) continue;
+          bookableMeta = {
+            title: r.data.bookableName,
+            linkUrl: r.data.linkUrl,
+            daysOfWeek: r.data.daysOfWeek,
+            timeStart: r.data.timeStart,
+            timeEnd: r.data.timeEnd,
+            durationMinutes: r.data.durationMinutes,
+            format: r.data.format,
+          };
+          break;
+        }
+        if (bookableMeta) (additions as Record<string, unknown>).bookableMeta = bookableMeta;
+      }
     }
     (additions as Record<string, unknown>).moduleGuard = result.moduleGuard;
 

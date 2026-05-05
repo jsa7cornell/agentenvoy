@@ -840,6 +840,62 @@ function renderMarkdown(text: string): React.ReactNode[] {
   });
 }
 
+// B4: exported so dispatch-stream.ts bookableMeta cast site can reference it.
+export type BookableMeta = {
+  title?: string;
+  linkUrl?: string;
+  daysOfWeek?: number[];
+  timeStart?: string;
+  timeEnd?: string;
+  durationMinutes?: number;
+  format?: string;
+};
+
+function BookableLinkCard({ url, meta }: { url: string; meta?: BookableMeta }) {
+  const DAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const days = meta?.daysOfWeek?.length ? meta.daysOfWeek.map((d) => DAY_ABBR[d]).join(", ") : "";
+  const fmtTime = (t: string) => {
+    const [h, m] = t.split(":").map(Number);
+    const hour = h % 12 || 12;
+    const ampm = h < 12 ? "am" : "pm";
+    return m === 0 ? `${hour}${ampm}` : `${hour}:${String(m).padStart(2, "0")}${ampm}`;
+  };
+  const timeWindow =
+    meta?.timeStart && meta?.timeEnd ? `${fmtTime(meta.timeStart)}–${fmtTime(meta.timeEnd)}` : "";
+  const duration = meta?.durationMinutes ? `${meta.durationMinutes} min` : "";
+  const format =
+    meta?.format === "video"
+      ? "Video"
+      : meta?.format === "phone"
+        ? "Phone"
+        : meta?.format === "in-person"
+          ? "In person"
+          : "";
+  const summaryParts = [days, timeWindow, duration, format].filter(Boolean);
+  return (
+    <div className="rounded-lg border border-DEFAULT bg-surface-inset p-3 flex flex-col gap-2 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+          Bookable
+        </span>
+        <span className="font-medium">{meta?.title ?? "Bookable Link"}</span>
+      </div>
+      {summaryParts.length > 0 && (
+        <div className="text-xs text-secondary">{summaryParts.join(" · ")}</div>
+      )}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted truncate flex-1">{url}</span>
+        <button
+          onClick={() => navigator.clipboard.writeText(url)}
+          className="text-xs text-secondary hover:text-primary"
+        >
+          Copy
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function MeetLinkCard({ url, topic, kind }: { url: string; topic?: string; kind?: "bookable" | "recurring" }) {
   const [copied, setCopied] = useState(false);
   const [shareSupported, setShareSupported] = useState(false);
@@ -1860,7 +1916,18 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     </div>
                   )}
                   <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
-                  {meetLinkMatch && <MeetLinkCard url={meetLinkMatch[1]} kind={meetLinkKind} />}
+                  {meetLinkMatch && meetLinkKind === "bookable" ? (
+                    <BookableLinkCard
+                      url={meetLinkMatch[1]}
+                      meta={
+                        (msg.metadata as Record<string, unknown> | null)?.bookableMeta as
+                          | BookableMeta
+                          | undefined
+                      }
+                    />
+                  ) : meetLinkMatch ? (
+                    <MeetLinkCard url={meetLinkMatch[1]} kind={meetLinkKind} />
+                  ) : null}
                 </div>
                 {reaction && (
                   <div className="absolute -bottom-3 right-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/10 rounded-full px-1.5 py-0.5 text-sm shadow-sm select-none">
