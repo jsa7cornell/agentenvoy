@@ -186,6 +186,19 @@ export function AvailabilityPanel({
     fetchSchedule();
   }, [fetchSchedule]);
 
+  // Refetch the schedule when the user submits their calendar selection
+  // in the first-run picker (FirstRunWelcome → CalendarPickerBubble). The
+  // picker's submit-side has already warmed the server-side cache; this
+  // pulls the freshly populated events into the widget so the user sees
+  // their calendar as soon as the next bubbles render.
+  useEffect(() => {
+    function onConfirmed() {
+      void fetchSchedule();
+    }
+    window.addEventListener("envoy:calendar-confirmed", onConfirmed);
+    return () => window.removeEventListener("envoy:calendar-confirmed", onConfirmed);
+  }, [fetchSchedule]);
+
   // Timezone picker
   async function handleTimezoneChange(tz: string) {
     const previous = timezone;

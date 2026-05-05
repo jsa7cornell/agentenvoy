@@ -513,6 +513,15 @@ function CalendarPickerBubble({
       await fetch("/api/tuner/schedule").catch(() => {});
     } finally {
       setSubmitting(false);
+      // Tell AvailabilityPanel to refetch its events (the right-side
+      // calendar widget) and tell Feed to scroll to the new content.
+      // Single event covers both; both listeners are wired in their own
+      // useEffects so they don't have to know about each other.
+      try {
+        window.dispatchEvent(new CustomEvent("envoy:calendar-confirmed"));
+      } catch {
+        // SSR / no-window guard
+      }
       onConfirm?.();
     }
   }
@@ -1197,6 +1206,27 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
       container.removeEventListener("scroll", onScroll);
       observer.disconnect();
     };
+  }, []);
+
+  // Scroll to bottom when the user submits the calendar picker. The new
+  // bubbles ("Great — I now have what I need", posture, primary link,
+  // tuning CTA) reveal *below* the picker, so without a nudge they land
+  // off-screen below the composer. Force-pin to bottom and scroll there.
+  useEffect(() => {
+    function onConfirmed() {
+      stickToBottomRef.current = true;
+      // Wait two RAFs to let the React render + ResizeObserver land before
+      // measuring scrollHeight; otherwise we scroll to the height before
+      // the new bubbles inflated.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const c = scrollContainerRef.current;
+          if (c) c.scrollTop = c.scrollHeight;
+        });
+      });
+    }
+    window.addEventListener("envoy:calendar-confirmed", onConfirmed);
+    return () => window.removeEventListener("envoy:calendar-confirmed", onConfirmed);
   }, []);
 
   // Auto-resize textarea

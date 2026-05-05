@@ -34,6 +34,7 @@ import { invalidateSchedule } from "@/lib/calendar";
 import type { UserPreferences } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
 import { HOST_WRITE_SCOPE } from "@/lib/oauth/required-scopes";
+import { DEFAULT_TIMEZONE } from "@/lib/timezone";
 
 type NumOrUndef = number | undefined;
 
@@ -144,7 +145,12 @@ export async function GET() {
   // Seeded posture surfaces in the first-run greeting (2026-04-26+) so
   // the user sees the values we lifted from Google + the hardcoded
   // floor. Display-only on the greeting; no scoring impact.
-  const tz = (e as { timezone?: string }).timezone ?? null;
+  // Fall back to DEFAULT_TIMEZONE if explicit.timezone is missing —
+  // the posture bubble's timezone bullet is always-render now (matches
+  // the businessHours/duration/videoProvider fallback pattern). The
+  // signup seed should populate this, but treat the bullet as a UX
+  // surface and floor it rather than showing a partial bubble.
+  const tz = (e as { timezone?: string }).timezone ?? DEFAULT_TIMEZONE;
   const videoProvider =
     (e as { videoProvider?: string }).videoProvider ?? "google_meet";
 
