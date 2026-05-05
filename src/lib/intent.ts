@@ -348,6 +348,7 @@ export const HOST_CHAT_INTENT_VALUES = [
   "query_calendar",
   "query_event",
   "chat",
+  "book_with_person",       // PR4 — bookings module (book_with_person)
 ] as const;
 
 export type GuestChatIntent = (typeof CHAT_INTENT_VALUES)[number];
