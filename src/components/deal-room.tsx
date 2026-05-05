@@ -232,6 +232,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // is correct because for non-bookable visits, feedbackCode IS the minted
   // personalized code (same thing as code).
   const [feedbackCode, setFeedbackCode] = useState<string | undefined>(undefined);
+  // B5: signals that this session is a bookable child link (has recurringWindowId).
+  // Used to render the guest-facing "Bookable" subtitle when !isHost.
+  const [isBookable, setIsBookable] = useState(false);
   const [schedulingMode, setSchedulingMode] = useState<"time" | "date">("time");
   const [isVip, setIsVip] = useState(false);
   // WISHLIST §1o PR-α: three-state response from `/api/negotiate/slots`
@@ -1031,6 +1034,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         // B2/B3: always reset feedbackCode at the top of handler (Pitfall 2 fix)
         // so stale bookable child codes don't leak across sessions in the same tab.
         setFeedbackCode(undefined);
+        // B5 N1: use !!() not conditional set — resets to false on re-load to a
+        // non-bookable session in the same React instance (N1 reviewer fix).
+        setIsBookable(!!data.isBookable);
         setLinkFormat(data.link?.format || "");
         // B2: populate linkDuration from session response — fallback when slotDuration
         // is undefined (e.g. slots API returned compute_failed for a bookable session).
@@ -1781,6 +1787,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               </span>
             ))}
           </div>
+        )}
+
+        {/* B5: bookable subtitle — guest-only, not shown to host or after confirm. */}
+        {isBookable && !isHost && (
+          <span className="text-xs text-secondary italic">
+            Bookable — anyone with this link can book
+          </span>
         )}
 
         {/* Meta line — activity icon + duration + (when set) datetime.

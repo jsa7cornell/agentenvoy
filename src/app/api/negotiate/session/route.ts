@@ -953,6 +953,9 @@ export async function POST(req: NextRequest) {
     },
     isHost,
     isGuest,
+    // B5: guest DealRoom uses this to render the bookable subtitle.
+    // link.recurringWindowId is set at session-spawn time for bookable children.
+    isBookable: !!(link.recurringWindowId),
     guestUser: guestUserPayload,
     // Session's stored guest timezone (first-write-wins). Client compares to
     // the browser's detected TZ to decide whether to show the TZ recovery
