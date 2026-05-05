@@ -18,7 +18,7 @@
  */
 import type { IntentModule, ModuleContextOutput } from "@/agent/modules/types";
 
-interface ChatContext extends ModuleContextOutput {}
+type ChatContext = ModuleContextOutput;
 
 export const chatModule: IntentModule<ChatContext> = {
   intent: "chat",

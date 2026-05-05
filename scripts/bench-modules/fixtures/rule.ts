@@ -37,7 +37,7 @@ const TEST_CHANNEL = { id: "test-channel-1" };
 function upcomingTuesdays2pm(count: number): UpcomingEvent[] {
   const out: UpcomingEvent[] = [];
   const now = new Date();
-  let cursor = new Date(now);
+  const cursor = new Date(now);
   // Advance to next Tuesday
   while (cursor.getDay() !== 2) cursor.setDate(cursor.getDate() + 1);
   for (let i = 0; i < count; i++) {
@@ -266,12 +266,10 @@ export const fixture4_conflict_awareness_drift: ModuleFixture = {
   userMessage: "Block 2pm every Tuesday for deep work.",
   conversationHistory: [],
   composerInvoker: (() => {
-    let count = 0;
     const drifted = `Done — Tuesdays 2-3pm now blocked.
 
 [ACTION]{"action":"update_availability_rule","params":{"operation":"add","rule":{"type":"recurring","action":"block","timeStart":"14:00","timeEnd":"15:00","daysOfWeek":[2],"originalText":"Block 2pm every Tuesday for deep work."}}}[/ACTION]`;
     return async () => {
-      count += 1;
       // Always returns the drifted shape — the composer never adapts. Tests retry exhaustion.
       return { text: drifted };
     };

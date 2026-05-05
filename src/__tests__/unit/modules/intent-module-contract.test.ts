@@ -40,8 +40,8 @@ const STILL_MIGRATING_HOST_INTENTS: ReadonlySet<string> = new Set([
 describe("intent module contract", () => {
   it("every host intent has a registered module on dashboard-host (or is allowlisted as still-migrating)", () => {
     for (const intent of HOST_CHAT_INTENT_VALUES) {
-      const module = lookupModule("dashboard-host", intent);
-      if (!module) {
+      const intentModule = lookupModule("dashboard-host", intent);
+      if (!intentModule) {
         if (STILL_MIGRATING_HOST_INTENTS.has(intent)) continue;
         throw new Error(
           `Missing module for dashboard-host/${intent}. Either register one, or add to STILL_MIGRATING_HOST_INTENTS.`,
@@ -49,7 +49,7 @@ describe("intent module contract", () => {
       }
       // Module exists — allowedActions subset check lands in PR1c when the rule
       // module declares actual actions; PR1a's smoke module has empty allowedActions.
-      expect(module.allowedActions, `${intent}: allowedActions must be defined (use [] to opt out)`).toBeDefined();
+      expect(intentModule.allowedActions, `${intent}: allowedActions must be defined (use [] to opt out)`).toBeDefined();
     }
   });
 
@@ -68,16 +68,16 @@ describe("intent module contract", () => {
     for (const surface of Object.keys(registry) as Array<keyof typeof registry>) {
       const surfaceMap = registry[surface] ?? {};
       for (const intent of Object.keys(surfaceMap)) {
-        const module = surfaceMap[intent];
-        expect(module.intent, `${surface}/${intent}: missing intent field`).toBe(intent);
-        expect(module.surface, `${surface}/${intent}: missing surface field`).toBe(surface);
-        expect(module.description, `${surface}/${intent}: missing description`).toBeTruthy();
-        expect(module.composerPlaybook, `${surface}/${intent}: missing composerPlaybook`).toBeDefined();
-        expect(module.contextLoader, `${surface}/${intent}: missing contextLoader`).toBeDefined();
-        expect(module.postStreamGuards, `${surface}/${intent}: missing postStreamGuards (use [] to opt out)`).toBeDefined();
-        expect(module.allowedActions, `${surface}/${intent}: missing allowedActions`).toBeDefined();
-        expect(module.responseStyle, `${surface}/${intent}: missing responseStyle`).toBeDefined();
-        expect(module.moduleGuardBucket, `${surface}/${intent}: missing moduleGuardBucket`).toBeTruthy();
+        const intentModule = surfaceMap[intent];
+        expect(intentModule.intent, `${surface}/${intent}: missing intent field`).toBe(intent);
+        expect(intentModule.surface, `${surface}/${intent}: missing surface field`).toBe(surface);
+        expect(intentModule.description, `${surface}/${intent}: missing description`).toBeTruthy();
+        expect(intentModule.composerPlaybook, `${surface}/${intent}: missing composerPlaybook`).toBeDefined();
+        expect(intentModule.contextLoader, `${surface}/${intent}: missing contextLoader`).toBeDefined();
+        expect(intentModule.postStreamGuards, `${surface}/${intent}: missing postStreamGuards (use [] to opt out)`).toBeDefined();
+        expect(intentModule.allowedActions, `${surface}/${intent}: missing allowedActions`).toBeDefined();
+        expect(intentModule.responseStyle, `${surface}/${intent}: missing responseStyle`).toBeDefined();
+        expect(intentModule.moduleGuardBucket, `${surface}/${intent}: missing moduleGuardBucket`).toBeTruthy();
       }
     }
   });

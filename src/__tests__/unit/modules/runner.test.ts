@@ -14,7 +14,6 @@
  *  - Module-not-registered throws
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { z } from "zod";
 import {
   runModule,
   registerModule,

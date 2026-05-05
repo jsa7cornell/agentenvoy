@@ -88,9 +88,16 @@ const UPCOMING_DAYS_WINDOW = 60;                 // look ahead 2 months for conf
  */
 export async function loadRuleContext(
   moduleContext: ModuleContext,
-  _matchResult: MatchResult,
-  _userMessage: string,
+  matchResult: MatchResult,
+  userMessage: string,
 ): Promise<RuleContext> {
+  // matchResult + userMessage reserved for future use (e.g., narrowing the
+  // ground-truth block by matched ruleId, or filtering upcoming events to the
+  // user-message's mentioned dates). Reference them once to satisfy
+  // no-unused-vars without changing behavior.
+  void matchResult;
+  void userMessage;
+
   const ctx = moduleContext as ModuleContext & RuleContextTestInjection;
 
   // Test seam: bypass real loads when fixture-injected.

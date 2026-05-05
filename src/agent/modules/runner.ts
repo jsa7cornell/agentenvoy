@@ -16,7 +16,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { envoyModel } from "@/lib/model";
 import { parseActions, stripActionBlocks, executeActions } from "@/agent/actions";
-import type { ActionRequest, ActionResult } from "@/agent/actions";
+import type { ActionResult } from "@/agent/actions";
 import {
   type AnyComposerTool,
   type ComposerInvoker,
@@ -158,12 +158,12 @@ export const defaultComposerInvoker: ComposerInvoker = async ({
 // ---------------------------------------------------------------------------
 
 function resolvePlaybook(
-  module: IntentModule,
+  intentModule: IntentModule,
   matchResult: MatchResult,
 ): readonly string[] {
-  return typeof module.composerPlaybook === "function"
-    ? module.composerPlaybook(matchResult)
-    : module.composerPlaybook;
+  return typeof intentModule.composerPlaybook === "function"
+    ? intentModule.composerPlaybook(matchResult)
+    : intentModule.composerPlaybook;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,15 +190,15 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
     throw new Error("Streaming mode not implemented in PR1a; ships in PR5b");
   }
 
-  const module = lookupModule(input.surface, input.intent);
-  if (!module) {
+  const intentModule = lookupModule(input.surface, input.intent);
+  if (!intentModule) {
     throw new Error(`No module registered for ${input.surface}/${input.intent}`);
   }
 
   const invoker = input.composerInvoker ?? defaultComposerInvoker;
 
   const moduleGuard: ModuleGuardRecord = {
-    bucket: module.moduleGuardBucket,
+    bucket: intentModule.moduleGuardBucket,
     guardsFired: [],
     retryCount: 0,
     retrySucceeded: null,
@@ -207,14 +207,14 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
   };
 
   // 1. Load context.
-  const contextOutput = await module.contextLoader(
+  const contextOutput = await intentModule.contextLoader(
     input.moduleContext,
     input.matchResult,
     input.userMessage,
   );
 
   // 2. Compose system prompt.
-  const fragments = resolvePlaybook(module, input.matchResult);
+  const fragments = resolvePlaybook(intentModule, input.matchResult);
   const systemPrompt = composeSystemPrompt(fragments, contextOutput, input.moduleContext);
 
   // 3. Invoke composer (Sonnet LLM call — Rule 17 layer 3).
@@ -222,7 +222,7 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
     systemPrompt,
     history: input.conversationHistory,
     userMessage: input.userMessage,
-    tools: module.composerTools,
+    tools: intentModule.composerTools,
     moduleContext: input.moduleContext,
   });
 
@@ -251,7 +251,7 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
     let fire: FireRecord | null = null;
 
     // PreEmit checks (state-aware; deterministic). First fire wins.
-    for (const check of module.preEmitChecks ?? []) {
+    for (const check of intentModule.preEmitChecks ?? []) {
       const result = await check.check({
         parsedActions,
         contextOutput,
@@ -272,10 +272,10 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
 
     // PostStream guards (prose-coherence; advisory). Only run if preEmit clean.
     if (!fire) {
-      const useDefaults = module.useDefaultPostStreamGuards !== false;
+      const useDefaults = intentModule.useDefaultPostStreamGuards !== false;
       const guards = useDefaults
-        ? [...module.postStreamGuards, ...DEFAULT_POST_STREAM_GUARDS]
-        : module.postStreamGuards;
+        ? [...intentModule.postStreamGuards, ...DEFAULT_POST_STREAM_GUARDS]
+        : intentModule.postStreamGuards;
       for (const guard of guards) {
         const result = guard.check({
           text,
@@ -326,7 +326,7 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
       systemPrompt,
       history: retryHistory,
       userMessage: fire.hint,
-      tools: module.composerTools,
+      tools: intentModule.composerTools,
       moduleContext: input.moduleContext,
     });
     text = retryResult.text;
@@ -351,14 +351,14 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
   }
 
   // 7. Validate parsedActions ⊆ allowedActions. Strip out-of-bounds emissions.
-  const allowed = new Set(module.allowedActions);
+  const allowed = new Set(intentModule.allowedActions);
   const stripped = parsedActions.filter((a) => !allowed.has(a.action));
   if (stripped.length > 0) {
     for (const a of stripped) {
       moduleGuard.guardsFired.push({
         name: "allowed-actions-violation",
         phase: "postStream",
-        flaggedReason: `module ${module.intent} emitted disallowed action ${a.action}`,
+        flaggedReason: `module ${intentModule.intent} emitted disallowed action ${a.action}`,
       });
     }
     parsedActions = parsedActions.filter((a) => allowed.has(a.action));
