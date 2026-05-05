@@ -39,8 +39,8 @@ const STILL_MIGRATING_HOST_INTENTS: ReadonlySet<string> = new Set([
   // "inquire", "query_calendar", "query_event" — migrated in PR3b-i
   // "create_link", "modify_link", "cancel_link" — collapsed to event_action in PR-B
   // "edit_preference", "create_bookable_link" — collapsed to manage_setup in PR-C
-  // All currently-known intents have registered cluster modules.
-  // query_calendar / query_event → inquire cluster (PR-D will remove them from here)
+  // "query_calendar", "query_event" — collapsed to inquire cluster in PR-D
+  // All HOST_CHAT_INTENT_VALUES now resolve to a registered cluster module.
 ]);
 
 describe("intent module contract", () => {

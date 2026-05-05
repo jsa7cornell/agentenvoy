@@ -24,11 +24,9 @@ import { eventActionModule } from "./event-action/module";
 // The individual module files are kept for their context-loaders + preEmitChecks,
 // which the cluster module imports directly.
 import { manageSetupModule } from "./manage-setup/module";
-import {
-  inquireModule,
-  queryCalendarModule,
-  queryEventModule,
-} from "./inquire/module";
+// PR-D: inquire cluster — replaces inquire/query_calendar/query_event.
+// Only one registration needed; INTENT_TO_CLUSTER maps all three to "inquire".
+import { inquireClusterModule } from "./inquire/module";
 import { bookingsModule } from "./bookings/module";
 
 let _registered = false;
@@ -48,9 +46,9 @@ export function ensureModulesRegistered(): void {
   // PR-C: manage_setup cluster (single module for profile/rule/bookable-link/edit_preference).
   // edit_preference/profile/rule/create_bookable_link route to manage_setup via INTENT_TO_CLUSTER.
   registerModule(manageSetupModule);
-  registerModule(inquireModule);
-  registerModule(queryCalendarModule);
-  registerModule(queryEventModule);
+  // PR-D: inquire cluster (single module for all read-only query intents).
+  // query_calendar and query_event route to inquire via INTENT_TO_CLUSTER.
+  registerModule(inquireClusterModule);
   registerModule(bookingsModule);      // PR4 — bookings module
 }
 
