@@ -17,6 +17,7 @@ import { GcalUpdateCard } from "./gcal-update-card";
 // `rule_proposal` system messages pre-deploy use it for display.
 import type { BookableLinkProposal } from "./onboarding/rule-form-fields";
 import { SendFeedbackLink } from "./send-feedback";
+import { ThumbsDownFeedback } from "./thumbs-down-feedback";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { canNativeShare, shareInvite } from "@/lib/share-invite";
 
@@ -1825,30 +1826,38 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
           const sameSpeakerAsPrev =
             !!prev && !prev.threadId && prev.role === msg.role && (prev.role === "user" || prev.role === "envoy");
           return (
-            <div key={msg.id} className={`relative max-w-[88%] ${isUser ? "self-end" : "self-start"}`}>
-              <div
-                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                  isUser
-                    ? "bg-purple-600 text-white rounded-br-sm"
-                    : "bg-black/5 dark:bg-white/7 rounded-bl-sm"
-                }`}
-              >
-                {!sameSpeakerAsPrev && (
-                  <div
-                    className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${
-                      isUser ? "text-white/60" : "text-purple-400"
-                    }`}
-                  >
-                    {isUser ? "You" : "Envoy"}
+            <div key={msg.id} className={`flex items-end gap-1 ${isUser ? "self-end justify-end" : "self-start justify-start"} max-w-[88%]`}>
+              <div className="relative">
+                <div
+                  className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                    isUser
+                      ? "bg-purple-600 text-white rounded-br-sm"
+                      : "bg-black/5 dark:bg-white/7 rounded-bl-sm"
+                  }`}
+                >
+                  {!sameSpeakerAsPrev && (
+                    <div
+                      className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${
+                        isUser ? "text-white/60" : "text-purple-400"
+                      }`}
+                    >
+                      {isUser ? "You" : "Envoy"}
+                    </div>
+                  )}
+                  <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
+                  {meetLinkMatch && <MeetLinkCard url={meetLinkMatch[1]} kind={meetLinkKind} />}
+                </div>
+                {reaction && (
+                  <div className="absolute -bottom-3 right-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/10 rounded-full px-1.5 py-0.5 text-sm shadow-sm select-none">
+                    {reaction}
                   </div>
                 )}
-                <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
-                {meetLinkMatch && <MeetLinkCard url={meetLinkMatch[1]} kind={meetLinkKind} />}
               </div>
-              {reaction && (
-                <div className="absolute -bottom-3 right-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/10 rounded-full px-1.5 py-0.5 text-sm shadow-sm select-none">
-                  {reaction}
-                </div>
+              {!isUser && (
+                <ThumbsDownFeedback
+                  sessionId={msg.threadId ?? null}
+                  messageContent={msg.content}
+                />
               )}
             </div>
           );
