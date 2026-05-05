@@ -35,6 +35,7 @@ import type { UserPreferences } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
 import { HOST_WRITE_SCOPE } from "@/lib/oauth/required-scopes";
 import { DEFAULT_TIMEZONE } from "@/lib/timezone";
+import { computeCalibrationDrift } from "@/lib/onboarding/drift";
 
 type NumOrUndef = number | undefined;
 
@@ -192,6 +193,43 @@ export async function GET() {
         }
       : null;
 
+  // returning-dormant context — drift summary for the DormantReturnBubble.
+  // Computed only when needed (variant is returning-dormant). Defensive:
+  // if computeCalibrationDrift throws, we omit the block rather than
+  // failing the whole GET. The bubble renders a degraded "no specific drift"
+  // message in that case (hasDrift === false).
+  let dormantContext: {
+    daysSinceCalibration: number | null;
+    drift: {
+      timezoneDrifted: boolean;
+      durationDrifted: boolean;
+      googleTimezone: string | null;
+      storedTimezone: string | null;
+      googleDuration: number | null;
+      storedDuration: number | null;
+      newCalendarsAvailable: number;
+    };
+  } | null = null;
+  if (welcomeVariant === "returning-dormant") {
+    try {
+      const driftAnalysis = await computeCalibrationDrift(userId);
+      dormantContext = {
+        daysSinceCalibration: driftAnalysis.daysSinceCalibration,
+        drift: {
+          timezoneDrifted: driftAnalysis.timezoneDrifted,
+          durationDrifted: driftAnalysis.durationDrifted,
+          googleTimezone: driftAnalysis.googleTimezone,
+          storedTimezone: driftAnalysis.storedTimezone,
+          googleDuration: driftAnalysis.googleDuration,
+          storedDuration: driftAnalysis.storedDuration,
+          newCalendarsAvailable: driftAnalysis.newCalendarsAvailable,
+        },
+      };
+    } catch {
+      // Leave dormantContext null — bubble degrades gracefully.
+    }
+  }
+
   return NextResponse.json({
     businessHoursStart: bhs,
     businessHoursEnd: bhe,
@@ -222,6 +260,9 @@ export async function GET() {
     // users effectively auto-confirm in the UI.
     calendarSelectionConfirmed:
       !!(e as { calendarSelectionConfirmed?: boolean }).calendarSelectionConfirmed,
+    // Dormant-return context (PR-E). Populated only when welcomeVariant is
+    // "returning-dormant"; null otherwise. Drives DormantReturnBubble copy.
+    dormantContext,
   });
 }
 

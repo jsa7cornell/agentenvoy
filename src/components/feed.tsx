@@ -9,6 +9,8 @@ import { formatDuration } from "@/lib/format-duration";
 import { formatDeferralFieldsList, type DeferralFieldNoun } from "@/agent/greetings/registry";
 import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
 import { PreferencesExtendedFlow } from "./onboarding/preferences-extended-flow";
+import { DormantReturnBubble, type DormantContext } from "./onboarding/DormantReturnBubble";
+import { tuningInProgress } from "@/lib/onboarding/dormant-eligibility";
 import { shortTimezoneLabel } from "@/lib/timezone";
 import { GcalUpdateCard } from "./gcal-update-card";
 // RuleConfirmCard / RuleConfirmSheet imports retired 2026-05-03 — the
@@ -115,6 +117,8 @@ interface SeededPosture {
    *  Gates the posture-readback bubble and primary-link card in
    *  FirstRunWelcome — until confirmed, only the welcome + picker show. */
   calendarSelectionConfirmed: boolean;
+  /** Drift summary for returning-dormant hosts. Null for all other variants. */
+  dormantContext: DormantContext | null;
 }
 
 const VIDEO_PROVIDER_DISPLAY: Record<string, string> = {
@@ -687,7 +691,13 @@ function GuestFirstVariant({
   );
 }
 
-function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
+function FirstRunWelcome({
+  onSeed,
+  messages: msgList,
+}: {
+  onSeed: (seed: string) => void;
+  messages: ChannelMsg[];
+}) {
   const [posture, setPosture] = useState<SeededPosture | null>(null);
   // Local "calendar confirmed" state — initial value comes from
   // posture.calendarSelectionConfirmed once the fetch lands; flips to true
@@ -715,6 +725,7 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
           guestFirstContext: data.guestFirstContext ?? null,
           hasCalendarWriteScope: !!data.hasCalendarWriteScope,
           calendarSelectionConfirmed: !!data.calendarSelectionConfirmed,
+          dormantContext: (data.dormantContext as DormantContext | null) ?? null,
         });
         if (data.calendarSelectionConfirmed) setCalendarConfirmed(true);
       })
@@ -734,11 +745,26 @@ function FirstRunWelcome({ onSeed }: { onSeed: (seed: string) => void }) {
   // feed is the implicit "current setup" affordance.
   if (posture.welcomeVariant === "active") return null;
 
-  // Returning-dormant: stub for now — slot wired but copy/UX deferred.
-  // Renders null in this PR; will become a "welcome back" bubble +
-  // posture refresher + chips in a follow-up once the design lands.
-  // TODO(returning-dormant): light bubble, posture refresher, ForwardChips.
-  if (posture.welcomeVariant === "returning-dormant") return null;
+  // Returning-dormant: show the DormantReturnBubble unless a PrimaryLinkFlow
+  // is currently in progress (Q3 guard — auto-resumed PrimaryLinkFlow wins).
+  if (posture.welcomeVariant === "returning-dormant") {
+    // Q3 guard: if tuning is in progress, yield to the tuning UI.
+    // The outer render tree already handles showing PrimaryLinkFlow;
+    // we just don't overlay the dormant bubble on top of it.
+    const guardActive = tuningInProgress(msgList);
+    if (guardActive || !posture.dormantContext) return null;
+    return (
+      <DormantReturnBubble
+        name={posture.name}
+        dormantContext={posture.dormantContext}
+        onRetune={(msg) => onSeed(msg)}
+        onDismiss={() => {
+          // No DB write needed — posture re-fetch on next visit will
+          // determine variant again based on message recency.
+        }}
+      />
+    );
+  }
 
   // Guest-first: user came in via someone else's link, signed up,
   // landed on Home. Acknowledge the prior interaction; skip the
@@ -1633,6 +1659,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
             <>
               {showWelcome && (
                 <FirstRunWelcome
+                  messages={messages}
                   onSeed={(seed) => {
                     if (seed === "__primary_link_flow__") {
                       setPrimaryLinkFlowActive(true);
