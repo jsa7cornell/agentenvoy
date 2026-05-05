@@ -137,8 +137,6 @@ export function DayView({
   const laidOut = useMemo(() => layoutEvents(dayEvents, timezone), [dayEvents, timezone]);
 
   const gridStartMin = HOUR_START * 60;
-  const loc = locationByDay[selectedDay];
-
   function getDayStripColor(dayStr: string): string {
     if (dayStr < todayStr) return "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700";
     const best = bestScoreByDay[dayStr];
@@ -194,11 +192,6 @@ export function DayView({
       {/* Selected day header */}
       <div className="px-3 py-1.5 border-b border-secondary shrink-0 flex items-center justify-between">
         <span className="text-xs font-medium text-primary">{formatDayHeader(selectedDay)}</span>
-        {loc && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-secondary text-secondary border border-DEFAULT">
-            {loc}
-          </span>
-        )}
       </div>
 
       {/* All-day events */}
@@ -307,9 +300,6 @@ export function DayView({
                     </div>
                     {primaryCalendar && ev.calendar && ev.calendar !== primaryCalendar && (
                       <div className="text-[9px] text-muted truncate italic">{ev.calendar}</div>
-                    )}
-                    {height > ROW_HEIGHT * 1.5 && ev.location && (
-                      <div className="text-[9px] text-secondary truncate">{ev.location}</div>
                     )}
                   </div>
                 </div>

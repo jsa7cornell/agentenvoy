@@ -365,7 +365,6 @@ export function WeeklyCalendar({
             style={{ gridTemplateColumns: gridCols }}>
             <div className="p-2 flex items-end justify-end">{headerGutterSlot}</div>
             {days.map((day) => {
-              const loc = locationByDay[day];
               const isToday = day === todayStr;
               const isPast = day < todayStr;
               const d = new Date(day + "T12:00:00");
@@ -390,11 +389,6 @@ export function WeeklyCalendar({
                       </span>
                     )}
                   </div>
-                  {loc && (
-                    <div className="mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] bg-surface-secondary text-secondary border border-DEFAULT">
-                      {loc}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -441,8 +435,8 @@ export function WeeklyCalendar({
               {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => (
                 <div
                   key={i}
-                  className="absolute right-2 text-[10px] text-muted leading-none"
-                  style={{ top: i * 2 * ROW_HEIGHT - 6 }}
+                  className="absolute left-0 right-0 flex justify-center text-[11px] text-secondary leading-none"
+                  style={{ top: i * 2 * ROW_HEIGHT, transform: "translateY(-50%)" }}
                 >
                   {formatHour(HOUR_START + i)}
                 </div>
@@ -601,9 +595,6 @@ export function WeeklyCalendar({
                         </div>
                         {primaryCalendar && ev.calendar && ev.calendar !== primaryCalendar && (
                           <div className="text-[9px] text-muted truncate italic">{ev.calendar}</div>
-                        )}
-                        {height > ROW_HEIGHT * 1.5 && ev.location && (
-                          <div className="text-[9px] text-secondary truncate">{ev.location}</div>
                         )}
                       </div>
                     </div>
