@@ -53,6 +53,21 @@ export interface ModuleFixture {
   /** Conversation history before the user message. */
   conversationHistory: Array<{ role: string; content: string }>;
   /**
+   * Multi-turn host/assistant turns to run sequentially BEFORE the
+   * `userMessage` turn under test. Each entry is one host turn; the bench
+   * harness invokes runModule per turn, threading the assistant's prior
+   * response into `conversationHistory` so the final turn (userMessage) sees
+   * the same on-the-wire history a real session would.
+   *
+   * Per Rule 27 (proposal §4.2) — bench fixtures need to express
+   * "host says X, you reply, then host says Y" patterns that previously
+   * lived as multi-turn worked dialogues in the operational fragments.
+   * The harness implementation (per-turn replay) lives in `run.ts`.
+   *
+   * Optional. Single-turn fixtures leave this undefined.
+   */
+  priorTurns?: Array<{ host: string; expectedAssistant?: string }>;
+  /**
    * Optional composer invoker override (for synthetic-injection fixtures).
    * Production fixtures omit this; the runner uses `defaultComposerInvoker`
    * which calls live Sonnet.
@@ -68,6 +83,24 @@ export interface ModuleFixture {
     proseContains?: string[];
     /** Substrings that MUST NOT appear in the prose. */
     proseNotContains?: string[];
+    /**
+     * Good/bad narration assertions (proposal §4.2). Each entry is a single
+     * concept being tested ("narration scope: Friday only"). The assertion
+     * passes when:
+     *   - every `goodPhrase` appears in the prose (case-insensitive), AND
+     *   - no `badPhrase` appears.
+     * The migrated good/bad pairs from operational fragments land here as
+     * regression assertions — moving from "show-and-tell in prompt" to
+     * "fail-on-match in bench."
+     *
+     * Example: `{ concept: "narration scope", goodPhrases: ["Friday"],
+     *            badPhrases: ["Thursday"] }` for a Friday-only request.
+     */
+    goodBadPairs?: Array<{
+      concept: string;
+      goodPhrases?: string[];
+      badPhrases?: string[];
+    }>;
     /** Guards that must fire. */
     guardsFired?: ExpectedGuardFire[];
     /** Guards that must NOT fire (e.g., happy-path: no fabricatedIdCheck). */
