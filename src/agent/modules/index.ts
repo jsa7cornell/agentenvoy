@@ -23,6 +23,12 @@ import {
   queryCalendarModule,
   queryEventModule,
 } from "./inquire/module";
+import {
+  createLinkModule,
+  modifyLinkModule,
+  cancelLinkModule,
+  scheduleModule,
+} from "./event-intents/module";
 
 let _registered = false;
 
@@ -41,6 +47,10 @@ export function ensureModulesRegistered(): void {
   registerModule(inquireModule);
   registerModule(queryCalendarModule);
   registerModule(queryEventModule);
+  registerModule(createLinkModule);
+  registerModule(modifyLinkModule);
+  registerModule(cancelLinkModule);
+  registerModule(scheduleModule);
 }
 
 // Auto-register on first import. Production code paths that import any

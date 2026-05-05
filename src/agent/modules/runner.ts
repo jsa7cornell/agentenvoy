@@ -68,6 +68,12 @@ export function composeSystemPrompt(
     parts.push(content.trim());
   }
 
+  // PR3b-iii: dynamic system-prompt suffix between playbook fragments and
+  // # Context (e.g., the matcher's deterministic-create hint).
+  if (contextOutput.systemPromptSuffix) {
+    parts.push(contextOutput.systemPromptSuffix.trim());
+  }
+
   // CONTEXT block: human-readable lines + ground-truth blocks the module loaded.
   const contextParts: string[] = [];
   contextParts.push(`User: ${moduleContext.user.name ?? "User"}`);
@@ -364,12 +370,42 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
     parsedActions = parsedActions.filter((a) => allowed.has(a.action));
   }
 
-  // 8. Action dispatch via canonical actions.ts.
+  // 8. Action dispatch via canonical actions.ts. PR3b-iii adds an optional
+  //    timeout race; on timeout the late completion is logged in the
+  //    background so debug bundles show the eventual outcome.
   let actionResults: ActionResult[] = [];
+  let actionsTimedOut = false;
   if (parsedActions.length > 0 && !blockingExhaustion) {
-    actionResults = await executeActions(parsedActions, input.moduleContext.user.id, {
+    const execPromise = executeActions(parsedActions, input.moduleContext.user.id, {
       sessionId: input.moduleContext.session?.id,
     });
+    if (input.actionTimeoutMs && input.actionTimeoutMs > 0) {
+      const timeoutPromise = new Promise<"__TIMEOUT__">((resolve) =>
+        setTimeout(() => resolve("__TIMEOUT__"), input.actionTimeoutMs),
+      );
+      const raced = await Promise.race([execPromise, timeoutPromise]);
+      if (raced === "__TIMEOUT__") {
+        actionsTimedOut = true;
+        execPromise
+          .then((r) =>
+            console.warn(
+              `[runner:${intentModule.intent}] late action completion user=${input.moduleContext.user.id} results=${r
+                .map((x) => (x.success ? "ok" : "fail"))
+                .join(",")}`,
+            ),
+          )
+          .catch((e) =>
+            console.error(
+              `[runner:${intentModule.intent}] late action error user=${input.moduleContext.user.id}:`,
+              e,
+            ),
+          );
+      } else {
+        actionResults = raced;
+      }
+    } else {
+      actionResults = await execPromise;
+    }
   }
 
   // 9. Format per responseStyle. Strip action blocks from prose.
@@ -391,6 +427,7 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
     parsedActions,
     actionResults,
     moduleGuard,
+    actionsTimedOut,
     systemPrompt,
   };
 }

@@ -5,83 +5,35 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateText } from "ai";
 import { envoyModel } from "@/lib/model";
-import { getOrComputeSchedule } from "@/lib/calendar";
-import { formatComputedSchedule, formatOfferableSlots } from "@/agent/composer";
-import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
-import { parseActions, executeActions, stripActionBlocks } from "@/agent/actions";
-import type { ActionRequest, ActionResult } from "@/agent/actions";
-import { narrateFailures, narrateTimeout, narrateFinalizeError } from "@/agent/action-narration";
+import { narrateFinalizeError } from "@/agent/action-narration";
 import { sanitizeHistory } from "@/lib/conversation";
 import {
   mergeChannelMetadata,
   parseChannelMessageMetadata,
 } from "@/lib/channel/metadata-schema";
-import type { ChannelMessageMetadata } from "@/lib/channel/metadata-schema";
-import {
-  needsActionEmissionRetry,
-  needsActionShapeRetry,
-  needsActionRedundancyRetry,
-  ACTION_EMISSION_RETRY_PROMPT,
-} from "@/agent/modules/_shared/post-stream-guards";
-import type { SelfCheckRecord } from "@/lib/channel/metadata-schema";
 import {
   selectVariant,
   type ProgressStage,
   type ProgressExecutingAction,
   type ProgressCopyInterpolation,
 } from "@/agent/progress-copy";
-import { runWithStageRotation } from "@/agent/progress-rotation";
 import { classifyChatIntent } from "@/agent/intent-classifier";
 import { isEchoOfRecentEnvoy } from "@/lib/echo-detect";
 import { normalizeChatIntent, type ChatIntent, type ChatIntentBlock } from "@/lib/intent";
-// Import the modules registry side-effects (registers chat smoke + rule +
-// profile + create_bookable_link).
+// Import the modules registry side-effects (registers all dashboard-host
+// modules: chat, rule, profile, create_bookable_link, inquire/query_*,
+// create_link/modify_link/cancel_link/schedule).
 import "@/agent/modules";
 import { dispatchModuleAndStream } from "@/agent/modules/_shared/dispatch-stream";
+import type { MatchResult } from "@/agent/modules/types";
 import { evaluateFreshCreateGate } from "@/agent/classifiers/host-fresh-create-gate";
-import type { CalendarEvent } from "@/lib/calendar";
 import {
   schedulingPrecheck,
   type PrecheckResult,
   type DeterministicCreateArgs,
 } from "@/agent/matcher";
 import { parseLinkParameters } from "@/lib/link-parameters";
-import { voicePlaybook, calendarEventComposer } from "@/agent/runtime-prompts/index";
 
-function formatUpcomingEvents(events: CalendarEvent[], tz: string): string | null {
-  const now = Date.now();
-  const cutoff = now + 14 * 24 * 60 * 60 * 1000;
-  const dateFmt = new Intl.DateTimeFormat("en-US", {
-    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-    timeZone: tz, hour12: true,
-  });
-  const relevant = events
-    .filter((e) => {
-      if (!e.summary || e.summary === "(no title)") return false;
-      const start = new Date(e.start).getTime();
-      return start >= now && start <= cutoff;
-    })
-    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
-    .slice(0, 15);
-  if (relevant.length === 0) return null;
-  const lines = relevant.map((e) => {
-    const startLabel = dateFmt.format(new Date(e.start));
-    const attendeePart = (e.attendeeCount ?? 0) > 1
-      ? ` (${e.attendeeCount} guests)`
-      : "";
-    return `- "${e.summary}" — ${startLabel}${attendeePart}`;
-  });
-  return `Upcoming calendar events (next 14 days — use these to resolve cancel/reschedule requests by name):\n${lines.join("\n")}`;
-}
-
-// Build system prompt bases via composition helper (PLAYBOOK Rule 19c).
-// Called at request time (lazy) so playbook load failures surface per-request
-// rather than killing module init.
-function buildChannelSystem(): string {
-  const persona = voicePlaybook();
-  const channel = calendarEventComposer();
-  return `${persona ? persona + "\n\n---\n\n" : ""}${channel}`;
-}
 
 // Profile + rule + create_bookable_link branches dispatch via runModule
 // (PR2 — composer-modules architecture). Each module loads a narrower
@@ -228,16 +180,12 @@ export async function POST(req: NextRequest) {
           }
         };
 
-        const withStageRotation = <T>(
-          stage: ProgressStage,
-          operation: () => Promise<T>,
-          options: { slots?: ProgressCopyInterpolation } = {},
-        ) => runWithStageRotation(emitStatus, stage, operation, options);
-
         try {
-          // Detect if the host is asking us to re-check / refresh calendar
-          const lowerMsg = message.toLowerCase();
-          const isRefreshRequest = /\b(check again|re-?check|refresh|re-?pull|changed my (schedule|calendar)|updated my (schedule|calendar)|look again|try again|one more time)\b/i.test(lowerMsg);
+          // Refresh-detection regex was load-bearing for the legacy schedule
+          // path's `getOrComputeSchedule(safeUser.id, { forceRefresh })`
+          // call; PR3b-iii moves that fetch into the schedule-context
+          // loader, which always uses the cached path. Re-introducing
+          // forceRefresh as a per-module hint is a follow-up.
 
           // ------------------------------------------------------------
           // Split-pass intent router (proposal 2026-04-21, decided 2026-
@@ -894,41 +842,24 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // Stage 1: scanning-calendar — fires BEFORE parallel-group-2. The
-          // group does more than just fetch schedule but the calendar read is
-          // the dominant wait, so we anchor the frame here (§2.1 table).
-          // Within-stage rotation ticks every WITHIN_STAGE_ROTATION_MS while
-          // getOrComputeSchedule is in flight (proposal §2.2 R2 fold).
+          // PR3b-iii: the schedule-context loader (run inside runModule)
+          // owns calendar load + active-sessions fetch + context-block
+          // formatting. The route layer keeps just the channel-session
+          // lifecycle (open/close/expire on a 3-day rolling window) plus
+          // the userMsgPersist barrier — both inputs to the conversation-
+          // history fetch below. Stage frame "scanning-calendar" fires here
+          // anyway as a coarse progress signal; the loader does the actual
+          // calendar read.
           const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
           const now = new Date();
 
-          const [, sessionResult, scheduleResult, activeSessions] = await Promise.all([
+          emitStatus("scanning-calendar");
+
+          const [, sessionResult] = await Promise.all([
             userMsgPersist,
             prisma.channelSession.findFirst({
               where: { channelId: safeChannel.id, closed: false },
               orderBy: { startedAt: "desc" },
-            }),
-            withStageRotation("scanning-calendar", () =>
-              getOrComputeSchedule(safeUser.id, { forceRefresh: isRefreshRequest }),
-            ).catch((e) => {
-              console.log("Schedule context error:", e);
-              return null;
-            }),
-            prisma.negotiationSession.findMany({
-              where: { hostId: safeUser.id, archived: false, status: { not: "cancelled" } },
-              include: {
-                link: {
-                  select: {
-                    inviteeName: true,
-                    inviteeEmail: true,
-                    topic: true,
-                    code: true,
-                    slug: true,
-                  },
-                },
-              },
-              orderBy: { updatedAt: "desc" },
-              take: 20,
             }),
           ]);
 
@@ -990,138 +921,6 @@ export async function POST(req: NextRequest) {
             });
           }
 
-          // Build context
-          const contextParts: string[] = [];
-          contextParts.push(`User: ${user.name || "User"}`);
-
-          let calendarConnected = false;
-          const hostPrefs = user.preferences as Record<string, unknown> | null;
-          const tz = getUserTimezone(hostPrefs);
-          const tzLabel = shortTimezoneLabel(tz);
-          let scoredSlotCount = 0;
-          if (scheduleResult?.connected) {
-            calendarConnected = true;
-            scoredSlotCount = scheduleResult.slots?.length ?? 0;
-            contextParts.push(
-              formatComputedSchedule(scheduleResult.slots, tz, scheduleResult.canWrite, undefined, {
-                weekConvention: "sun_start",
-              }),
-            );
-            contextParts.push(formatOfferableSlots(scheduleResult.slots, tz, scheduleResult.canWrite));
-
-            // Upcoming named events — lets Envoy resolve "cancel my meeting with
-            // Katie" even when the NegotiationSession is old or below the take:20
-            // limit. Only real events (with a summary) in the next 14 days.
-            const upcomingLines = formatUpcomingEvents(scheduleResult.events, tz);
-            if (upcomingLines) contextParts.push(upcomingLines);
-          }
-          if (!calendarConnected) {
-            contextParts.push("Calendar: Not connected");
-          }
-
-          if (user.persistentKnowledge) {
-            contextParts.push(`Host's persistent preferences:\n${user.persistentKnowledge}`);
-          }
-          if (user.upcomingSchedulePreferences) {
-            contextParts.push(`Host's situational context (near-term):\n${user.upcomingSchedulePreferences}`);
-          }
-          if (user.hostDirectives && (user.hostDirectives as string[]).length > 0) {
-            contextParts.push(`Host directives (highest priority):\n${(user.hostDirectives as string[]).map(d => `- ${d}`).join("\n")}`);
-          }
-
-          // Reusable links — Primary + all active Bookable Link rules — so the
-          // inquire tier can answer recall questions ("what's my sales pitch link")
-          // and the schedule tier can reference them. Per reusable-links proposal §4.
-          {
-            const explicitPrefs = (hostPrefs?.explicit as Record<string, unknown> | undefined) ?? {};
-            const structuredRules =
-              (explicitPrefs.structuredRules as Array<{
-                action?: string;
-                status?: string;
-                bookable?: { name?: string; title?: string; linkSlug?: string; linkCode?: string };
-              }> | undefined) ?? [];
-            const primaryLinkName =
-              typeof explicitPrefs.primaryLinkName === "string" && (explicitPrefs.primaryLinkName as string).trim()
-                ? explicitPrefs.primaryLinkName as string
-                : "Primary link";
-            const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://agentenvoy.ai";
-            const lines: string[] = [];
-            if (safeUser.meetSlug) {
-              lines.push(`- "${primaryLinkName}" (default): ${origin}/meet/${safeUser.meetSlug}`);
-            }
-            for (const r of structuredRules) {
-              if (r.action !== "bookable" || r.status !== "active") continue;
-              const linkData = r.bookable;
-              if (!linkData) continue;
-              const name = linkData.name ?? linkData.title ?? "Drop-in Hours";
-              const url = linkData.linkSlug && linkData.linkCode
-                ? `${origin}/meet/${linkData.linkSlug}/${linkData.linkCode}`
-                : "(url unavailable)";
-              lines.push(`- "${name}": ${url}`);
-            }
-            if (lines.length > 0) {
-              contextParts.push(
-                `Host's reusable links (answer "what's my X link" / "share my X link" from this list — match by name fuzzy, case-insensitive; if the host asks generally for "my links" reply with the full list):\n${lines.join("\n")}`
-              );
-            }
-          }
-
-          if (activeSessions.length > 0) {
-            const sessionList = activeSessions.map(s => {
-              const guest = s.link.inviteeName || s.guestEmail || "unknown";
-              const note = s.statusLabel ? `, note: ${s.statusLabel}` : "";
-              const code = s.link.code ?? null;
-              const url = s.link.slug && s.link.code
-                ? `/meet/${s.link.slug}/${s.link.code}`
-                : null;
-              const ids = [
-                `sessionId: ${s.id}`,
-                code ? `linkCode: ${code}` : null,
-                url ? `url: ${url}` : null,
-              ].filter(Boolean).join(", ");
-              return `- "${s.title || 'Untitled'}" (${ids}) — status: ${s.status}, guest: ${guest}${note}`;
-            }).join('\n');
-            contextParts.push(
-              `Sessions (active and confirmed — "agreed" sessions have a confirmed calendar event and can be cancelled or rescheduled):\n${sessionList}\n\n` +
-              `You can execute actions on these sessions using [ACTION] blocks. ` +
-              `For session-scoped actions (update_format / update_time / update_location / cancel / hold_slot / archive) pass sessionId. ` +
-              `For link-scoped actions (update_link / expand_link) pass linkCode — it's the 6-char string after /meet/{slug}/ in the url above.`
-            );
-          } else {
-            contextParts.push("Active sessions: None");
-          }
-
-          const timeStr = now.toLocaleString("en-US", {
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-            timeZoneName: "short",
-            timeZone: tz,
-          });
-          contextParts.push(`Current time: ${timeStr}`);
-
-          if (!user.lastCalibratedAt) {
-            contextParts.push("Calibration: NEVER — this host has not been calibrated. Run onboarding calibration (see ONBOARDING CALIBRATION below).");
-          } else {
-            const daysSince = Math.floor((Date.now() - new Date(user.lastCalibratedAt).getTime()) / (1000 * 60 * 60 * 24));
-            if (daysSince >= 10) {
-              contextParts.push(`Calibration: Last calibrated ${daysSince} days ago. Consider running a check-in (see CHECK-IN CALIBRATION below).`);
-            } else {
-              contextParts.push(`Calibration: Last calibrated ${daysSince} day${daysSince !== 1 ? "s" : ""} ago.`);
-            }
-          }
-
-          // Stage 2: scoring — between schedule result and LLM call. Slot data
-          // available here: `{count}` (scored slot count) and `{tz}` (host tz).
-          emitStatus("scoring", {
-            slots: {
-              ...(scoredSlotCount > 0 ? { count: String(scoredSlotCount) } : {}),
-              ...(tzLabel ? { tz: tzLabel } : {}),
-            },
-          });
-
           const threeDaysAgo = new Date(Date.now() - THREE_DAYS_MS);
           const sessionStart = new Date(activeSession.startedAt.getTime() - 5000);
           const historyStart = sessionStart > threeDaysAgo ? sessionStart : threeDaysAgo;
@@ -1143,377 +942,91 @@ export async function POST(req: NextRequest) {
             console.warn(`[channel/chat] History sanitized | userId=${safeUser.id} | ${warnings.join("; ")}`);
           }
 
-          // Inquire-tier short-circuits at line 677 (PR3b-i). Reaching here
-          // means this is a chat or event-shaped intent on the legacy
-          // schedule path; both use the channel composer.
-          const systemBase = buildChannelSystem();
-          const precheckHintBlock = precheckCreateHint
-            ? "\n\n" + precheckCreateHint
-            : "";
-          const system =
-            systemBase + precheckHintBlock + "\n\nCONTEXT:\n" + contextParts.join("\n");
-          const modelId = "claude-sonnet-4-6";
-
-          // Stage 3: thinking — just before generateText. Within-stage
-          // rotation ticks while the LLM is generating (proposal §2.2 R2).
-          const first = await withStageRotation("thinking", () =>
-            generateText({
-              model: envoyModel(modelId),
-              maxOutputTokens: 1024,
-              system,
-              messages,
-            }),
-          );
-          let fullText = first.text;
-
-          // selfCheck record — written to message metadata if either guard
-          // fires. Read by future eval rig (proposal §2 Layer 4).
-          let selfCheckRecord: SelfCheckRecord | null = null;
-
-          // Inquire-tier short-circuits earlier (PR3b-i). Reaching here means
-          // this is a chat or event-shaped intent; run the action-fidelity
-          // guards.
-          {
-            // Layer 2a — existing emission guard (no [ACTION] block at all).
-            const emissionFired = needsActionEmissionRetry(fullText);
-            // Parse actions once so the shape + redundancy checks can both
-            // inspect them without re-parsing.
-            const parsedActions = !emissionFired ? parseActions(fullText) : [];
-            // Layer 2b — new shape guard (action emitted but missing
-            // guestPicks key required by prose). Only runs when emission
-            // guard didn't fire — emission's [ACTION]-present short-circuit
-            // is what enables shape to inspect actions, but if no [ACTION]
-            // is present at all the shape check has nothing to inspect.
-            const shapeFired = !emissionFired
-              ? needsActionShapeRetry(fullText, parsedActions)
-              : null;
-            // F6 (2026-05-01) — false-apology / duplicate-re-emit guard.
-            // Detects composer prose claiming a prior action didn't fire
-            // (when in fact it did) followed by a redundant re-emit. Runs
-            // only when an action was emitted; otherwise emission guard
-            // already covers the no-emit case.
-            const redundancyFired =
-              !emissionFired && !shapeFired
-                ? needsActionRedundancyRetry(fullText, parsedActions)
-                : null;
-
-            if (emissionFired || shapeFired || redundancyFired) {
-              const flaggedReason =
-                shapeFired?.flaggedReason ??
-                redundancyFired?.flaggedReason ??
-                "set-up-x";
-              const retryHint =
-                shapeFired?.hint ??
-                redundancyFired?.hint ??
-                ACTION_EMISSION_RETRY_PROMPT;
-              console.warn(
-                `[channel/chat] action-fidelity guard fired (${flaggedReason}) for user ${safeUser.id}, forcing retry`
-              );
-              const originalText = fullText;
-              selfCheckRecord = {
-                flaggedReason,
-                retryAttempted: true,
-                retrySucceeded: null,
-                originalText,
+          // PR3b-iii: chat + event-shaped intents now dispatch via runModule.
+          // The route layer's responsibilities for the schedule path are:
+          //   (a) channel-session lifecycle (above — runs unconditionally)
+          //   (b) precheck for event intents (above — multi-match early-returns)
+          //   (c) build the conversation history from the 3-day rolling window
+          //   (d) call dispatchModuleAndStream with the precheck hint folded
+          //       into matchResult.resolved.args.precheckHint (modules' loader
+          //       turns it into the system-prompt suffix). Inquire-tier and
+          //       chat short-circuit earlier (PR3b-i / PR3b-ii) so reaching
+          //       here means an event-shaped intent.
+          const moduleIntent = intent;
+          const matchResult: MatchResult = (() => {
+            if (precheckResult?.kind === "deterministic-create") {
+              return {
+                kind: "deterministic" as const,
+                resolved: {
+                  freshCreate: true,
+                  args: {
+                    precheckHint: precheckCreateHint ?? undefined,
+                    originatingIntent: moduleIntent,
+                  },
+                },
+                playbookVariant: "deterministic-create",
               };
-              // Emit retry frame (capped at 2 per turn).
-              emitStatus("retrying");
-              const retry = await generateText({
-                model: envoyModel(modelId),
-                maxOutputTokens: 512,
-                system,
-                messages: [
-                  ...messages,
-                  { role: "assistant", content: fullText },
-                  { role: "user", content: retryHint },
-                ],
-              });
-              if (retry.text.trim()) {
-                fullText += "\n\n" + retry.text;
-                // Retry succeeded if it added any content. We don't try to
-                // judge whether the retry's content actually fixed the
-                // problem here — Layer 4 corpus + offline eval analyze that.
-                selfCheckRecord = {
-                  ...selfCheckRecord,
-                  retrySucceeded: true,
-                  correctedText: fullText,
-                };
-              } else {
-                selfCheckRecord = { ...selfCheckRecord, retrySucceeded: false };
-              }
             }
+            if (
+              precheckResult?.kind === "deterministic-modify" ||
+              precheckResult?.kind === "deterministic-cancel"
+            ) {
+              return {
+                kind: "deterministic" as const,
+                resolved: {
+                  args: { originatingIntent: moduleIntent },
+                },
+                playbookVariant: precheckResult.kind,
+              };
+            }
+            return {
+              kind: "deterministic" as const,
+              resolved: { args: { originatingIntent: moduleIntent } },
+            };
+          })();
+
+          await dispatchModuleAndStream({
+            surface: "dashboard-host",
+            intent: moduleIntent,
+            channelId: safeChannel.id,
+            userId: safeUser.id,
+            userName: user.name ?? null,
+            userEmail: user.email ?? "",
+            message,
+            userMsgPersist,
+            controller,
+            encoder,
+            emitStatus: (stage) => emitStatus(stage),
+            conversationHistory: messages,
+            matchResult,
+            actionTimeoutMs: 15_000,
+            narrateFailureResults: true,
+            errorTag: `schedule:${moduleIntent}`,
+          });
+
+          // Silent-drift telemetry: matcher said deterministic but Sonnet
+          // didn't emit the matching action. The runner's allowed-actions
+          // enforcement strips out-of-bounds emissions; here we log the
+          // case where the deterministic-expected action was simply absent
+          // (likely Sonnet chose to clarify instead). Mirrors the legacy
+          // path's `precheck_silent_drift` event for corpus segmentation.
+          // (We log post-dispatch; the actual per-turn parsedActions are
+          // already persisted on the envoy message metadata.)
+          if (
+            precheckResult?.kind === "deterministic-create" ||
+            precheckResult?.kind === "deterministic-modify" ||
+            precheckResult?.kind === "deterministic-cancel"
+          ) {
+            // The route no longer holds the parsedActions array. The
+            // moduleGuard.bucket on the persisted envoy turn captures the
+            // per-intent retry/guard signal; downstream telemetry can
+            // join on (channelId, latest envoy turn) to reconstruct.
+            // PR7 cleanup will revisit if the drift dashboard regresses.
           }
 
-          // --- Stage 4/5/6: inline action + finalization pipeline ---
-          // Preserves the buffer-mode invariant from narration-hygiene-v2:
-          // the `text` frame is only emitted AFTER all actions resolve and
-          // failure narration (if any) has replaced the LLM draft inline.
-          const ACTION_TIMEOUT_MS = 15_000;
-          // Prompt snapshot default-on (proposal Q8). Host can opt out by
-          // setting PROMPT_SNAPSHOT_ENABLED=false — a reader noticing missing
-          // promptContext on incident turns should check this env first.
-          const promptSnapshotEnabled =
-            process.env.PROMPT_SNAPSHOT_ENABLED !== "false";
-          const buildEnvoyMetadata = (
-            actions: ActionRequest[],
-            actionResults: ActionResult[],
-            base?: Record<string, unknown>,
-          ): ChannelMessageMetadata => {
-            const additions: Partial<ChannelMessageMetadata> = {};
-            if (actions.length > 0) {
-              additions.actions = actions.map((a) => ({
-                action: a.action,
-                params: (a.params ?? {}) as Record<string, unknown>,
-              }));
-              additions.actionResults = actions.map((a, i) => {
-                const r = actionResults[i];
-                if (!r) {
-                  return { action: a.action, success: false, message: "timed_out" };
-                }
-                return {
-                  action: a.action,
-                  success: r.success,
-                  message: r.message,
-                  ...(r.data ? { data: r.data } : {}),
-                };
-              });
-            }
-            if (promptSnapshotEnabled) {
-              additions.promptContext = {
-                systemPrompt: systemBase,
-                contextBlock: contextParts.join("\n"),
-                modelId,
-              };
-            }
-            if (selfCheckRecord) {
-              additions.selfCheck = selfCheckRecord;
-            }
-            return mergeChannelMetadata(base ?? null, additions);
-          };
-          const finalizeResponse = async (text: string): Promise<string> => {
-            try {
-              const parsed = parseActions(text);
-              // Inquire-tier short-circuits earlier (PR3b-i); the runner's
-              // allowed-actions enforcement strips any [ACTION] blocks for
-              // those intents. Reaching here means chat or event-shaped.
-              // Silent-drift telemetry (Round-2 fix on PR #83, 2026-04-27;
-              // extended for PR1 of the chat-decisioning-layer-redesign).
-              // The matcher has decided this turn is a deterministic
-              // create / modify / cancel against an existing entity, but
-              // Sonnet emerged with no matching action — likely Sonnet
-              // chose to clarify instead. Per §11.5 P5 the event keeps
-              // firing across the new intent split with the same name,
-              // and adds an `originatingIntent` field while keeping the
-              // old field shapes during the 7-day grace period.
-              if (
-                precheckResult?.kind === "deterministic-create" ||
-                precheckResult?.kind === "deterministic-modify" ||
-                precheckResult?.kind === "deterministic-cancel"
-              ) {
-                const expectedAction =
-                  precheckResult.kind === "deterministic-create"
-                    ? "create_link"
-                    : precheckResult.kind === "deterministic-modify"
-                      ? "update_link"
-                      : "cancel";
-                const emittedExpected = parsed.some(
-                  (a) => a.action === expectedAction,
-                );
-                if (!emittedExpected) {
-                  const originatingIntent =
-                    precheckResult.kind === "deterministic-create"
-                      ? "create_link"
-                      : precheckResult.kind === "deterministic-modify"
-                        ? "modify_link"
-                        : "cancel_link";
-                  console.log(
-                    JSON.stringify({
-                      event: "precheck_silent_drift",
-                      userId: safeUser.id,
-                      // New PR1 field — `originatingIntent` lets the
-                      // dashboard split create vs modify vs cancel rates.
-                      originatingIntent,
-                      // Old fields kept for 7-day grace per §11.5 P5;
-                      // only populated when the precheck was a create
-                      // (-modify / -cancel never carried these).
-                      inviteeName:
-                        precheckResult.kind === "deterministic-create"
-                          ? precheckResult.args.inviteeName
-                          : null,
-                      topic:
-                        precheckResult.kind === "deterministic-create"
-                          ? precheckResult.args.topic
-                          : null,
-                      duration:
-                        precheckResult.kind === "deterministic-create"
-                          ? precheckResult.args.duration
-                          : null,
-                      dateRangeKeyword:
-                        precheckResult.kind === "deterministic-create"
-                          ? precheckResult.args.dateRangeKeyword
-                          : null,
-                      emittedActions: parsed.map((a) => a.action),
-                      responseSample: text.slice(0, 200),
-                    }),
-                  );
-                }
-              }
-              const actions = parsed;
-              let actionResults: ActionResult[] = [];
-              let timedOut = false;
-              if (actions.length > 0) {
-                // Stage 4: drafting — before executeActions, keyed to first
-                // action's guest (when available from params).
-                const firstAction = actions[0];
-                const draftSlots = slotsFromAction(firstAction);
-                emitStatus("drafting", { slots: draftSlots });
-
-                const onActionStart = (action: ActionRequest, index: number) => {
-                  // Stage 5: executing — one frame per action, up to the cap.
-                  const slots = slotsFromAction(action);
-                  emitStatus("executing", {
-                    action: action.action as ProgressExecutingAction,
-                    slots,
-                    withinStageIndex: index,
-                  });
-                };
-
-                const execPromise = executeActions(actions, safeUser.id, {
-                  meetSlug: safeUser.meetSlug || undefined,
-                  onActionStart,
-                });
-                const timeoutPromise = new Promise<"__TIMEOUT__">((resolve) =>
-                  setTimeout(() => resolve("__TIMEOUT__"), ACTION_TIMEOUT_MS),
-                );
-                const raced = await Promise.race([execPromise, timeoutPromise]);
-                if (raced === "__TIMEOUT__") {
-                  timedOut = true;
-                  execPromise
-                    .then((r) => console.warn(`[channel/chat] late action completion user=${safeUser.id} results=${r.map(x => x.success ? "ok" : "fail").join(",")}`))
-                    .catch((e) => console.error(`[channel/chat] late action error user=${safeUser.id}:`, e));
-                } else {
-                  actionResults = raced;
-                }
-              }
-
-              // Stage 6: finalizing — after action results, before DB write.
-              emitStatus("finalizing");
-
-              let displayText = stripActionBlocks(text);
-              displayText = displayText.replace(/```agentenvoy-action\s*\n?[\s\S]*?\n?```/g, "").trim();
-
-              let overriddenNarration: string | null = null;
-              if (timedOut) {
-                overriddenNarration = displayText || null;
-                displayText = narrateTimeout();
-              } else {
-                const failedResults = actionResults.filter((r) => !r.success);
-                if (failedResults.length > 0) {
-                  overriddenNarration = displayText || null;
-                  displayText = narrateFailures(actions, actionResults, displayText);
-                }
-              }
-
-              const baseOverride = overriddenNarration
-                ? { overriddenNarration }
-                : null;
-              const envoyMetadata = buildEnvoyMetadata(
-                actions,
-                actionResults,
-                baseOverride ?? undefined,
-              );
-
-              const createLinkResult = actionResults.find((r) => r.success && r.data?.url);
-              if (createLinkResult?.data) {
-                const d = createLinkResult.data;
-                const envoyText = displayText || createLinkResult.message;
-                await prisma.channelMessage.create({
-                  data: {
-                    channelId: safeChannel.id,
-                    role: "envoy",
-                    content: envoyText,
-                    threadId: d.sessionId as string,
-                    metadata: envoyMetadata as Prisma.InputJsonValue,
-                  },
-                });
-                return envoyText;
-              }
-
-              const threadedResult = actionResults.find(
-                (r) => r.success && typeof r.data?.sessionId === "string",
-              );
-              if (threadedResult?.data) {
-                const sid = threadedResult.data.sessionId as string;
-                const summary =
-                  actionResults.filter((r) => !r.silent).length > 0
-                    ? actionResults
-                        .filter((r) => !r.silent)
-                        .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
-                        .join("\n")
-                    : "";
-                const envoyText = displayText || threadedResult.message;
-                await prisma.channelMessage.create({
-                  data: {
-                    channelId: safeChannel.id,
-                    role: "envoy",
-                    content: envoyText,
-                    threadId: sid,
-                    metadata: envoyMetadata as Prisma.InputJsonValue,
-                  },
-                });
-                if (summary && displayText) {
-                  await prisma.channelMessage.create({
-                    data: { channelId: safeChannel.id, role: "system", content: summary },
-                  });
-                }
-                return envoyText;
-              }
-
-              const visibleResults = actionResults.filter((r) => !r.silent);
-              if (visibleResults.length > 0) {
-                const summary = visibleResults
-                  .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
-                  .join("\n");
-                if (!displayText) {
-                  displayText = summary;
-                } else {
-                  await prisma.channelMessage.create({
-                    data: { channelId: safeChannel.id, role: "system", content: summary },
-                  });
-                }
-              }
-
-              const finalText = displayText || text || "Done.";
-              await prisma.channelMessage.create({
-                data: {
-                  channelId: safeChannel.id,
-                  role: "envoy",
-                  content: finalText,
-                  metadata: envoyMetadata as Prisma.InputJsonValue,
-                },
-              });
-              return finalText;
-            } catch (e) {
-              console.error("[channel/chat] finalizeResponse error:", e);
-              const fallback = narrateFinalizeError();
-              try {
-                await prisma.channelMessage.create({
-                  data: { channelId: safeChannel.id, role: "envoy", content: fallback },
-                });
-              } catch {
-                // swallow — already in an error path
-              }
-              return fallback;
-            }
-          };
-
-          const clientText = await finalizeResponse(fullText);
-
-          // Final text frame — atomic, after all actions and narration rewrite.
-          controller.enqueue(
-            encoder.encode(JSON.stringify({ type: "text", content: clientText }) + "\n"),
-          );
           controller.close();
+          return;
+
         } catch (e) {
           console.error("[channel/chat] stream start error:", e);
           try {
@@ -1543,37 +1056,6 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Extract ProgressCopy slot values from an action's params. Per-action specific
- * copy (§10 decision #7) — we surface `{guest}` and `{day}` when the action's
- * params carry them, generic fallback otherwise.
- *
- * PII contract: only the closed-union slots may be emitted. Preferences /
- * directives / knowledge fields are deliberately not considered here.
- */
-function slotsFromAction(action: ActionRequest): ProgressCopyInterpolation {
-  const p = action.params as Record<string, unknown>;
-  const slots: ProgressCopyInterpolation = {};
-  const guestRaw =
-    (typeof p.inviteeName === "string" && p.inviteeName) ||
-    (typeof p.guestName === "string" && p.guestName) ||
-    null;
-  if (guestRaw) {
-    // First-name preferred (§2.2 slot-fill examples).
-    slots.guest = String(guestRaw).trim().split(/\s+/)[0];
-  }
-  const dayRaw =
-    (typeof p.day === "string" && p.day) ||
-    (typeof p.date === "string" && p.date) ||
-    (typeof p.time === "string" && p.time) ||
-    null;
-  if (dayRaw) slots.day = String(dayRaw);
-  return slots;
-}
 
 /**
  * Build an injected-hint prompt block for `deterministic-create` precheck

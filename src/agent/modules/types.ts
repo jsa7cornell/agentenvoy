@@ -86,6 +86,15 @@ export interface ModuleContextOutput {
   contextLines: string[];
   /** Optional [GROUND TRUTH] block for state-grounding (e.g., F14 Phase 3.A). */
   groundTruthBlock?: string;
+  /**
+   * Optional dynamic content the runner inserts AFTER the playbook fragments
+   * and BEFORE the # Context section. Used by event-intent modules
+   * (PR3b-iii) to fold the matcher's deterministic-create hint into the
+   * system prompt without polluting the static playbook fragment list. The
+   * legacy schedule path's `system = systemBase + precheckHintBlock + "..."`
+   * shape (chat/route.ts:1124-1127 pre-PR3b-iii) is preserved by this seam.
+   */
+  systemPromptSuffix?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +286,14 @@ export interface RunnerInput {
    * runner uses the default Sonnet invoker. Tests + bench fixtures pass mocks.
    */
   composerInvoker?: ComposerInvoker;
+  /**
+   * Optional action-execution timeout in ms. When set, the runner races
+   * `executeActions(parsedActions)` against `setTimeout(timeoutMs)`. On
+   * timeout, the runner returns `actionsTimedOut: true` and logs the late
+   * completion in the background. PR3b-iii adopts the legacy schedule path's
+   * 15s default for event intents.
+   */
+  actionTimeoutMs?: number;
 }
 
 export interface ModuleGuardRecord {
@@ -299,6 +316,9 @@ export type RunnerOutput =
       moduleGuard: ModuleGuardRecord;
       /** Exposed for tests + bench inspection. */
       systemPrompt: string;
+      /** PR3b-iii: action-execution exceeded `actionTimeoutMs`. The late
+       *  completion is logged in the background; actionResults is empty. */
+      actionsTimedOut?: boolean;
     }
   | {
       kind: "streaming";

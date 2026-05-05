@@ -21,7 +21,11 @@ import {
   mergeChannelMetadata,
   type ChannelMessageMetadata,
 } from "@/lib/channel/metadata-schema";
-import { narrateFinalizeError } from "@/agent/action-narration";
+import {
+  narrateFailures,
+  narrateFinalizeError,
+  narrateTimeout,
+} from "@/agent/action-narration";
 import { runModule } from "@/agent/modules/runner";
 import type {
   IntentSurface,
@@ -55,6 +59,23 @@ export interface DispatchModuleAndStreamArgs {
    * semantic without duplicating the lifecycle logic in this helper.
    */
   conversationHistory?: Array<{ role: string; content: string }>;
+  /**
+   * Per-turn action-execution timeout in ms (PR3b-iii). When set, the runner
+   * races executeActions against this timeout. On timeout, displayText is
+   * replaced with `narrateTimeout()` and the late completion is logged.
+   * Legacy schedule path uses 15000.
+   */
+  actionTimeoutMs?: number;
+  /**
+   * Whether to override displayText with `narrateFailures()` when
+   * actionResults contain failures (PR3b-iii). Default: true for event
+   * intents that emit actions; harmless no-op when no actions emit.
+   */
+  narrateFailureResults?: boolean;
+  /** Whether to emit the `executing` status frame between thinking and
+   *  finalizing. Defaults to true when `actionTimeoutMs` is set (event
+   *  intents emit actions and benefit from the frame); false otherwise. */
+  emitExecutingStage?: boolean;
   /** Log prefix for failures. Defaults to `intent`. */
   errorTag?: string;
 }
@@ -105,6 +126,10 @@ export async function dispatchModuleAndStream(
       sanitizedHistory = messages;
     }
 
+    if (args.emitExecutingStage ?? args.actionTimeoutMs != null) {
+      emitStatus("executing");
+    }
+
     const result = await runModule({
       surface,
       intent,
@@ -120,6 +145,7 @@ export async function dispatchModuleAndStream(
         },
       userMessage: message,
       conversationHistory: sanitizedHistory,
+      actionTimeoutMs: args.actionTimeoutMs,
     });
 
     if (result.kind !== "buffered") {
@@ -153,13 +179,37 @@ export async function dispatchModuleAndStream(
     }
     (additions as Record<string, unknown>).moduleGuard = result.moduleGuard;
 
+    // PR3b-iii: narrate failures + timeouts at presentation layer. The
+    // runner returns the LLM's draft text; the helper replaces it with
+    // a failure-aware narration when actions failed or timed out, mirroring
+    // the legacy schedule path's behavior.
+    let displayText = result.text || "Done.";
+    let overriddenNarration: string | null = null;
+    if (result.actionsTimedOut) {
+      overriddenNarration = result.text || null;
+      displayText = narrateTimeout();
+    } else if ((args.narrateFailureResults ?? true) && result.actionResults.length > 0) {
+      const failed = result.actionResults.filter((r) => !r.success);
+      if (failed.length > 0) {
+        overriddenNarration = result.text || null;
+        displayText = narrateFailures(
+          result.parsedActions,
+          result.actionResults,
+          result.text || "",
+        );
+      }
+    }
+    if (overriddenNarration) {
+      (additions as Record<string, unknown>).overriddenNarration = overriddenNarration;
+    }
+
     // Append linkUrl from successful actions so the host sees shareable URLs.
     const linkUrls = result.actionResults
       .filter((r) => r.success && typeof r.data?.linkUrl === "string")
       .map((r) => r.data!.linkUrl as string);
-    let finalText = result.text || "Done.";
+    let finalText = displayText;
     if (linkUrls.length > 0) {
-      const trimmed = (result.text || "").trim();
+      const trimmed = displayText.trim();
       finalText = trimmed
         ? `${trimmed}\n\n${linkUrls.join("\n\n")}`
         : linkUrls.join("\n\n");
