@@ -22,6 +22,7 @@ import {
   loadScheduleContext,
   type ScheduleContext,
 } from "@/agent/modules/_shared/schedule-context";
+import { inquireFewShot } from "./fewshot";
 
 export const inquireClusterModule: IntentModule<ScheduleContext> = {
   intent: "inquire",
@@ -42,6 +43,8 @@ export const inquireClusterModule: IntentModule<ScheduleContext> = {
   allowedActions: [],
   responseStyle: "human-prose",
   moduleGuardBucket: "inquire",
+  // Rule 27: worked-dialogue examples live in fewshot.ts, not in the fragment.
+  fewshot: inquireFewShot,
 };
 
 // Keep legacy named exports so any direct imports in bench fixtures or tests
