@@ -83,27 +83,31 @@ describe("validateChatIntent", () => {
     expect(out.clarifier).toBe("Which one?");
   });
 
-  it("falls back to schedule when kind=unclear but clarifier missing/blank", () => {
-    expect(validateChatIntent({ kind: "unclear" })).toEqual({ kind: "schedule" });
+  it("falls back to unclear (no quick-replies) when kind=unclear but clarifier missing/blank", () => {
+    // PR-E: was falling back to { kind: "schedule" } — now returns { kind: "unclear" }
+    // so the route uses its default clarifier text instead of misrouting.
+    expect(validateChatIntent({ kind: "unclear" })).toEqual({ kind: "unclear" });
     expect(validateChatIntent({ kind: "unclear", clarifier: "" })).toEqual({
-      kind: "schedule",
+      kind: "unclear",
     });
     expect(validateChatIntent({ kind: "unclear", clarifier: "   " })).toEqual({
-      kind: "schedule",
+      kind: "unclear",
     });
   });
 
-  it("drops quick-replies targeting stub tiers (profile, rule) per N2", () => {
+  it("drops quick-replies targeting stub tiers (profile, rule) per N2; maps schedule → event_action per PR-E", () => {
     const out = validateChatIntent({
       kind: "unclear",
       clarifier: "Which did you mean?",
       quickReplies: [
         { label: "Edit profile", intent: "profile" },
         { label: "Add a rule", intent: "rule" },
+        // PR-E: "schedule" in quick-reply intents is mapped to "event_action" (cluster name).
         { label: "Book it", intent: "schedule" },
       ],
     });
-    expect(out.quickReplies).toEqual([{ label: "Book it", intent: "schedule" }]);
+    // "Book it" survives but with intent mapped to "event_action".
+    expect(out.quickReplies).toEqual([{ label: "Book it", intent: "event_action" }]);
   });
 
   it("drops malformed quick-replies (missing label, bad intent)", () => {

@@ -51,7 +51,9 @@ export type ChannelChatFrame =
       text: string;
       quickReplies: Array<{
         label: string;
-        intent: "schedule" | "inquire";
+        // PR-E: "event_action" replaces "schedule" as the cluster hint name.
+        // "schedule" kept for stale-client compatibility.
+        intent: "event_action" | "inquire" | "schedule";
       }>;
     };
 
@@ -138,14 +140,20 @@ function parseFrame(line: string): ChannelChatFrame | null {
         if (!r || typeof r !== "object") return null;
         const item = r as { label?: unknown; intent?: unknown };
         const label = typeof item.label === "string" ? item.label : "";
+        // PR-E: accept "event_action" (new cluster name) and "schedule" (legacy compat).
         const intent =
-          item.intent === "schedule" || item.intent === "inquire"
-            ? (item.intent as "schedule" | "inquire")
+          item.intent === "event_action" ||
+          item.intent === "inquire" ||
+          item.intent === "schedule"
+            ? (item.intent as "event_action" | "inquire" | "schedule")
             : null;
         if (!label || !intent) return null;
         return { label, intent };
       })
-      .filter((r): r is { label: string; intent: "schedule" | "inquire" } => r !== null);
+      .filter(
+        (r): r is { label: string; intent: "event_action" | "inquire" | "schedule" } =>
+          r !== null,
+      );
     return { type: "clarifier", text, quickReplies };
   }
   if (type === "reaction") {

@@ -19,7 +19,7 @@ import {
 } from "@/agent/progress-copy";
 import { classifyChatIntent } from "@/agent/intent-classifier";
 import { isEchoOfRecentEnvoy } from "@/lib/echo-detect";
-import { normalizeChatIntent, type ChatIntent, type ChatIntentBlock } from "@/lib/intent";
+import { normalizeChatIntent, type ChatIntentBlock } from "@/lib/intent";
 // Import the modules registry side-effects (registers all dashboard-host
 // modules: chat, rule, profile, create_bookable_link, inquire/query_*,
 // create_link/modify_link/cancel_link/schedule).
@@ -94,9 +94,18 @@ export async function POST(req: NextRequest) {
     // Hint from a clarifier quick-reply click — bypasses the classifier.
     // Proposal §2.4, §2.6. Stub tiers are NOT accepted as hints (schema
     // §2.2 restricts quick-replies to live tiers only).
-    const hintedIntent: ChatIntent | null = (() => {
-      const n = normalizeChatIntent(rawIntentHint);
-      if (n === "schedule" || n === "inquire") return n;
+    // PR-E (Q6 lock): cluster names are valid hint values ("event_action",
+    // "inquire"). Type widened to string to accommodate cluster names that
+    // are not in the ChatIntent union (they're cluster-level routing keys).
+    const hintedIntent: string | null = (() => {
+      if (typeof rawIntentHint !== "string") return null;
+      const hint = rawIntentHint.trim();
+      // Accept cluster-name hints directly (post-PR-E).
+      if (hint === "event_action" || hint === "inquire") return hint;
+      // Backward compat: old clients may still send "schedule" or a ChatIntent.
+      const n = normalizeChatIntent(hint);
+      if (n === "schedule") return "event_action"; // map legacy → cluster name
+      if (n === "inquire") return "inquire";
       return null;
     })();
 
@@ -287,7 +296,10 @@ export async function POST(req: NextRequest) {
             // Skip classifier entirely; trust the marco-pending reply.
             intentBlock = { kind: marcoReplayResolved.kind };
           } else if (hintedIntent) {
-            intentBlock = { kind: hintedIntent };
+            // hintedIntent is string | null (PR-E: cluster names like "event_action"
+            // are not in the ChatIntent union but are valid routing keys here).
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            intentBlock = { kind: hintedIntent as any };
           } else {
             // Build a lightweight context snapshot for the classifier —
             // active session titles help it resolve pronouns like "move
@@ -701,7 +713,9 @@ export async function POST(req: NextRequest) {
             intent === "create_link" ||
             intent === "modify_link" ||
             intent === "cancel_link" ||
-            intent === "schedule";
+            intent === "schedule" ||
+            // PR-E: "event_action" cluster hint bypasses classifier and lands here.
+            intent === "event_action";
           if (isEventIntent) {
             try {
               const [precheckSessions, recentTurns] = await Promise.all([

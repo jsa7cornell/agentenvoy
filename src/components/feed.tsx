@@ -910,7 +910,8 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
   // the classifier. Proposal: 2026-04-21_dashboard-chat-intent-router §2.6.
   const [clarifierState, setClarifierState] = useState<{
     originalText: string;
-    replies: Array<{ label: string; intent: "schedule" | "inquire" }>;
+    // PR-E: "event_action" is the new cluster name; "schedule" kept for stale-data compat.
+    replies: Array<{ label: string; intent: "event_action" | "inquire" | "schedule" }>;
   } | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [calendarConnected, setCalendarConnected] = useState(true);
@@ -1267,7 +1268,8 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
   // Send message
   const handleSend = async (
     overrideText?: string,
-    intentHint?: "schedule" | "inquire",
+    // PR-E: "event_action" is the new cluster hint name; "schedule" for legacy compat.
+    intentHint?: "event_action" | "inquire" | "schedule",
   ) => {
     const text = (overrideText ?? input).trim();
     if (!text || loading) return;
@@ -1392,7 +1394,8 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
         // `never` at the post-stream check.
         const clarifierBox: {
           value: {
-            replies: Array<{ label: string; intent: "schedule" | "inquire" }>;
+            // PR-E: "event_action" is the new cluster name; "schedule" kept for stale-data compat.
+    replies: Array<{ label: string; intent: "event_action" | "inquire" | "schedule" }>;
           } | null;
         } = { value: null };
         let pendingCopy: string | null = null;

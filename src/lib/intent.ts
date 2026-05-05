@@ -412,13 +412,13 @@ export function intentToCluster(intent: string): string {
 
 /**
  * Quick-reply shape emitted by the classifier when `kind === "unclear"`.
- * Per N2 fold: stub tiers are NOT allowed as quick-reply targets in v1 —
- * clicking a profile/rule option would dead-end on a "coming soon" stub.
- * The schema enumerates `["schedule", "inquire"]` only.
+ * Per N2 fold: stub tiers are NOT allowed as quick-reply targets in v1.
+ * PR-E (Q6 lock): hint names are now cluster names — `"event_action"` replaces
+ * `"schedule"`. The schema enumerates `["event_action", "inquire"]` only.
  */
 export type ChatIntentQuickReply = {
   label: string;
-  intent: "schedule" | "inquire";
+  intent: "event_action" | "inquire";
 };
 
 export type ChatIntentBlock = {
@@ -512,9 +512,9 @@ export function validateChatIntent(raw: unknown): ChatIntentBlock {
       typeof block.clarifier === "string" && block.clarifier.trim()
         ? block.clarifier.trim()
         : null;
-    // Unclear without clarifier text = dead-end bubble. Fall back to
-    // schedule (today's behavior) rather than render an empty prompt.
-    if (!clarifier) return { kind: "schedule" };
+    // Unclear without clarifier text = dead-end bubble. Return unclear
+    // with no quickReplies so the route uses a default clarifier message.
+    if (!clarifier) return { kind: "unclear" };
 
     const quickReplies = Array.isArray(block.quickReplies)
       ? block.quickReplies
@@ -522,11 +522,15 @@ export function validateChatIntent(raw: unknown): ChatIntentBlock {
             if (!q || typeof q !== "object") return null;
             const item = q as { label?: unknown; intent?: unknown };
             const label = typeof item.label === "string" ? item.label.trim() : "";
-            const intent = normalizeChatIntent(item.intent);
+            let rawIntent = typeof item.intent === "string" ? item.intent : null;
+            // PR-E: map legacy "schedule" quick-reply intent to cluster name "event_action".
+            if (rawIntent === "schedule") rawIntent = "event_action";
             // Stub tiers (profile, rule) dropped per N2 — no dead-end CTAs.
-            if (!label || !intent || (intent !== "schedule" && intent !== "inquire")) {
+            // Only "event_action" and "inquire" are valid quick-reply targets.
+            if (!label || (rawIntent !== "event_action" && rawIntent !== "inquire")) {
               return null;
             }
+            const intent = rawIntent as "event_action" | "inquire";
             return { label, intent } as ChatIntentQuickReply;
           })
           .filter((x): x is ChatIntentQuickReply => x !== null)
