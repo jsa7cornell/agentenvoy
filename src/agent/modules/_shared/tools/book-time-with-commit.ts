@@ -11,8 +11,7 @@
  */
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { confirmBooking } from "@/lib/confirm-pipeline";
-import { handleCreateLink } from "@/agent/actions";
+import { mintLinkAndConfirmInvite } from "@/agent/modules/_shared/mint-link-and-confirm-invite";
 import type { ComposerTool, ModuleContext } from "@/agent/modules/types";
 
 const inputSchema = z.object({
@@ -106,71 +105,47 @@ export const bookTimeWithCommit: ComposerTool<
       };
     }
 
-    // ── Mint contextual link ─────────────────────────────────────────────────
-    const createLinkParams: Record<string, unknown> = {
-      inviteeNames: other.name ? [other.name] : [],
-      inviteeEmail: other.email,
-      ...(intent.activity ? { activity: intent.activity } : {}),
-      ...(durationMinutes ? { duration: durationMinutes } : {}),
-      ...(intent.format ? { format: intent.format } : {}),
-      ...(intent.topic ? { note: intent.topic } : {}),
-      ...(intent.hostNote ? { hostNote: intent.hostNote } : {}),
-      ...(intent.location ? { location: intent.location } : {}),
-    };
-
-    const createResult = await handleCreateLink(createLinkParams, callerUserId);
-
-    if (!createResult.success) {
-      return {
-        ok: false,
-        reason: "validation_failed",
-        message: createResult.message ?? "Failed to create meeting link",
-      };
-    }
-
-    const sessionId = createResult.data?.sessionId as string | undefined;
-    if (!sessionId) {
-      return {
-        ok: false,
-        reason: "validation_failed",
-        message: "Link created but no session ID returned",
-      };
-    }
-
-    // ── Confirm the booking ──────────────────────────────────────────────────
-    const confirmResult = await confirmBooking({
-      sessionId,
-      dateTime: slot.start,
-      duration: durationMinutes,
-      format: intent.format,
-      location: intent.location ?? null,
-      guestEmail: other.email,
-      guestName: other.name,
-      userAgent: null,
+    // ── Mint + confirm via shared helper ─────────────────────────────────────
+    // Both this deprecated tool and `create_link({commitMode: "invite"})`
+    // (forthcoming, Path B fold) call `mintLinkAndConfirmInvite`. Resolves
+    // the prior mutual-recursion risk between this tool and handleCreateLink.
+    const result = await mintLinkAndConfirmInvite({
+      invitee: { email: other.email, name: other.name },
+      slot: { start: slot.start, end: slot.end },
+      intent: {
+        ...(intent.activity ? { activity: intent.activity } : {}),
+        ...(durationMinutes ? { durationMinutes } : {}),
+        ...(intent.format ? { format: intent.format } : {}),
+        ...(intent.topic ? { topic: intent.topic } : {}),
+        ...(intent.hostNote ? { hostNote: intent.hostNote } : {}),
+        ...(intent.location ? { location: intent.location } : {}),
+      },
+      callerUserId,
     });
 
-    if (!confirmResult.ok) {
+    if (!result.ok) {
       return {
         ok: false,
-        reason: confirmResult.reason,
-        message: confirmResult.message,
+        reason: result.reason,
+        message: result.message,
       };
     }
-
-    const confirmedSession = await prisma.negotiationSession.findUnique({
-      where: { id: sessionId },
-      select: { link: { select: { slug: true, code: true } } },
-    });
-    const baseUrl = process.env.NEXTAUTH_URL || "https://agentenvoy.ai";
-    const meetingUrl =
-      confirmedSession?.link?.code && confirmedSession?.link?.slug
-        ? `${baseUrl}/meet/${confirmedSession.link.slug}/${confirmedSession.link.code}`
-        : `${baseUrl}/meet/unknown`;
 
     return {
-      ...confirmResult,
-      meetingUrl,
-      sessionId,
+      ok: true,
+      outcome: "success",
+      status: result.status,
+      dateTime: result.dateTime,
+      duration: result.duration,
+      format: result.format,
+      location: result.location,
+      emailSent: result.emailSent,
+      meetingUrl: result.meetingUrl,
+      sessionId: result.sessionId,
+      ...(result.warnings ? { warnings: result.warnings } : {}),
+      ...(result.calendarWriteUnavailable
+        ? { calendarWriteUnavailable: true }
+        : {}),
     };
   },
 };
