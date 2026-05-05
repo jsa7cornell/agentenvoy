@@ -14,7 +14,7 @@ import {
   voicePlaybook,
   dealroomGuestComposer,
   dealroomHostComposer,
-} from "./playbooks/index";
+} from "./runtime-prompts/index";
 
 // --- Model configuration per domain ---
 

@@ -164,6 +164,7 @@ export interface ActionResult {
   success: boolean;
   message: string;
   data?: Record<string, unknown>;
+  silent?: boolean; // true = do not surface this result in the chat thread
 }
 
 // --- Parser ---
@@ -1575,6 +1576,7 @@ async function handleUpdateKnowledge(
   return {
     success: true,
     message: `Updated ${parts.join(" and ")} (knowledge base)`,
+    silent: true,
   };
 }
 

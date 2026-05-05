@@ -38,7 +38,7 @@ import {
   type DeterministicCreateArgs,
 } from "@/agent/matcher";
 import { parseLinkParameters } from "@/lib/link-parameters";
-import { voicePlaybook, calendarEventComposer, inquireComposer } from "@/agent/playbooks/index";
+import { voicePlaybook, calendarEventComposer, inquireComposer } from "@/agent/runtime-prompts/index";
 
 function formatUpcomingEvents(events: CalendarEvent[], tz: string): string | null {
   const now = Date.now();
@@ -419,8 +419,8 @@ export async function POST(req: NextRequest) {
           if (intent === "profile" || intent === "rule") {
             const playbookRelativePath =
               intent === "profile"
-                ? "src/agent/playbooks/composers/profile-composer.md"
-                : "src/agent/playbooks/composers/calendar-rule-composer.md";
+                ? "src/agent/runtime-prompts/composers/profile-composer.md"
+                : "src/agent/runtime-prompts/composers/calendar-rule-composer.md";
             let profileGapHints: string[] | undefined;
             if (intent === "profile") {
               try {
@@ -532,8 +532,8 @@ export async function POST(req: NextRequest) {
               );
             const tier: "profile" | "rule" = isRuleShape ? "rule" : "profile";
             const playbookRelativePath = isRuleShape
-              ? "src/agent/playbooks/composers/calendar-rule-composer.md"
-              : "src/agent/playbooks/composers/profile-composer.md";
+              ? "src/agent/runtime-prompts/composers/calendar-rule-composer.md"
+              : "src/agent/runtime-prompts/composers/profile-composer.md";
             try {
               await runDispatchHandler({
                 tier,
@@ -610,7 +610,7 @@ export async function POST(req: NextRequest) {
               await runDispatchHandler({
                 tier: "rule",
                 playbookRelativePath:
-                  "src/agent/playbooks/composers/calendar-rule-composer.md",
+                  "src/agent/runtime-prompts/composers/calendar-rule-composer.md",
                 userId: safeUser.id,
                 userName: user.name ?? null,
                 channelId: safeChannel.id,
@@ -659,7 +659,7 @@ export async function POST(req: NextRequest) {
                 await runDispatchHandler({
                   tier: "rule",
                   playbookRelativePath:
-                    "src/agent/playbooks/composers/calendar-rule-composer.md",
+                    "src/agent/runtime-prompts/composers/calendar-rule-composer.md",
                   userId: safeUser.id,
                   userName: user.name ?? null,
                   channelId: safeChannel.id,
@@ -1441,8 +1441,9 @@ export async function POST(req: NextRequest) {
               if (threadedResult?.data) {
                 const sid = threadedResult.data.sessionId as string;
                 const summary =
-                  actionResults.length > 0
+                  actionResults.filter((r) => !r.silent).length > 0
                     ? actionResults
+                        .filter((r) => !r.silent)
                         .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
                         .join("\n")
                     : "";
@@ -1464,8 +1465,9 @@ export async function POST(req: NextRequest) {
                 return envoyText;
               }
 
-              if (actionResults.length > 0) {
-                const summary = actionResults
+              const visibleResults = actionResults.filter((r) => !r.silent);
+              if (visibleResults.length > 0) {
+                const summary = visibleResults
                   .map((r) => `${r.success ? "\u2713" : "\u2717"} ${r.message}`)
                   .join("\n");
                 if (!displayText) {

@@ -9,7 +9,7 @@ import { join } from "path";
 // PR2 rename: channel.md → composers/calendar-event-composer.md
 describe("calendar-event-composer.md playbook", () => {
   const playbook = readFileSync(
-    join(process.cwd(), "src", "agent", "playbooks", "composers", "calendar-event-composer.md"),
+    join(process.cwd(), "src", "agent", "runtime-prompts", "composers", "calendar-event-composer.md"),
     "utf-8"
   );
 

@@ -50,25 +50,25 @@ function applySubstitutions(markdown: string): string {
 // ── Fragments (shared building blocks) ────────────────────────────────────
 export function voicePlaybook(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/playbooks/fragments/voice.md"), "utf-8");
+    return readFileSync(join(cwd, "src/agent/runtime-prompts/fragments/voice.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load fragments/voice.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load fragments/voice.md: ${err}`);
   }
 }
 export function groundTruthPlaybook(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/playbooks/fragments/ground-truth.md"), "utf-8");
+    return readFileSync(join(cwd, "src/agent/runtime-prompts/fragments/ground-truth.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load fragments/ground-truth.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load fragments/ground-truth.md: ${err}`);
   }
 }
 
 // ── Classifiers ────────────────────────────────────────────────────────────
 export function hostClassifierPlaybook(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/playbooks/classifiers/host-classifier.md"), "utf-8");
+    return readFileSync(join(cwd, "src/agent/runtime-prompts/classifiers/host-classifier.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load classifiers/host-classifier.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load classifiers/host-classifier.md: ${err}`);
   }
 }
 // NOTE: guest classifier (intent-classifier.md) deleted in PR2. No export.
@@ -80,47 +80,47 @@ export function calendarEventComposer(): string {
     // natural windows). The readFileSync call uses a literal string per the
     // Vercel file-tracing invariant at the top of this file.
     return applySubstitutions(
-      readFileSync(join(cwd, "src/agent/playbooks/composers/calendar-event-composer.md"), "utf-8"),
+      readFileSync(join(cwd, "src/agent/runtime-prompts/composers/calendar-event-composer.md"), "utf-8"),
     );
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load composers/calendar-event-composer.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load composers/calendar-event-composer.md: ${err}`);
   }
 }
 export function inquireComposer(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/playbooks/composers/inquire-composer.md"), "utf-8");
+    return readFileSync(join(cwd, "src/agent/runtime-prompts/composers/inquire-composer.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load composers/inquire-composer.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load composers/inquire-composer.md: ${err}`);
   }
 }
 export function profileComposer(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/playbooks/composers/profile-composer.md"), "utf-8");
+    return readFileSync(join(cwd, "src/agent/runtime-prompts/composers/profile-composer.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load composers/profile-composer.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load composers/profile-composer.md: ${err}`);
   }
 }
 export function calendarRuleComposer(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/playbooks/composers/calendar-rule-composer.md"), "utf-8");
+    return readFileSync(join(cwd, "src/agent/runtime-prompts/composers/calendar-rule-composer.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load composers/calendar-rule-composer.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load composers/calendar-rule-composer.md: ${err}`);
   }
 }
 
 // ── Composers (deal-room) ──────────────────────────────────────────────────
 export function dealroomGuestComposer(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/playbooks/composers/dealroom-guest-composer.md"), "utf-8");
+    return readFileSync(join(cwd, "src/agent/runtime-prompts/composers/dealroom-guest-composer.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load composers/dealroom-guest-composer.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load composers/dealroom-guest-composer.md: ${err}`);
   }
 }
 export function dealroomHostComposer(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/playbooks/composers/dealroom-host-composer.md"), "utf-8");
+    return readFileSync(join(cwd, "src/agent/runtime-prompts/composers/dealroom-host-composer.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load composers/dealroom-host-composer.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load composers/dealroom-host-composer.md: ${err}`);
   }
 }
 
@@ -141,7 +141,7 @@ export function administratorPlaybook(): string {
   try {
     return readFileSync(join(cwd, "src/lib/proposal-synthesizer/playbooks/administrator.md"), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load proposal-synthesizer/playbooks/administrator.md: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load proposal-synthesizer/playbooks/administrator.md: ${err}`);
   }
 }
 
@@ -154,6 +154,6 @@ export function loadPlaybook(relativePath: string): string {
   try {
     return readFileSync(join(cwd, relativePath), "utf-8");
   } catch (err) {
-    throw new Error(`[playbooks/index] failed to load ${relativePath}: ${err}`);
+    throw new Error(`[runtime-prompts/index] failed to load ${relativePath}: ${err}`);
   }
 }

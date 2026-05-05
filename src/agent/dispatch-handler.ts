@@ -29,12 +29,12 @@ import {
   type ActionResult,
 } from "@/agent/actions";
 import { narrateFailures, narrateTimeout, narrateFinalizeError } from "@/agent/action-narration";
-import { loadPlaybook, voicePlaybook } from "./playbooks/index";
+import { loadPlaybook, voicePlaybook } from "./runtime-prompts/index";
 
 /**
  * Detect the Bookable Link **create** intent inside an LLM-emitted action.
  *
- * Shape produced by `rule.md`'s ladder (see playbooks/rule.md, examples
+ * Shape produced by `rule.md`'s ladder (see runtime-prompts/composers/calendar-rule-composer.md, examples
  * "Create a Bookable Link" / "Create a bookable link for 30-min
  * video calls on Tuesdays"):
  *

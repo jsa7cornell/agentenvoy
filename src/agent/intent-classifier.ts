@@ -27,7 +27,7 @@ import {
   type HostChatIntent,
 } from "@/lib/intent";
 import { recordSpan } from "@/lib/langfuse";
-import { hostClassifierPlaybook as loadHostClassifierPlaybook } from "./playbooks/index";
+import { hostClassifierPlaybook as loadHostClassifierPlaybook } from "./runtime-prompts/index";
 
 const CLASSIFIER_MODEL = "claude-haiku-4-5-20251001";
 const CLASSIFIER_MAX_TOKENS = 256;

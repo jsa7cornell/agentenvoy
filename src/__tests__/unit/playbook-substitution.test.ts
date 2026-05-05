@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calendarEventComposer } from "@/agent/playbooks";
+import { calendarEventComposer } from "@/agent/runtime-prompts";
 
 describe("playbook substitution — calendar-event-composer", () => {
   const playbook = calendarEventComposer();
