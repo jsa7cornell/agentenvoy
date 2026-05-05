@@ -30,7 +30,6 @@ import { invalidateSchedule } from "@/lib/calendar";
 import { parseBusinessHoursRange } from "@/lib/time-parse";
 import {
   PrimaryLinkStep,
-  STEP_ORDER,
   timezonePrompt,
   timezoneOtherPrompt,
   hoursPrompt,
@@ -250,7 +249,22 @@ export async function POST(req: NextRequest) {
   const label = typeof body.label === "string" ? body.label : null;
   const freetext = typeof body.freetext === "string" ? body.freetext : null;
 
-  if (!step || !STEP_ORDER.includes(step)) {
+  // Validate against the full step union — STEP_ORDER is just the spine
+  // (always-present steps); zoom_link / phone_number are conditional
+  // sub-steps inserted by the route after `format` based on the user's
+  // pick. Validating against STEP_ORDER alone rejected those legitimate
+  // requests with "Missing or invalid step."
+  const VALID_STEPS: ReadonlySet<PrimaryLinkStep> = new Set([
+    "timezone",
+    "hours",
+    "duration",
+    "format",
+    "zoom_link",
+    "phone_number",
+    "guest_flex",
+    "complete",
+  ]);
+  if (!step || !VALID_STEPS.has(step)) {
     return NextResponse.json({ error: "Missing or invalid step" }, { status: 400 });
   }
 
