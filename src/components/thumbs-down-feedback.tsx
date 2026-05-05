@@ -27,7 +27,7 @@ export function ThumbsDownFeedback({ sessionId, messageContent }: Props) {
         type="button"
         onClick={() => setOpen(true)}
         title="Flag this response"
-        className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity text-zinc-400 hover:text-red-400 text-[13px] ml-1.5 leading-none"
+        className="opacity-30 hover:opacity-100 active:opacity-100 transition-opacity text-zinc-400 hover:text-red-400 text-[13px] ml-1.5 leading-none"
       >
         👎
       </button>

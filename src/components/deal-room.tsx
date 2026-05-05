@@ -2638,7 +2638,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               <React.Fragment key={msg.id}>
                 {dateSeparator}
                 {primerBanner}
-                <div className={`flex min-w-0 items-end gap-1 group ${rightAligned ? "justify-end" : "justify-start"}`}>
+                <div className={`flex min-w-0 items-end gap-1 ${rightAligned ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[85%] min-w-0 rounded-2xl px-4 py-3 text-sm leading-relaxed ${messageStyle}`}>
                     {isExternalAgent
                       ? renderExternalAgentSender(msg.metadata ?? null, labelColor)
