@@ -54,14 +54,20 @@ describe("intent module contract", () => {
     }
   });
 
-  it("PR1a smoke module is registered and well-formed", () => {
+  it("chat module is registered and well-formed (real module post-PR3b-ii)", () => {
     const chat = lookupModule("dashboard-host", "chat");
-    expect(chat, "chat smoke module must be registered (PR1a's only module)").toBeDefined();
+    expect(chat, "chat module must be registered").toBeDefined();
     expect(chat!.intent).toBe("chat");
     expect(chat!.surface).toBe("dashboard-host");
     expect(chat!.composerPlaybook).toBeDefined();
-    expect(chat!.allowedActions).toEqual([]);   // smoke module emits no actions
     expect(chat!.responseStyle).toBe("human-prose");
+    // PR3b-ii: chat is now the real fall-through module with the full
+    // channel-composer action union; the PR1a empty-allowedActions stub
+    // is gone. A non-trivial allowedActions list is the new invariant.
+    expect(Array.isArray(chat!.allowedActions)).toBe(true);
+    expect(chat!.allowedActions.length).toBeGreaterThan(0);
+    expect(chat!.allowedActions).toContain("create_link");
+    expect(chat!.moduleGuardBucket).toBe("chat");
   });
 
   it("every registered module declares all required fields (TS exhaustiveness as runtime check)", () => {

@@ -669,12 +669,13 @@ export async function POST(req: NextRequest) {
             intent === "query_calendar" ||
             intent === "query_event";
 
-          if (isInquireTier) {
-            // Inquire-tier modules: read-only, no precheck, no actions, no
-            // channel-session lifecycle (the lifecycle stays at the route
-            // layer for event-tier paths until PR3b-iii). historyLimit:50
-            // is a minor fidelity drop vs the legacy 3-day-session-bounded
-            // window — defensible for stateless read-only questions.
+          if (isInquireTier || intent === "chat") {
+            // Inquire-tier (PR3b-i) + chat (PR3b-ii) modules: read-only or
+            // free-form fall-through; no precheck, no channel-session
+            // lifecycle (stays at the route layer for event-tier paths
+            // until PR3b-iii). historyLimit:50 is a minor fidelity drop vs
+            // the legacy 3-day-session-bounded window — defensible for
+            // stateless read-only and conversational turns.
             await dispatchModuleAndStream({
               surface: "dashboard-host",
               intent,
