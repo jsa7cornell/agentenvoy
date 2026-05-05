@@ -205,11 +205,35 @@ export function compileStructuredRules(
 
     switch (rule.action) {
       case "block": {
+        // 2026-05-05 hardening: a one-time block rule with an effectiveDate
+        // MUST always scope to that date — either as a blackoutDay (all-day
+        // or no time bounds) or as a date-scoped BlockedWindow (partial
+        // day). This branch runs *regardless* of the allDay flag because
+        // the composer has been observed to omit it. Without this guard, a
+        // bare `{type: "one-time", effectiveDate: ...}` rule fell through
+        // to the time-range branch and produced an unscoped 00:00–23:59
+        // window that blocked every day until expires.
+        const isOneTimeDateScoped = rule.type === "one-time" && !!rule.effectiveDate;
+        if (isOneTimeDateScoped) {
+          const hasTimeBounds = !!rule.timeStart || !!rule.timeEnd;
+          if (!hasTimeBounds) {
+            // All-day, single-date → blackout
+            blackoutDays.push(rule.effectiveDate!);
+          } else {
+            // Partial-day, single-date → date-scoped BlockedWindow
+            const bw: BlockedWindow = {
+              start: rule.timeStart || "00:00",
+              end: rule.timeEnd || "23:59",
+              label: rule.originalText,
+              date: rule.effectiveDate!,
+            };
+            blockedWindows.push(bw);
+          }
+          break;
+        }
+
         if (rule.allDay) {
-          if (rule.type === "one-time" && rule.effectiveDate) {
-            // Single-date blackout
-            blackoutDays.push(rule.effectiveDate);
-          } else if (rule.type === "temporary" && rule.effectiveDate && rule.expiryDate) {
+          if (rule.type === "temporary" && rule.effectiveDate && rule.expiryDate) {
             // Date range → individual blackout days
             const start = new Date(rule.effectiveDate + "T12:00:00");
             const end = new Date(rule.expiryDate + "T12:00:00");

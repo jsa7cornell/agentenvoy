@@ -100,6 +100,14 @@ export interface BlockedWindow {
   label?: string;
   expires?: string; // ISO date "YYYY-MM-DD"
   /**
+   * Single-date scope for one-time partial-day block rules (added 2026-05-05).
+   * When set, the window applies ONLY on this exact date — `days` and
+   * `expires` are bypassed in favor of an exact-date match. Fixes the
+   * "block 2-4pm on May 12" failure mode where the compiler produced a
+   * date-unscoped window that blocked every day until expires.
+   */
+  date?: string; // ISO date "YYYY-MM-DD"
+  /**
    * Intrinsic nature of this block. Defaults to "preference" when unset —
    * most user-tagged blocks are self-imposed (surfing, focus time, gym).
    * Set to "commitment" when the label references a specific other party
@@ -493,6 +501,13 @@ function isInBlockedWindow(
   const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   for (const w of blockedWindows) {
     // Skip expired windows
+    // Single-date-scoped windows: match only on the exact date, ignore
+    // days/expires (a one-time block has its own intrinsic date scope).
+    if (w.date) {
+      if (w.date !== todayStr) continue;
+      if (timeStr >= w.start && timeStr < w.end) return w;
+      continue;
+    }
     if (w.expires && w.expires < todayStr) continue;
     // Check day filter
     if (w.days && !w.days.includes(shortDay)) continue;

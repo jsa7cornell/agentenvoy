@@ -2956,7 +2956,7 @@ function collectNormalizedLinkNames(
   return out;
 }
 
-async function handleUpdateAvailabilityRule(
+export async function handleUpdateAvailabilityRule(
   params: Record<string, unknown>,
   userId: string,
 ): Promise<ActionResult> {
@@ -3067,14 +3067,27 @@ async function handleUpdateAvailabilityRule(
       linkUrl = buildBookableLinkUrl(user.meetSlug, linkCode);
     }
 
+    // 2026-05-05 hardening — Fix 2 (allDay inference): when the composer
+    // emits a block rule with no time bounds, default `allDay` to true so
+    // the compiler's date-scope branch fires deterministically. Without
+    // this, the composer's flag-omission rate produced calendar-wide
+    // blackouts (see availability-rules.ts compiler date-scope fix).
+    const inputAllDay = ruleInput!.allDay;
+    const inputTimeStart = ruleInput!.timeStart;
+    const inputTimeEnd = ruleInput!.timeEnd;
+    const inferredAllDay =
+      action === "block" && inputAllDay === undefined && !inputTimeStart && !inputTimeEnd
+        ? true
+        : inputAllDay;
+
     const rule: AvailabilityPreference = {
       id: newId,
       originalText: String(ruleInput!.originalText ?? "").trim() || "(no description)",
       type: (ruleInput!.type as AvailabilityPreference["type"]) ?? "recurring",
       action,
-      timeStart: ruleInput!.timeStart,
-      timeEnd: ruleInput!.timeEnd,
-      allDay: ruleInput!.allDay,
+      timeStart: inputTimeStart,
+      timeEnd: inputTimeEnd,
+      allDay: inferredAllDay,
       daysOfWeek: ruleInput!.daysOfWeek,
       effectiveDate: ruleInput!.effectiveDate,
       expiryDate: ruleInput!.expiryDate,
@@ -3087,6 +3100,34 @@ async function handleUpdateAvailabilityRule(
       priority: typeof ruleInput!.priority === "number" ? ruleInput!.priority : 3,
       createdAt: nowIso,
     };
+
+    // 2026-05-05 hardening — Fix 3 (write-time dedupe): bookable rules are
+    // already name-uniqueness-checked above; for everything else, scan
+    // active rules for a structural match and short-circuit if found.
+    // Repro: the same "Protect next Tuesday all day" composer turn fired
+    // twice and wrote two structurally-identical rules.
+    if (action !== "bookable") {
+      const dup = existing.find(
+        (r) =>
+          r.status === "active" &&
+          r.action === rule.action &&
+          r.type === rule.type &&
+          (r.effectiveDate ?? null) === (rule.effectiveDate ?? null) &&
+          (r.expiryDate ?? null) === (rule.expiryDate ?? null) &&
+          (r.timeStart ?? null) === (rule.timeStart ?? null) &&
+          (r.timeEnd ?? null) === (rule.timeEnd ?? null) &&
+          JSON.stringify(r.daysOfWeek ?? []) === JSON.stringify(rule.daysOfWeek ?? []) &&
+          r.originalText === rule.originalText,
+      );
+      if (dup) {
+        return {
+          success: true,
+          message: `Rule already exists (${dup.id})`,
+          data: { dedupedAgainst: dup.id, id: dup.id },
+        };
+      }
+    }
+
     nextRules = [...existing, rule];
     addedRuleId = newId;
     if (action === "bookable" && bookable) {
