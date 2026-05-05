@@ -694,9 +694,18 @@ function GuestFirstVariant({
 function FirstRunWelcome({
   onSeed,
   messages: msgList,
+  onCalendarConfirmed,
 }: {
   onSeed: (seed: string) => void;
   messages: ChannelMsg[];
+  /** Fired exactly once after the picker bubble's submit handler completes
+   *  (or auto-confirm for single-calendar users). Parent uses this seam to
+   *  dispatch a synthetic host message that classifies to
+   *  `recalibrate.first-time` — auto-launching the conversational
+   *  calibration arc per `2026-05-05_conversational-onboarding-vision` §3.2.
+   *  Only fires on the active-submit transition, not on a fresh page load
+   *  where `calendarSelectionConfirmed` was already true server-side. */
+  onCalendarConfirmed?: () => void;
 }) {
   const [posture, setPosture] = useState<SeededPosture | null>(null);
   // Local "calendar confirmed" state — initial value comes from
@@ -807,15 +816,34 @@ function FirstRunWelcome({
 
       {/* Calendar picker — always shown. Self-hides for users with <2
           calendars and auto-fires onConfirm. Submit button confirms +
-          warms the schedule cache. Same speaker, label suppressed. */}
+          warms the schedule cache. Same speaker, label suppressed.
+          ── PR-B (conversational-onboarding §3.2): on the active-submit
+          transition, fire `onCalendarConfirmed` so the parent can dispatch
+          the synthetic recalibrate.first-time trigger. Guarded against
+          double-fire from the single-calendar auto-confirm effect. */}
       <CalendarPickerBubble
         showLabel={false}
         alreadyConfirmed={calendarConfirmed}
-        onConfirm={() => setCalendarConfirmed(true)}
+        onConfirm={() => {
+          if (calendarConfirmed) return;
+          setCalendarConfirmed(true);
+          onCalendarConfirmed?.();
+        }}
       />
 
       {/* Everything below is gated on the Submit click (or auto-confirm
-          for single-calendar users). */}
+          for single-calendar users). The previous "Take 2 minutes / Continue
+          tuning my preferences" CTA + cold-mount auto-trigger of
+          <PrimaryLinkFlow> was REMOVED in PR-B per the 2026-05-05
+          conversational-onboarding proposal (Author Response B3 — full
+          retirement of the deterministic 5-step flow as the cold-mount
+          default; Calibrate is the sole path). The parent now dispatches a
+          synthetic recalibrate.first-time message via `onCalendarConfirmed`,
+          and the conversational arc opens the next chat turn.
+          <PrimaryLinkFlow> auto-resume continues to work for users who were
+          mid-flow when this deployed — that path lives in the
+          `loadMessages` effect of the parent (driven by `tuningInProgress`
+          on the message list, untouched by this PR). */}
       {calendarConfirmed && (
         <>
           <EnvoyBubble showLabel={false}>
@@ -828,21 +856,6 @@ function FirstRunWelcome({
           {posture.meetSlug && (
             <PrimaryLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
           )}
-
-          <EnvoyBubble showLabel={false}>
-              Take 2 minutes to tune your preferences — it makes every meeting
-              better.
-          </EnvoyBubble>
-
-          <div className="px-1">
-            <button
-              type="button"
-              onClick={() => onSeed("__primary_link_flow__")}
-              className="text-xs px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition"
-            >
-              Continue tuning my preferences →
-            </button>
-          </div>
         </>
       )}
     </div>
