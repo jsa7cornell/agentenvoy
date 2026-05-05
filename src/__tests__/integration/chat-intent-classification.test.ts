@@ -312,6 +312,42 @@ const HOST_CASES: HostCase[] = [
     expected: "chat",
     notes: "Bug #2 — display-settings request must classify as chat, not modify_link",
   },
+
+  // guest-picks disambiguator (Mode C, 2026-05-05) — when host explicitly
+  // says the OTHER PARTY chooses time/location/format, route to create_link
+  // (open-invite scheduling link), NOT book_with_person.
+  // Trigger: feedback bundle cmot67s6e000hk2jsdr7jd86z; host said "grab a bike
+  // ride with katie next week or the week after - she chooses location and time"
+  // and was incorrectly routed to book_with_person (asked for guest's email).
+  {
+    message: "grab a bike ride with [Name] next week or the week after - she chooses location and time",
+    expected: "create_link",
+    notes: "Mode C — guest-picks signal (\"she chooses location and time\") → create_link, not book_with_person",
+  },
+  {
+    message: "set up coffee with [Name] sometime, let them pick the time",
+    expected: "create_link",
+    notes: "Mode C — \"let them pick\" → create_link",
+  },
+  {
+    message: "send [Name] an open invite for a 30-min call — any time works for them",
+    expected: "create_link",
+    notes: "Mode C — explicit \"open invite\" + \"any time works for them\" → create_link",
+  },
+
+  // book_with_person (2) — classic committed-booking shape MUST still route here.
+  // Defends against over-aggressive guest-picks disambiguator stealing legitimate
+  // bilateral bookings.
+  {
+    message: "book a 30-min call with [Name] Tuesday at 2pm",
+    expected: "book_with_person",
+    notes: "Mode C guard — host names specific time + contact + commit-now → book_with_person",
+  },
+  {
+    message: "find a time with [Name] next week — check both our calendars",
+    expected: "book_with_person",
+    notes: "Mode C guard — explicit bilateral framing stays book_with_person",
+  },
 ];
 
 describe.skipIf(!hasGatewayKey)(

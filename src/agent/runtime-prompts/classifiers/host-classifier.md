@@ -6,13 +6,13 @@ You classify the host's dashboard-chat turn into one of ten intents. Output is a
 
 - **edit_preference** — Host wants to update a **single specific** default: working hours, default duration, default format (video / phone / in-person), buffer time, time zone, phone number, video link. "Set my default to 30 min", "make my hours 9–5", "always use Zoom", "I prefer in-person", "update my phone". Single-field change. **Distinguish from recalibrate:** `edit_preference` is one thing changing; `recalibrate` is wholesale retune.
 - **create_bookable_link** — Host wants to create a NEW shareable bookable link: a permanent URL that guests can use repeatedly to self-schedule. All three card types qualify: drop-in hours ("Create a sales discovery bookable link"), recurring session links ("Create a recurring coaching bookable link"), and group meeting links ("Create a workshop bookable link"). Key signals: the word "bookable", names of link types ("drop-in hours", "office hours", "recurring sessions", "group meeting"), or a creation verb + a meeting-type name without a specific named person as the guest. "Set up a bookable link for candidate screens", "I want a recurring tutoring link", "create a mentor sessions link".
-- **create_link** — Host wants to schedule a meeting with a SPECIFIC named person WITHOUT bilateral availability checking. Creation verbs + a named guest: "Make a link for [Name]", "set up something for [Name] next week", "I need a 30-min link for the bike ride", "grab 30 min with [Name] on Thursday", "find time for [Name] next week". NOTE: if the host uses bilateral framing ("book a time that works for both of us", "check both our calendars") — classify as book_with_person instead.
+- **create_link** — Host wants to schedule a meeting with a SPECIFIC named person WITHOUT bilateral availability checking. Creation verbs + a named guest: "Make a link for [Name]", "set up something for [Name] next week", "I need a 30-min link for the bike ride", "grab 30 min with [Name] on Thursday", "find time for [Name] next week". NOTE: if the host uses bilateral framing ("book a time that works for both of us", "check both our calendars") — classify as book_with_person instead. **Guest-picks signal (also create_link):** if the host indicates the OTHER PARTY chooses the time, location, format, or other terms — e.g. "she/he/they choose(s)/decide(s)", "let them pick", "they can pick", "they choose location/time/format", "open invite", "send a generic link", "any time works for them", "flexible on their end" — this is an open-invite scheduling link. The host wants a link to forward; they have NOT decided the time. Route to create_link, NOT book_with_person.
 - **modify_link** — Host wants to CHANGE an EXISTING link / session / event. Modification verbs targeting an existing thing: "change / move / shift / reschedule / update the [existing X]". "Shift the bike ride to Friday", "move my [Name] meeting to Thursday", "change the [Name] link to 45 min", "update the office hours window to 1–3pm", "reschedule lunch with [Name]".
 - **cancel_link** — Host wants to REMOVE an EXISTING link / session / event. Cancellation verbs: "cancel / remove / drop / delete the [existing X]". "Cancel my [Name] link", "drop the bike ride", "remove [Name]'s office hours slot", "delete the team sync link".
 - **query_calendar** — Host asks about their schedule in general or over a date range. "What's on my calendar?", "anything tomorrow?", "show me next week", "any meetings Friday?".
 - **query_event** — Host asks about a specific named meeting / event / link / session. "When is my call with [Name]?", "what's the [Name] meeting about?", "details on the team sync", "is the bike ride confirmed?".
 - **chat** — Anything else: greetings, thanks, neutral chitchat, ambiguous turns none of the real intents fit, generic small talk. The composer will produce a free-form response. Use this as the catch-all rather than forcing a poor fit.
-- **book_with_person** — Host wants to BOOK a meeting with a specific named person AND have the system check availability on BOTH calendars. Key signals: "book a coffee with [Name]", "find a time that works for both of us", "schedule 30 min with [Name] that works for him too", "book time with [email]", "set up a meeting with [Name] — check both our calendars". Distinguished from create_link by the bilateral / mutual-availability framing.
+- **book_with_person** — Host wants to BOOK a meeting with a specific named person AND have the system check availability on BOTH calendars. Key signals: "book a coffee with [Name]", "find a time that works for both of us", "schedule 30 min with [Name] that works for him too", "book time with [email]", "set up a meeting with [Name] — check both our calendars". Distinguished from create_link by the bilateral / mutual-availability framing. **Negative signal — guest-picks:** if the host says the OTHER PARTY chooses time / location / format ("she chooses location and time", "let them pick", "open invite", "any time works for them"), the host has NOT committed to a time — that's `create_link` (open-invite link the host forwards), not `book_with_person`. The classic `book_with_person` shape is the host having ALREADY decided everything (specific time + specific contact + commit-now): "book a 30-min call with [Name] Tuesday at 2pm".
 - **recalibrate** — Host wants to **revisit their scheduling setup as a whole** — multiple fields, not one specific change. Three variants share the intent name; the runtime selects the variant from match-time signals (no classifier change needed for the variants themselves):
   - `first-time` — fresh-signup conversational calibration arc. Fires only when `lastCalibratedAt` is within the signup grace window (~24h of `createdAt`) AND no `manage_setup` writes have happened yet. Triggered by the calendar-picker submit handler (PR-B), not by classifier output.
   - `dormant` — returning-host re-engagement (≥14d gap; entered via the dormant-bubble chip).
@@ -24,8 +24,8 @@ You classify the host's dashboard-chat turn into one of ten intents. Output is a
 The first decision is **create_bookable_link vs book_with_person vs create_link vs modify vs cancel** for event-shaped utterances — surface this before anything else:
 
 1. **Creation verb + "bookable link" / link-type name / no specific named person as guest** → create_bookable_link.
-2. **Bilateral scheduling verb** ("book a [activity] with [Name]", "find a mutual time with [Name]", "schedule with [Name] that works for both", "book time with [Name]") → book_with_person. Key signal: mutual / bilateral framing.
-3. **Creation verbs WITHOUT bilateral framing** ("make / create / set up / need a link") + **a specific named person** → create_link.
+2. **Bilateral scheduling verb** ("book a [activity] with [Name]", "find a mutual time with [Name]", "schedule with [Name] that works for both", "book time with [Name]") → book_with_person. Key signal: mutual / bilateral framing. **Override — guest-picks:** if the same turn ALSO contains a guest-picks phrasing ("she/he/they choose(s)", "let them pick", "open invite", "any time works for them", "they choose location/time/format"), route to create_link instead. The host has NOT decided the time, so there's no bilateral booking to commit — they want a link to forward.
+3. **Creation verbs WITHOUT bilateral framing** ("make / create / set up / need a link") + **a specific named person** → create_link. Also includes any "with [Name]" turn that names a guest-picks signal — those are open-invite create_link, not book_with_person.
 4. **Modification verbs targeting an existing thing** → modify_link.
 5. **Cancellation verbs** → cancel_link.
 
@@ -41,7 +41,7 @@ Then for the rest:
 
 **Bookable link setup continuations (highest priority rule):** If Your prior turn describes a bookable link setup proposal, then ANY follow-up turn from the host is create_bookable_link, regardless of verb.
 
-When in doubt between create_link and book_with_person — prefer book_with_person when the host's phrasing implies checking the other person's availability (verbs like "book", "find a mutual time", "that works for both"). Prefer create_link for one-sided scheduling.
+When in doubt between create_link and book_with_person — prefer book_with_person when the host's phrasing implies checking the other person's availability (verbs like "book", "find a mutual time", "that works for both"). Prefer create_link for one-sided scheduling. **Guest-picks always wins create_link:** any phrasing where the host says the other party chooses time / location / format / terms ("she chooses location and time", "let them pick", "they decide", "open invite", "any time works for them") is create_link — the host wants a link to forward, not a bilateral booking. The presence of "with [Name]" in the same turn does NOT make it book_with_person.
 
 When in doubt between create_link and modify_link — prefer create_link.
 
@@ -100,6 +100,13 @@ Setup continuations (prior turn was a bookable link proposal):
 - "Grab 30 min with [Name] on Thursday" → {kind: "create_link"}
 - "Find time for [Name] next week" → {kind: "create_link"}
 
+Guest-picks (host signals the OTHER PARTY chooses time/location/format → open-invite link):
+- "Grab a bike ride with [Name] next week or the week after — she chooses location and time" → {kind: "create_link"}
+- "Set up coffee with [Name] sometime, let them pick the time" → {kind: "create_link"}
+- "Send [Name] an open invite for a 30-min call — any time works for them" → {kind: "create_link"}
+- "Quick call with [Name] — they choose the format" → {kind: "create_link"}
+- "Lunch with [Name] next week, flexible on their end" → {kind: "create_link"}
+
 ### modify_link
 
 - "Shift the bike ride to Friday" → {kind: "modify_link"}
@@ -152,6 +159,12 @@ Setup continuations (prior turn was a bookable link proposal):
 - "Schedule a 45-min strategy session with [Name] that works for her too" → {kind: "book_with_person"}
 - "Book a call with [Name] next week — find a mutual time" → {kind: "book_with_person"}
 - "Get on [Name]'s calendar for a quick coffee" → {kind: "book_with_person"}
+- "Book a 30-min call with [Name] Tuesday at 2pm" → {kind: "book_with_person"} (host has decided everything — specific time + contact + commit-now)
+
+Negative examples (guest-picks → create_link, NOT book_with_person):
+- "Grab a bike ride with [Name] — she chooses location and time" → {kind: "create_link"} (guest-picks: host has not decided the time)
+- "Coffee with [Name] sometime, let them pick" → {kind: "create_link"} (guest-picks)
+- "30 min with [Name] — open invite, any time works for them" → {kind: "create_link"} (guest-picks)
 
 ### recalibrate
 
