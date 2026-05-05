@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { safeTimezone } from "@/lib/timezone";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
+import { fetchGoogleOnboardingSeed } from "@/lib/google-onboarding-seed";
+import { buildSeededExplicit } from "@/lib/onboarding/seed-defaults";
+import type { Prisma } from "@prisma/client";
 
 /**
  * Dev-only endpoint for onboarding testing.
@@ -52,16 +54,23 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "User not found" }, { status: 404 });
       }
 
-      // Keep timezone + Google-seeded fields; clear explicit tuning choices
-      // so the first-run welcome posture bubble reflects clean defaults.
-      const prefs = (user.preferences as Record<string, unknown>) || {};
-      const explicit = (prefs.explicit as Record<string, unknown>) || {};
-      const timezone = safeTimezone(explicit.timezone as string);
+      // Re-run the Google seed (timezone, defaultDuration, weekStart,
+      // primaryCalendarId, etc.) so reset produces an as-if-fresh-signup
+      // state. Without this, prefs.explicit ends up partially empty and
+      // FirstRunWelcome's posture bubble can't fill its bullets — most
+      // visibly the timezone bullet drops out (tz read returns null).
+      // Best-effort: any failure returns {} and the hardcoded floor in
+      // buildSeededExplicit still produces a working profile.
+      const googleSeed = await fetchGoogleOnboardingSeed(user.id).catch((err) => {
+        console.error("[onboarding-reset] google seed fetch failed:", err);
+        return {};
+      });
+      const seededExplicit = buildSeededExplicit({ googleSeed });
 
-      // Keep lastCalibratedAt set — new users are calibrated at signup and
-      // the legacy /api/onboarding/chat flow must NOT re-run. Resetting to
-      // null triggers the old wall-of-text intro. The first-run welcome is
-      // driven by having no channel messages, not by lastCalibratedAt.
+      // Keep lastCalibratedAt stamped — calibration is implicit at signup
+      // and the legacy /api/onboarding/chat flow has been deleted.
+      // FirstRunWelcome is gated by "no channel messages", not by
+      // lastCalibratedAt; nulling it would just complicate things.
       const freshCalibration = new Date();
       logCalibrationWrite({ userId: user.id, value: freshCalibration, source: "debug-reset" });
       await prisma.user.update({
@@ -70,7 +79,7 @@ export async function POST(req: NextRequest) {
           lastCalibratedAt: freshCalibration,
           persistentKnowledge: null,
           upcomingSchedulePreferences: null,
-          preferences: { explicit: { timezone } },
+          preferences: { explicit: seededExplicit } as Prisma.InputJsonValue,
         },
       });
 
