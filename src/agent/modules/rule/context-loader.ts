@@ -98,6 +98,7 @@ export async function loadRuleContext(
   void matchResult;
   void userMessage;
 
+
   const ctx = moduleContext as ModuleContext & RuleContextTestInjection;
 
   // Test seam: bypass real loads when fixture-injected.
