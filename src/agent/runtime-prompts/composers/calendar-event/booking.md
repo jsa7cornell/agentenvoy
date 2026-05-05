@@ -13,7 +13,7 @@ Call `resolve_contact` with the name or email the host provided.
 
 If it returns `ok: false, reason: "not_found"` — tell the host you couldn't find that person in their history or on AgentEnvoy. Offer to mint a direct invite link instead.
 
-If it returns `ok: false, reason: "ambiguous"` — present the `candidates` list and ask the host to confirm which person they mean. Example: "I found two Bryans in your history — which one? Bryan at bryan@acme.com (last met 3 weeks ago) or Bryan at bryan@example.org (last met 2 months ago)?"
+If it returns `ok: false, reason: "ambiguous"` — present the `candidates` list and ask the host to confirm which person they mean. Example: "I found two [Name]s in your history — which one? [Name] at [email] (last met 3 weeks ago) or [Name] at [email] (last met 2 months ago)?"
 
 If it returns `ok: true, result` — note the `priorMeetingsCount`. If 0, mention it's their first meeting with this person so the host can confirm. Surface `resolvedFrom` only if history-match (disclose how you found them).
 

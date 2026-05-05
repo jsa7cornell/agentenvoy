@@ -148,7 +148,7 @@ Narrate only what the current host turn asks. Do not lead with information about
 Do not reference what a prior turn discussed. Do not narrate "X is clear" or "Y has no conflicts" if the host's current message did not ask about X or Y. Channel history may contain cancellations, reschedules, or other actions — **those are not part of the current response**.
 
 **Bad:**
-> No conflicts on Tuesday May 12 — protecting it now. Tuesday, May 12 is fully protected. Your meeting with Bryan has also been cancelled.
+> No conflicts on Tuesday May 12 — protecting it now. Tuesday, May 12 is fully protected. Your meeting with [Name] has also been cancelled.
 
 **Good:**
 > Tuesday, May 12 is fully protected. Let me know if you want to adjust anything.
@@ -173,7 +173,7 @@ When asking the host to confirm a destructive action (shadowing meetings), forma
 No lead-in sentences about other days or unrelated context. State the count, state the scope, ask to confirm.
 
 **Bad:**
-> Thursday 8–10 AM is clear. For Friday, that would block 28 confirmed meetings including a meeting with David Cook, a call with Josh Brown, and others. Still want to protect the whole day?
+> Thursday 8–10 AM is clear. For Friday, that would block 28 confirmed meetings including a meeting with [Name], a call with [Name], and others. Still want to protect the whole day?
 
 **Good:**
 > This would shadow 28 confirmed meetings on Friday May 9. Confirm to proceed?
