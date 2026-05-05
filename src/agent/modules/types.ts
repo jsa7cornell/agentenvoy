@@ -179,6 +179,27 @@ export interface PostStreamGuard {
 }
 
 // ---------------------------------------------------------------------------
+// Few-shot fixtures (per-module, optional)
+//
+// Per Rule 27 (proposal `2026-05-05_examples-vs-instructions-prompt-separation`):
+// worked-dialogue examples move OUT of operational prompt fragments and into
+// a per-module `fewshot.ts`. The runner attaches these as past user/assistant
+// turns at the head of the messages array, with the prompt-cache breakpoint
+// on the LAST few-shot assistant turn so the static system prompt + few-shot
+// share one cache prefix; per-host context (history + current message) lives
+// below the breakpoint.
+//
+// Shape: `Array<{ user: string, assistant: string }>` per proposal §4.2.
+// Optional on IntentModule — modules without in-context examples leave it
+// undefined and the runner is a no-op.
+// ---------------------------------------------------------------------------
+
+export interface FewShotTurn {
+  user: string;
+  assistant: string;
+}
+
+// ---------------------------------------------------------------------------
 // IntentModule (the declarative bundle)
 // ---------------------------------------------------------------------------
 
@@ -239,6 +260,21 @@ export interface IntentModule<C extends ModuleContextOutput = ModuleContextOutpu
 
   /** Bucket name for moduleGuard corpus segmentation. Stable; do not rename per Rule 25(l). */
   moduleGuardBucket: string;
+
+  /**
+   * Optional few-shot demonstrations (Rule 27 per-module fixture surface).
+   *
+   * When defined, the runner attaches these as past user/assistant turns at
+   * the head of the messages array — immediately after the system prompt and
+   * BEFORE `conversationHistory` + the current user message. The prompt-cache
+   * breakpoint sits on the LAST few-shot assistant turn so the static system
+   * prompt + few-shot turns share one cache prefix and per-host context
+   * (history + current message) lives below the breakpoint.
+   *
+   * Modules without in-context examples leave this undefined and the runner
+   * is a no-op for the fewshot path.
+   */
+  fewshot?: readonly FewShotTurn[];
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +298,13 @@ export interface ComposerInvoker {
     userMessage: string;
     tools: readonly AnyComposerTool[] | undefined;
     moduleContext: ModuleContext;
+    /**
+     * Per Rule 27: few-shot demonstration turns the runner attaches at the
+     * head of the messages array (before `history` + `userMessage`). The
+     * prompt-cache breakpoint sits on the last few-shot assistant turn.
+     * Undefined when the module has no in-context examples (no-op path).
+     */
+    fewshot?: readonly FewShotTurn[];
   }): Promise<{
     text: string;
     toolCalls?: Array<{ name: string; durationMs: number; success: boolean }>;
