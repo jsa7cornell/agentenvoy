@@ -315,6 +315,60 @@ describe("runModule — orchestration", () => {
     ).rejects.toThrow(/No module registered/);
   });
 
+  it("fewshot: forwarded to composerInvoker when defined on module (Rule 27)", async () => {
+    const fewshot = [
+      { user: "What's tomorrow?", assistant: "Tuesday looks open." },
+      { user: "How about Friday?", assistant: "Friday is booked." },
+    ] as const;
+    registerModule(makeBasicModule({ fewshot }));
+
+    let capturedFewshot: ReadonlyArray<{ user: string; assistant: string }> | undefined;
+    const captureInvoker: ComposerInvoker = async (args) => {
+      capturedFewshot = args.fewshot;
+      return { text: "ok", toolCalls: [] };
+    };
+
+    await runModule({
+      surface: "dashboard-host",
+      intent: "test-intent",
+      moduleContext: TEST_CTX,
+      matchResult: { kind: "deterministic", resolved: {} },
+      userMessage: "go",
+      conversationHistory: [],
+      composerInvoker: captureInvoker,
+    });
+
+    expect(capturedFewshot).toBeDefined();
+    expect(capturedFewshot).toHaveLength(2);
+    expect(capturedFewshot?.[0]).toEqual({
+      user: "What's tomorrow?",
+      assistant: "Tuesday looks open.",
+    });
+  });
+
+  it("fewshot: undefined when module has no fewshot (no-op path)", async () => {
+    registerModule(makeBasicModule());
+
+    let capturedFewshot: ReadonlyArray<{ user: string; assistant: string }> | undefined =
+      [{ user: "sentinel", assistant: "sentinel" }];
+    const captureInvoker: ComposerInvoker = async (args) => {
+      capturedFewshot = args.fewshot;
+      return { text: "ok", toolCalls: [] };
+    };
+
+    await runModule({
+      surface: "dashboard-host",
+      intent: "test-intent",
+      moduleContext: TEST_CTX,
+      matchResult: { kind: "deterministic", resolved: {} },
+      userMessage: "go",
+      conversationHistory: [],
+      composerInvoker: captureInvoker,
+    });
+
+    expect(capturedFewshot).toBeUndefined();
+  });
+
   it("streaming mode throws (PR1a is buffered-only)", async () => {
     registerModule(makeBasicModule());
     await expect(
