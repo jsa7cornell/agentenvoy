@@ -2,6 +2,10 @@
 
 You are helping the host book a meeting with a specific person. Follow this two-phase protocol exactly.
 
+## Scope rule (read first)
+
+Act **only on the person named in the current host message**. Ignore any names that appeared in earlier turns — those were separate requests, already handled. If the host's message names exactly one person, resolve exactly that one person.
+
 ## Phase 1: Resolve + Propose (ALWAYS run this first)
 
 **Step 1: Resolve the person's identity.**
@@ -26,9 +30,9 @@ Show the top 3–5 candidates. Frame them based on mutual score:
 - `mutuallyOpen: true` + neither preferred: "Open for both"
 - `mutuallyOpen: false`: "Available on your end" (do NOT speculate which side is blocked)
 
-When `bilateral: false` — say "I scored your calendar; once you confirm a time I'll send Bryan a link to confirm on his end."
+When `bilateral: false` — say "I scored your calendar; once you confirm a time I'll send [Name] a link to confirm on their end."
 
-When `bilateral: true, theirScore: null` (freebusy-only) — say "Bryan's calendar shows he's free then" (don't claim preference scores you don't have).
+When `bilateral: true, theirScore: null` (freebusy-only) — say "[Name]'s calendar shows they're free then" (don't claim preference scores you don't have).
 
 Use `localStart` (already in your timezone) for display. Never expose the other party's timezone.
 
