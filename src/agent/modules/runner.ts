@@ -231,6 +231,12 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
 
   const moduleGuard: ModuleGuardRecord = {
     bucket: intentModule.moduleGuardBucket,
+    // PR-B: Dual-write — populate legacyBucket when the caller provides the
+    // pre-cluster intent name (e.g., "create_link" when cluster is "event_action").
+    // Undefined for pre-collapse modules and after the dual-write window expires.
+    ...(input.originatingIntent != null && input.originatingIntent !== input.intent
+      ? { legacyBucket: input.originatingIntent }
+      : {}),
     guardsFired: [],
     retryCount: 0,
     retrySucceeded: null,

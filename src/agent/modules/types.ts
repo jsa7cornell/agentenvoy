@@ -301,6 +301,14 @@ export interface RunnerInput {
    * Parity with legacy-route.ts:1220 which emitted `retrying` from the route.
    */
   onRetry?: () => void;
+  /**
+   * PR-B: Corpus-continuity dual-write — the originating intent name before
+   * cluster translation (e.g., `"create_link"` when cluster is `"event_action"`).
+   * When set, the runner populates `moduleGuard.legacyBucket` so corpus queries
+   * remain backward-compatible across the cluster-rename window.
+   * Undefined during the pre-collapse period and after the dual-write window.
+   */
+  originatingIntent?: string;
 }
 
 export interface ModuleGuardRecord {

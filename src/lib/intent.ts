@@ -363,6 +363,54 @@ const GUEST_CHAT_INTENT_SET = new Set<string>(CHAT_INTENT_VALUES);
 const HOST_CHAT_INTENT_SET = new Set<string>(HOST_CHAT_INTENT_VALUES);
 
 /**
+ * Cluster-collapse intent→cluster map (proposal 2026-05-04 §4, Q4 lock).
+ *
+ * The classifier still emits fine-grained intent names (per the Q4 lock —
+ * no rubric authoring change). The route and dispatch-stream layers translate
+ * to a cluster name before calling `runModule`, so the registry is keyed on
+ * cluster names. `legacyBucket` in `ModuleGuardRecord` carries the original
+ * intent name for corpus-continuity during the dual-write window.
+ *
+ * Populated incrementally as cluster-collapse PRs land:
+ *   PR-B: event_action cluster (create_link, modify_link, cancel_link, schedule)
+ *   PR-C: manage_setup cluster (edit_preference, create_bookable_link)
+ *   PR-D: inquire cluster (query_calendar, query_event)
+ *   PR-E: hint name update (schedule → event_action in UI emitters)
+ *
+ * Intents that ARE their cluster name map to themselves (identity entries).
+ */
+export const INTENT_TO_CLUSTER: Record<string, string> = {
+  // event_action cluster (PR-B)
+  create_link:   "event_action",
+  modify_link:   "event_action",
+  cancel_link:   "event_action",
+  schedule:      "event_action",
+  // manage_setup cluster (PR-C — added here for completeness; PR-C wires it)
+  edit_preference:       "manage_setup",
+  create_bookable_link:  "manage_setup",
+  // inquire cluster (PR-D)
+  query_calendar: "inquire",
+  query_event:    "inquire",
+  // identity entries (cluster == intent)
+  inquire:          "inquire",
+  chat:             "chat",
+  book_with_person: "book_with_person",
+  // manage_setup also covers the legacy "profile" and "rule" intent names
+  // so that any legacy code paths still dispatching those names get routed
+  // to the manage_setup cluster (PR-C activates the module registration).
+  profile: "manage_setup",
+  rule:    "manage_setup",
+};
+
+/**
+ * Resolve the cluster name for a given intent. Falls back to the intent
+ * itself if not in the map (safe-passthrough for unknown/future intents).
+ */
+export function intentToCluster(intent: string): string {
+  return INTENT_TO_CLUSTER[intent] ?? intent;
+}
+
+/**
  * Quick-reply shape emitted by the classifier when `kind === "unclear"`.
  * Per N2 fold: stub tiers are NOT allowed as quick-reply targets in v1 —
  * clicking a profile/rule option would dead-end on a "coming soon" stub.

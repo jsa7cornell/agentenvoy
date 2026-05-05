@@ -7,45 +7,54 @@
  * (not a frozen literal array) makes drift between enum + modules
  * structurally impossible — the test fails the moment they diverge.
  *
- * PR1a ships this test with an explicit "still-migrating" allowlist (per
- * the author's response to N4): intents that haven't migrated to a real
- * module yet pass through `runDispatchHandler` (or the schedule path) as
- * before. The allowlist shrinks with every subsequent PR (PR1c removes
- * `rule`, PR2 removes `profile` + `edit_preference`, etc.). When the
- * allowlist is empty, every host intent is module-backed.
+ * PR-B+: The registry is keyed on cluster names (e.g., `event_action`), not
+ * individual intent names. The contract test translates each intent via
+ * `INTENT_TO_CLUSTER` before looking up in the registry, mirroring the
+ * runtime dispatch path in `dispatchModuleAndStream`. This means:
+ * - `create_link` → looks up `event_action` → registered ✓
+ * - `modify_link` → looks up `event_action` → registered ✓
+ * - `cancel_link` → looks up `event_action` → registered ✓
+ * - `edit_preference` → looks up `manage_setup` (PR-C)
+ * - etc.
+ *
+ * The "still-migrating" allowlist covers intents whose cluster module has
+ * not yet been registered (PRs not yet landed). It shrinks with each PR.
  */
 import { describe, it, expect } from "vitest";
-import { HOST_CHAT_INTENT_VALUES } from "@/lib/intent";
+import { HOST_CHAT_INTENT_VALUES, INTENT_TO_CLUSTER } from "@/lib/intent";
 import { lookupModule, getRegistry } from "@/agent/modules";
 
 /**
- * Intents whose module-migration is still pending. Every entry is a "ticket"
- * for a future PR. The list shrinks per PR; when empty, every host intent
- * runs through a module + the runner.
+ * Intents whose cluster module is still pending registration. Every entry is
+ * a "ticket" for a future PR. The list shrinks per PR; when empty, every host
+ * intent resolves to a registered cluster module.
  *
- * Order matches the migration roadmap in the proposal's §3 PR plan.
+ * PR-B: removed create_link/modify_link/cancel_link (now route to event_action).
+ * PR-C: will remove edit_preference/create_bookable_link (route to manage_setup).
+ * PR-D: will remove query_calendar/query_event (route to inquire).
  */
 const STILL_MIGRATING_HOST_INTENTS: ReadonlySet<string> = new Set([
   // "rule" — migrated in PR1c
   // "profile", "create_bookable_link" — migrated in PR2
   // "inquire", "query_calendar", "query_event" — migrated in PR3b-i
-  // "edit_preference" — left unregistered by design in PR2 (Open Question 1
-  //   of the composer-modules proposal remains open). The route layer
-  //   delegates to either the profile or rule module via a keyword regex.
+  // "create_link", "modify_link", "cancel_link" — collapsed to event_action in PR-B
+  // "edit_preference", "create_bookable_link" — route to manage_setup cluster (PR-C)
   "edit_preference",
-  "create_link",                                // PR3b-iii
-  "modify_link",                                // PR3b-iii
-  "cancel_link",                                // PR3b-iii
+  "create_bookable_link",  // routes to manage_setup (PR-C)
 ]);
 
 describe("intent module contract", () => {
   it("every host intent has a registered module on dashboard-host (or is allowlisted as still-migrating)", () => {
     for (const intent of HOST_CHAT_INTENT_VALUES) {
-      const intentModule = lookupModule("dashboard-host", intent);
+      // PR-B+: Translate via INTENT_TO_CLUSTER before registry lookup.
+      // This mirrors the runtime dispatch path in dispatchModuleAndStream.
+      const clusterIntent = INTENT_TO_CLUSTER[intent] ?? intent;
+      const intentModule = lookupModule("dashboard-host", clusterIntent);
       if (!intentModule) {
         if (STILL_MIGRATING_HOST_INTENTS.has(intent)) continue;
         throw new Error(
-          `Missing module for dashboard-host/${intent}. Either register one, or add to STILL_MIGRATING_HOST_INTENTS.`,
+          `Missing module for dashboard-host/${clusterIntent} (intent: ${intent}). ` +
+          `Either register one, or add to STILL_MIGRATING_HOST_INTENTS.`,
         );
       }
       // Module exists — allowedActions subset check lands in PR1c when the rule

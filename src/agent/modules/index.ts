@@ -10,6 +10,9 @@
  *   PR2:  profile, edit_preference (split into profile/rule routes)
  *   PR3:  create_link, modify_link, cancel_link, schedule, inquire, query_calendar, query_event
  *   PR4:  bookings (book_with_person) ← shipped
+ *   PR-B: event_action cluster (collapses create_link/modify_link/cancel_link/schedule)
+ *   PR-C: manage_setup cluster (collapses profile/rule/create_bookable_link/edit_preference)
+ *   PR-D: inquire cluster (collapses query_calendar/query_event under inquire)
  *   PR5:  dealroom-host/*, dealroom-guest/*
  *   PR6:  no new modules; PR6 is MCP exposure layer
  */
@@ -23,12 +26,10 @@ import {
   queryCalendarModule,
   queryEventModule,
 } from "./inquire/module";
-import {
-  createLinkModule,
-  modifyLinkModule,
-  cancelLinkModule,
-  scheduleModule,
-} from "./event-intents/module";
+// PR-B: event_action cluster — replaces create_link/modify_link/cancel_link/schedule.
+// The four old module exports are kept in event-intents/module.ts for reference
+// but are no longer registered; INTENT_TO_CLUSTER in intent.ts handles routing.
+import { eventActionModule } from "./event-action/module";
 import { bookingsModule } from "./bookings/module";
 
 let _registered = false;
@@ -48,10 +49,10 @@ export function ensureModulesRegistered(): void {
   registerModule(inquireModule);
   registerModule(queryCalendarModule);
   registerModule(queryEventModule);
-  registerModule(createLinkModule);
-  registerModule(modifyLinkModule);
-  registerModule(cancelLinkModule);
-  registerModule(scheduleModule);
+  // PR-B: event_action cluster (single module for all event-shaped intents).
+  // create_link/modify_link/cancel_link/schedule are no longer individually
+  // registered; they route to event_action via INTENT_TO_CLUSTER.
+  registerModule(eventActionModule);
   registerModule(bookingsModule);      // PR4 — bookings module
 }
 

@@ -31,6 +31,7 @@ import type {
   IntentSurface,
   MatchResult,
 } from "@/agent/modules/types";
+import { intentToCluster } from "@/lib/intent";
 import { isBookableAction } from "@/agent/modules/_shared/bookable";
 
 const DEFAULT_HISTORY_LIMIT = 10;
@@ -138,9 +139,17 @@ export async function dispatchModuleAndStream(
       emitStatus("executing");
     }
 
+    // PR-B: Translate the originating intent to its cluster name before
+    // calling runModule. The registry is keyed on cluster names post-PR-B.
+    // `originatingIntent` carries the pre-cluster name for legacyBucket
+    // dual-write in the runner (corpus-continuity, proposal §4.1.1).
+    const clusterIntent = intentToCluster(intent);
     const result = await runModule({
       surface,
-      intent,
+      intent: clusterIntent,
+      // Only pass originatingIntent when it differs from the cluster name
+      // (i.e., when an actual translation occurred).
+      ...(clusterIntent !== intent ? { originatingIntent: intent } : {}),
       moduleContext: {
         user: { id: userId, name: userName, email: userEmail },
         channel: { id: channelId },
