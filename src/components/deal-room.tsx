@@ -220,6 +220,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [slotLocation, setSlotLocation] = useState<{ label: string; until?: string } | null>(null);
   const [slotDuration, setSlotDuration] = useState<number | undefined>(undefined);
   const [slotMinDuration, setSlotMinDuration] = useState<number | undefined>(undefined);
+  // B2: fallback duration from session response — used when slotDuration is
+  // undefined (e.g. slots API returned compute_failed). Session response is
+  // the authoritative source for link-configured duration; slots API is the
+  // authoritative source for computed availability duration.
+  const [linkDuration, setLinkDuration] = useState<number | undefined>(undefined);
+  // B3: child link code returned by session response — used for feedback auth.
+  // feedbackCode is the child NegotiationLink.code (e.g. "hf5uex");
+  // code (from URL) is the bookable rule's linkCode (e.g. "q89wdvt4").
+  // The feedback route looks up by NegotiationLink.code; feedbackCode ?? code
+  // is correct because for non-bookable visits, feedbackCode IS the minted
+  // personalized code (same thing as code).
+  const [feedbackCode, setFeedbackCode] = useState<string | undefined>(undefined);
   const [schedulingMode, setSchedulingMode] = useState<"time" | "date">("time");
   const [isVip, setIsVip] = useState(false);
   // WISHLIST §1o PR-α: three-state response from `/api/negotiate/slots`
@@ -1016,7 +1028,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             Array.isArray(fields) ? (fields as unknown[]).filter((f): f is string => typeof f === "string") : [],
           );
         }
+        // B2/B3: always reset feedbackCode at the top of handler (Pitfall 2 fix)
+        // so stale bookable child codes don't leak across sessions in the same tab.
+        setFeedbackCode(undefined);
         setLinkFormat(data.link?.format || "");
+        // B2: populate linkDuration from session response — fallback when slotDuration
+        // is undefined (e.g. slots API returned compute_failed for a bookable session).
+        if (typeof data.link?.duration === "number" && data.link.duration > 0) {
+          setLinkDuration(data.link.duration);
+        }
         setLinkStartTime(typeof (data.link as Record<string, unknown>)?.startTime === "string" ? (data.link as Record<string, unknown>).startTime as string : null);
         setLinkLocation(typeof data.link?.location === "string" && data.link.location.trim() ? data.link.location.trim() : null);
         setLinkActivity(typeof data.link?.activity === "string" && data.link.activity.trim() ? data.link.activity.trim() : null);
@@ -1062,9 +1082,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (data.isGroupEvent) setIsGroupEvent(true);
         if (data.participants) setParticipants(data.participants);
 
-        // Primary link → redirect to persistent contextual URL
-        if (!code && data.code) {
-          router.replace(`/meet/${slug}/${data.code}`);
+        // B3: store child NegotiationLink.code for feedback auth.
+        // feedbackCode is the child NegotiationLink.code (e.g. "hf5uex");
+        // code (from URL) is the bookable rule's linkCode (e.g. "q89wdvt4").
+        // The feedback route looks up by NegotiationLink.code; feedbackCode ?? code
+        // is correct because for non-bookable visits, feedbackCode IS the minted
+        // personalized code (same thing as code).
+        if (data.code) {
+          setFeedbackCode(data.code);
+          // Primary link → redirect to persistent contextual URL
+          if (!code) {
+            router.replace(`/meet/${slug}/${data.code}`);
+          }
         }
 
         // Already confirmed — load messages AND set confirmed state
@@ -1535,7 +1564,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     : latestProposal?.format ?? linkFormat ?? null;
   const eventDuration = confirmed && confirmData
     ? String(confirmData.duration)
-    : latestProposal ? String(latestProposal.duration) : String(slotDuration || 30);
+    // B2: linkDuration fallback — when slotDuration is undefined (e.g. slots API
+    // compute_failed), the session response's data.link?.duration is the
+    // authoritative link-configured duration. Avoids "30 min" header on a
+    // 60-min Tutoring bookable when slots failed to compute.
+    : latestProposal ? String(latestProposal.duration) : String(slotDuration ?? linkDuration ?? 30);
   const eventLocation = confirmed && confirmData
     ? (confirmData.location as string | null)
     : latestProposal?.location ?? linkLocation ?? null;
@@ -3001,7 +3034,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           )}
           <SendFeedbackLink
             mode={isHost ? "host-deal-room" : "guest-deal-room"}
-            linkCode={code}
+            // B3: feedbackCode is the child NegotiationLink.code; falls back to
+            // the URL's code (which IS the child code for non-bookable visits).
+            linkCode={feedbackCode ?? code}
             sessionId={sessionId}
             className="text-[10px]"
           />

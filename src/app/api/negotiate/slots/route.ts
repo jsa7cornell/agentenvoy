@@ -88,6 +88,14 @@ export async function GET(req: NextRequest) {
     linkRules = parseLinkParameters(session.link?.parameters);
     recurringWindowId = session.link?.recurringWindowId ?? null;
     scheduleLink = session.link ? { type: session.link.type ?? undefined, parameters: session.link.parameters } : null;
+    if (recurringWindowId) {
+      // Bookable child links carry only format+duration — not full variance posture.
+      // applyBookableWindow handles the window constraint below; use Primary posture here.
+      // Root cause: getLinkPosture treats type:"personalized" as isVarianceLink=true and
+      // calls resolveFromVariance which requires hoursStartMinutes/End/daysOfWeek/bufferMinutes
+      // that bookable children never carry. Confirmed from Vercel log 2026-05-05T17:13:39Z.
+      scheduleLink = null;
+    }
     partialSessionId = sessionId;
     negotiatedDuration = session.negotiatedDuration ?? null;
   } else {
