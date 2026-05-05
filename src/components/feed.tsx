@@ -694,9 +694,18 @@ function GuestFirstVariant({
 function FirstRunWelcome({
   onSeed,
   messages: msgList,
+  onCalendarConfirmed,
 }: {
   onSeed: (seed: string) => void;
   messages: ChannelMsg[];
+  /** Fired exactly once after the picker bubble's submit handler completes
+   *  (or auto-confirm for single-calendar users). Parent uses this seam to
+   *  dispatch a synthetic host message that classifies to
+   *  `recalibrate.first-time` — auto-launching the conversational
+   *  calibration arc per `2026-05-05_conversational-onboarding-vision` §3.2.
+   *  Only fires on the active-submit transition, not on a fresh page load
+   *  where `calendarSelectionConfirmed` was already true server-side. */
+  onCalendarConfirmed?: () => void;
 }) {
   const [posture, setPosture] = useState<SeededPosture | null>(null);
   // Local "calendar confirmed" state — initial value comes from
@@ -807,15 +816,34 @@ function FirstRunWelcome({
 
       {/* Calendar picker — always shown. Self-hides for users with <2
           calendars and auto-fires onConfirm. Submit button confirms +
-          warms the schedule cache. Same speaker, label suppressed. */}
+          warms the schedule cache. Same speaker, label suppressed.
+          ── PR-B (conversational-onboarding §3.2): on the active-submit
+          transition, fire `onCalendarConfirmed` so the parent can dispatch
+          the synthetic recalibrate.first-time trigger. Guarded against
+          double-fire from the single-calendar auto-confirm effect. */}
       <CalendarPickerBubble
         showLabel={false}
         alreadyConfirmed={calendarConfirmed}
-        onConfirm={() => setCalendarConfirmed(true)}
+        onConfirm={() => {
+          if (calendarConfirmed) return;
+          setCalendarConfirmed(true);
+          onCalendarConfirmed?.();
+        }}
       />
 
       {/* Everything below is gated on the Submit click (or auto-confirm
-          for single-calendar users). */}
+          for single-calendar users). The previous "Take 2 minutes / Continue
+          tuning my preferences" CTA + cold-mount auto-trigger of
+          <PrimaryLinkFlow> was REMOVED in PR-B per the 2026-05-05
+          conversational-onboarding proposal (Author Response B3 — full
+          retirement of the deterministic 5-step flow as the cold-mount
+          default; Calibrate is the sole path). The parent now dispatches a
+          synthetic recalibrate.first-time message via `onCalendarConfirmed`,
+          and the conversational arc opens the next chat turn.
+          <PrimaryLinkFlow> auto-resume continues to work for users who were
+          mid-flow when this deployed — that path lives in the
+          `loadMessages` effect of the parent (driven by `tuningInProgress`
+          on the message list, untouched by this PR). */}
       {calendarConfirmed && (
         <>
           <EnvoyBubble showLabel={false}>
@@ -828,21 +856,6 @@ function FirstRunWelcome({
           {posture.meetSlug && (
             <PrimaryLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
           )}
-
-          <EnvoyBubble showLabel={false}>
-              Take 2 minutes to tune your preferences — it makes every meeting
-              better.
-          </EnvoyBubble>
-
-          <div className="px-1">
-            <button
-              type="button"
-              onClick={() => onSeed("__primary_link_flow__")}
-              className="text-xs px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition"
-            >
-              Continue tuning my preferences →
-            </button>
-          </div>
         </>
       )}
     </div>
@@ -851,12 +864,19 @@ function FirstRunWelcome({
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-/** Render **bold** and [link](url) markdown in message content */
+/** Render **bold**, _italic_, and [link](url) markdown in message content.
+ *  Italic support added in PR-B (conversational-onboarding) so the
+ *  recalibrate.first-time fragment's worked-example sentence renders in
+ *  italics per Q5b — visually separates the user-could-say demonstration
+ *  from Envoy's voice. Mirrors `renderTuningMarkdown` in primary-link-flow.tsx. */
 function renderMarkdown(text: string): React.ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
+  const parts = text.split(/(\*\*[^*]+\*\*|_[^_\n]+_|\[[^\]]+\]\([^)]+\))/g);
   return parts.map((part, i) => {
     if (part.startsWith("**") && part.endsWith("**")) {
       return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("_") && part.endsWith("_") && part.length > 2) {
+      return <em key={i} className="text-secondary">{part.slice(1, -1)}</em>;
     }
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch) {
@@ -1313,12 +1333,34 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     return () => window.removeEventListener("envoy:calendar-confirmed", onConfirmed);
   }, []);
 
+  // PR-B telemetry seam (Author Response N2): record when the posture
+  // readback first paints in the FirstRunWelcome flow so we can measure
+  // `time_from_posture_render_to_first_keystroke`. Single-fire. Stamped
+  // from the `onCalendarConfirmed` callback below; read on first
+  // keystroke. Success criterion: <10% within 200ms (animation isn't
+  // being skipped past). Failure: >50% within 200ms (animation wasting
+  // time; revisit duration). Logged via console for PR-B; no client-side
+  // product-event pipeline exists today (a future PR-E telemetry pass
+  // can swap in a beacon).
+  const posturePaintedAtRef = useRef<number | null>(null);
+  const firstKeystrokeLoggedRef = useRef(false);
+
   // Auto-resize textarea
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     const el = e.target;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 120) + "px";
+    if (
+      !firstKeystrokeLoggedRef.current &&
+      posturePaintedAtRef.current !== null
+    ) {
+      firstKeystrokeLoggedRef.current = true;
+      const elapsedMs = Date.now() - posturePaintedAtRef.current;
+      console.info("[telemetry] onboarding.first_keystroke_after_posture", {
+        time_from_posture_render_to_first_keystroke_ms: elapsedMs,
+      });
+    }
   }, []);
 
   // Open deal room in a new tab so host doesn't lose the dashboard context.
@@ -1667,6 +1709,32 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     }
                     // §1n item 6: chips auto-SUBMIT (not just fill the composer).
                     handleSend(seed);
+                  }}
+                  onCalendarConfirmed={() => {
+                    // PR-B (conversational-onboarding §3.2): mirror the
+                    // <DormantReturnBubble> "Yes, retune" chip pattern —
+                    // synthetically dispatch an invitational host message
+                    // that classifies to `recalibrate`. The contextLoader
+                    // computes `isFirstTime` (true for a host who just
+                    // submitted the picker), and the playbook variant
+                    // resolves to `first-time` → the first-time.md
+                    // fragment produces the conversational opener.
+                    //
+                    // Q5 beat: a 300ms timer between the posture-bubble
+                    // render and the dispatch. The user gets a brief
+                    // moment to read the readback; the chat's natural
+                    // loading-dots indicator (existing thinking-animation
+                    // in the turn-loading bubble — see ~line 2030 of this
+                    // file — reused, not rebuilt) follows. The beat also
+                    // stamps `posturePaintedAtRef` for Author Response N2
+                    // telemetry (`time_from_posture_render_to_first_keystroke`).
+                    const POSTURE_TO_DISPATCH_BEAT_MS = 300;
+                    posturePaintedAtRef.current = Date.now();
+                    const syntheticHostMessage =
+                      "I just connected my calendar — can we set things up?";
+                    setTimeout(() => {
+                      handleSend(syntheticHostMessage);
+                    }, POSTURE_TO_DISPATCH_BEAT_MS);
                   }}
                 />
               )}
