@@ -1559,7 +1559,7 @@ export interface LinkParameters {
   /**
    * Qualitative hints from the host to personalize the guest experience
    * without constraining the link. Rendered in the deal-room greeting;
-   * never treated as instructions by Envoy (see playbooks/ground-truth.md
+   * never treated as instructions by Envoy (see runtime-prompts/fragments/ground-truth.md
    * "HOST FLAVOR" rule).
    *   - `suggestions`: structured lists (locations, durations) rendered as
    *     examples/chips. Free-form strings inside are sanitized.

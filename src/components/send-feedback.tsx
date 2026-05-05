@@ -37,6 +37,7 @@ const AREA_LABELS: Record<FeedbackArea, string> = {
   calendar_sync: "Calendar sync",
   confirmation_flow: "Confirmation flow",
   other: "Something else",
+  composer_thumbs_down: "Composer feedback",
 };
 
 interface SendFeedbackLinkProps {

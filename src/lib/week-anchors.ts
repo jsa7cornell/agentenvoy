@@ -17,7 +17,7 @@
  *
  * All outputs are human-readable labels ("Mon, Apr 20, 2026") — the LLM
  * copies them verbatim into the OFFERABLE SLOTS list it picks from. The
- * playbook at `src/agent/playbooks/calendar.md` says LLMs never compute
+ * playbook at `src/agent/runtime-prompts/calendar.md` says LLMs never compute
  * day-of-week; these helpers give them pre-formatted answers.
  *
  * Pure functions; unit-testable without a server.

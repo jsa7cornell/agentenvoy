@@ -13,7 +13,7 @@
  *
  * Adding a new activity should mean editing this file ONLY. The composer
  * playbook is build-time substituted from ACTIVITY_VOCAB via
- * playbooks/index.ts; runtime sites import their helpers from here.
+ * runtime-prompts/index.ts; runtime sites import their helpers from here.
  *
  * SPEC §2.2 (Activity vocab term) and §3.6 (Event title generation) point
  * here as canonical.
@@ -143,7 +143,7 @@ export function defaultDurationForActivity(
 
 /**
  * Render the canonical activity table as a markdown block for build-time
- * substitution into calendar-event-composer.md. Used by playbooks/index.ts
+ * substitution into calendar-event-composer.md. Used by runtime-prompts/index.ts
  * when serving the composer prompt — placeholder `{{ACTIVITY_VOCAB_TABLE}}`
  * in the .md file gets replaced with the output of this function.
  *

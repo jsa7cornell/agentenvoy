@@ -32,6 +32,7 @@ export const FEEDBACK_AREAS = [
   "calendar_sync",
   "confirmation_flow",
   "other",
+  "composer_thumbs_down",
 ] as const;
 export const FeedbackAreaSchema = z.enum(FEEDBACK_AREAS);
 export type FeedbackArea = z.infer<typeof FeedbackAreaSchema>;

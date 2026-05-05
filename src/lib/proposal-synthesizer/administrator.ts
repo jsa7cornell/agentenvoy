@@ -1,5 +1,5 @@
 import type { AgentConfig, ResearchResult, Synthesis } from "./types";
-import { administratorPlaybook } from "../../agent/playbooks/index";
+import { administratorPlaybook } from "../../agent/runtime-prompts/index";
 
 interface ComposeOptions {
   question: string;

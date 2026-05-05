@@ -11,7 +11,7 @@
  *
  * The sanitized value is rendered inside a delimited [HOST FLAVOR] block in
  * Envoy's prompt with explicit instructions to treat it as description, not
- * commands (see `src/agent/playbooks/ground-truth.md`).
+ * commands (see `src/agent/runtime-prompts/ground-truth.md`).
  */
 
 const MAX_LEN = 200;
