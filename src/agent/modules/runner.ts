@@ -57,6 +57,7 @@ import {
 } from "./types";
 import { DEFAULT_POST_STREAM_GUARDS } from "./_shared/post-stream-guards";
 import { lookupModule } from "./registry";
+import { prisma } from "@/lib/prisma";
 
 // ---------------------------------------------------------------------------
 // Playbook fragment loading
@@ -477,6 +478,57 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
   // infra for corpus-continuity across the cluster-collapse rename window).
   moduleGuard.emittedActions = parsedActions.map((a) => a.action);
 
+  // PR-E: Telemetry — `calibrateVariant` for the recalibrate module so corpus
+  // rows can be segmented by variant without parsing the system prompt.
+  // Read from `matchResult.playbookVariant` (the canonical signal) and
+  // narrow to the closed set; unknown values silently drop (mirrors the
+  // module's own selectVariant fallthrough to "open").
+  if (intentModule.intent === "recalibrate" && input.matchResult.kind === "deterministic") {
+    const v = input.matchResult.playbookVariant;
+    if (v === "first-time" || v === "dormant" || v === "explicit-ask" || v === "open") {
+      moduleGuard.calibrateVariant = v;
+    }
+  }
+
+  // PR-E: Telemetry — `onboardingFraming` for the chat module. Mirror the
+  // chat module's variant selection logic so the telemetry label matches
+  // what was actually composed into the system prompt. v1 only wires
+  // `post-calibration`; the type accommodates future framing variants.
+  if (intentModule.intent === "chat") {
+    const onboardingState = (contextOutput as { onboardingState?: unknown })
+      .onboardingState;
+    if (onboardingState !== undefined) {
+      // Inline the same window check selectChatVariant uses, on the same
+      // contextOutput. Importing selectChatVariant directly into the runner
+      // would couple the runner to the chat module; this stays neutral.
+      const POST_CALIBRATION_WINDOW_MS = 5 * 60 * 1000;
+      const state = onboardingState as {
+        lastCalibrationCompletionAt: Date | string | null;
+        lastTuningCompletionAt: Date | string | null;
+      };
+      const now = Date.now();
+      const candidates: Array<Date | string | null> = [
+        state.lastCalibrationCompletionAt,
+        state.lastTuningCompletionAt,
+      ];
+      let framing:
+        | "post-calibration"
+        | "fresh-host-skip-calibrate"
+        | "sub-dormant-return"
+        | null = null;
+      for (const at of candidates) {
+        if (!at) continue;
+        const atMs = at instanceof Date ? at.getTime() : new Date(at).getTime();
+        const delta = now - atMs;
+        if (delta >= 0 && delta <= POST_CALIBRATION_WINDOW_MS) {
+          framing = "post-calibration";
+          break;
+        }
+      }
+      moduleGuard.onboardingFraming = framing;
+    }
+  }
+
   // 8. Action dispatch via canonical actions.ts. PR3b-iii adds an optional
   //    timeout race; on timeout the late completion is logged in the
   //    background so debug bundles show the eventual outcome.
@@ -512,6 +564,63 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
       }
     } else {
       actionResults = await execPromise;
+    }
+  }
+
+  // PR-E: Write a recalibrate-arc terminal marker on wind-down so the chat
+  // module's `post-calibration` variant (PR-C) fires for the new
+  // conversational flow, not just legacy `primary-link-tuning` auto-resume.
+  //
+  // Detection: any successful `update_meeting_settings` emission from the
+  // recalibrate module on `dashboard-host` during a `first-time` or
+  // `explicit-ask` variant turn signals arc completion (those are the two
+  // variants that drive a calibration arc to wind-down; `dormant` and
+  // `open` are mid-conversation entry surfaces). The marker is idempotent
+  // within the 5-minute post-calibration window — re-firing is a no-op for
+  // PR-C's variant resolution.
+  //
+  // Mirrors the metadata shape from `app/src/app/api/onboarding/_persist.ts`
+  // and the `findLatestTerminalMarkerAt` reader in
+  // `app/src/lib/onboarding/dormant-eligibility.ts`.
+  if (
+    intentModule.intent === "recalibrate" &&
+    intentModule.surface === "dashboard-host" &&
+    moduleGuard.calibrateVariant !== undefined &&
+    (moduleGuard.calibrateVariant === "first-time" ||
+      moduleGuard.calibrateVariant === "explicit-ask") &&
+    !actionsTimedOut &&
+    !blockingExhaustion
+  ) {
+    const meetingSettingsIdx = parsedActions.findIndex(
+      (a) => a.action === "update_meeting_settings",
+    );
+    const meetingSettingsResult =
+      meetingSettingsIdx >= 0 ? actionResults[meetingSettingsIdx] : undefined;
+    if (meetingSettingsResult?.success) {
+      try {
+        const userId = input.moduleContext.user.id;
+        let channel = await prisma.channel.findUnique({ where: { userId } });
+        if (!channel) {
+          channel = await prisma.channel.create({ data: { userId } });
+        }
+        await prisma.channelMessage.create({
+          data: {
+            channelId: channel.id,
+            role: "envoy",
+            content: "",
+            metadata: {
+              kind: "onboarding",
+              subkind: "recalibrate",
+              terminal: true,
+            },
+          },
+        });
+      } catch (e) {
+        console.error(
+          `[runner:recalibrate] terminal-marker write failed user=${input.moduleContext.user.id}:`,
+          e,
+        );
+      }
     }
   }
 

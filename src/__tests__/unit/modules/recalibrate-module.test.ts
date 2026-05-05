@@ -48,14 +48,52 @@ describe("recalibrate module shape", () => {
     expect(m!.allowedActions).toContain("update_knowledge");
   });
 
-  it("does NOT declare create_link or availability-mutation actions (scope guard)", () => {
+  it("declares allowedActions widened in PR-A for first-time multi-action emit", () => {
+    // PR-A (`2026-05-05_conversational-onboarding-vision`) widened the
+    // recalibrate `allowedActions` to include `update_business_hours` and
+    // `update_availability_rule` so the conversational first-time arc can
+    // emit availability protections / windows extracted from natural-language
+    // descriptions ("I protect lunchtime", "MWF availability").
+    expect(m!.allowedActions).toContain("update_business_hours");
+    expect(m!.allowedActions).toContain("update_availability_rule");
+  });
+
+  it("does NOT declare event-creation or availability-deletion actions (scope guard)", () => {
+    // Recalibrate is scoped to host-side calibration writes; event-creation
+    // and availability-rule deletion remain out of scope.
     expect(m!.allowedActions).not.toContain("create_link");
-    expect(m!.allowedActions).not.toContain("update_availability_rule");
     expect(m!.allowedActions).not.toContain("delete_availability_rule");
   });
 
-  it("declares a composerPlaybook that includes the recalibrate base fragment", () => {
-    expect(m!.composerPlaybook).toEqual(
+  it("declares a composerPlaybook function that selects per-variant fragments", () => {
+    // PR-A switched composerPlaybook from a static array to a function so
+    // recalibrate can load matcher-conditional fragments per variant
+    // (first-time / dormant / explicit-ask / open). Assert the function form
+    // and probe each variant returns the expected fragment path.
+    expect(typeof m!.composerPlaybook).toBe("function");
+    const playbook = m!.composerPlaybook as (
+      match: import("@/agent/modules/types").MatchResult,
+    ) => readonly string[];
+    const make = (variant: string) =>
+      ({
+        kind: "deterministic" as const,
+        resolved: {},
+        playbookVariant: variant,
+      });
+    expect(playbook(make("first-time"))).toEqual(
+      expect.arrayContaining(["composers/recalibrate/first-time"]),
+    );
+    expect(playbook(make("dormant"))).toEqual(
+      expect.arrayContaining(["composers/recalibrate/dormant"]),
+    );
+    expect(playbook(make("explicit-ask"))).toEqual(
+      expect.arrayContaining(["composers/recalibrate/explicit-ask"]),
+    );
+    expect(playbook(make("open"))).toEqual(
+      expect.arrayContaining(["composers/recalibrate/base"]),
+    );
+    // Fallthrough: unknown variant resolves to base ("open" path).
+    expect(playbook({ kind: "fall-through" })).toEqual(
       expect.arrayContaining(["composers/recalibrate/base"]),
     );
   });
@@ -64,8 +102,10 @@ describe("recalibrate module shape", () => {
     expect(typeof m!.contextLoader).toBe("function");
   });
 
-  it("has preEmitChecks as an array (may be empty)", () => {
+  it("has preEmitChecks as an array including requiredFieldExtractionCheck (PR-A)", () => {
     expect(Array.isArray(m!.preEmitChecks)).toBe(true);
+    const names = (m!.preEmitChecks ?? []).map((c) => c.name);
+    expect(names).toContain("required-field-extraction-check");
   });
 
   it("has postStreamGuards as an array (may be empty)", () => {
