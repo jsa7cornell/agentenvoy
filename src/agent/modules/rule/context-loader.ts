@@ -14,6 +14,8 @@
  */
 import { prisma } from "@/lib/prisma";
 import { getOrComputeSchedule } from "@/lib/calendar";
+import { formatComputedSchedule } from "@/agent/composer";
+import { getUserTimezone } from "@/lib/timezone";
 import type { ModuleContext, ModuleContextOutput, MatchResult } from "@/agent/modules/types";
 
 export interface RuleSummary {
@@ -203,10 +205,33 @@ export async function loadRuleContext(
     }
   }
 
+  // Prepend the DATE REFERENCE + day-by-day calendar block so the rule
+  // composer can map ISO dates (returned by check_conflicts_for_rule) to
+  // correct weekday names without hallucinating. Mirrors the schedule-context
+  // path which always includes formatComputedSchedule() in contextLines.
+  // create_bookable_link inherits this fix for free (shares loadRuleContext).
+  const contextLines: string[] = [];
+  if (schedule?.connected && schedule.slots) {
+    const tz = getUserTimezone(
+      (user?.preferences as Record<string, unknown> | null) ?? null,
+    );
+    contextLines.push(
+      formatComputedSchedule(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        schedule.slots as any,
+        tz,
+        schedule.canWrite,
+        undefined,
+        { weekConvention: "sun_start" },
+      ),
+    );
+  }
+  contextLines.push(
+    `Host's primary link defaults: format=${primaryLinkDefaults.format}, duration=${primaryLinkDefaults.duration} min, hours=${primaryLinkDefaults.hours}`,
+  );
+
   return {
-    contextLines: [
-      `Host's primary link defaults: format=${primaryLinkDefaults.format}, duration=${primaryLinkDefaults.duration} min, hours=${primaryLinkDefaults.hours}`,
-    ],
+    contextLines,
     groundTruthBlock: renderCurrentRulesBlock(recentRules),
     recentRules,
     upcomingEvents,

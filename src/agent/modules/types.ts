@@ -294,6 +294,13 @@ export interface RunnerInput {
    * 15s default for event intents.
    */
   actionTimeoutMs?: number;
+  /**
+   * Called by the runner each time it is about to retry the composer after a
+   * guard fires. Allows the caller (dispatchModuleAndStream) to emit a
+   * `retrying` status frame to the client so the user sees progress.
+   * Parity with legacy-route.ts:1220 which emitted `retrying` from the route.
+   */
+  onRetry?: () => void;
 }
 
 export interface ModuleGuardRecord {

@@ -321,6 +321,10 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
       break;
     }
 
+    // Signal the caller (e.g. dispatchModuleAndStream) so it can emit a
+    // `retrying` frame to the client before we make the next LLM call.
+    input.onRetry?.();
+
     // Retry the composer with the hint as the next user turn.
     moduleGuard.retryCount = (attempt + 1) as 0 | 1 | 2;
     const retryHistory: Array<{ role: string; content: string }> = [

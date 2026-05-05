@@ -46,7 +46,7 @@ export interface DispatchModuleAndStreamArgs {
   userMsgPersist: Promise<unknown>;
   controller: ReadableStreamDefaultController<Uint8Array>;
   encoder: TextEncoder;
-  emitStatus: (stage: "thinking" | "executing" | "finalizing") => void;
+  emitStatus: (stage: "thinking" | "executing" | "finalizing" | "retrying") => void;
   /** Matcher output. Defaults to fresh-create deterministic match. */
   matchResult?: MatchResult;
   /** Channel-message lookback for the composer's conversation history. */
@@ -78,6 +78,14 @@ export interface DispatchModuleAndStreamArgs {
   emitExecutingStage?: boolean;
   /** Log prefix for failures. Defaults to `intent`. */
   errorTag?: string;
+  /**
+   * Called by the runner each time it triggers a guard-retry inside the
+   * for-loop. Allows the route to emit a `retrying` status frame to the
+   * client so the user sees progress during multi-attempt turns.
+   * (parity-fix: legacy schedule path emitted `retrying` from the route;
+   * the runner retried silently in PR1a.)
+   */
+  onRetry?: () => void;
 }
 
 /**
@@ -146,6 +154,12 @@ export async function dispatchModuleAndStream(
       userMessage: message,
       conversationHistory: sanitizedHistory,
       actionTimeoutMs: args.actionTimeoutMs,
+      onRetry: args.onRetry
+        ? () => {
+            args.onRetry!();
+            emitStatus("retrying");
+          }
+        : undefined,
     });
 
     if (result.kind !== "buffered") {
@@ -204,9 +218,14 @@ export async function dispatchModuleAndStream(
     }
 
     // Append linkUrl from successful actions so the host sees shareable URLs.
+    // handleCreateLink returns `data.url`; other handlers return `data.linkUrl`.
     const linkUrls = result.actionResults
-      .filter((r) => r.success && typeof r.data?.linkUrl === "string")
-      .map((r) => r.data!.linkUrl as string);
+      .filter(
+        (r) =>
+          r.success &&
+          (typeof r.data?.linkUrl === "string" || typeof r.data?.url === "string"),
+      )
+      .map((r) => (r.data!.linkUrl ?? r.data!.url) as string);
     let finalText = displayText;
     if (linkUrls.length > 0) {
       const trimmed = displayText.trim();
@@ -215,14 +234,50 @@ export async function dispatchModuleAndStream(
         : linkUrls.join("\n\n");
     }
 
+    // Extract sessionId from the first successful action result that carries
+    // one. Used to thread the envoy message to the correct session card and
+    // (for multi-action turns) write a system-role summary row.
+    const threadId = result.actionResults.find(
+      (r) => r.success && typeof r.data?.sessionId === "string",
+    )?.data?.sessionId as string | undefined;
+
+    // Persist promptContext snapshot for incident-response / debug bundles.
+    // Matches legacy-route.ts:1281-1287. Gated by PROMPT_SNAPSHOT_ENABLED env
+    // var (defaults to enabled — set to "false" to suppress).
+    if (process.env.PROMPT_SNAPSHOT_ENABLED !== "false") {
+      (additions as Record<string, unknown>).promptContext = {
+        systemPrompt: result.systemPrompt,
+        modelId: "claude-sonnet-4-6",
+      };
+    }
+
     await prisma.channelMessage.create({
       data: {
         channelId,
         role: "envoy",
         content: finalText,
+        ...(threadId ? { threadId } : {}),
         metadata: mergeChannelMetadata(null, additions) as Prisma.InputJsonValue,
       },
     });
+
+    // System-role summary row for multi-action turns (modify/cancel/etc.).
+    // Matches legacy-route.ts:1465-1483. Written after the envoy turn so the
+    // feed renders the summary beneath the card.
+    if (result.actionResults.length > 1) {
+      const visibleSummary = result.actionResults
+        .map((r, i) => {
+          const action = result.parsedActions[i]?.action ?? "action";
+          const symbol = r.success ? "✓" : "✗";
+          return `${symbol} ${r.message ?? action}`;
+        })
+        .join("\n");
+      if (visibleSummary) {
+        await prisma.channelMessage.create({
+          data: { channelId, role: "system", content: visibleSummary },
+        });
+      }
+    }
 
     controller.enqueue(
       encoder.encode(JSON.stringify({ type: "text", content: finalText }) + "\n"),
