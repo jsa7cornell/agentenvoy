@@ -1,20 +1,18 @@
 "use client";
 
 /**
- * ThumbsDownFeedback — inline 👎 on Envoy messages (admin/host only).
+ * ThumbsDownFeedback — inline 👎 on Envoy messages (host-only).
  *
  * Submits to /api/feedback/submit with area="composer_thumbs_down".
- * The admin note lands in userText; the flagged message content lands in
- * triedToDoText so the agent reading the report has the exact turn.
- * Review queue: /admin/feedback?area=composer_thumbs_down
+ * userText = admin note; triedToDoText = flagged message; full conversation
+ * bundle built server-side. Review: /admin/feedback?area=composer_thumbs_down
+ * Full doc: agentenvoy/COMPOSERREPORTS.md
  */
 
 import { useCallback, useState } from "react";
 
 interface Props {
-  /** NegotiationSession.id — scopes the bundle the server builds. */
   sessionId: string | null;
-  /** The full text of the Envoy message being flagged. */
   messageContent: string;
 }
 
@@ -53,7 +51,9 @@ function ThumbsDownModal({
 }) {
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState(false);
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [agentPrompt, setAgentPrompt] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = useCallback(async () => {
@@ -78,9 +78,15 @@ function ThumbsDownModal({
           url: typeof window !== "undefined" ? window.location.href : undefined,
         }),
       });
-      const json = (await res.json()) as { ok: boolean; error?: string };
+      const json = (await res.json()) as {
+        ok: boolean;
+        reportId?: string;
+        agentPrompt?: string;
+        error?: string;
+      };
       if (!res.ok || !json.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      setDone(true);
+      setReportId(json.reportId ?? null);
+      setAgentPrompt(json.agentPrompt ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send");
     } finally {
@@ -97,12 +103,41 @@ function ThumbsDownModal({
         className="w-full max-w-sm rounded-2xl border border-white/10 bg-zinc-950 p-5 text-sm text-zinc-100 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {done ? (
+        {reportId !== null ? (
           <div className="space-y-3">
             <p className="font-semibold">Logged 👎</p>
-            <p className="text-xs text-zinc-400">
-              Added to composer feedback queue.
-            </p>
+            <div className="rounded-md border border-white/10 bg-zinc-900 px-3 py-2 space-y-1 text-[11px]">
+              <div className="flex justify-between text-zinc-400">
+                <span>Report</span>
+                <a
+                  href={`/admin/feedback/${reportId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono text-sky-400 hover:text-sky-300"
+                >
+                  {reportId}
+                </a>
+              </div>
+              {sessionId && (
+                <div className="flex justify-between text-zinc-400">
+                  <span>Session</span>
+                  <span className="font-mono text-zinc-300">{sessionId}</span>
+                </div>
+              )}
+            </div>
+            {agentPrompt && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(agentPrompt);
+                  setPromptCopied(true);
+                  setTimeout(() => setPromptCopied(false), 2000);
+                }}
+                className="w-full rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-1.5 text-[11px] text-sky-300 hover:bg-sky-500/10 text-left"
+              >
+                {promptCopied ? "Copied ✓" : "Copy debug curl (15 min token)"}
+              </button>
+            )}
             <div className="flex justify-end pt-1">
               <button
                 type="button"
