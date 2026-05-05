@@ -1759,16 +1759,18 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
             return (
               <div key={msg.id} className="self-start flex flex-col gap-2 w-full max-w-[440px]">
                 {msg.content && (
-                  <div className="flex items-end gap-1">
+                  <>
                     <div className="rounded-2xl px-4 py-3 text-sm leading-relaxed bg-black/5 dark:bg-white/7 rounded-bl-sm">
                       <div className="text-[10px] font-semibold uppercase tracking-wide mb-1 text-purple-400">Envoy</div>
                       <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
                     </div>
-                    <ThumbsDownFeedback
-                      sessionId={msg.thread.id}
-                      messageContent={msg.content}
-                    />
-                  </div>
+                    <div className="flex justify-end -mt-1">
+                      <ThumbsDownFeedback
+                        sessionId={msg.thread.id}
+                        messageContent={msg.content}
+                      />
+                    </div>
+                  </>
                 )}
                 <ThreadCard
                   title={msg.thread.title || "Thread"}
