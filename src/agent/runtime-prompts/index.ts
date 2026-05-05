@@ -145,15 +145,4 @@ export function administratorPlaybook(): string {
   }
 }
 
-// ── Dynamic loader (dispatch-handler uses variable playbookRelativePath) ───
-// NOTE: dynamic paths cannot be statically traced by @vercel/nft. The files
-// loaded here (profile-composer.md, calendar-rule-composer.md) are traced via
-// the static exports above — keep their named exports in sync with whatever
-// paths dispatch-handler.ts may request at runtime.
-export function loadPlaybook(relativePath: string): string {
-  try {
-    return readFileSync(join(cwd, relativePath), "utf-8");
-  } catch (err) {
-    throw new Error(`[runtime-prompts/index] failed to load ${relativePath}: ${err}`);
-  }
-}
+

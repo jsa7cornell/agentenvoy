@@ -275,9 +275,10 @@ describe("unclear + missing/fabricated clarifier → closed-set fallback", () =>
 // ---------------------------------------------------------------------------
 
 describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3 + chat-decisioning-layer-redesign PR1)", () => {
-  it("contains exactly the 7 host-side values in order (PR1 split create_link → create/modify/cancel)", () => {
+  it("contains exactly the 8 host-side values in order (PR1 split create_link → create/modify/cancel; create_bookable_link added)", () => {
     expect([...HOST_CHAT_INTENT_VALUES]).toEqual([
       "edit_preference",
+      "create_bookable_link",
       "create_link",
       "modify_link",
       "cancel_link",
@@ -285,7 +286,7 @@ describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3 + chat-decisioning-layer-redesig
       "query_event",
       "chat",
     ]);
-    expect(HOST_CHAT_INTENT_VALUES).toHaveLength(7);
+    expect(HOST_CHAT_INTENT_VALUES).toHaveLength(8);
   });
 
   it("every host value normalizes via the full-union normalizeChatIntent", () => {
@@ -313,12 +314,14 @@ describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3 + chat-decisioning-layer-redesig
     }
   });
 
-  it("guest and host sets are disjoint (combined size = 13)", () => {
+  it("guest and host sets are disjoint (combined size = guest+host)", () => {
     const combined = new Set<string>([
       ...CHAT_INTENT_VALUES,
       ...HOST_CHAT_INTENT_VALUES,
     ]);
-    expect(combined.size).toBe(13);
+    expect(combined.size).toBe(
+      CHAT_INTENT_VALUES.length + HOST_CHAT_INTENT_VALUES.length,
+    );
   });
 
   it("validateChatIntent passes host values through the default branch", () => {

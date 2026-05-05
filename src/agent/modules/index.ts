@@ -16,6 +16,8 @@
 import { registerModule } from "./registry";
 import { chatModule } from "./chat/module";
 import { ruleModule } from "./rule/module";
+import { profileModule } from "./profile/module";
+import { createBookableLinkModule } from "./create-bookable-link/module";
 
 let _registered = false;
 
@@ -29,6 +31,8 @@ export function ensureModulesRegistered(): void {
   _registered = true;
   registerModule(chatModule);
   registerModule(ruleModule);
+  registerModule(profileModule);
+  registerModule(createBookableLinkModule);
 }
 
 // Auto-register on first import. Production code paths that import any

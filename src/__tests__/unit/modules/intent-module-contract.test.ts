@@ -27,9 +27,11 @@ import { lookupModule, getRegistry } from "@/agent/modules";
  */
 const STILL_MIGRATING_HOST_INTENTS: ReadonlySet<string> = new Set([
   // "rule" — migrated in PR1c (composer-modules-pr1c)
-  "create_bookable_link",                       // PR1c follow-on (or PR2)
-  "profile",                                    // PR2
-  "edit_preference",                            // PR2
+  // "profile", "create_bookable_link" — migrated in PR2
+  // "edit_preference" — left unregistered by design in PR2 (Open Question 1
+  //   of the composer-modules proposal remains open). The route layer
+  //   delegates to either the profile or rule module via a keyword regex.
+  "edit_preference",
   "create_link",                                // PR3
   "modify_link",                                // PR3
   "cancel_link",                                // PR3

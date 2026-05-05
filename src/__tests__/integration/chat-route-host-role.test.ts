@@ -48,16 +48,16 @@ vi.mock("@/agent/intent-classifier", () => ({
   classifyChatIntent: (...args: unknown[]) => classifyChatIntentMock(...args),
 }));
 
-// dispatch-handler is invoked for edit_preference / profile / rule. Stub it
-// out so the test doesn't need the full LLM streaming pipeline; we just
-// assert it's called with the right tier.
-const runDispatchHandlerMock = vi.fn<(args: unknown) => Promise<void>>(
+// dispatchModuleAndStream is invoked for edit_preference / profile / rule /
+// create_bookable_link. Stub it out so the test doesn't need the full LLM
+// streaming pipeline; we just assert it's called with the right intent.
+const dispatchModuleAndStreamMock = vi.fn<(args: unknown) => Promise<void>>(
   async () => {
-    // Simulate the handler closing the stream cleanly.
+    // Simulate the helper closing the stream cleanly.
   },
 );
-vi.mock("@/agent/dispatch-handler", () => ({
-  runDispatchHandler: (args: unknown) => runDispatchHandlerMock(args),
+vi.mock("@/agent/modules/_shared/dispatch-stream", () => ({
+  dispatchModuleAndStream: (args: unknown) => dispatchModuleAndStreamMock(args),
 }));
 
 // Calendar — the route loads it for `schedule` / inquire tiers. Under the
@@ -98,7 +98,7 @@ const ORIGIN = "http://localhost:3000";
 beforeEach(async () => {
   await resetDb();
   classifyChatIntentMock.mockReset();
-  runDispatchHandlerMock.mockClear();
+  dispatchModuleAndStreamMock.mockClear();
   process.env.NEXTAUTH_URL = ORIGIN;
 });
 
@@ -248,14 +248,14 @@ describe("chat route — host-role plumbing (PR1 invariants)", () => {
     expect(classifyChatIntentMock).toHaveBeenCalledTimes(1);
     expect(classifyChatIntentMock.mock.calls[0][2]).toBe("host");
 
-    // Dispatch-handler must NOT be called for `chat` (only for
-    // edit_preference / profile / rule). If it had fired, it would mean
-    // the chat tier was being routed through the profile playbook, which
-    // is the wrong shape for a free-form host turn.
-    expect(runDispatchHandlerMock).not.toHaveBeenCalled();
+    // dispatchModuleAndStream must NOT be called for `chat` (only for
+    // edit_preference / profile / rule / create_bookable_link). If it had
+    // fired, it would mean the chat tier was being routed through the
+    // profile module, which is the wrong shape for a free-form host turn.
+    expect(dispatchModuleAndStreamMock).not.toHaveBeenCalled();
   });
 
-  test("T4 (bonus): edit_preference routes through dispatch-handler with profile tier", async () => {
+  test("T4 (bonus): edit_preference routes through profile module", async () => {
     const user = await createUser({ email: "pref@chat.test" });
     vi.mocked(getServerSession).mockResolvedValue({
       user: { email: user.email, name: user.name },
@@ -276,22 +276,20 @@ describe("chat route — host-role plumbing (PR1 invariants)", () => {
     );
     await drainStream(res);
 
-    expect(runDispatchHandlerMock).toHaveBeenCalledTimes(1);
-    const firstCall = runDispatchHandlerMock.mock.calls[0] as unknown as [
-      { tier: string; playbookRelativePath: string },
+    expect(dispatchModuleAndStreamMock).toHaveBeenCalledTimes(1);
+    const firstCall = dispatchModuleAndStreamMock.mock.calls[0] as unknown as [
+      { intent: string },
     ];
     const dispatchArgs = firstCall[0];
-    // PR1 keyword-heuristic stopgap: profile-shaped utterances ("make my
+    // PR2 keyword-heuristic stopgap: profile-shaped utterances ("make my
     // default 30 min" — no buffer/hours/days/am/pm/window/availability
-    // tokens) route through profile.md. PR4 will split edit_preference at
-    // the classifier level and remove this heuristic.
-    expect(dispatchArgs.tier).toBe("profile");
-    expect(dispatchArgs.playbookRelativePath).toBe(
-      "src/agent/runtime-prompts/composers/profile-composer.md",
-    );
+    // tokens) route through the profile module. Open Question 1 of the
+    // composer-modules proposal (split edit_preference at the classifier
+    // level into edit_profile/edit_rule) remains open.
+    expect(dispatchArgs.intent).toBe("profile");
   });
 
-  test("T4b: edit_preference with rule-shape keyword routes through rule tier", async () => {
+  test("T4b: edit_preference with rule-shape keyword routes through rule module", async () => {
     const user = await createUser({ email: "pref-rule@chat.test" });
     vi.mocked(getServerSession).mockResolvedValue({
       user: { email: user.email, name: user.name },
@@ -312,16 +310,13 @@ describe("chat route — host-role plumbing (PR1 invariants)", () => {
     );
     await drainStream(res);
 
-    expect(runDispatchHandlerMock).toHaveBeenCalledTimes(1);
-    const firstCall = runDispatchHandlerMock.mock.calls[0] as unknown as [
-      { tier: string; playbookRelativePath: string },
+    expect(dispatchModuleAndStreamMock).toHaveBeenCalledTimes(1);
+    const firstCall = dispatchModuleAndStreamMock.mock.calls[0] as unknown as [
+      { intent: string },
     ];
     const dispatchArgs = firstCall[0];
-    // "buffer" + "minutes" — heuristic catches "buffer" and routes to
-    // rule.md so the dispatch-handler loads availability-rule grammar.
-    expect(dispatchArgs.tier).toBe("rule");
-    expect(dispatchArgs.playbookRelativePath).toBe(
-      "src/agent/runtime-prompts/composers/calendar-rule-composer.md",
-    );
+    // "buffer" + "minutes" — heuristic catches "buffer" and routes to the
+    // rule module so the calendar-rule playbook drives the turn.
+    expect(dispatchArgs.intent).toBe("rule");
   });
 });

@@ -1,19 +1,17 @@
 /**
  * Bookable Link create flow data path.
  *
- * Covers the interception → proposal → confirm round-trip:
+ * Covers two surfaces:
  *
- *   1. Dispatch-handler classifies an LLM-emitted `update_availability_rule`
- *      action with `params.rule.action === "bookable"` (or legacy
- *      `"office_hours"`) and `operation === "add"` as a Bookable Link proposal
- *      (no rule write yet); other rule actions (block, location, remove, …)
- *      and non-Bookable rule actions still flow through executeActions.
- *   2. The projected payload matches the BookableLinkProposalPayload contract
- *      consumed by the confirmation card / sheet.
- *   3. POST /api/availability-rules/confirm validates auth + the
- *      persisted proposal row + the immutable originalText cross-check,
- *      then writes the rule into `User.preferences.explicit.structuredRules[]`
- *      with the same shape `handleUpdateAvailabilityRule` produces.
+ *   1. `isBookableAction` (moved to `modules/_shared/bookable.ts` in PR2)
+ *      classifies LLM-emitted `update_availability_rule` actions with
+ *      `params.rule.action === "bookable"` and `operation === "add"` so the
+ *      route can tag the persisted envoy turn's metadata with
+ *      `linkKind: "bookable"`.
+ *   2. POST /api/availability-rules/confirm continues to validate auth +
+ *      the persisted proposal row + the immutable originalText cross-check
+ *      for any in-flight `rule_proposal` rows that predate the 2026-05-03
+ *      chat-driven reshape. New traffic does not exercise this path.
  *
  * Vocabulary: this test exercises the **Bookable Link** feature — code
  * keyword `r.action === "bookable"`. It does NOT touch
@@ -59,11 +57,7 @@ vi.mock("@/lib/profile-gaps", () => ({
   invalidateBehaviorSnapshot: vi.fn(),
 }));
 
-import {
-  isBookableAction,
-  projectProposal,
-  type BookableLinkProposalPayload,
-} from "@/agent/dispatch-handler";
+import { isBookableAction } from "@/agent/modules/_shared/bookable";
 import { POST as confirmPOST } from "@/app/api/availability-rules/confirm/route";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
@@ -167,86 +161,12 @@ describe("isBookableAction", () => {
   });
 });
 
-describe("projectProposal", () => {
-  it("projects all fields when the LLM emits a complete payload (new bookable field)", () => {
-    const out: BookableLinkProposalPayload = projectProposal({
-      action: "update_availability_rule",
-      params: {
-        operation: "add",
-        rule: {
-          originalText: "Tennis team drop-in hours — weekdays 8–10am, 30-min video",
-          type: "recurring",
-          action: "bookable",
-          daysOfWeek: [1, 2, 3, 4, 5],
-          timeStart: "08:00",
-          timeEnd: "10:00",
-          bookable: {
-            name: "Tennis team",
-            format: "video",
-            durationMinutes: 30,
-          },
-          priority: 3,
-        },
-      },
-    });
-    expect(out.title).toBe("Tennis team");
-    expect(out.format).toBe("video");
-    expect(out.durationMinutes).toBe(30);
-    expect(out.daysOfWeek).toEqual([1, 2, 3, 4, 5]);
-    expect(out.timeStart).toBe("08:00");
-    expect(out.timeEnd).toBe("10:00");
-    expect(out.originalText).toContain("Tennis team");
-  });
-
-  it("falls back to safe defaults on partial payloads", () => {
-    const out = projectProposal({
-      action: "update_availability_rule",
-      params: { operation: "add", rule: { action: "bookable" } },
-    });
-    expect(out.title).toBe("Drop-in Hours");
-    expect(out.format).toBe("video");
-    expect(out.durationMinutes).toBe(30);
-    expect(out.daysOfWeek).toEqual([0, 1, 2, 3, 4, 5, 6]);
-    expect(out.timeStart).toBe("09:00");
-    expect(out.timeEnd).toBe("17:00");
-  });
-
-  it("rejects out-of-range daysOfWeek and falls back when empty", () => {
-    const out = projectProposal({
-      action: "update_availability_rule",
-      params: {
-        operation: "add",
-        rule: {
-          action: "bookable",
-          daysOfWeek: [-1, 7, 8, "monday"],
-          bookable: { name: "Coaching" },
-        },
-      },
-    });
-    // All entries filtered → falls back to all-week default.
-    expect(out.daysOfWeek).toEqual([0, 1, 2, 3, 4, 5, 6]);
-  });
-
-  it("normalizes format and duration to safe values", () => {
-    const out = projectProposal({
-      action: "update_availability_rule",
-      params: {
-        operation: "add",
-        rule: {
-          action: "bookable",
-          bookable: {
-            name: "Sales pitch",
-            // bogus values — should normalize back to defaults
-            format: "carrier-pigeon",
-            durationMinutes: 7,
-          },
-        },
-      },
-    });
-    expect(out.format).toBe("video");
-    expect(out.durationMinutes).toBe(30);
-  });
-});
+// `projectProposal` + `BookableLinkProposalPayload` were retired with the
+// 2026-05-03 chat-driven narration reshape (proposal `2026-05-03_recurring-
+// and-office-hours-widgets` §3.8). Bookable rule writes now flow through
+// `executeActions` like every other rule action; the propose-then-confirm
+// shape is gone from the runtime path. Tests for those helpers were
+// removed alongside the helpers in PR2.
 
 // ─── /api/availability-rules/confirm round-trip ─────────────────────────────
 

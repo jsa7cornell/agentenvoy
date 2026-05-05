@@ -29,11 +29,11 @@ import { runWithStageRotation } from "@/agent/progress-rotation";
 import { classifyChatIntent } from "@/agent/intent-classifier";
 import { isEchoOfRecentEnvoy } from "@/lib/echo-detect";
 import { normalizeChatIntent, type ChatIntent, type ChatIntentBlock } from "@/lib/intent";
-import { runDispatchHandler } from "@/agent/dispatch-handler";
-import { runModule } from "@/agent/modules";
-// Import the modules registry side-effects (registers chat smoke + rule).
+// Import the modules registry side-effects (registers chat smoke + rule +
+// profile + create_bookable_link).
 import "@/agent/modules";
-import { computeProfileGaps } from "@/lib/profile-gaps";
+import { dispatchModuleAndStream } from "@/agent/modules/_shared/dispatch-stream";
+import { evaluateFreshCreateGate } from "@/agent/classifiers/host-fresh-create-gate";
 import type { CalendarEvent } from "@/lib/calendar";
 import {
   schedulingPrecheck,
@@ -83,10 +83,10 @@ function buildInquireSystem(): string {
   return `${persona ? persona + "\n\n---\n\n" : ""}${inquire}`;
 }
 
-// Profile + rule tiers route through `runDispatchHandler` (Proposal 3,
-// decided 2026-04-21). Each tier loads a narrower playbook
-// (profile.md / rule.md) and emits the shorter `thinking → executing →
-// finalizing` taxonomy — no calendar scan or slot scoring.
+// Profile + rule + create_bookable_link branches dispatch via runModule
+// (PR2 — composer-modules architecture). Each module loads a narrower
+// playbook and emits the shorter `thinking → executing → finalizing`
+// taxonomy — no calendar scan or slot scoring.
 
 // ---------------------------------------------------------------------------
 // Progress narration protocol (proposal decided 2026-04-21)
@@ -417,158 +417,52 @@ export async function POST(req: NextRequest) {
           );
 
           // Tier dispatch — profile + rule short-circuit before the
-          // calendar load. Profile keeps the legacy runDispatchHandler
-          // path (migrates to runModule in PR2). Rule routes through the
-          // new module runner (PR1c — composer-modules architecture).
+          // calendar load. Both run through `runModule` (PR2 — composer-
+          // modules architecture). The route layer assembles the per-turn
+          // context (user, channel, message) and delegates the lifecycle
+          // (history sanitize → composer call → guards/retries → action
+          // dispatch → metadata persist → stream) to dispatchModuleAndStream.
           if (intent === "profile") {
-            const playbookRelativePath =
-              "src/agent/runtime-prompts/composers/profile-composer.md";
-            let profileGapHints: string[] | undefined;
-            try {
-              const gaps = await computeProfileGaps(safeUser.id);
-              profileGapHints = gaps.map((g) => g.hint);
-            } catch (e) {
-              console.warn(`[channel/chat] computeProfileGaps failed for ${safeUser.id}:`, e);
-            }
-            try {
-              await runDispatchHandler({
-                tier: "profile",
-                playbookRelativePath,
-                userId: safeUser.id,
-                userName: user.name ?? null,
-                channelId: safeChannel.id,
-                userMessage: message,
-                userMsgPersist,
-                controller,
-                encoder,
-                profileGapHints,
-                emitStatus: (stage) => {
-                  emitStatus(stage);
-                },
-              });
-            } catch (e) {
-              console.error(`[channel/chat] dispatch-handler profile failed:`, e);
-            }
+            await dispatchModuleAndStream({
+              surface: "dashboard-host",
+              intent: "profile",
+              channelId: safeChannel.id,
+              userId: safeUser.id,
+              userName: user.name ?? null,
+              userEmail: user.email ?? "",
+              message,
+              userMsgPersist,
+              controller,
+              encoder,
+              emitStatus: (stage) => emitStatus(stage),
+            });
             controller.close();
             return;
           }
 
           if (intent === "rule") {
-            // PR1c — composer-modules architecture wiring. Rule intent
-            // dispatches through `runModule` instead of `runDispatchHandler`.
-            // The rule module declares its own contextLoader (loads recent
-            // rules + upcoming events for conflict-awareness), composerTools
-            // (`check_conflicts_for_rule`), and preEmitChecks (fabricated-id +
-            // conflict-awareness). See `src/agent/modules/rule/module.ts`.
-            try {
-              emitStatus("thinking");
-
-              // Load conversation history for the rule turn (last 10 channel
-              // messages, sanitized — mirror of dispatch-handler.ts:218-248).
-              const recentMessages = await prisma.channelMessage.findMany({
-                where: { channelId: safeChannel.id },
-                orderBy: { createdAt: "desc" },
-                take: 10,
-              });
-              recentMessages.reverse();
-              const { messages: sanitizedHistory } = sanitizeHistory(
-                recentMessages.map((m) => ({ role: m.role, content: m.content })),
-                ["envoy", "assistant"],
-              );
-
-              const ruleResult = await runModule({
-                surface: "dashboard-host",
-                intent: "rule",
-                moduleContext: {
-                  user: {
-                    id: safeUser.id,
-                    name: user.name ?? null,
-                    email: user.email ?? "",
-                  },
-                  channel: { id: safeChannel.id },
-                  surface: "dashboard-host",
-                },
-                // Trivial matcher for PR1c: rule intent is mostly fresh-create.
-                // F14 Phase 3.B fresh-create gate + matcher refinement (NLP
-                // rule-name resolution for "extend Sales pitch hours") are
-                // future work; the rule module already handles update vs add
-                // via fabricatedIdCheck.
-                matchResult: {
-                  kind: "deterministic",
-                  resolved: { freshCreate: true },
-                  playbookVariant: "add",
-                },
-                userMessage: message,
-                conversationHistory: sanitizedHistory,
-              });
-
-              if (ruleResult.kind !== "buffered") {
-                throw new Error("rule module returned non-buffered result");
-              }
-
-              emitStatus("finalizing");
-
-              // Persist envoy turn with moduleGuard metadata for the corpus.
-              await userMsgPersist;
-              const moduleMetadata: Partial<ChannelMessageMetadata> = {};
-              if (ruleResult.parsedActions.length > 0) {
-                moduleMetadata.actions = ruleResult.parsedActions.map((a) => ({
-                  action: a.action,
-                  params: (a.params ?? {}) as Record<string, unknown>,
-                }));
-                moduleMetadata.actionResults = ruleResult.parsedActions.map((a, i) => {
-                  const r = ruleResult.actionResults[i];
-                  if (!r) return { action: a.action, success: false, message: "no_result" };
-                  return {
-                    action: a.action,
-                    success: r.success,
-                    message: r.message,
-                    ...(r.data ? { data: r.data } : {}),
-                  };
-                });
-              }
-              // moduleGuard — corpus-bucketed guard-firing record.
-              (moduleMetadata as Record<string, unknown>).moduleGuard = ruleResult.moduleGuard;
-
-              // Append linkUrl from successful action results so host sees the URL.
-              const linkUrls = ruleResult.actionResults
-                .filter((r) => r.success && typeof r.data?.linkUrl === "string")
-                .map((r) => r.data!.linkUrl as string);
-              let finalText = ruleResult.text || "Done.";
-              if (linkUrls.length > 0) {
-                finalText = (ruleResult.text || "").trim();
-                finalText = finalText
-                  ? `${finalText}\n\n${linkUrls.join("\n\n")}`
-                  : linkUrls.join("\n\n");
-              }
-
-              await prisma.channelMessage.create({
-                data: {
-                  channelId: safeChannel.id,
-                  role: "envoy",
-                  content: finalText,
-                  metadata: mergeChannelMetadata(null, moduleMetadata) as Prisma.InputJsonValue,
-                },
-              });
-
-              controller.enqueue(
-                encoder.encode(JSON.stringify({ type: "text", content: finalText }) + "\n"),
-              );
-            } catch (e) {
-              console.error(`[channel/chat] rule module failed:`, e);
-              const fallback = narrateFinalizeError();
-              try {
-                await userMsgPersist;
-                await prisma.channelMessage.create({
-                  data: { channelId: safeChannel.id, role: "envoy", content: fallback },
-                });
-                controller.enqueue(
-                  encoder.encode(JSON.stringify({ type: "text", content: fallback }) + "\n"),
-                );
-              } catch (persistErr) {
-                console.error(`[channel/chat] rule fallback persist failed:`, persistErr);
-              }
-            }
+            await dispatchModuleAndStream({
+              surface: "dashboard-host",
+              intent: "rule",
+              channelId: safeChannel.id,
+              userId: safeUser.id,
+              userName: user.name ?? null,
+              userEmail: user.email ?? "",
+              message,
+              userMsgPersist,
+              controller,
+              encoder,
+              emitStatus: (stage) => emitStatus(stage),
+              // Rule intent is mostly fresh-create at PR2; matcher refinement
+              // (NLP rule-name resolution for "extend Sales pitch hours") is
+              // future work. The rule module's fabricatedIdCheck handles
+              // update vs add via [GROUND TRUTH] grounding.
+              matchResult: {
+                kind: "deterministic",
+                resolved: { freshCreate: true },
+                playbookVariant: "add",
+              },
+            });
             controller.close();
             return;
           }
@@ -636,45 +530,43 @@ export async function POST(req: NextRequest) {
           // ------------------------------------------------------------
 
           // edit_preference → keyword-heuristic stopgap routing.
-          // TODO PR4: split edit_preference at the classifier level into
-          // edit_profile / edit_rule per Open Question 4 of the proposal,
-          // and remove this heuristic. For PR1 we route message-shape:
-          //   - rule-shaped ("buffer/hours/days/am/pm/window/availability")
-          //     → rule.md
-          //   - everything else → profile.md
-          // This keeps the diff minimal while loading a host-appropriate
-          // playbook for both message kinds.
+          // Open Question 1 of the composer-modules proposal (whether to
+          // split at the classifier level into edit_profile/edit_rule)
+          // remains open; PR2 preserves the legacy regex shape and routes
+          // to either the profile or rule module accordingly. The
+          // delegation lives at this route layer rather than inside a
+          // standalone edit-preference module so each downstream module's
+          // contextLoader / preEmitChecks / allowedActions stay tight.
           if (intent === "edit_preference") {
             const lowerMessage = message.toLowerCase();
             const isRuleShape =
               /\b(buffer|hours?|days?|am|pm|window|availability)\b/.test(
                 lowerMessage,
               );
-            const tier: "profile" | "rule" = isRuleShape ? "rule" : "profile";
-            const playbookRelativePath = isRuleShape
-              ? "src/agent/runtime-prompts/composers/calendar-rule-composer.md"
-              : "src/agent/runtime-prompts/composers/profile-composer.md";
-            try {
-              await runDispatchHandler({
-                tier,
-                playbookRelativePath,
-                userId: safeUser.id,
-                userName: user.name ?? null,
-                channelId: safeChannel.id,
-                userMessage: message,
-                userMsgPersist,
-                controller,
-                encoder,
-                emitStatus: (stage) => {
-                  emitStatus(stage);
-                },
-              });
-            } catch (e) {
-              console.error(
-                `[channel/chat] dispatch-handler edit_preference failed (tier=${tier}):`,
-                e,
-              );
-            }
+            const routedIntent: "profile" | "rule" = isRuleShape ? "rule" : "profile";
+            await dispatchModuleAndStream({
+              surface: "dashboard-host",
+              intent: routedIntent,
+              channelId: safeChannel.id,
+              userId: safeUser.id,
+              userName: user.name ?? null,
+              userEmail: user.email ?? "",
+              message,
+              userMsgPersist,
+              controller,
+              encoder,
+              emitStatus: (stage) => emitStatus(stage),
+              errorTag: `edit_preference→${routedIntent}`,
+              ...(isRuleShape
+                ? {
+                    matchResult: {
+                      kind: "deterministic" as const,
+                      resolved: { freshCreate: false },
+                      playbookVariant: "update",
+                    },
+                  }
+                : {}),
+            });
             controller.close();
             return;
           }
@@ -704,98 +596,66 @@ export async function POST(req: NextRequest) {
           //   - Continuation (prior envoy turn was a proposal): historyLimit:4 so
           //     the composer can see what was proposed and what the user is tweaking.
           if (intent === "create_bookable_link") {
-            // Continuation if ANY of the last 3 envoy turns mentions "bookable" —
-            // covers the proposal turn, iterative-tweak turns (which may not say
-            // "bookable" explicitly), and the post-creation "link is live" turn.
-            // historyLimit:4 is safe: with 4 messages of context the model can
-            // distinguish a completed prior session from an in-progress one.
-            const isBookableContinuation =
-              recentEnvoyContents.some((c) => /bookable/i.test(c));
-            const prefs = (user.preferences as Record<string, unknown> | null) ?? {};
-            const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
-            const defaultFormat = (explicit.defaultFormat as string | undefined) ?? "video";
-            const defaultDuration = (explicit.defaultDuration as number | undefined) ?? 30;
-            const hoursStartMin =
-              (explicit.businessHoursStartMinutes as number | undefined) ??
-              ((explicit.businessHoursStart as number | undefined) ?? 9) * 60;
-            const hoursEndMin =
-              (explicit.businessHoursEndMinutes as number | undefined) ??
-              ((explicit.businessHoursEnd as number | undefined) ?? 17) * 60;
-            const fmtMin = (m: number) =>
-              `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
-            const contextLines = [
-              `Host's primary link defaults: format=${defaultFormat}, duration=${defaultDuration}min, hours=${fmtMin(hoursStartMin)}–${fmtMin(hoursEndMin)} weekdays`,
-            ];
-            try {
-              await runDispatchHandler({
-                tier: "rule",
-                playbookRelativePath:
-                  "src/agent/runtime-prompts/composers/calendar-rule-composer.md",
-                userId: safeUser.id,
-                userName: user.name ?? null,
-                channelId: safeChannel.id,
-                userMessage: message,
-                userMsgPersist,
-                controller,
-                encoder,
-                contextLines,
-                historyLimit: isBookableContinuation ? 4 : 0,
-                emitStatus: (stage) => {
-                  emitStatus(stage);
-                },
-              });
-            } catch (e) {
-              console.error("[channel/chat] bookable-link dispatch failed:", e);
-            }
+            // Fresh-create gate (F14 Phase 3.B): a continuation iff any of
+            // the last 3 envoy turns mentions "bookable". Continuations get
+            // historyLimit:4 (composer can see what was proposed and what
+            // the host is tweaking); fresh creates get historyLimit:0 (no
+            // bleed from a prior session, and immune to the userMsgPersist
+            // race documented at chat/route.ts:702 pre-PR2).
+            const gate = evaluateFreshCreateGate({ recentEnvoyContents });
+            await dispatchModuleAndStream({
+              surface: "dashboard-host",
+              intent: "create_bookable_link",
+              channelId: safeChannel.id,
+              userId: safeUser.id,
+              userName: user.name ?? null,
+              userEmail: user.email ?? "",
+              message,
+              userMsgPersist,
+              controller,
+              encoder,
+              emitStatus: (stage) => emitStatus(stage),
+              historyLimit: gate.historyLimit,
+              matchResult: {
+                kind: "deterministic",
+                resolved: { freshCreate: !gate.isContinuation },
+                playbookVariant: "add",
+              },
+            });
             controller.close();
             return;
           }
 
           // Belt-and-suspenders: if the classifier returned create_link but
           // the message clearly describes a bookable link (keyword present),
-          // re-route to the rule composer. This handles edge cases where Haiku
-          // misclassifies due to prior Bobby/Katie context in the channel.
+          // re-route to the create-bookable-link module. This handles edge
+          // cases where Haiku misclassifies due to prior Bobby/Katie context
+          // in the channel.
           if (intent === "create_link") {
             const lowerMsg = message.toLowerCase();
             const isBookableCreate =
               /\b(bookable links?|office hours?|drop-?in hours?|booking window|mentor hours?|coaching hours?|open hours?|recurring (sessions?|link|bookable)|group meeting links?)\b/.test(lowerMsg);
             if (isBookableCreate) {
-              const prefs = (user.preferences as Record<string, unknown> | null) ?? {};
-              const explicit = (prefs.explicit as Record<string, unknown> | undefined) ?? {};
-              const defaultFormat = (explicit.defaultFormat as string | undefined) ?? "video";
-              const defaultDuration = (explicit.defaultDuration as number | undefined) ?? 30;
-              const hoursStartMin =
-                (explicit.businessHoursStartMinutes as number | undefined) ??
-                ((explicit.businessHoursStart as number | undefined) ?? 9) * 60;
-              const hoursEndMin =
-                (explicit.businessHoursEndMinutes as number | undefined) ??
-                ((explicit.businessHoursEnd as number | undefined) ?? 17) * 60;
-              const fmtMin = (m: number) =>
-                `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
-              const contextLines = [
-                `Host's primary link defaults: format=${defaultFormat}, duration=${defaultDuration}min, hours=${fmtMin(hoursStartMin)}–${fmtMin(hoursEndMin)} weekdays`,
-              ];
-              try {
-                await runDispatchHandler({
-                  tier: "rule",
-                  playbookRelativePath:
-                    "src/agent/runtime-prompts/composers/calendar-rule-composer.md",
-                  userId: safeUser.id,
-                  userName: user.name ?? null,
-                  channelId: safeChannel.id,
-                  userMessage: message,
-                  userMsgPersist,
-                  controller,
-                  encoder,
-                  contextLines,
-                  historyLimit: 0,
-                  emitStatus: (stage) => {
-                    emitStatus(stage);
-                  },
-                });
-              } catch (e) {
-                console.error("[channel/chat] bookable-link fallback dispatch failed:", e);
-              }
+              await dispatchModuleAndStream({
+                surface: "dashboard-host",
+                intent: "create_bookable_link",
+                channelId: safeChannel.id,
+                userId: safeUser.id,
+                userName: user.name ?? null,
+                userEmail: user.email ?? "",
+                message,
+                userMsgPersist,
+                controller,
+                encoder,
+                emitStatus: (stage) => emitStatus(stage),
+                historyLimit: 0,
+                errorTag: "create_link→bookable-fallback",
+                matchResult: {
+                  kind: "deterministic",
+                  resolved: { freshCreate: true },
+                  playbookVariant: "add",
+                },
+              });
               controller.close();
               return;
             }
