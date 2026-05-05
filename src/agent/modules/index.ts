@@ -18,18 +18,17 @@
  */
 import { registerModule } from "./registry";
 import { chatModule } from "./chat/module";
-import { ruleModule } from "./rule/module";
-import { profileModule } from "./profile/module";
-import { createBookableLinkModule } from "./create-bookable-link/module";
+// PR-B: event_action cluster — replaces create_link/modify_link/cancel_link/schedule.
+import { eventActionModule } from "./event-action/module";
+// PR-C: manage_setup cluster — replaces profile/rule/create_bookable_link/edit_preference.
+// The individual module files are kept for their context-loaders + preEmitChecks,
+// which the cluster module imports directly.
+import { manageSetupModule } from "./manage-setup/module";
 import {
   inquireModule,
   queryCalendarModule,
   queryEventModule,
 } from "./inquire/module";
-// PR-B: event_action cluster — replaces create_link/modify_link/cancel_link/schedule.
-// The four old module exports are kept in event-intents/module.ts for reference
-// but are no longer registered; INTENT_TO_CLUSTER in intent.ts handles routing.
-import { eventActionModule } from "./event-action/module";
 import { bookingsModule } from "./bookings/module";
 
 let _registered = false;
@@ -43,16 +42,15 @@ export function ensureModulesRegistered(): void {
   if (_registered) return;
   _registered = true;
   registerModule(chatModule);
-  registerModule(ruleModule);
-  registerModule(profileModule);
-  registerModule(createBookableLinkModule);
+  // PR-B: event_action cluster (single module for all event-shaped intents).
+  // create_link/modify_link/cancel_link/schedule route to event_action via INTENT_TO_CLUSTER.
+  registerModule(eventActionModule);
+  // PR-C: manage_setup cluster (single module for profile/rule/bookable-link/edit_preference).
+  // edit_preference/profile/rule/create_bookable_link route to manage_setup via INTENT_TO_CLUSTER.
+  registerModule(manageSetupModule);
   registerModule(inquireModule);
   registerModule(queryCalendarModule);
   registerModule(queryEventModule);
-  // PR-B: event_action cluster (single module for all event-shaped intents).
-  // create_link/modify_link/cancel_link/schedule are no longer individually
-  // registered; they route to event_action via INTENT_TO_CLUSTER.
-  registerModule(eventActionModule);
   registerModule(bookingsModule);      // PR4 — bookings module
 }
 
