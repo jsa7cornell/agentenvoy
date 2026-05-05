@@ -33,6 +33,7 @@ import type {
 } from "@/agent/modules/types";
 import { intentToCluster } from "@/lib/intent";
 import { isBookableAction } from "@/agent/modules/_shared/bookable";
+import { scopeHistory } from "@/agent/modules/_shared/history-scope";
 
 const DEFAULT_HISTORY_LIMIT = 10;
 
@@ -135,6 +136,16 @@ export async function dispatchModuleAndStream(
       sanitizedHistory = messages;
     }
 
+    // Phase-2 wiring of the conversation-history scope detector (proposal
+    // 2026-05-05_conversation-history-scope, Rule 28). Runs AFTER the
+    // pre-built / fresh-fetch branch resolves so both paths flow through
+    // the detector (reviewer §3). On `pivot`, `scopeHistory` returns an
+    // empty array — the composer sees no prior context for fresh-contact
+    // / closed-task pivots, eliminating the prior-name bleed by construction.
+    // On `continue` the array is unchanged.
+    const scope = scopeHistory(sanitizedHistory, message);
+    sanitizedHistory = scope.messages;
+
     if (args.emitExecutingStage ?? args.actionTimeoutMs != null) {
       emitStatus("executing");
     }
@@ -223,7 +234,17 @@ export async function dispatchModuleAndStream(
         if (bookableMeta) (additions as Record<string, unknown>).bookableMeta = bookableMeta;
       }
     }
-    (additions as Record<string, unknown>).moduleGuard = result.moduleGuard;
+    // Stash history-scope telemetry into moduleGuard for debug bundles +
+    // post-mortem (proposal §4.2 / Rule 28).
+    const moduleGuardWithScope = {
+      ...result.moduleGuard,
+      historyScope: {
+        mode: scope.mode,
+        prunedCount: scope.prunedCount,
+        closedTasks: scope.closedTasks,
+      },
+    };
+    (additions as Record<string, unknown>).moduleGuard = moduleGuardWithScope;
 
     // PR3b-iii: narrate failures + timeouts at presentation layer. The
     // runner returns the LLM's draft text; the helper replaces it with

@@ -404,6 +404,23 @@ export interface ModuleGuardRecord {
    * vs. landing (2-week threshold check per proposal N1 fold).
    */
   gapsSurfaced?: string[];
+
+  /**
+   * Conversation-history scope detector telemetry (proposal
+   * `2026-05-05_conversation-history-scope`, Phase 2). Set by the dispatch
+   * helper after `scopeHistory` runs. `mode` is the per-turn classification
+   * (`continue` keeps the default lookback; `pivot` drops closed-task rows
+   * from the lookback). `prunedCount` is the number of history rows dropped.
+   * `closedTasks` lists the contact/topic tokens identified as belonging to
+   * closed tasks (telemetry + post-mortem debugging surface). Undefined for
+   * call sites that do not route through the dispatch helper (none today,
+   * per Rule 28).
+   */
+  historyScope?: {
+    mode: "continue" | "pivot";
+    prunedCount: number;
+    closedTasks: string[];
+  };
 }
 
 export type RunnerOutput =
