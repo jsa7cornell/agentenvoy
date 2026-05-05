@@ -180,7 +180,7 @@ export interface IntentModule<C extends ModuleContextOutput = ModuleContextOutpu
   description: string;
 
   /**
-   * Playbook fragment paths under `app/src/agent/playbooks/`.
+   * Playbook fragment paths under `app/src/agent/runtime-prompts/`.
    * Composed in order with `---` separators into the composer's system prompt.
    * Per file-tracing invariant (B4): every fragment path is intended to be
    * inlined as a literal `readFileSync(join(cwd, "literal/path"))` because

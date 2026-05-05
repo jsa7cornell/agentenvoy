@@ -48,8 +48,8 @@ import { lookupModule } from "./registry";
  */
 export function loadFragment(fragmentPath: string): string {
   const cwd = process.cwd();
-  // fragmentPath is relative to app/src/agent/playbooks/ (e.g., "fragments/voice")
-  const fullPath = join(cwd, "src", "agent", "playbooks", `${fragmentPath}.md`);
+  // fragmentPath is relative to app/src/agent/runtime-prompts/ (e.g., "fragments/voice")
+  const fullPath = join(cwd, "src", "agent", "runtime-prompts", `${fragmentPath}.md`);
   return readFileSync(fullPath, "utf-8");
 }
 

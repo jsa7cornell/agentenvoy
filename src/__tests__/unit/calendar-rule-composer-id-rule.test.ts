@@ -26,7 +26,7 @@ import path from "path";
 
 const PLAYBOOK_PATH = path.resolve(
   __dirname,
-  "../../agent/playbooks/composers/calendar-rule-composer.md",
+  "../../agent/runtime-prompts/composers/calendar-rule-composer.md",
 );
 
 describe("calendar-rule-composer.md — HARD RULE on fabricated ids (sentinel)", () => {
