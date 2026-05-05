@@ -41,7 +41,7 @@ function toDateStr(d: Date): string {
 export function DayView({
   events,
   slots,
-  locationByDay,
+  locationByDay: _locationByDay,
   timezone,
   weekStart,
   primaryCalendar,

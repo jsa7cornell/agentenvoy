@@ -187,7 +187,7 @@ interface WeeklyCalendarProps {
 export function WeeklyCalendar({
   events,
   slots,
-  locationByDay,
+  locationByDay: _locationByDay,
   timezone,
   weekStart,
   primaryCalendar,
