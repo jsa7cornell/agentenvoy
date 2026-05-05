@@ -432,6 +432,31 @@ export interface ModuleGuardRecord {
     prunedCount: number;
     closedTasks: string[];
   };
+
+  /**
+   * PR-E (`2026-05-05_conversational-onboarding-vision`): the recalibrate
+   * playbook variant resolved for this turn, populated by the runner from
+   * `matchResult.playbookVariant` when the module is `recalibrate`. Lets
+   * telemetry segment recalibrate corpus rows by variant
+   * (first-time vs dormant vs explicit-ask vs open) without parsing the
+   * system prompt. Undefined for non-recalibrate modules.
+   */
+  calibrateVariant?: "first-time" | "dormant" | "explicit-ask" | "open";
+
+  /**
+   * PR-E (`2026-05-05_conversational-onboarding-vision`): chat-module
+   * onboarding-framing label resolved for this turn. Populated when the
+   * chat module's variant selector resolves to one of the framing variants;
+   * v1 wires only `post-calibration` (PR-C). The type accommodates future
+   * variants (`fresh-host-skip-calibrate`, `sub-dormant-return`) without
+   * a follow-up type change. `null` denotes "fell through to base"; absent
+   * denotes "module is not chat or did not resolve a framing variant."
+   */
+  onboardingFraming?:
+    | "post-calibration"
+    | "fresh-host-skip-calibrate"
+    | "sub-dormant-return"
+    | null;
 }
 
 export type RunnerOutput =
