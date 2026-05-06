@@ -2014,7 +2014,17 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
 
           // Chat bubble
           const isUser = msg.role === "user";
-          const meetLinkMatch = !isUser ? msg.content.match(/(https?:\/\/[^\s]+\/meet\/[^\s]+)/) : null;
+          // Prefer URL persisted to metadata (post-2026-05-06 plumbing);
+          // fall back to the content regex for legacy rows whose envoy turn
+          // was written before `metadata.linkUrl` existed.
+          const meetLinkMetaUrl = !isUser
+            ? ((msg.metadata as Record<string, unknown> | null)?.linkUrl as string | undefined)
+            : undefined;
+          const meetLinkRegexMatch = !isUser
+            ? msg.content.match(/(https?:\/\/[^\s]+\/meet\/[^\s]+)/)
+            : null;
+          const meetLinkUrl =
+            meetLinkMetaUrl ?? (meetLinkRegexMatch ? meetLinkRegexMatch[1] : undefined);
           const meetLinkKind = (msg.metadata as Record<string, unknown> | null)?.linkKind as "bookable" | "recurring" | undefined;
           const reaction = isUser ? (msg.metadata?.reaction as string | undefined) : undefined;
           // §1n item 2: suppress speaker label on consecutive same-speaker bubbles
@@ -2043,17 +2053,17 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     </div>
                   )}
                   <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
-                  {meetLinkMatch && meetLinkKind === "bookable" ? (
+                  {meetLinkUrl && meetLinkKind === "bookable" ? (
                     <BookableLinkCard
-                      url={meetLinkMatch[1]}
+                      url={meetLinkUrl}
                       meta={
                         (msg.metadata as Record<string, unknown> | null)?.bookableMeta as
                           | BookableMeta
                           | undefined
                       }
                     />
-                  ) : meetLinkMatch ? (
-                    <MeetLinkCard url={meetLinkMatch[1]} kind={meetLinkKind} />
+                  ) : meetLinkUrl ? (
+                    <MeetLinkCard url={meetLinkUrl} kind={meetLinkKind} />
                   ) : null}
                 </div>
                 {reaction && (

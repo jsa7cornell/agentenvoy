@@ -114,6 +114,14 @@ export const ChannelMessageMetadataSchema = z
     marcoPending: MarcoPendingSchema.nullable().optional(),
     toolInvocations: z.array(ToolInvocationRecordSchema).optional(),
     selfCheck: SelfCheckRecordSchema.optional(),
+    /**
+     * Shareable URL for the link primitive this turn produced (populated
+     * from successful action results' `data.linkUrl` / `data.url`).
+     * Read first by `feed.tsx`'s MeetLinkCard / BookableLinkCard render;
+     * the content-regex fallback covers legacy rows written before
+     * 2026-05-06.
+     */
+    linkUrl: z.string().optional(),
   })
   .passthrough();
 export type ChannelMessageMetadata = z.infer<typeof ChannelMessageMetadataSchema>;

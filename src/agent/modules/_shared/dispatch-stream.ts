@@ -37,6 +37,68 @@ import { scopeHistory } from "@/agent/modules/_shared/history-scope";
 
 const DEFAULT_HISTORY_LIMIT = 10;
 
+/**
+ * Action-result shape relevant to link-URL resolution. Mirrors the subset of
+ * fields `result.actionResults[i]` carries that this helper consumes; kept
+ * structural so this file isn't coupled to the runner's full result type.
+ */
+export interface LinkUrlResolverActionResult {
+  success: boolean;
+  data?: {
+    url?: unknown;
+    linkUrl?: unknown;
+  } | null;
+}
+
+export interface LinkUrlResolution {
+  /** Display text after the legacy URL append (only for `data.linkUrl`). */
+  displayText: string;
+  /**
+   * URL to persist to `ChannelMessage.metadata.linkUrl`. Set when ANY
+   * successful action result carries a `data.url` or `data.linkUrl`. The
+   * feed reads this first to render the link card; the content-regex
+   * fallback covers legacy rows persisted before this metadata key existed.
+   */
+  linkUrl: string | undefined;
+}
+
+/**
+ * Pure helper extracted from `dispatchModuleAndStream` so the link-URL
+ * resolution policy is unit-testable in isolation. See 2026-05-06
+ * link-url-via-metadata rework for the why.
+ *
+ * Policy:
+ * - `data.url` (only field `handleCreateLink` returns): persisted to
+ *   metadata only. NOT appended to displayText — the feed's link card
+ *   already renders it from metadata, so appending duplicates the URL.
+ * - `data.linkUrl` (e.g. `handleUpdateAvailabilityRule` bookable case):
+ *   persisted to metadata AND appended to displayText, preserving the
+ *   legacy text-share behavior for that flow.
+ */
+export function resolveLinkUrlsForTurn(
+  actionResults: ReadonlyArray<LinkUrlResolverActionResult>,
+  displayText: string,
+): LinkUrlResolution {
+  let firstUrl: string | undefined;
+  const linkUrlsForDisplay: string[] = [];
+  for (const r of actionResults) {
+    if (!r.success || !r.data) continue;
+    const linkUrl = typeof r.data.linkUrl === "string" ? r.data.linkUrl : undefined;
+    const dataUrl = typeof r.data.url === "string" ? r.data.url : undefined;
+    const candidate = linkUrl ?? dataUrl;
+    if (candidate && firstUrl === undefined) firstUrl = candidate;
+    if (linkUrl) linkUrlsForDisplay.push(linkUrl);
+  }
+  let finalText = displayText;
+  if (linkUrlsForDisplay.length > 0) {
+    const trimmed = displayText.trim();
+    finalText = trimmed
+      ? `${trimmed}\n\n${linkUrlsForDisplay.join("\n\n")}`
+      : linkUrlsForDisplay.join("\n\n");
+  }
+  return { displayText: finalText, linkUrl: firstUrl };
+}
+
 export interface DispatchModuleAndStreamArgs {
   surface: IntentSurface;
   intent: string;
@@ -270,21 +332,18 @@ export async function dispatchModuleAndStream(
       (additions as Record<string, unknown>).overriddenNarration = overriddenNarration;
     }
 
-    // Append linkUrl from successful actions so the host sees shareable URLs.
-    // handleCreateLink returns `data.url`; other handlers return `data.linkUrl`.
-    const linkUrls = result.actionResults
-      .filter(
-        (r) =>
-          r.success &&
-          (typeof r.data?.linkUrl === "string" || typeof r.data?.url === "string"),
-      )
-      .map((r) => (r.data!.linkUrl ?? r.data!.url) as string);
-    let finalText = displayText;
-    if (linkUrls.length > 0) {
-      const trimmed = displayText.trim();
-      finalText = trimmed
-        ? `${trimmed}\n\n${linkUrls.join("\n\n")}`
-        : linkUrls.join("\n\n");
+    // Resolve link URL from successful action results for two consumers:
+    //   (1) `metadata.linkUrl` — preferred channel for the feed's link card
+    //       (read in `feed.tsx`'s MeetLinkCard / BookableLinkCard render path)
+    //   (2) legacy `displayText` append — kept for `data.linkUrl` (e.g.
+    //       `update_availability_rule`) where the URL is the visible payload of
+    //       the turn. NOT done for `data.url` (e.g. `create_link`) — that path
+    //       used to double-render the URL (in prose AND in the card graphic);
+    //       see 2026-05-06 link-url-metadata-plumbing rework.
+    const { displayText: finalText, linkUrl: persistedLinkUrl } =
+      resolveLinkUrlsForTurn(result.actionResults, displayText);
+    if (persistedLinkUrl) {
+      (additions as Record<string, unknown>).linkUrl = persistedLinkUrl;
     }
 
     // Extract sessionId from the first successful action result that carries
