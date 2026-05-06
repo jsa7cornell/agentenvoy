@@ -106,6 +106,47 @@ describe("POST /api/onboarding/calibrate-opener", () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
+  it("writes seed-info with an EARLIER createdAt than opener (HOTFIX-3 ordering contract)", async () => {
+    // Postgres `now()` inside a $transaction returns the same timestamp for
+    // every row (transaction-start time). Hotfix-3 fixes that by passing
+    // explicit JS Dates: seed-info gets the earlier timestamp.
+    (prisma.channelMessage.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    const captured: Array<{ subkind: string; createdAt: Date }> = [];
+    (prisma.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
+      async (ops: unknown[]) => {
+        const results = await Promise.all(
+          (ops as Promise<unknown>[]).map((p) => p),
+        );
+        return results;
+      },
+    );
+    (prisma.channelMessage.create as ReturnType<typeof vi.fn>).mockImplementation(
+      async (args: {
+        data: { content: string; metadata: { subkind: string }; createdAt: Date };
+      }) => {
+        captured.push({
+          subkind: args.data.metadata.subkind,
+          createdAt: args.data.createdAt,
+        });
+        return { id: `msg_${args.data.metadata.subkind}`, ...args.data };
+      },
+    );
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+
+    expect(captured.length).toBe(2);
+    const seed = captured.find((c) => c.subkind === "calibrate-seed-info");
+    const opener = captured.find((c) => c.subkind === "calibrate-opener");
+    expect(seed).toBeDefined();
+    expect(opener).toBeDefined();
+    expect(seed!.createdAt).toBeInstanceOf(Date);
+    expect(opener!.createdAt).toBeInstanceOf(Date);
+    // Strictly less-than: seed-info must sort BEFORE opener.
+    expect(seed!.createdAt.getTime()).toBeLessThan(opener!.createdAt.getTime());
+  });
+
   it("seed-info content includes all four bullet fields built from fixture preferences", async () => {
     (prisma.channelMessage.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 

@@ -33,6 +33,10 @@ import {
   type DeterministicCreateArgs,
 } from "@/agent/matcher";
 import { parseLinkParameters } from "@/lib/link-parameters";
+import {
+  shouldForceCalibrateFirstTime,
+  CALIBRATE_FOLLOWTHROUGH_LOOKBACK,
+} from "@/lib/onboarding/calibrate-followthrough-override";
 
 
 // Profile + rule + create_bookable_link branches dispatch via runModule
@@ -357,45 +361,32 @@ export async function POST(req: NextRequest) {
             fabricationDetected = classified.fabricationDetected;
           }
           // ------------------------------------------------------------
-          // Calibrate-opener follow-through override (HOTFIX 2026-05-05).
+          // Calibrate-followthrough dispatch override.
           //
-          // When the previous envoy turn is the deterministic
-          // calibrate-opener bubble (subkind: "calibrate-opener", persisted
-          // by /api/onboarding/calibrate-opener after picker submit), the
-          // host's natural reply describing how they work might classify to
-          // edit_preference, recalibrate, or chat depending on phrasing.
-          // We force it to recalibrate.first-time so the multi-action-emit
-          // fidelity check + first-time fragment both fire.
+          // Hotfix-1 (2026-05-05): introduced. Hotfix-2 (2026-05-05): broke
+          // when seed-info became the most-recent envoy message and the
+          // single-message predicate missed `calibrate-seed-info`.
+          // Hotfix-3 (2026-05-05): widened to match either calibrate-* subkind
+          // and to look across the most-recent N envoy messages. Once the
+          // composer has responded once, its response is the most-recent
+          // envoy turn and carries no calibrate-* subkind, so subsequent host
+          // turns classify normally. 30-minute window stays as a backstop.
           //
-          // Narrow override: only active when the calibrate-opener was the
-          // very last envoy turn AND it landed within the last 30 minutes.
-          // Once the user replies past the opener, the most-recent envoy
-          // turn is the LLM's response and the check stops firing.
+          // Predicate lives in `@/lib/onboarding/calibrate-followthrough-override`
+          // for testability.
           // ------------------------------------------------------------
           let forcedRoute: string | null = null;
           let forcedPlaybookVariant: string | null = null;
           {
-            const CALIBRATE_OPENER_FOLLOWTHROUGH_WINDOW_MS = 30 * 60 * 1000;
-            const lastEnvoy = lastEnvoyForMarco; // already fetched above
-            if (lastEnvoy?.metadata) {
-              const meta = parseChannelMessageMetadata(lastEnvoy.metadata) as
-                Record<string, unknown>;
-              const subkind = typeof meta.subkind === "string" ? meta.subkind : null;
-              if (subkind === "calibrate-opener") {
-                // Re-fetch with createdAt to enforce the time window.
-                const lastEnvoyRow = await prisma.channelMessage.findFirst({
-                  where: { channelId: safeChannel.id, role: "envoy" },
-                  orderBy: { createdAt: "desc" },
-                  select: { createdAt: true },
-                });
-                const ageMs = lastEnvoyRow
-                  ? Date.now() - lastEnvoyRow.createdAt.getTime()
-                  : Number.POSITIVE_INFINITY;
-                if (ageMs <= CALIBRATE_OPENER_FOLLOWTHROUGH_WINDOW_MS) {
-                  forcedRoute = "calibrate-opener-followthrough";
-                  forcedPlaybookVariant = "first-time";
-                }
-              }
+            const recentEnvoy = await prisma.channelMessage.findMany({
+              where: { channelId: safeChannel.id, role: "envoy" },
+              orderBy: { createdAt: "desc" },
+              take: CALIBRATE_FOLLOWTHROUGH_LOOKBACK,
+              select: { metadata: true, createdAt: true },
+            });
+            if (shouldForceCalibrateFirstTime(recentEnvoy)) {
+              forcedRoute = "calibrate-opener-followthrough";
+              forcedPlaybookVariant = "first-time";
             }
           }
 

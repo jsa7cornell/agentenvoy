@@ -129,12 +129,21 @@ export async function POST() {
     playbookVariant: "first-time",
   };
 
-  // Atomic write: both messages persist or neither does. createMany returns
-  // counts only on Postgres, so we follow up with a fetch to return the
-  // created rows in their canonical createdAt ordering. Both rows share the
-  // channelId; the seed-info row is created first so it sorts before the
-  // opener (createdAt is server-set with ms precision, so we rely on the
-  // sequential create() calls inside the transaction for ordering).
+  // Order contract: seed-info FIRST (earlier createdAt), opener SECOND (later
+  // createdAt). The bundle renders chronologically, so seed-info appears
+  // above the opener in the feed — matching John's verbatim flow ("the first
+  // message has their Google seed information").
+  //
+  // HOTFIX-3 (2026-05-05): we previously used `prisma.$transaction([...])`
+  // which assigns Postgres `now()` to both rows. Inside a single transaction
+  // `now()` returns the transaction-start time, so both rows got IDENTICAL
+  // `createdAt` timestamps and feed ordering became non-deterministic
+  // (often resolved by id, putting opener first — exactly the regression).
+  // Fix: explicit JS-computed timestamps with seed-info < opener (1ms gap),
+  // passed via `data.createdAt` to override the schema default. Keeps the
+  // single-transaction atomicity guarantee.
+  const seedInfoCreatedAt = new Date();
+  const openerCreatedAt = new Date(seedInfoCreatedAt.getTime() + 1);
   const [seedInfo, opener] = await prisma.$transaction([
     prisma.channelMessage.create({
       data: {
@@ -142,6 +151,7 @@ export async function POST() {
         role: "envoy",
         content: seedInfoText,
         metadata: seedInfoMetadata,
+        createdAt: seedInfoCreatedAt,
       },
     }),
     prisma.channelMessage.create({
@@ -150,6 +160,7 @@ export async function POST() {
         role: "envoy",
         content: CALIBRATE_FIRST_TIME_OPENER_TEXT,
         metadata: openerMetadata,
+        createdAt: openerCreatedAt,
       },
     }),
   ]);
