@@ -356,7 +356,56 @@ export async function POST(req: NextRequest) {
             rawClassifierKind = classified.rawKind;
             fabricationDetected = classified.fabricationDetected;
           }
-          const intent = intentBlock.kind;
+          // ------------------------------------------------------------
+          // Calibrate-opener follow-through override (HOTFIX 2026-05-05).
+          //
+          // When the previous envoy turn is the deterministic
+          // calibrate-opener bubble (subkind: "calibrate-opener", persisted
+          // by /api/onboarding/calibrate-opener after picker submit), the
+          // host's natural reply describing how they work might classify to
+          // edit_preference, recalibrate, or chat depending on phrasing.
+          // We force it to recalibrate.first-time so the multi-action-emit
+          // fidelity check + first-time fragment both fire.
+          //
+          // Narrow override: only active when the calibrate-opener was the
+          // very last envoy turn AND it landed within the last 30 minutes.
+          // Once the user replies past the opener, the most-recent envoy
+          // turn is the LLM's response and the check stops firing.
+          // ------------------------------------------------------------
+          let forcedRoute: string | null = null;
+          let forcedPlaybookVariant: string | null = null;
+          {
+            const CALIBRATE_OPENER_FOLLOWTHROUGH_WINDOW_MS = 30 * 60 * 1000;
+            const lastEnvoy = lastEnvoyForMarco; // already fetched above
+            if (lastEnvoy?.metadata) {
+              const meta = parseChannelMessageMetadata(lastEnvoy.metadata) as
+                Record<string, unknown>;
+              const subkind = typeof meta.subkind === "string" ? meta.subkind : null;
+              if (subkind === "calibrate-opener") {
+                // Re-fetch with createdAt to enforce the time window.
+                const lastEnvoyRow = await prisma.channelMessage.findFirst({
+                  where: { channelId: safeChannel.id, role: "envoy" },
+                  orderBy: { createdAt: "desc" },
+                  select: { createdAt: true },
+                });
+                const ageMs = lastEnvoyRow
+                  ? Date.now() - lastEnvoyRow.createdAt.getTime()
+                  : Number.POSITIVE_INFINITY;
+                if (ageMs <= CALIBRATE_OPENER_FOLLOWTHROUGH_WINDOW_MS) {
+                  forcedRoute = "calibrate-opener-followthrough";
+                  forcedPlaybookVariant = "first-time";
+                }
+              }
+            }
+          }
+
+          // Apply the override before the dispatch chain. Telemetry logs
+          // both `intent` (final routing) and `classifierIntent` (original)
+          // so both are visible side-by-side when debugging.
+          const classifierIntent = intentBlock.kind;
+          const intent = forcedRoute === "calibrate-opener-followthrough"
+            ? ("recalibrate" as typeof intentBlock.kind)
+            : classifierIntent;
 
           // Structured telemetry at the dispatch seam (proposal §3.4).
           // userId + intent only — no utterance text, no PII beyond what
@@ -366,6 +415,7 @@ export async function POST(req: NextRequest) {
               event: "chat_intent",
               userId: safeUser.id,
               intent,
+              classifierIntent,
               rawKind: rawClassifierKind,
               hadClarifier: intent === "unclear" && !!intentBlock.clarifier,
               userIntentHintUsed: !!hintedIntent,
@@ -373,6 +423,7 @@ export async function POST(req: NextRequest) {
               classifierLatencyMs,
               echoFlag,
               fabricationDetected,
+              forcedRoute,
             }),
           );
 
@@ -639,7 +690,12 @@ export async function POST(req: NextRequest) {
               emitStatus: (stage) => emitStatus(stage),
               matchResult: {
                 kind: "deterministic",
-                resolved: {},
+                resolved: forcedRoute
+                  ? { args: { forcedRoute } }
+                  : {},
+                ...(forcedPlaybookVariant
+                  ? { playbookVariant: forcedPlaybookVariant }
+                  : {}),
               },
             });
             controller.close();

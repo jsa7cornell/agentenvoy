@@ -1711,29 +1711,59 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     handleSend(seed);
                   }}
                   onCalendarConfirmed={() => {
-                    // PR-B (conversational-onboarding §3.2): mirror the
-                    // <DormantReturnBubble> "Yes, retune" chip pattern —
-                    // synthetically dispatch an invitational host message
-                    // that classifies to `recalibrate`. The contextLoader
-                    // computes `isFirstTime` (true for a host who just
-                    // submitted the picker), and the playbook variant
-                    // resolves to `first-time` → the first-time.md
-                    // fragment produces the conversational opener.
+                    // HOTFIX 2026-05-05: replaced PR-B synthetic-message
+                    // dispatch ("I just connected my calendar — can we set
+                    // things up?") which (a) classified to chat/manage_setup
+                    // instead of recalibrate, and (b) bypassed the first-time
+                    // fragment. Now we POST to /api/onboarding/calibrate-opener
+                    // which persists the deterministic warm anchor opener as
+                    // an Envoy ChannelMessage. The next host turn is
+                    // force-routed to recalibrate.first-time by the dispatch
+                    // override in app/api/channel/chat/route.ts (which keys
+                    // off metadata.subkind === "calibrate-opener").
                     //
-                    // Q5 beat: a 300ms timer between the posture-bubble
-                    // render and the dispatch. The user gets a brief
-                    // moment to read the readback; the chat's natural
-                    // loading-dots indicator (existing thinking-animation
-                    // in the turn-loading bubble — see ~line 2030 of this
-                    // file — reused, not rebuilt) follows. The beat also
-                    // stamps `posturePaintedAtRef` for Author Response N2
-                    // telemetry (`time_from_posture_render_to_first_keystroke`).
+                    // Q5 beat: a 300ms posture-readback pause, then we set
+                    // `loading=true` while the endpoint persists the opener
+                    // — that renders the existing typing-indicator bubble
+                    // (the same animation used in the dashboard and deal
+                    // room — three bouncing dots, ~line 2073 below). The
+                    // beat also stamps `posturePaintedAtRef` for Author
+                    // Response N2 telemetry
+                    // (`time_from_posture_render_to_first_keystroke`).
                     const POSTURE_TO_DISPATCH_BEAT_MS = 300;
                     posturePaintedAtRef.current = Date.now();
-                    const syntheticHostMessage =
-                      "I just connected my calendar — can we set things up?";
-                    setTimeout(() => {
-                      handleSend(syntheticHostMessage);
+                    setTimeout(async () => {
+                      setLoading(true);
+                      try {
+                        const res = await fetch(
+                          "/api/onboarding/calibrate-opener",
+                          { method: "POST" },
+                        );
+                        if (!res.ok) {
+                          console.error(
+                            "[feed] calibrate-opener POST failed",
+                            res.status,
+                          );
+                          return;
+                        }
+                        const data = (await res.json()) as {
+                          message: ChannelMsg;
+                        };
+                        if (data?.message) {
+                          // Idempotency: if the opener was already persisted
+                          // (e.g., picker fired twice on a slow network), the
+                          // server returns the existing row — don't append a
+                          // duplicate to local state.
+                          setMessages((prev) => {
+                            if (prev.some((m) => m.id === data.message.id)) return prev;
+                            return [...prev, data.message];
+                          });
+                        }
+                      } catch (err) {
+                        console.error("[feed] calibrate-opener error", err);
+                      } finally {
+                        setLoading(false);
+                      }
                     }, POSTURE_TO_DISPATCH_BEAT_MS);
                   }}
                 />

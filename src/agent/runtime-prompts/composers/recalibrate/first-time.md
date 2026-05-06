@@ -17,6 +17,13 @@ This is the voice and structure to anchor against. Adapt phrasing, but
 preserve the four moves: invitational frame → worked example → "things that
 help me" hint list → scope-bounded reassurance.
 
+> **Keep-in-sync warning.** The blockquote below is also extracted verbatim
+> as the TypeScript const `CALIBRATE_FIRST_TIME_OPENER_TEXT` in
+> `src/lib/onboarding/calibrate-opener-text.ts`. That const is what the
+> `/api/onboarding/calibrate-opener` endpoint persists as the deterministic
+> first bubble after the calendar picker. If you edit the prose here, update
+> the const too — they are not auto-derived.
+
 > *"I'd love to hear a little bit more about how you work so that I can tune
 > your primary availability link. For instance, you could say 'I want to offer
 > MWF, but I protect lunchtime every day. My standard meeting slots are 25
