@@ -11,7 +11,6 @@ import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
 import { PreferencesExtendedFlow } from "./onboarding/preferences-extended-flow";
 import { DormantReturnBubble, type DormantContext } from "./onboarding/DormantReturnBubble";
 import { tuningInProgress } from "@/lib/onboarding/dormant-eligibility";
-import { shortTimezoneLabel } from "@/lib/timezone";
 import { GcalUpdateCard } from "./gcal-update-card";
 // RuleConfirmCard / RuleConfirmSheet imports retired 2026-05-03 — the
 // bookable-link create flow is now chat-driven (proposal §3.8). The
@@ -121,25 +120,6 @@ interface SeededPosture {
   dormantContext: DormantContext | null;
 }
 
-const VIDEO_PROVIDER_DISPLAY: Record<string, string> = {
-  google_meet: "Google Meet",
-  zoom: "Zoom",
-  webex: "Webex",
-  teams: "Microsoft Teams",
-  phone: "phone",
-  in_person: "in-person",
-};
-
-function formatBizMinutes(m: number): string {
-  const h = Math.floor(m / 60);
-  const min = m % 60;
-  const suffix = h < 12 || h === 24 ? "am" : "pm";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return min === 0
-    ? `${h12}${suffix}`
-    : `${h12}:${String(min).padStart(2, "0")}${suffix}`;
-}
-
 function firstNameOf(name: string | null): string {
   if (!name) return "there";
   return name.split(/\s+/)[0];
@@ -212,66 +192,17 @@ function EnvoyBubble({
   );
 }
 
-/** Bubble used in the first-run + returning-dormant variants — readback
- *  of the user's currently-seeded scheduling posture so they know what
- *  we're working with. Reusable so a "still right?" nudge for dormant
- *  users gets the same affordances as the first-run intro.
+/** Standalone "your primary link is ready" card — renders below the
+ *  calendar picker in the first-run welcome (after the calendar-bullets
+ *  message has been written to chat by `/api/onboarding/calibrate-opener`).
+ *  Indigo-ringed, uppercase micro-label header, URL + Copy in a tinted
+ *  inset row.
  *
- *  Per mockups/mobile-v2.html §1 Frame 1: the standalone-link card was
- *  pulled OUT of this bubble (was previously rendered inline at the bottom
- *  for first-run). It now renders as a sibling under the bubble in
- *  FirstRunWelcome — keeps the readback bubble focused on posture and lets
- *  the link card carry an indigo-ringed "ready to share" affordance. */
-function PostureBubble({ p, showLabel }: { p: SeededPosture; showLabel?: boolean }) {
-  const bizRange = `${formatBizMinutes(p.businessHoursStartMinutes)}–${formatBizMinutes(p.businessHoursEndMinutes)}`;
-  const tzLabel = p.timezone ? shortTimezoneLabel(p.timezone) : "";
-  const provider =
-    VIDEO_PROVIDER_DISPLAY[p.videoProvider] ?? p.videoProvider;
-  const isFirstRun = p.welcomeVariant === "first-run";
-
-  return (
-    <EnvoyBubble showLabel={showLabel}>
-        <div className="mb-2">
-          {isFirstRun
-            ? "I've already set you up using your Google Calendar:"
-            : "Quick refresher on your current setup:"}
-        </div>
-        <ul className="space-y-1 text-[13px] tabular-nums">
-          <li>
-            <span aria-hidden="true">⏰</span>{" "}
-            <span className="text-muted">Business hours:</span>{" "}
-            <span className="font-medium">{bizRange}</span>
-          </li>
-          {tzLabel && (
-            <li>
-              <span aria-hidden="true">🌍</span>{" "}
-              <span className="text-muted">Timezone:</span>{" "}
-              <span className="font-medium">{tzLabel}</span>
-            </li>
-          )}
-          <li>
-            <span aria-hidden="true">⏱️</span>{" "}
-            <span className="text-muted">Default meetings:</span>{" "}
-            <span className="font-medium">
-              {p.defaultDuration}-minute {provider}
-            </span>
-          </li>
-          <li>
-            <span aria-hidden="true">📅</span>{" "}
-            <span className="text-muted">Reading from:</span>{" "}
-            <span className="font-medium">your primary calendar</span>
-          </li>
-        </ul>
-        <div className="mt-2 text-[12px] text-muted">
-          All customizable any time.
-        </div>
-    </EnvoyBubble>
-  );
-}
-
-/** Standalone "your primary link is ready" card — renders under the
- *  PostureBubble in the first-run welcome. Indigo-ringed, uppercase
- *  micro-label header, URL + Copy in a tinted inset row. */
+ *  HOTFIX-2 (2026-05-05): the sibling `<PostureBubble>` it used to render
+ *  next to was removed — the four Google-seed bullets are now persisted
+ *  as the FIRST Envoy ChannelMessage in the channel (subkind:
+ *  "calibrate-seed-info") so they survive `hasRealChat` flipping and
+ *  survive reload. See `src/lib/onboarding/calibrate-seed-info-text.ts`. */
 function PrimaryLinkReadyCard({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -844,19 +775,16 @@ function FirstRunWelcome({
           mid-flow when this deployed — that path lives in the
           `loadMessages` effect of the parent (driven by `tuningInProgress`
           on the message list, untouched by this PR). */}
-      {calendarConfirmed && (
-        <>
-          <EnvoyBubble showLabel={false}>
-            Great — I now have what I need from your calendar! Here&rsquo;s
-            how I&rsquo;m set up by default:
-          </EnvoyBubble>
-
-          <PostureBubble p={posture} showLabel={false} />
-
-          {posture.meetSlug && (
-            <PrimaryLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
-          )}
-        </>
+      {/* HOTFIX-2 (2026-05-05): the "Great — I now have what I need" bubble
+          and `<PostureBubble>` (Google-seed bullets) used to render here on
+          calendarConfirmed. Both have been promoted to a persisted Envoy
+          ChannelMessage written by `/api/onboarding/calibrate-opener`
+          (subkind: "calibrate-seed-info") so they survive the moment
+          `hasRealChat` flips and `<FirstRunWelcome>` unmounts. The
+          `PrimaryLinkReadyCard` stays here — it's a distinct affordance
+          (link CTA), not the seed-bullets bubble. */}
+      {calendarConfirmed && posture.meetSlug && (
+        <PrimaryLinkReadyCard url={`agentenvoy.ai/meet/${posture.meetSlug}`} />
       )}
     </div>
   );
@@ -1746,17 +1674,36 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                           );
                           return;
                         }
+                        // HOTFIX-2 (2026-05-05): endpoint now returns TWO
+                        // messages — the seed-info bullets (subkind:
+                        // calibrate-seed-info) and the warm anchor opener
+                        // (subkind: calibrate-opener). Both get appended.
+                        // `.message` is back-compat with the older one-row
+                        // shape and points at the opener.
                         const data = (await res.json()) as {
-                          message: ChannelMsg;
+                          seedInfo?: ChannelMsg | null;
+                          opener?: ChannelMsg | null;
+                          message?: ChannelMsg | null;
                         };
-                        if (data?.message) {
-                          // Idempotency: if the opener was already persisted
-                          // (e.g., picker fired twice on a slow network), the
-                          // server returns the existing row — don't append a
-                          // duplicate to local state.
+                        const toAppend: ChannelMsg[] = [];
+                        if (data?.seedInfo) toAppend.push(data.seedInfo);
+                        if (data?.opener) toAppend.push(data.opener);
+                        // Fall back to .message if neither named field
+                        // was present (defensive — shouldn't happen post-
+                        // hotfix-2, but keeps the client robust if a stale
+                        // server is reached during deploy).
+                        if (toAppend.length === 0 && data?.message) {
+                          toAppend.push(data.message);
+                        }
+                        if (toAppend.length > 0) {
+                          // Idempotency: if any of these were already
+                          // persisted (e.g., picker fired twice on a slow
+                          // network) the server returns existing rows —
+                          // don't append duplicates to local state.
                           setMessages((prev) => {
-                            if (prev.some((m) => m.id === data.message.id)) return prev;
-                            return [...prev, data.message];
+                            const seen = new Set(prev.map((m) => m.id));
+                            const fresh = toAppend.filter((m) => !seen.has(m.id));
+                            return fresh.length > 0 ? [...prev, ...fresh] : prev;
                           });
                         }
                       } catch (err) {
