@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useTheme } from "next-themes";
+import { computeAutoTheme } from "@/components/theme-preference-sync";
 import { useRouter } from "next/navigation";
 import ThreadCard from "./thread-card";
 import { ChannelChatStreamParser, type ChannelChatFrame } from "@/lib/channel-chat-stream";
@@ -790,6 +792,117 @@ function FirstRunWelcome({
   );
 }
 
+// ── Calibrate choice panel ───────────────────────────────────────────────
+
+/**
+ * Two-path choice shown after the seed-info bubble lands in the feed.
+ * Replaces the old "auto-launch calibration opener" behaviour — the host
+ * now explicitly picks depth:
+ *   (a) "This is good enough to start" → asks one more question (theme),
+ *       then closes onboarding.
+ *   (b) "Customize my preferences (recommended)" → writes the calibrate-opener
+ *       message and proceeds to the full conversational calibration arc.
+ *
+ * Not persisted — ephemeral UI rendered from local state. A reload after
+ * the seed-info POST but before a choice is harmless: the panel re-appears
+ * from the same message condition (`hasSeedInfo && !hasOpener`).
+ */
+type CalibratePanelStage = "choice" | "theme" | "done";
+
+function CalibrateChoicePanel({
+  onChoiceB,
+  onDone,
+}: {
+  /** Called when the host picks path (b). Parent posts calibrate-proceed. */
+  onChoiceB: () => void;
+  /** Called after path (a) completion — parent marks choice done. */
+  onDone: () => void;
+}) {
+  const [stage, setStage] = useState<CalibratePanelStage>("choice");
+  const [savingTheme, setSavingTheme] = useState(false);
+  const { setTheme } = useTheme();
+
+  async function handleThemePick(mode: "light" | "dark" | "auto") {
+    if (savingTheme) return;
+    setSavingTheme(true);
+    if (mode === "auto") {
+      setTheme(computeAutoTheme(new Date().getHours()));
+    } else {
+      setTheme(mode);
+    }
+    try {
+      await fetch("/api/me/ui-prefs", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ themeMode: mode }),
+      });
+    } catch {
+      // Swallow — local theme is already applied
+    } finally {
+      setSavingTheme(false);
+    }
+    setStage("done");
+    setTimeout(() => onDone(), 1200);
+  }
+
+  if (stage === "done") {
+    return (
+      <EnvoyBubble showLabel={false}>
+        You&rsquo;re all set — your primary link is ready to share. Ask me anything.
+      </EnvoyBubble>
+    );
+  }
+
+  if (stage === "theme") {
+    return (
+      <div className="flex flex-col gap-3">
+        <EnvoyBubble showLabel={false}>
+          One quick thing — which display mode do you prefer?
+        </EnvoyBubble>
+        <div className="flex flex-wrap gap-2 px-1">
+          {(
+            [
+              { label: "☀️ Light", value: "light" },
+              { label: "🌙 Dark", value: "dark" },
+              { label: "💻 Auto", value: "auto" },
+            ] as const
+          ).map(({ label, value }) => (
+            <button
+              key={value}
+              type="button"
+              disabled={savingTheme}
+              onClick={() => handleThemePick(value)}
+              className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-primary transition disabled:opacity-50"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2 px-1">
+      <button
+        type="button"
+        onClick={() => setStage("theme")}
+        className="text-xs px-3 py-1.5 rounded-full border border-secondary/60 hover:border-purple-500/60 hover:bg-purple-500/5 text-primary transition"
+      >
+        This is good enough to start
+      </button>
+      <button
+        type="button"
+        onClick={onChoiceB}
+        className="text-xs px-3 py-1.5 rounded-full bg-purple-600 hover:bg-purple-500 text-white font-medium transition"
+      >
+        Customize my preferences{" "}
+        <span className="opacity-75">(recommended)</span>
+      </button>
+    </div>
+  );
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /** Render **bold**, _italic_, and [link](url) markdown in message content.
@@ -956,6 +1069,12 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
   // CTA shown after primary-link completion, and auto-resumed on reload if
   // prior preferences-extended messages exist without the terminal flag.
   const [extendedFlowActive, setExtendedFlowActive] = useState(false);
+  // True once the host has made their choice via CalibrateChoicePanel (path a
+  // or b). Suppresses the panel even if the opener hasn't landed yet (path b
+  // is mid-flight). Resets to false on page reload — the panel re-appears
+  // until the opener message is written (path b) or the user's first real
+  // message lands (hasRealChat).
+  const [calibrateChoiceMade, setCalibrateChoiceMade] = useState(false);
   // Lightweight context for `PrimaryLinkFlow` — fetched once on mount.
   // Not gating: if these are null, the flow degrades gracefully (no
   // primary-link slug in the celebration, no browser tz proposal).
@@ -1648,10 +1767,14 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     // an Envoy ChannelMessage. The next host turn is
                     // force-routed to recalibrate.first-time by the dispatch
                     // override in app/api/channel/chat/route.ts (which keys
-                    // off metadata.subkind === "calibrate-opener").
+                    // The endpoint now writes seed-info only. The host then
+                    // sees CalibrateChoicePanel and picks:
+                    //   (a) "Good enough" → theme question → done
+                    //   (b) "Customize" → calibrate-proceed writes the opener
+                    //       → dispatch override routes to recalibrate.first-time
                     //
                     // Q5 beat: a 300ms posture-readback pause, then we set
-                    // `loading=true` while the endpoint persists the opener
+                    // `loading=true` while the endpoint persists seed-info
                     // — that renders the existing typing-indicator bubble
                     // (the same animation used in the dashboard and deal
                     // room — three bouncing dots, ~line 2073 below). The
@@ -1674,12 +1797,11 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                           );
                           return;
                         }
-                        // HOTFIX-2 (2026-05-05): endpoint now returns TWO
-                        // messages — the seed-info bullets (subkind:
-                        // calibrate-seed-info) and the warm anchor opener
-                        // (subkind: calibrate-opener). Both get appended.
-                        // `.message` is back-compat with the older one-row
-                        // shape and points at the opener.
+                        // Endpoint writes seed-info only. Append seedInfo;
+                        // ignore opener field (now null/absent). Back-compat:
+                        // if an older server returns a full pair (stale deploy
+                        // window), still append both so existing users aren't
+                        // broken mid-session.
                         const data = (await res.json()) as {
                           seedInfo?: ChannelMsg | null;
                           opener?: ChannelMsg | null;
@@ -1687,11 +1809,8 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                         };
                         const toAppend: ChannelMsg[] = [];
                         if (data?.seedInfo) toAppend.push(data.seedInfo);
+                        // Back-compat only: stale server returned opener too
                         if (data?.opener) toAppend.push(data.opener);
-                        // Fall back to .message if neither named field
-                        // was present (defensive — shouldn't happen post-
-                        // hotfix-2, but keeps the client robust if a stale
-                        // server is reached during deploy).
                         if (toAppend.length === 0 && data?.message) {
                           toAppend.push(data.message);
                         }
@@ -2108,6 +2227,59 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
             Response ready.
           </div>
         )}
+
+        {/* Calibrate choice panel — two-path choice shown after seed-info
+            lands. Condition: seed-info present, no opener yet, not loading,
+            host hasn't chosen yet this session. Path (b) POSTs to
+            calibrate-proceed which writes the opener and lets the dispatch
+            override route the next host turn to recalibrate.first-time. */}
+        {(() => {
+          if (loading || calibrateChoiceMade) return null;
+          const hasSeedInfo = messages.some((m) => {
+            const meta = m.metadata as { kind?: string; subkind?: string } | null;
+            return meta?.kind === "onboarding" && meta?.subkind === "calibrate-seed-info";
+          });
+          const hasOpener = messages.some((m) => {
+            const meta = m.metadata as { kind?: string; subkind?: string } | null;
+            return meta?.kind === "onboarding" && meta?.subkind === "calibrate-opener";
+          });
+          // Also suppress if there's already real chat — the calibration arc
+          // already ran in a prior session.
+          const hasRealChatNow = messages.some((m) => {
+            const meta = m.metadata as { kind?: string } | null;
+            return meta?.kind !== "onboarding";
+          });
+          if (!hasSeedInfo || hasOpener || hasRealChatNow) return null;
+          return (
+            <CalibrateChoicePanel
+              onChoiceB={async () => {
+                setCalibrateChoiceMade(true);
+                setLoading(true);
+                try {
+                  const res = await fetch("/api/onboarding/calibrate-proceed", {
+                    method: "POST",
+                  });
+                  if (!res.ok) {
+                    console.error("[feed] calibrate-proceed POST failed", res.status);
+                    return;
+                  }
+                  const data = (await res.json()) as { opener?: ChannelMsg | null };
+                  if (data?.opener) {
+                    setMessages((prev) => {
+                      const seen = new Set(prev.map((m) => m.id));
+                      return seen.has(data.opener!.id) ? prev : [...prev, data.opener!];
+                    });
+                  }
+                } catch (err) {
+                  console.error("[feed] calibrate-proceed error", err);
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              onDone={() => setCalibrateChoiceMade(true)}
+            />
+          );
+        })()}
 
         <div ref={messagesEndRef} />
         </div>

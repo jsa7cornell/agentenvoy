@@ -1,35 +1,35 @@
 /**
  * Calibrate-followthrough dispatch override predicate.
  *
- * After the picker submit, `/api/onboarding/calibrate-opener` writes two
- * Envoy messages in this order:
- *   1. `subkind: "calibrate-seed-info"` (earlier createdAt — FIRST in feed)
- *   2. `subkind: "calibrate-opener"`    (later createdAt   — SECOND in feed)
+ * Architecture (2026-05-06 choice-panel refactor):
+ *   - `/api/onboarding/calibrate-opener` writes seed-info only.
+ *   - If the host picks path (b) "Customize my preferences", the client
+ *     POSTs to `/api/onboarding/calibrate-proceed` which writes the
+ *     calibrate-opener message.
+ *   - The host's first reply after the opener should force-route to
+ *     `recalibrate.first-time`.
+ *   - If the host picks path (a) "Good enough to start", no opener is
+ *     written and subsequent messages should NOT be force-routed.
  *
- * The host's first reply post-picker should force-route to
- * `recalibrate.first-time` so the multi-action-emit fidelity check + first-time
- * fragment fire. The dispatch route in `app/api/channel/chat/route.ts`
- * imports this predicate and applies the override before the dispatch chain.
+ * Therefore this predicate matches ONLY `subkind === "calibrate-opener"`.
+ * Seed-info alone must not trigger the override — that would incorrectly
+ * force-route path (a) users who already indicated they don't want the
+ * full calibration arc.
  *
- * **Hotfix-1 (2026-05-05)** introduced the override checking ONLY for
- * `subkind === "calibrate-opener"` on the single most-recent envoy turn.
+ * The N-message lookback (default 5) is kept for robustness: if future
+ * system/composer messages are interleaved between the opener and the
+ * host's reply, we still detect the opener within the window.
  *
- * **Hotfix-2 (2026-05-05)** added the seed-info message — but seed-info ended
- * up MORE RECENT than the opener, making the most-recent envoy turn
- * `calibrate-seed-info`. The Hotfix-1 predicate missed it; the override
- * stopped firing; user replies routed to `manage_setup` and emitted phantom
- * `create_bookable_link` actions. Production report `cmotkhjwa000lj7qmg0kx53qi`.
- *
- * **Hotfix-3 (2026-05-05)** widens the predicate two ways:
- *   1. Match EITHER `calibrate-seed-info` OR `calibrate-opener` subkinds.
- *   2. Look at the most recent N envoy messages (default 5), not just the
- *      one most recent — robust to future order changes or interleaved
- *      system messages. The override fires if ANY of those N envoy messages
- *      carries a calibrate-* subkind AND no host turn has been processed
- *      since (handled separately by the route — once the host's first reply
- *      lands and the composer responds, the most recent envoy message is
- *      the composer's response, which carries no calibrate-* subkind, and
- *      the predicate stops matching).
+ * History of changes:
+ *   Hotfix-1 (2026-05-05): introduced, matched calibrate-opener only.
+ *   Hotfix-2 (2026-05-05): broke — seed-info was written after opener with
+ *     an identical createdAt (Postgres now() = transaction start). Widened
+ *     to match either subkind.
+ *   Hotfix-3 (2026-05-05): widened to look at last N messages + match either
+ *     subkind. Fixed ordering with explicit JS timestamps.
+ *   Choice-panel refactor (2026-05-06): reverted to calibrate-opener only.
+ *     Seed-info is now written first; opener is written lazily on path (b).
+ *     Seed-info alone must not trigger the override.
  *
  * The 30-minute time window stays as a backstop.
  */
@@ -37,7 +37,6 @@ import type { Prisma } from "@prisma/client";
 import { parseChannelMessageMetadata } from "@/lib/channel/metadata-schema";
 
 export const CALIBRATE_FOLLOWTHROUGH_SUBKINDS = [
-  "calibrate-seed-info",
   "calibrate-opener",
 ] as const;
 
@@ -54,8 +53,8 @@ export interface CalibrateFollowthroughCandidate {
 
 /**
  * Returns true when the most-recent N envoy messages contain a
- * calibrate-seed-info or calibrate-opener metadata AND the most-recent of
- * those calibrate-* messages landed within the time window.
+ * calibrate-opener message AND the most-recent such message landed within
+ * the time window. Seed-info alone does NOT trigger the override.
  *
  * Pass envoy messages ordered MOST-RECENT-FIRST. Non-calibrate envoy messages
  * interleaved among the lookback window are ignored — the override fires as
