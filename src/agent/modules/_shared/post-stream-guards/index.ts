@@ -493,6 +493,104 @@ export const forwardProjectionConsistencyGuard: PostStreamGuard = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// URL-in-narration strip — cosmetic cleanup (rewrite, not retry)
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical personalized-link URL shape: `/meet/<slug>/<code>`. Minted by
+ * `handleCreateLink` (`${baseUrl}/meet/${meetSlug}/${code}`).
+ *
+ * Two path segments after `/meet/` are required so this does NOT match the
+ * bookable-link landing page (`/meet/<slug>` only). Slug + code are
+ * `[A-Za-z0-9_-]+` to cover both production codes and dev hashes.
+ *
+ * The pattern is repeated inline at each replace/test call site rather than
+ * shared as a constant — `RegExp.prototype.test` carries `lastIndex` on
+ * `g`-flagged literals, and sharing the literal across stateful + stateless
+ * uses is a common foot-gun.
+ */
+
+/**
+ * Returns true if the text contains at least one /meet/<slug>/<code> URL.
+ * Standalone for unit-test composition; the guard wrapper combines this with
+ * the link-emitting-action gate.
+ */
+export function needsUrlInNarrationStrip(text: string): boolean {
+  if (!text) return false;
+  // Non-`g` test regex — `.test()` on a stateful global regex carries lastIndex.
+  return /https?:\/\/[^\s/]+\/meet\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+/.test(text);
+}
+
+/**
+ * Strips /meet/<slug>/<code> URLs from prose.
+ *
+ * - Trailing case (most common): URL on its own line after one or more newlines
+ *   → strip the leading newlines + URL together. Avoids leaving a dangling blank
+ *   tail.
+ * - Mid-sentence case: URL embedded in running prose → strip just the URL token
+ *   plus a single adjacent space, leaving sentence structure intact.
+ *
+ * Multiple URLs in one response are all stripped (single pass, regex global).
+ */
+export function stripMeetUrlFromNarration(text: string): string {
+  // (a) Strip URLs on their own line: capture the leading newline(s).
+  let out = text.replace(
+    /\n+\s*https?:\/\/[^\s/]+\/meet\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\s*/g,
+    "",
+  );
+  // (b) Strip mid-sentence URLs with surrounding whitespace.
+  out = out.replace(
+    / ?https?:\/\/[^\s/]+\/meet\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+ ?/g,
+    " ",
+  );
+  // Collapse double-spaces left by mid-sentence strip.
+  out = out.replace(/  +/g, " ");
+  // Trim trailing whitespace from the document.
+  return out.replace(/\s+$/g, "");
+}
+
+/**
+ * Action types that mint or refresh a /meet/<slug>/<code> URL surfaced in the
+ * link card. When at least one of these appears in this turn's parsedActions,
+ * a trailing /meet/ URL in prose is presumed to be the same URL the card will
+ * render — and is therefore redundant and strippable.
+ */
+const LINK_EMITTING_ACTION_TYPES = new Set(["create_link", "update_link"]);
+
+/**
+ * URL-in-narration strip guard. Cluster-scoped to event_action.
+ *
+ * Failure mode: composer narrates a successful create_link / update_link and
+ * trails the /meet/ URL after a blank line; the link card UI renders the same
+ * URL just below, making the prose tail redundant and visually noisy.
+ *
+ * Triggers (FeedbackReports `cmot617ih001erafmvb6ipl4g` Larry AM,
+ * `cmotc57cz0018v8lwellbeziv` Katie PM, both 2026-05-05). User: "link url
+ * showing up in the message - this is unnecessary b/c the event card shows up."
+ *
+ * Returns `kind: "rewrite"` (NOT a retry) — the composer didn't lie, it was
+ * just redundant. Single-pass cleanup; no LLM round-trip. The runner records
+ * the firing in `moduleGuard.guardsFired` for corpus telemetry.
+ */
+export const urlInNarrationStripGuard: PostStreamGuard = {
+  name: "url-in-narration-strip",
+  check: ({ text, parsedActions }) => {
+    if (!needsUrlInNarrationStrip(text)) return null;
+    const linkActionEmitted = parsedActions.some((a) =>
+      LINK_EMITTING_ACTION_TYPES.has(a.action),
+    );
+    if (!linkActionEmitted) return null;
+    const stripped = stripMeetUrlFromNarration(text);
+    if (stripped === text) return null;
+    return {
+      kind: "rewrite",
+      flaggedReason: "url-in-narration:meet-url-trailing",
+      text: stripped,
+    };
+  },
+};
+
 /**
  * Default guard set auto-injected by the runner unless the module sets
  * `useDefaultPostStreamGuards: false`.

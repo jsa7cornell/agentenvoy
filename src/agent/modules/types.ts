@@ -168,10 +168,22 @@ export interface PostStreamGuardArgs {
   moduleContext: ModuleContext;
 }
 
-export interface PostStreamGuardResult {
-  flaggedReason: string;
-  hint: string;
-}
+/**
+ * PostStream guards return one of two action shapes:
+ *
+ * - `{ kind?: "retry", flaggedReason, hint }` (default) — sends `hint` back to
+ *   the composer as the next user turn, asking it to re-narrate / re-emit.
+ *   `kind` is optional for backward-compat with pre-rewrite guards.
+ *
+ * - `{ kind: "rewrite", flaggedReason, text }` — replaces the buffered text
+ *   in place; does NOT reinvoke the composer. Single-pass cleanup. Use this
+ *   for cosmetic / structural cleanup where the composer didn't lie, just
+ *   produced redundant or noisy prose (e.g. trailing /meet/ URL when the
+ *   link card already shows it — `url-in-narration-strip`, 2026-05-05).
+ */
+export type PostStreamGuardResult =
+  | { kind?: "retry"; flaggedReason: string; hint: string }
+  | { kind: "rewrite"; flaggedReason: string; text: string };
 
 export interface PostStreamGuard {
   name: string;

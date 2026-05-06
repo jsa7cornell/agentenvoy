@@ -139,7 +139,10 @@ describe("narrationEmissionConsistencyGuard — wrapper", () => {
     });
     expect(result).not.toBeNull();
     expect(result?.flaggedReason).toMatch(/claim-without-emit/);
-    expect(result?.hint).toMatch(/state change|emit|suppress/i);
+    // Narrow off the rewrite branch — this guard only emits retry shape.
+    if (result && result.kind !== "rewrite") {
+      expect(result.hint).toMatch(/state change|emit|suppress/i);
+    }
   });
 
   it("does NOT fire when claim is matched by an emitted action", () => {

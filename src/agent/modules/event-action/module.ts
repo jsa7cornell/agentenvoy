@@ -29,7 +29,10 @@
 import type { IntentModule } from "@/agent/modules/types";
 import { loadEventIntentContext } from "@/agent/modules/event-intents/context-loader";
 import type { ScheduleContext } from "@/agent/modules/_shared/schedule-context";
-import { forwardProjectionConsistencyGuard } from "@/agent/modules/_shared/post-stream-guards";
+import {
+  forwardProjectionConsistencyGuard,
+  urlInNarrationStripGuard,
+} from "@/agent/modules/_shared/post-stream-guards";
 
 export const eventActionModule: IntentModule<ScheduleContext> = {
   intent: "event_action",
@@ -49,7 +52,13 @@ export const eventActionModule: IntentModule<ScheduleContext> = {
   // Catches unsolicited "Want me to open up earlier mornings?" projection bleed
   // (FeedbackReport `cmot63s7x0001k2js8f96655r`). Structural backstop after
   // prose tunes (7f0b6ca / 3a12911 / 4248a08) proved insufficient.
-  postStreamGuards: [forwardProjectionConsistencyGuard],
+  //
+  // url-in-narration-strip: cosmetic rewrite (NOT retry) — strips the trailing
+  // /meet/<slug>/<code> URL when create_link / update_link emitted this turn,
+  // since the link card renders it just below the prose. Triggers: FeedbackReports
+  // cmot617ih001erafmvb6ipl4g (Larry AM) + cmotc57cz0018v8lwellbeziv (Katie PM),
+  // both 2026-05-05.
+  postStreamGuards: [forwardProjectionConsistencyGuard, urlInNarrationStripGuard],
   // Union of all four absorbed modules' allowedActions (deduplicated).
   // Includes update_time / update_format / update_location from modify_link
   // so within-thread drift (create→modify) no longer triggers silent-strip

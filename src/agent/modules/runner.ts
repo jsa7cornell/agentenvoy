@@ -348,6 +348,11 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
     }
 
     // PostStream guards (prose-coherence; advisory). Only run if preEmit clean.
+    //
+    // A guard may return `kind: "rewrite"` instead of the default retry shape —
+    // when it does, we replace `text` in place, record the firing in
+    // moduleGuard.guardsFired, and continue evaluating remaining guards on
+    // the rewritten text. No retry, no LLM round-trip. Single-pass cleanup.
     if (!fire) {
       const useDefaults = intentModule.useDefaultPostStreamGuards !== false;
       const guards = useDefaults
@@ -359,16 +364,27 @@ export async function runModule(input: RunnerInput): Promise<RunnerOutput> {
           parsedActions,
           moduleContext: input.moduleContext,
         });
-        if (result) {
-          fire = {
+        if (!result) continue;
+        if (result.kind === "rewrite") {
+          // Apply the rewrite, log it as a fired guard, but do NOT count
+          // toward retry budget. Continue checking subsequent guards on the
+          // rewritten text — multiple cleanup guards can stack within a turn.
+          text = result.text;
+          moduleGuard.guardsFired.push({
             name: guard.name,
             phase: "postStream",
             flaggedReason: result.flaggedReason,
-            hint: result.hint,
-            severity: "advisory",
-          };
-          break;
+          });
+          continue;
         }
+        fire = {
+          name: guard.name,
+          phase: "postStream",
+          flaggedReason: result.flaggedReason,
+          hint: result.hint,
+          severity: "advisory",
+        };
+        break;
       }
     }
 

@@ -155,7 +155,10 @@ describe("forwardProjectionConsistencyGuard — wrapper", () => {
     });
     expect(result).not.toBeNull();
     expect(result?.flaggedReason).toMatch(/forward-projection/);
-    expect(result?.hint.length).toBeGreaterThan(0);
+    // Narrow off the rewrite branch — this guard only emits retry shape.
+    if (result && result.kind !== "rewrite") {
+      expect(result.hint.length).toBeGreaterThan(0);
+    }
   });
 
   it("fires regardless of whether actions were emitted (cluster scope handles legitimacy)", () => {
