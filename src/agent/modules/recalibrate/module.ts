@@ -46,8 +46,9 @@ import { requiredFieldExtractionCheck } from "./pre-emit-checks/required-field-e
 
 /**
  * Resolve the recalibrate variant from a MatchResult without requiring
- * contextOutput. Mirrors `selectVariant` minus the (currently unused)
- * context arg so the static playbook resolver can run pre-context-load.
+ * contextOutput. Used as the pre-context fallback when the runner asks for
+ * the static playbook before context-load. Post-load, `selectVariant` is
+ * preferred — it also reads `RecalibrateContext.isFirstTime`.
  */
 function variantFromMatch(matchResult: MatchResult): RecalibrateVariant {
   if (matchResult.kind === "deterministic" && matchResult.playbookVariant) {
@@ -77,10 +78,16 @@ export const recalibrateModule: IntentModule<RecalibrateContext> = {
     "Distinguished from edit_preference / manage_setup (single-field or " +
     "multi-field edits on already-calibrated hosts) by entry-window scope.",
 
-  composerPlaybook: (matchResult) => [
-    "fragments/voice",
-    fragmentPathForVariant(variantFromMatch(matchResult)),
-  ],
+  // Function-form composerPlaybook: the runner passes `contextOutput` after
+  // the contextLoader runs, so `selectVariant` can read `isFirstTime` as a
+  // post-seed fallback. When called pre-context (no second arg), we fall
+  // back to the matcher-only resolver.
+  composerPlaybook: (matchResult, contextOutput) => {
+    const variant = contextOutput
+      ? selectVariant(matchResult, contextOutput as RecalibrateContext)
+      : variantFromMatch(matchResult);
+    return ["fragments/voice", fragmentPathForVariant(variant)];
+  },
 
   contextLoader: loadRecalibrateContext,
 

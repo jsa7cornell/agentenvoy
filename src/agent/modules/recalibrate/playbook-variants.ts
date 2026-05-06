@@ -27,7 +27,8 @@
  * The runner then loads the appropriate fragment from
  * `runtime-prompts/composers/recalibrate/<variant>.md`.
  */
-import type { MatchResult, ModuleContextOutput } from "@/agent/modules/types";
+import type { MatchResult } from "@/agent/modules/types";
+import type { RecalibrateContext } from "./context-loader";
 
 export type RecalibrateVariant =
   | "first-time"
@@ -45,24 +46,33 @@ const KNOWN_VARIANTS: ReadonlySet<RecalibrateVariant> = new Set([
 /**
  * Select the playbook variant for this recalibrate turn.
  *
- * Priority order: explicit `matchResult.playbookVariant` (set at the matcher/
- * dispatch seam) wins. If it's set to `"first-time"`, that wins over all
- * other signals — the conversational-onboarding arc is the load-bearing
- * post-seed surface and a host-classifier mis-route shouldn't displace it.
+ * Priority order:
+ *   1. Explicit `matchResult.playbookVariant` (set at the matcher / dispatch
+ *      seam) wins. The post-classifier dispatch override in
+ *      `app/api/channel/chat/route.ts` stamps `"first-time"` when the latest
+ *      envoy turn is a `subkind: "calibrate-opener"` bubble within 30 minutes.
+ *   2. `contextOutput.isFirstTime` — fresh-signup post-seed-load fallback.
+ *      Safety net for any case where the dispatch override didn't fire but
+ *      the host still belongs in the first-time arc.
+ *   3. Fallthrough: `"open"`.
  *
- * Otherwise: dormant > explicit-ask > open. Fallthrough is `"open"`.
+ * (Future: dormant > explicit-ask are stamped at the matcher; not yet a
+ *  context-derived signal here.)
  */
 export function selectVariant(
   matchResult: MatchResult,
-  // contextOutput unused in v1; future use: check driftAnalysis to prefer
-  // "dormant" when daysSinceCalibration is high.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _contextOutput: ModuleContextOutput,
+  contextOutput: RecalibrateContext,
 ): RecalibrateVariant {
+  // Explicit hint at the matcher/dispatch seam wins.
   if (matchResult.kind === "deterministic" && matchResult.playbookVariant) {
     const v = matchResult.playbookVariant as RecalibrateVariant;
     if (KNOWN_VARIANTS.has(v)) return v;
   }
+  // Fresh-signup post-seed-load fallback. The first-time arc is the right
+  // home regardless of upstream hint absence — covers cases where the
+  // dispatch override (chat/route.ts) didn't fire but the host is still
+  // post-seed.
+  if (contextOutput.isFirstTime) return "first-time";
   return "open";
 }
 
