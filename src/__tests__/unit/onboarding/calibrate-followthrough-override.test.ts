@@ -1,16 +1,15 @@
 /**
  * Unit tests for the calibrate-followthrough dispatch override predicate.
  *
- * Hotfix-3 regression test: the bug fixed here was that Hotfix-2 added a
- * seed-info Envoy message which became the most-recent envoy turn, and
- * Hotfix-1's predicate (which only matched `subkind: "calibrate-opener"`)
- * stopped firing. The override skipped, the user's reply routed to
- * manage_setup, and a phantom bookable link got created.
+ * Architecture as of 2026-05-06 choice-panel refactor:
+ *   - calibrate-opener writes seed-info only.
+ *   - calibrate-proceed writes the opener when host picks path (b).
+ *   - Override must fire ONLY when calibrate-opener is present (not seed-info
+ *     alone), so path (a) hosts are not incorrectly force-routed.
  *
- * These tests lock both behaviors:
- *   1. Override fires when EITHER calibrate-* subkind is present.
- *   2. Override fires across the most-recent N envoy messages (seed-info-most-recent
- *      + opener-second-most-recent is the canonical scenario).
+ * Hotfix-3 regression (preserved): the N-message lookback was added because
+ * the opener can be second-most-recent if a system message was interleaved.
+ * That robustness is still in the predicate (lookback default 5).
  */
 import { describe, it, expect } from "vitest";
 import { shouldForceCalibrateFirstTime } from "@/lib/onboarding/calibrate-followthrough-override";
@@ -25,20 +24,37 @@ function envoy(subkind: string | null, ageMs: number) {
 }
 
 describe("shouldForceCalibrateFirstTime", () => {
-  it("fires when seed-info is most recent (Hotfix-3 regression scenario)", () => {
-    const recent = [
-      envoy("calibrate-seed-info", 1_000),
-      envoy("calibrate-opener", 2_000),
-    ];
-    expect(shouldForceCalibrateFirstTime(recent, NOW)).toBe(true);
-  });
-
-  it("fires when opener is most recent", () => {
+  it("fires when opener is most recent (normal path-b flow)", () => {
     const recent = [
       envoy("calibrate-opener", 1_000),
       envoy("calibrate-seed-info", 2_000),
     ];
     expect(shouldForceCalibrateFirstTime(recent, NOW)).toBe(true);
+  });
+
+  it("fires when opener is present but not most recent (system message interleaved)", () => {
+    const recent = [
+      envoy(null, 500),                    // e.g. system response
+      envoy("calibrate-opener", 1_500),
+      envoy("calibrate-seed-info", 2_500),
+    ];
+    expect(shouldForceCalibrateFirstTime(recent, NOW)).toBe(true);
+  });
+
+  it("does NOT fire when only seed-info is present (path-a or pre-choice)", () => {
+    const recent = [
+      envoy("calibrate-seed-info", 1_000),
+    ];
+    expect(shouldForceCalibrateFirstTime(recent, NOW)).toBe(false);
+  });
+
+  it("does NOT fire when seed-info is most recent and no opener exists (choice-panel refactor invariant)", () => {
+    // Regression guard: Hotfix-3 matched seed-info; the new arch must not.
+    const recent = [
+      envoy("calibrate-seed-info", 1_000),
+      envoy(null, 2_000),
+    ];
+    expect(shouldForceCalibrateFirstTime(recent, NOW)).toBe(false);
   });
 
   it("does NOT fire when neither subkind is present", () => {
@@ -54,15 +70,6 @@ describe("shouldForceCalibrateFirstTime", () => {
     expect(shouldForceCalibrateFirstTime(recent, NOW)).toBe(false);
   });
 
-  it("fires when calibrate-* is interleaved among non-calibrate envoy turns inside lookback", () => {
-    const recent = [
-      envoy(null, 500),                       // composer response with no subkind
-      envoy("calibrate-seed-info", 1_500),
-      envoy("calibrate-opener", 2_500),
-    ];
-    expect(shouldForceCalibrateFirstTime(recent, NOW)).toBe(true);
-  });
-
   it("respects the lookback bound (default 5)", () => {
     const recent = [
       envoy(null, 100),
@@ -70,7 +77,7 @@ describe("shouldForceCalibrateFirstTime", () => {
       envoy(null, 300),
       envoy(null, 400),
       envoy(null, 500),
-      // calibrate-* exists but past the lookback cutoff
+      // calibrate-opener exists but past the lookback cutoff
       envoy("calibrate-opener", 600),
     ];
     expect(shouldForceCalibrateFirstTime(recent, NOW, 5)).toBe(false);
