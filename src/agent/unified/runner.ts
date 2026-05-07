@@ -32,6 +32,7 @@ export type UnifiedAgentContext = {
   channelId: string;
   timezone: string;
   userName: string | null;
+  meetSlug?: string;
   message: string;
   isAdmin?: boolean;
 };
@@ -64,7 +65,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         const modelSelection = selectModelForTurn({ messageLength: ctx.message.length });
 
         // Build tool surface for this request.
-        const tools = buildUnifiedTools({ userId: ctx.userId, timezone: ctx.timezone });
+        const tools = buildUnifiedTools({ userId: ctx.userId, timezone: ctx.timezone, meetSlug: ctx.meetSlug });
 
         // Load recent conversation history.
         const recentMessages = await loadRecentHistory(ctx.channelId);

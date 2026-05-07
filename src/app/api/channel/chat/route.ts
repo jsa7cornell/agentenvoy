@@ -136,6 +136,7 @@ export async function POST(req: NextRequest) {
         channelId: safeChannel.id,
         timezone,
         userName: safeUser.name ?? null,
+        meetSlug: safeUser.meetSlug ?? undefined,
         message,
         isAdmin: false, // TODO: wire real isAdmin once admin field is on user
       });
