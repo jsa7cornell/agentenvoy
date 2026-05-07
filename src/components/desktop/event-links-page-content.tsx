@@ -94,6 +94,15 @@ function format12h(hhmm: string | undefined): string {
   return m === 0 ? `${h12}${suffix}` : `${h12}:${String(m).padStart(2, "0")}${suffix}`;
 }
 
+/** Convert minutes-from-midnight to compact 12h string: 540→"9a", 1080→"6p", 570→"9:30a" */
+function formatMinutes(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const suffix = h >= 12 ? "p" : "a";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${h12}${suffix}` : `${h12}:${String(m).padStart(2, "0")}${suffix}`;
+}
+
 function buildBookableLinkSub(rule: AvailabilityRule): string {
   const oh = rule.bookable ?? (rule as unknown as { officeHours?: typeof rule.bookable }).officeHours;
   if (!oh) return "Drop-in Hours";
@@ -102,7 +111,26 @@ function buildBookableLinkSub(rule: AvailabilityRule): string {
   const end = format12h(rule.timeEnd);
   const window = start && end ? `${start}–${end}` : "";
   const dur = `${oh.durationMinutes} min`;
-  return [dur, days, window].filter(Boolean).join(" · ");
+  const bufMins = (oh as unknown as { bufferMinutes?: number }).bufferMinutes;
+  const buf = typeof bufMins === "number" && bufMins > 0 ? `${bufMins}m buffer` : "";
+  return [dur, days, window, buf].filter(Boolean).join(" · ");
+}
+
+function buildPrimaryLinkSub(opts: {
+  defaultDuration: number;
+  defaultFormat: string;
+  businessHoursStartMinutes: number;
+  businessHoursEndMinutes: number;
+  bufferMinutes: number;
+}): string {
+  const { defaultDuration, defaultFormat, businessHoursStartMinutes, businessHoursEndMinutes, bufferMinutes } = opts;
+  const dur = `${defaultDuration} min`;
+  const fmt = defaultFormat === "in-person" ? "in person" : defaultFormat;
+  const startStr = formatMinutes(businessHoursStartMinutes);
+  const endStr = formatMinutes(businessHoursEndMinutes);
+  const avail = `Mon–Fri ${startStr}–${endStr}`;
+  const buf = bufferMinutes > 0 ? `${bufferMinutes}m buffer` : "";
+  return [dur, fmt, avail, buf].filter(Boolean).join(" · ");
 }
 
 function buildEventSub(s: UpcomingEventRow): string {
@@ -355,9 +383,10 @@ export function EventLinksPageContent() {
   }
 
   function refetchReusable() {
-    fetch("/api/tuner/preferences")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+    Promise.all([
+      fetch("/api/tuner/preferences").then((r) => (r.ok ? r.json() : null)),
+      fetch("/api/me/scheduling-defaults").then((r) => (r.ok ? r.json() : null)),
+    ]).then(([data, defaults]) => {
         if (!data) return;
         const origin = typeof window !== "undefined" ? window.location.origin : "";
         const slug = data.meetSlug as string | null | undefined;
@@ -368,13 +397,20 @@ export function EventLinksPageContent() {
         if (first) setHostFirstName(first);
         if (slug) {
           const primaryName = (data.primaryLinkName as string) || (first ? `${first}'s Primary Link` : "Primary link");
-          const defaultDur =
-            typeof data.defaultMeetingMinutes === "number" ? data.defaultMeetingMinutes : 30;
+          const primarySub = defaults
+            ? buildPrimaryLinkSub({
+                defaultDuration: (defaults.defaultDuration as number) ?? 30,
+                defaultFormat: (defaults.defaultFormat as string) ?? "video",
+                businessHoursStartMinutes: (defaults.businessHoursStartMinutes as number) ?? 540,
+                businessHoursEndMinutes: (defaults.businessHoursEndMinutes as number) ?? 1080,
+                bufferMinutes: (defaults.bufferMinutes as number) ?? 0,
+              })
+            : "30 min · video";
           out.push({
             key: "primary",
             kind: "primary",
             name: primaryName,
-            sub: `${defaultDur} min · video`,
+            sub: primarySub,
             url: `${origin}/meet/${slug}`,
             icon: "🔗",
           });
@@ -413,6 +449,7 @@ export function EventLinksPageContent() {
         }
         setReusableRows(out);
       })
+      .catch(() => {})
       .finally(() => setReusableLoaded(true));
   }
 
