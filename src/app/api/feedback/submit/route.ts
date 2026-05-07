@@ -104,6 +104,7 @@ export async function POST(request: NextRequest) {
         area: submission.area ?? null,
         checklistState: submission.checklistState as never,
         clientState: (submission.clientState ?? null) as never,
+        tags: submission.tags ?? [],
         bundle: bundle as never,
         filedByGuest: false,
       },

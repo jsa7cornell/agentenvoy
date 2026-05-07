@@ -61,6 +61,17 @@ export type ClientState = z.infer<typeof ClientStateSchema>;
  * doesn't type. `triedToDoText` is retained for schema back-compat with
  * any outstanding client but the new UI never populates it.
  */
+/** FB-2 structured failure-mode tags for the thumbs-down modal checkbox row. */
+export const FEEDBACK_TAGS = [
+  "over-asks",
+  "echoed-reasoning",
+  "too-wordy",
+  "wrong-tool",
+  "hallucinated-success",
+  "missed-multi-option",
+] as const;
+export type FeedbackTag = (typeof FEEDBACK_TAGS)[number];
+
 export const FeedbackSubmitSchema = z.object({
   userText: z.string().max(4000).optional(),
   triedToDoText: z.string().max(4000).optional(),
@@ -74,6 +85,8 @@ export const FeedbackSubmitSchema = z.object({
     .max(100)
     .optional(),
   clientState: ClientStateSchema.optional(),
+  /** FB-2: structured failure-mode tags from the thumbs-down modal. */
+  tags: z.array(z.enum(FEEDBACK_TAGS)).max(10).optional(),
 });
 export type FeedbackSubmitInput = z.infer<typeof FeedbackSubmitSchema>;
 

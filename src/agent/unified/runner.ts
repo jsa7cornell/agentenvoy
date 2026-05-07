@@ -28,6 +28,10 @@ import { unifiedAgentSystemPrompt } from "@/agent/runtime-prompts";
 const SYSTEM_PROMPT = unifiedAgentSystemPrompt();
 const MAX_STEPS = 8; // passed as stopCondition: stepCountIs(MAX_STEPS)
 
+// Captured once per cold start. VERCEL_GIT_COMMIT_SHA is injected at build time;
+// falls back to "local" for dev environments without it.
+const PROMPT_VERSION = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
+
 export type UnifiedAgentContext = {
   userId: string;
   channelId: string;
@@ -305,6 +309,7 @@ function buildUnifiedMetadata(params: {
     unifiedTurn: {
       model: modelId,
       tier: turnCost.tier,
+      promptVersion: PROMPT_VERSION,
       toolCalls: toolCallNames,
       durationMs,
       selfCheck,

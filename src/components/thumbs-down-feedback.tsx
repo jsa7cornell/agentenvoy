@@ -4,12 +4,21 @@
  * ThumbsDownFeedback — inline 👎 on Envoy messages (host-only).
  *
  * Submits to /api/feedback/submit with area="composer_thumbs_down".
- * userText = admin note; triedToDoText = flagged message; full conversation
- * bundle built server-side. Review: /admin/feedback?area=composer_thumbs_down
- * Full doc: agentenvoy/COMPOSERREPORTS.md
+ * FB-2: structured failure-mode tags (checkboxes) + optional free-text note.
+ * Bundle built server-side. Review: /admin/feedback?area=composer_thumbs_down
  */
 
 import { useCallback, useState } from "react";
+import { FEEDBACK_TAGS, type FeedbackTag } from "@/lib/feedback/schema";
+
+const TAG_LABELS: Record<FeedbackTag, string> = {
+  "over-asks": "Asked for info it had",
+  "echoed-reasoning": "Showed internal reasoning",
+  "too-wordy": "Too long / verbose",
+  "wrong-tool": "Used wrong action",
+  "hallucinated-success": "Claimed it did something it didn't",
+  "missed-multi-option": "Should have offered more options",
+};
 
 interface Props {
   sessionId: string | null;
@@ -50,11 +59,19 @@ function ThumbsDownModal({
   onClose: () => void;
 }) {
   const [note, setNote] = useState("");
+  const [selectedTags, setSelectedTags] = useState<Set<FeedbackTag>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [reportId, setReportId] = useState<string | null>(null);
-  const [agentPrompt, setAgentPrompt] = useState<string | null>(null);
-  const [promptCopied, setPromptCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const toggleTag = useCallback((tag: FeedbackTag) => {
+    setSelectedTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }, []);
 
   const submit = useCallback(async () => {
     setSubmitting(true);
@@ -68,6 +85,7 @@ function ThumbsDownModal({
           userText: note.trim() || undefined,
           triedToDoText: messageContent,
           sessionId: sessionId ?? undefined,
+          tags: selectedTags.size > 0 ? Array.from(selectedTags) : undefined,
           checklistState: {
             messages: true,
             sessions: true,
@@ -81,18 +99,16 @@ function ThumbsDownModal({
       const json = (await res.json()) as {
         ok: boolean;
         reportId?: string;
-        agentPrompt?: string;
         error?: string;
       };
       if (!res.ok || !json.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       setReportId(json.reportId ?? null);
-      setAgentPrompt(json.agentPrompt ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send");
     } finally {
       setSubmitting(false);
     }
-  }, [note, sessionId, messageContent]);
+  }, [note, selectedTags, sessionId, messageContent]);
 
   return (
     <div
@@ -125,19 +141,6 @@ function ThumbsDownModal({
                 </div>
               )}
             </div>
-            {agentPrompt && (
-              <button
-                type="button"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(agentPrompt);
-                  setPromptCopied(true);
-                  setTimeout(() => setPromptCopied(false), 2000);
-                }}
-                className="w-full rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-1.5 text-[11px] text-sky-300 hover:bg-sky-500/10 text-left"
-              >
-                {promptCopied ? "Copied ✓" : "Copy debug curl (15 min token)"}
-              </button>
-            )}
             <div className="flex justify-end pt-1">
               <button
                 type="button"
@@ -160,11 +163,31 @@ function ThumbsDownModal({
                 ×
               </button>
             </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {FEEDBACK_TAGS.map((tag) => (
+                <label
+                  key={tag}
+                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] cursor-pointer transition-colors ${
+                    selectedTags.has(tag)
+                      ? "border-red-500/50 bg-red-500/10 text-red-300"
+                      : "border-white/10 bg-zinc-900 text-zinc-400 hover:border-white/20"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedTags.has(tag)}
+                    onChange={() => toggleTag(tag)}
+                    className="sr-only"
+                  />
+                  {TAG_LABELS[tag]}
+                </label>
+              ))}
+            </div>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="What was wrong? (optional)"
-              rows={3}
+              placeholder="Anything else? (optional)"
+              rows={2}
               autoFocus
               className="w-full resize-none rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-purple-500/60 focus:outline-none"
             />

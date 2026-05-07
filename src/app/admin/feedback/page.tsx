@@ -11,6 +11,61 @@ import { requireAdminContext } from "@/lib/admin-auth";
 import { logAdminAccess } from "@/lib/admin/access-log";
 import { FEEDBACK_AREAS, type FeedbackArea } from "@/lib/feedback/schema";
 
+// --- FB-3: Tier failure-rate chart ------------------------------------------
+
+type TierRow = { tier: string; reports: number; total: number; rate: number };
+
+async function fetchTierStats(since: Date): Promise<TierRow[]> {
+  // Extract tier from each report's bundle (last envoy turn in recentTurns).
+  // Only v2 bundles carry unifiedTurn.tier; v1 and null bundles are skipped.
+  const reports = await prisma.feedbackReport.findMany({
+    where: { createdAt: { gte: since } },
+    select: { bundle: true },
+  });
+
+  const tierCounts = new Map<string, number>();
+  for (const r of reports) {
+    const b = r.bundle as Record<string, unknown> | null;
+    if (!b || b.version !== 2) continue;
+    const msgs = b.messages as { recentTurns?: unknown[] } | undefined;
+    const turns = msgs?.recentTurns;
+    if (!Array.isArray(turns)) continue;
+    // Find the last envoy turn that has a unifiedTurn.tier.
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const t = turns[i] as Record<string, unknown>;
+      if (t.role !== "envoy") continue;
+      const meta = t.metadata as Record<string, unknown> | undefined;
+      const tier = (meta?.unifiedTurn as Record<string, unknown> | undefined)?.tier;
+      if (typeof tier === "string") {
+        tierCounts.set(tier, (tierCounts.get(tier) ?? 0) + 1);
+        break;
+      }
+    }
+  }
+
+  if (tierCounts.size === 0) return [];
+
+  // Total envoy ChannelMessage turns per tier in the same window.
+  const totalsRaw = await prisma.$queryRaw<{ tier: string; cnt: bigint }[]>`
+    SELECT
+      (metadata->'unifiedTurn'->>'tier') AS tier,
+      COUNT(*)::bigint AS cnt
+    FROM "ChannelMessage"
+    WHERE role = 'envoy'
+      AND "createdAt" >= ${since}
+      AND metadata->'unifiedTurn'->>'tier' IS NOT NULL
+    GROUP BY 1
+  `;
+  const totalByTier = new Map(totalsRaw.map((r) => [r.tier, Number(r.cnt)]));
+
+  return Array.from(tierCounts.entries())
+    .map(([tier, reports]) => {
+      const total = totalByTier.get(tier) ?? 0;
+      return { tier, reports, total, rate: total > 0 ? reports / total : 0 };
+    })
+    .sort((a, b) => b.reports - a.reports);
+}
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -100,6 +155,8 @@ export default async function AdminFeedbackPage({
     },
   });
 
+  const tierStats = await fetchTierStats(since);
+
   const rows = await prisma.feedbackReport.findMany({
     where: {
       createdAt: { gte: since },
@@ -140,11 +197,52 @@ export default async function AdminFeedbackPage({
   return (
     <main className="mx-auto max-w-6xl p-6 font-mono text-sm">
       <header className="mb-6">
-        <h1 className="text-xl font-bold">Admin · Feedback</h1>
+        <div className="flex items-start justify-between">
+          <h1 className="text-xl font-bold">Admin · Feedback</h1>
+          <Link href="/admin/feedback/patterns" className="text-xs text-sky-400 hover:underline">
+            Patterns →
+          </Link>
+        </div>
         <p className="text-xs text-zinc-500">
           {rows.length} report{rows.length === 1 ? "" : "s"} · {admin.email}
         </p>
       </header>
+
+      {tierStats.length > 0 && (
+        <section className="mb-6 rounded-lg border border-white/10 bg-zinc-900/50 p-4">
+          <p className="mb-3 text-xs font-semibold text-zinc-400 uppercase tracking-wide">
+            Failure rate by model tier · {label}
+          </p>
+          <div className="grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-x-3 gap-y-1.5 text-xs">
+            <span className="text-zinc-500 font-medium">Tier</span>
+            <span></span>
+            <span className="text-zinc-500 text-right">Reports</span>
+            <span className="text-zinc-500 text-right">Total turns</span>
+            <span className="text-zinc-500 text-right">Rate</span>
+            {tierStats.map(({ tier, reports, total, rate }) => {
+              const pct = total > 0 ? rate * 100 : null;
+              const barWidth = Math.min(100, rate * 2000); // scale: 5% = full bar
+              return (
+                <>
+                  <span key={`tier-${tier}`} className="font-mono text-zinc-200 capitalize">{tier ?? "modules-path"}</span>
+                  <div key={`bar-${tier}`} className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-red-500/60"
+                      style={{ width: `${barWidth}%` }}
+                    />
+                  </div>
+                  <span key={`r-${tier}`} className="text-right font-mono text-zinc-300">{reports}</span>
+                  <span key={`t-${tier}`} className="text-right font-mono text-zinc-500">{total > 0 ? total : "—"}</span>
+                  <span key={`p-${tier}`} className={`text-right font-mono ${pct !== null && pct > 3 ? "text-red-400" : "text-zinc-400"}`}>
+                    {pct !== null ? `${pct.toFixed(1)}%` : "—"}
+                  </span>
+                </>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-[10px] text-zinc-600">Rate = 👎 reports / envoy turns for that tier in window. Unified-agent path only; modules-path turns have no tier.</p>
+        </section>
+      )}
 
       <section className="mb-5 space-y-1.5 text-xs">
         <FilterRow label="range">

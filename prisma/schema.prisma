@@ -167,6 +167,9 @@ model FeedbackReport {
   /// viewer timezone, viewport, last-seen message id. User-device context,
   /// no third-party data. See src/lib/feedback/capture-client-state.ts.
   clientState    Json?
+  /// Structured failure-mode tags — e.g. ["over-asks", "too-wordy"].
+  /// Populated by the thumbs-down modal checkbox row (FB-2).
+  tags           String[]
   createdAt      DateTime  @default(now())
 
   agentTokens AgentAccessToken[]

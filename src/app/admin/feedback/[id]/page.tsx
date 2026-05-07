@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdminContext } from "@/lib/admin-auth";
 import { logAdminAccess } from "@/lib/admin/access-log";
 import { AdminActionsPanel, type ActiveToken } from "./admin-actions";
+import { ReplayPanel } from "./replay-panel";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -164,6 +165,8 @@ export default async function AdminFeedbackDetailPage({
           currentStatus={report.status}
           activeTokens={activeTokens}
         />
+
+        <ReplayPanel reportId={report.id} disabled={bundleVersion !== 2} />
 
         <section className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
           <h2 className="mb-3 text-xs uppercase tracking-wider text-zinc-500">What happened?</h2>
