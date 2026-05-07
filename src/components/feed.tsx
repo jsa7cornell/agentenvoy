@@ -1280,14 +1280,19 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     router.replace(onboardReturnTo);
   }, [initialLoading, isCalibrated, onboardReturnTo, router]);
 
-  // Auto-send after a sessionStorage prefill (e.g. event-links cross-route nav)
+  // Auto-send after a sessionStorage prefill (e.g. event-links cross-route nav).
+  // Gated on !initialLoading: without this guard, handleSend fires while the
+  // history fetch is still in-flight. The history fetch then overwrites the
+  // optimistic user message, leaving the envoy response appearing before the
+  // request until the post-turn refresh corrects the order.
   useEffect(() => {
+    if (initialLoading) return;
     if (pendingSendRef.current && input === pendingSendRef.current) {
       pendingSendRef.current = null;
       handleSend();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input]);
+  }, [input, initialLoading]);
 
   // Scroll feed container to bottom. On new messages (OR on message-array
   // identity changes — e.g., post-turn refetch that rehydrates `thread` data
