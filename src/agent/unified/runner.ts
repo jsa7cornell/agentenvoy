@@ -144,22 +144,114 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         );
 
         // Layer 4 — self-check (post-stream, fast model).
-        // Advisory: logs the result but does not retry in v1 (retry path is Day 5).
         const selfCheckResult = await runSelfCheck(
           toolCallSummaries,
           ctx.message,
           recentMessages,
         );
+
+        // Layer 4 retry (2026-05-07): when self-check flags a turn, run a
+        // remediation streamText that corrects the issue (the model sees its
+        // own prior response + the flag reason and issues update/archive
+        // calls as needed). User sees the correction streamed in-place,
+        // replacing the original text. The original turn's writes remain in
+        // the DB; the model uses corrective tools to fix them.
+        let remediationToolNames: string[] = [];
+        let remediationCost: TurnCost | null = null;
+        let remediationDurationMs: number | null = null;
+        let remediated = false;
+
         if (!selfCheckResult.passed) {
           console.warn(
             "[unified-agent] self-check flagged:",
             selfCheckResult.flaggedTools,
             selfCheckResult.reason,
           );
+
+          const remediationStart = Date.now();
+          emitStatus(enqueue, "checking", statusSeq++, "Reviewing and correcting…");
+
+          const remediationResult = streamText({
+            model: envoyModel(modelSelection.modelId),
+            messages: [
+              {
+                role: "system",
+                content: SYSTEM_PROMPT,
+                providerOptions: {
+                  anthropic: { cacheControl: { type: "ephemeral" } },
+                },
+              },
+              ...recentMessages,
+              { role: "user", content: ctx.message },
+              { role: "assistant", content: fullText },
+              {
+                role: "user",
+                content:
+                  `[Layer-4 self-check flagged your previous response]\n\n` +
+                  `Flagged tools: ${(selfCheckResult.flaggedTools ?? []).join(", ") || "(unspecified)"}\n` +
+                  `Reason: ${selfCheckResult.reason ?? "(unspecified)"}\n\n` +
+                  `Issue a correction. If you wrote something incorrect (wrong recurrence, ` +
+                  `wrong duration, fabricated detail, etc.), use the appropriate update or ` +
+                  `archive tool to fix it now, then narrate the correction in ONE short ` +
+                  `sentence. Do not apologize at length. Do not re-explain what was wrong; ` +
+                  `just fix and narrate. If the issue is purely narrative (no incorrect ` +
+                  `write to fix), just emit a corrected one-sentence narration.`,
+              },
+            ],
+            tools,
+            stopWhen: stepCountIs(MAX_STEPS),
+          });
+
+          // Stream remediation text — replaces the prior text in the client
+          // (which keeps only the latest text frame).
+          let remediationText = "";
+          for await (const chunk of remediationResult.fullStream) {
+            if (chunk.type === "text-delta") {
+              remediationText += chunk.text;
+              emitText(enqueue, remediationText);
+            } else if (chunk.type === "tool-call") {
+              const copy = TOOL_STATUS_COPY[chunk.toolName] ?? "Correcting…";
+              emitStatus(enqueue, chunk.toolName, statusSeq++, copy);
+            }
+          }
+
+          const [remedSteps, remedUsage] = await Promise.all([
+            remediationResult.steps,
+            remediationResult.totalUsage,
+          ]);
+          remediationToolNames = remedSteps.flatMap((s) =>
+            s.toolCalls.map((tc) => tc.toolName),
+          );
+          remediationDurationMs = Date.now() - remediationStart;
+          remediationCost = computeTurnCost(
+            remedUsage,
+            modelSelection.modelId,
+            modelSelection,
+          );
+          remediated = true;
+
+          // The persisted envoy text is now the remediation, not the original.
+          fullText = remediationText;
         }
 
         const durationMs = Date.now() - startMs;
-        const turnCost = computeTurnCost(usage, modelSelection.modelId, modelSelection);
+        // Combine costs across original + remediation.
+        const baseCost = computeTurnCost(usage, modelSelection.modelId, modelSelection);
+        const turnCost: TurnCost = remediationCost
+          ? {
+              model: baseCost.model,
+              tier: baseCost.tier,
+              inputTokens: baseCost.inputTokens + remediationCost.inputTokens,
+              outputTokens: baseCost.outputTokens + remediationCost.outputTokens,
+              cacheReadTokens: baseCost.cacheReadTokens + remediationCost.cacheReadTokens,
+              cacheWriteTokens: baseCost.cacheWriteTokens + remediationCost.cacheWriteTokens,
+              costUsd: baseCost.costUsd + remediationCost.costUsd,
+            }
+          : baseCost;
+        // Combined tool-call list — original + remediation.
+        const allToolCallNames = remediated
+          ? [...toolCallNames, ...remediationToolNames]
+          : toolCallNames;
 
         // Extract sessionId from any tool result that carries one — used to
         // attach this message to the session card in the feed (threadId).
@@ -181,10 +273,12 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
             ...(threadId ? { threadId } : {}),
             metadata: buildUnifiedMetadata({
               turnCost,
-              toolCallNames,
+              toolCallNames: allToolCallNames,
               modelId: modelSelection.modelId,
               durationMs,
               selfCheck: selfCheckResult,
+              remediated,
+              remediationDurationMs,
             }),
           },
         });
@@ -298,8 +392,12 @@ function buildUnifiedMetadata(params: {
   modelId: string;
   durationMs: number;
   selfCheck: { passed: boolean; flaggedTools?: string[]; reason?: string };
+  /** Layer 4 retry: did this turn run a remediation pass after self-check failed? */
+  remediated?: boolean;
+  /** Wall-clock duration of the remediation streamText call (ms). Null if not remediated. */
+  remediationDurationMs?: number | null;
 }): Prisma.InputJsonValue {
-  const { turnCost, toolCallNames, modelId, durationMs, selfCheck } = params;
+  const { turnCost, toolCallNames, modelId, durationMs, selfCheck, remediated, remediationDurationMs } = params;
 
   // Synthesize moduleGuard.bucket from tool names for corpus continuity.
   // Maps tool name prefixes to logical bucket names understood by the dashboard.
@@ -313,6 +411,7 @@ function buildUnifiedMetadata(params: {
       toolCalls: toolCallNames,
       durationMs,
       selfCheck,
+      ...(remediated ? { remediated: true, remediationDurationMs } : {}),
       cost: {
         inputTokens: turnCost.inputTokens,
         outputTokens: turnCost.outputTokens,
