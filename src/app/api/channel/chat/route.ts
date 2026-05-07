@@ -37,6 +37,7 @@ import {
   shouldForceCalibrateFirstTime,
   CALIBRATE_FOLLOWTHROUGH_LOOKBACK,
 } from "@/lib/onboarding/calibrate-followthrough-override";
+import { runUnifiedAgent } from "@/agent/unified/runner";
 
 
 // Profile + rule + create_bookable_link branches dispatch via runModule
@@ -119,6 +120,29 @@ export async function POST(req: NextRequest) {
       channel = await prisma.channel.create({ data: { userId: safeUser.id } });
     }
     const safeChannel = channel;
+
+    // -----------------------------------------------------------------------
+    // Unified agent flag gate (proposal 2026-05-06).
+    // Set UNIFIED_AGENT_ENABLED=true in Vercel env to route all host turns
+    // through the single-model tool-calling pipeline. Kill switch: flip to
+    // false → ~60s redeploy → back on legacy path. No code changes needed.
+    // -----------------------------------------------------------------------
+    if (process.env.UNIFIED_AGENT_ENABLED === "true") {
+      const timezone =
+        (safeUser.preferences as Record<string, unknown> | null)?.timezone as string | undefined ??
+        "America/Los_Angeles";
+      const stream = runUnifiedAgent({
+        userId: safeUser.id,
+        channelId: safeChannel.id,
+        timezone,
+        userName: safeUser.name ?? null,
+        message,
+        isAdmin: false, // TODO: wire real isAdmin once admin field is on user
+      });
+      return new Response(stream, {
+        headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+      });
+    }
 
     // Count prior envoy messages on this channel — used as the turn-index seed
     // component for copy rotation (§2.2 selection rules, N4 fold). Scoped to

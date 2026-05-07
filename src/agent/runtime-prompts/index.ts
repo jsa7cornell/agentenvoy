@@ -128,6 +128,15 @@ export function dealroomHostComposer(): string {
 // as the "## Negotiation Strategy" section. There is no longer a separate
 // negotiationPlaybook() loader.
 
+// ── Unified agent (collapse classifier + composer, 2026-05-06) ────────────
+export function unifiedAgentSystemPrompt(): string {
+  try {
+    return readFileSync(join(cwd, "src/agent/runtime-prompts/composers/unified-agent.md"), "utf-8");
+  } catch (err) {
+    throw new Error(`[runtime-prompts/index] failed to load composers/unified-agent.md: ${err}`);
+  }
+}
+
 // ── Multi-agent proposal synthesizer (separate feature — /api/negotiator/synthesize) ─
 // NOTE: this is NOT the deal-room negotiator. It's the system prompt for the
 // agent that compares competing AI-agent research outputs and emits a JSON

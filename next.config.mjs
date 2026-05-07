@@ -15,6 +15,7 @@ const nextConfig = {
   outputFileTracingIncludes: {
     "/api/**/*": [
       "./src/agent/runtime-prompts/**/*.md",
+      "./src/agent/unified/**/*.md",
       "./src/lib/negotiator/playbooks/**/*.md",
     ],
   },
