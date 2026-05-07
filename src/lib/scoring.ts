@@ -645,7 +645,6 @@ function scoreSlot(
   // date-scoped BlockedWindow matching. todayStr is today's date — used only
   // for expiry checks on recurring/ongoing windows.
   const slotDateStr = getLocalDateStr(slotStart, tz);
-  const todayStr = getLocalDateStr(new Date(), tz);
 
   // Open-slot base. blockCost / firmness are filled in per return path.
   const base: ScoredSlot = {
