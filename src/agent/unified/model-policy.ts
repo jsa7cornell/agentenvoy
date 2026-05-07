@@ -46,6 +46,12 @@ export type ModelSelection = {
 
 export type TurnContext = {
   messageLength: number;
+  /** Number of tool calls in the most recent envoy turn. Used to detect
+   *  multi-step flow in progress; we keep Sonnet for those even on short turns. */
+  priorTurnToolCount?: number;
+  /** Whether any prior envoy turn in the loaded history made a tool call.
+   *  Conservative gate to avoid Haiku stepping into the middle of a tool sequence. */
+  priorToolUseInHistory?: boolean;
   // Reserved for future escalation signals (multi-session, deep rule edits, etc.)
   forceDeep?: boolean;
   forceFast?: boolean;
@@ -54,9 +60,18 @@ export type TurnContext = {
 /**
  * Selects the appropriate model tier for a turn.
  *
- * v1 heuristics: conservative. Default (Sonnet 4.6) almost always.
- * Deep (Opus 4.7) only for explicitly long messages indicating complex intent.
- * Fast (Haiku) reserved for future sub-tasks (e.g. self-check pass).
+ * Tier policy (v2 — cost-reduction PR 2026-05-07):
+ *   - **Opus** when the message is long (>500 chars) or `forceDeep`. Genuinely
+ *     complex intents that benefit from deeper reasoning.
+ *   - **Haiku** when the message is short (≤200 chars) AND there's no recent
+ *     multi-step flow. Confirmations, simple acks, single-shot reads — Haiku
+ *     handles these fine and costs ~3x less.
+ *   - **Sonnet** for everything else (default tier — most tool-using turns).
+ *
+ * Why the multi-step gate matters: if a user says "yes" mid-flow after a
+ * `LOAD_active_sessions` proposal, dropping to Haiku risks losing tool-routing
+ * accuracy for the follow-up. Stay on Sonnet whenever there's a tool sequence
+ * in progress.
  */
 export function selectModelForTurn(ctx: TurnContext): ModelSelection {
   if (ctx.forceDeep) {
@@ -65,12 +80,26 @@ export function selectModelForTurn(ctx: TurnContext): ModelSelection {
   if (ctx.forceFast) {
     return { tier: "fast", modelId: MODEL_TIERS.fast, reason: "forced-fast" };
   }
-  // Escalate to Opus for genuinely long / complex messages
+  // Escalate to Opus for genuinely long / complex messages.
   if (ctx.messageLength > 500) {
     return {
       tier: "deep",
       modelId: MODEL_TIERS.deep,
       reason: "long-message-escalation",
+    };
+  }
+  // Drop to Haiku for short turns when no multi-step flow is in progress.
+  // The 200-char threshold catches confirmations ("go for it", "yes please"),
+  // simple acks, and single-shot questions while leaving room for short
+  // create-link asks ("schedule coffee with Susan tomorrow") on Sonnet.
+  const noMultiStep =
+    !ctx.priorTurnToolCount &&
+    !ctx.priorToolUseInHistory;
+  if (ctx.messageLength <= 200 && noMultiStep) {
+    return {
+      tier: "fast",
+      modelId: MODEL_TIERS.fast,
+      reason: "short-no-multistep",
     };
   }
   return { tier: "default", modelId: MODEL_TIERS.default, reason: "default" };
@@ -88,10 +117,18 @@ export type TurnCost = {
 
 /**
  * Computes per-turn cost from Vercel AI SDK usage object.
- * `usage.promptTokens` = input (non-cached) + cache-write.
- * Anthropic does not currently break these out in the AI SDK response, so we
- * treat the full promptTokens as input cost (slight overcount on cache-write
- * turns). Will refine if SDK exposes granular cache fields.
+ *
+ * The SDK's `usage.inputTokens` is the TOTAL prompt tokens including cache
+ * read/write portions. We split out cache reads/writes so each is priced at
+ * its own rate, and bill the remainder as non-cached input.
+ *
+ * Anthropic prompt caching pricing (per Anthropic docs):
+ *   - cache-write tokens: same rate as input × 1.25
+ *   - cache-read tokens: same rate as input × 0.1
+ *   - non-cached input: standard input rate
+ *
+ * Cache-tracking enabled 2026-05-07 in the cost-reduction PR; prior turns'
+ * persisted cost rows show non-cached pricing (cacheReadTokens=0).
  */
 export function computeTurnCost(
   usage: LanguageModelUsage,
@@ -99,12 +136,13 @@ export function computeTurnCost(
   selection: ModelSelection,
 ): TurnCost {
   const pricing = MODEL_PRICING[modelId] ?? MODEL_PRICING[MODEL_TIERS.default];
-  const inputTokens = usage.inputTokens ?? 0;
+  const totalInput = usage.inputTokens ?? 0;
   const outputTokens = usage.outputTokens ?? 0;
-
-  // Cache fields are not yet exposed by the Vercel AI SDK wrapper — zero for now.
-  const cacheReadTokens = 0;
-  const cacheWriteTokens = 0;
+  const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens ?? 0;
+  const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+  // Non-cached input is whatever's left after subtracting cache reads/writes.
+  // Clamp to 0 in case the SDK reports inconsistent totals.
+  const inputTokens = Math.max(0, totalInput - cacheReadTokens - cacheWriteTokens);
 
   const costUsd =
     (inputTokens / 1_000_000) * pricing.inputPer1M +

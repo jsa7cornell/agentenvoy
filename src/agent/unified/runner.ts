@@ -62,9 +62,6 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         // Emit thinking frame so UI shows activity.
         emitStatus(enqueue, "thinking", 1);
 
-        // Select model tier.
-        const modelSelection = selectModelForTurn({ messageLength: ctx.message.length });
-
         // Build tool surface for this request (with userMessage for Layer 2 grounding).
         const tools = buildUnifiedTools({
           userId: ctx.userId,
@@ -73,15 +70,33 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           userMessage: ctx.message,
         });
 
-        // Load recent conversation history.
-        const recentMessages = await loadRecentHistory(ctx.channelId);
+        // Load recent conversation history (now also returns multi-step signal).
+        const { messages: recentMessages, priorToolUseInHistory } =
+          await loadRecentHistory(ctx.channelId);
+
+        // Select model tier — Haiku for short single-turn cases, Sonnet otherwise.
+        const modelSelection = selectModelForTurn({
+          messageLength: ctx.message.length,
+          priorToolUseInHistory,
+        });
 
         // Stream the unified agent response.
+        // Anthropic prompt caching: mark the system prompt as ephemeral so
+        // every turn's static prefix (system + tool definitions) hits the
+        // cache. 5-min TTL fits typical conversational pacing; cache write
+        // happens on first turn, then all reads in the next 5 min are ~10x
+        // cheaper. See proposal 2026-05-07_ua-cost-reduction.
         const startMs = Date.now();
         const result = streamText({
           model: envoyModel(modelSelection.modelId),
-          system: SYSTEM_PROMPT,
           messages: [
+            {
+              role: "system",
+              content: SYSTEM_PROMPT,
+              providerOptions: {
+                anthropic: { cacheControl: { type: "ephemeral" } },
+              },
+            },
             ...recentMessages,
             { role: "user", content: ctx.message },
           ],
@@ -235,20 +250,34 @@ function emitText(enqueue: EnqueueFn, content: string): void {
 
 async function loadRecentHistory(
   channelId: string,
-): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+): Promise<{
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  priorToolUseInHistory: boolean;
+}> {
+  // Window cut from 20 → 10 (cost-reduction PR 2026-05-07). 10 turns covers
+  // the typical multi-turn conversation; longer-tail context is rarely
+  // load-bearing and the savings are ~1,500 tokens per turn.
   const rows = await prisma.channelMessage.findMany({
     where: { channelId },
     orderBy: { createdAt: "desc" },
-    take: 20,
-    select: { role: true, content: true },
+    take: 10,
+    select: { role: true, content: true, metadata: true },
   });
   // Reverse so oldest-first, map envoy → assistant for AI SDK.
-  return rows
+  const messages = rows
     .reverse()
     .map((r) => ({
       role: r.role === "envoy" ? ("assistant" as const) : ("user" as const),
       content: r.content,
     }));
+  // Detect whether any envoy turn in the window made a tool call. Used by the
+  // tier-selection heuristic to keep Sonnet engaged for multi-step flows.
+  const priorToolUseInHistory = rows.some((r) => {
+    if (r.role !== "envoy") return false;
+    const md = r.metadata as { unifiedTurn?: { toolCalls?: string[] } } | null;
+    return Array.isArray(md?.unifiedTurn?.toolCalls) && md.unifiedTurn.toolCalls.length > 0;
+  });
+  return { messages, priorToolUseInHistory };
 }
 
 function buildUnifiedMetadata(params: {

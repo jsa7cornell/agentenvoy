@@ -8,13 +8,29 @@ import {
 } from "@/agent/unified/model-policy";
 
 describe("selectModelForTurn", () => {
-  it("returns default (Sonnet) for short messages", () => {
+  // v2 policy (cost-reduction PR 2026-05-07):
+  //   short (≤200) + no multi-step → fast (Haiku)
+  //   long (>500) → deep (Opus)
+  //   else → default (Sonnet)
+
+  it("returns fast (Haiku) for short messages with no multi-step in progress", () => {
     const r = selectModelForTurn({ messageLength: 50 });
-    expect(r.tier).toBe("default");
-    expect(r.modelId).toBe(MODEL_TIERS.default);
+    expect(r.tier).toBe("fast");
+    expect(r.modelId).toBe(MODEL_TIERS.fast);
+    expect(r.reason).toBe("short-no-multistep");
   });
 
-  it("returns default for messages at the escalation boundary (500)", () => {
+  it("returns default (Sonnet) for short messages when prior tool use is in history", () => {
+    const r = selectModelForTurn({ messageLength: 50, priorToolUseInHistory: true });
+    expect(r.tier).toBe("default");
+  });
+
+  it("returns default for medium messages above the Haiku ceiling (>200, ≤500)", () => {
+    const r = selectModelForTurn({ messageLength: 201 });
+    expect(r.tier).toBe("default");
+  });
+
+  it("returns default for messages at the deep-escalation boundary (500)", () => {
     const r = selectModelForTurn({ messageLength: 500 });
     expect(r.tier).toBe("default");
   });
@@ -32,7 +48,7 @@ describe("selectModelForTurn", () => {
   });
 
   it("forceFast overrides default selection", () => {
-    const r = selectModelForTurn({ messageLength: 100, forceFast: true });
+    const r = selectModelForTurn({ messageLength: 300, forceFast: true });
     expect(r.tier).toBe("fast");
     expect(r.modelId).toBe(MODEL_TIERS.fast);
     expect(r.reason).toBe("forced-fast");
@@ -45,7 +61,8 @@ describe("selectModelForTurn", () => {
 });
 
 describe("computeTurnCost", () => {
-  const defaultSelection = selectModelForTurn({ messageLength: 50 });
+  // Use a medium-length message to land on Sonnet for the cost-arithmetic tests.
+  const defaultSelection = selectModelForTurn({ messageLength: 250 });
 
   it("computes zero cost for zero-token usage", () => {
     const cost = computeTurnCost(

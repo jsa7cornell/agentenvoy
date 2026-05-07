@@ -98,9 +98,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const LOAD_calendar_context = tool({
     description:
-      "Load the host's calendar: upcoming events, busy blocks, available slots. " +
-      "Call before answering ANY question about times or scheduling. " +
-      "Do NOT call for preference edits, rule changes, or link management.",
+      "Load calendar: upcoming events, busy blocks, free slots. " +
+      "Call before any time/scheduling question. NOT for prefs/rules/links.",
     inputSchema: z.object({
       lookaheadDays: z.number().int().min(1).max(60).default(14)
         .describe("Days of calendar data to load (default 14, max 60)."),
@@ -111,19 +110,16 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const LOAD_active_sessions = tool({
     description:
-      "Load the host's active (non-archived) negotiation sessions and their links. " +
-      "Call before any action that references a session or link by ID/code — archive, " +
-      "update_time, update_format, hold_slot, personal_link_update, etc. " +
-      "Do NOT fabricate session IDs or link codes; always ground in this tool's output.",
+      "Load active sessions + their links. Call before any session/link write. " +
+      "Never fabricate session IDs or link codes; ground in this output.",
     inputSchema: z.object({}),
     execute: async () => loadActiveSessions(ctx.userId),
   });
 
   const LOAD_preferences = tool({
     description:
-      "Load the host's preferences, availability rules (including bookable links), and knowledge fields. " +
-      "Call before editing rules, bookable links, primary link config, or knowledge. " +
-      "Returns the full rule list with IDs and bookable link codes — required to avoid fabricating identifiers.",
+      "Load preferences, rules (incl. bookable links with codes/IDs), and knowledge. " +
+      "Call before any rule/bookable/primary write. Returns real IDs — never fabricate.",
     inputSchema: z.object({}),
     execute: async () => loadPreferences(ctx.userId),
   });
@@ -134,18 +130,9 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const personal_link_create = tool({
     description:
-      "Create a PERSONAL LINK for one specific named guest. " +
-      "Use for: 'grab time with Susan', 'schedule with John', '1:1 with Sarah', 'set up Marcus's onboarding'. " +
-      "Do NOT use for shareable templates anyone can book — use bookable_link_create. " +
-      "Do NOT use for multi-person events — use group_event_create. " +
-      "inviteeName and activity are required.\n\n" +
-      "SEEDING: by default the host's Primary link seeds availability/format/duration. " +
-      "If the host names a different bookable link ('Office Hours meeting with Susie'), call LOAD_preferences " +
-      "to find the link's code, then pass seedFromBookableCode.\n\n" +
-      "RECURRENCE: set the recurrence object only if the host described an ongoing 1:1 with this person.\n\n" +
-      "ONE-SHOT (autoConfirm): set autoConfirm + inviteeEmail when the host gives an exact date+time AND " +
-      "guest email AND no optionality phrasing ('might', 'flexible', 'or'). Handler creates the link AND " +
-      "commits the slot to GCal. Do NOT use autoConfirm without both dateTime and inviteeEmail.",
+      "Personal link for ONE named guest. inviteeName + activity required. " +
+      "Seeds from Primary by default; pass seedFromBookableCode for named bookable seed. " +
+      "Set recurrence for ongoing 1:1. Set autoConfirm + inviteeEmail only with exact date+time and no optionality.",
     inputSchema: z.object({
       activity: z.string().describe("Meeting type. E.g. 'intro call', 'coffee', 'coaching'. Required."),
       inviteeName: z.string().describe("Guest's name. Required for personal links."),
@@ -181,10 +168,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const personal_link_update = tool({
     description:
-      "Edit an existing personal link. Requires code (the link's short code) OR sessionId. " +
-      "Call LOAD_active_sessions first to get the real code. Do NOT fabricate codes. " +
-      "availability[] and blockedRanges[] are COMPLETE replacement arrays. " +
-      "Only include fields that are actually changing (patch hygiene).",
+      "Edit a personal link. Requires code or sessionId from LOAD_active_sessions. " +
+      "availability[] and blockedRanges[] are full replacements. Only pass changing fields.",
     inputSchema: z.object({
       code: z.string().optional().describe("Link short code (preferred identifier)."),
       sessionId: z.string().optional().describe("Session ID to resolve the link (alternative to code)."),
@@ -209,9 +194,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const personal_link_archive = tool({
     description:
-      "Archive a personal link — hides it from the host's view. " +
-      "Existing bookings remain intact. Reversible via personal_link_unarchive. " +
-      "Requires code or sessionId from LOAD_active_sessions.",
+      "Archive a personal link. Reversible via personal_link_unarchive. Requires code or sessionId.",
     inputSchema: z.object({
       code: z.string().optional().describe("Link short code."),
       sessionId: z.string().optional().describe("Session ID to resolve the link."),
@@ -220,9 +203,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const personal_link_unarchive = tool({
-    description:
-      "Restore a previously archived personal link. " +
-      "Requires code or sessionId.",
+    description: "Restore an archived personal link. Requires code or sessionId.",
     inputSchema: z.object({
       code: z.string().optional().describe("Link short code."),
       sessionId: z.string().optional().describe("Session ID to resolve the link."),
@@ -236,17 +217,9 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const bookable_link_create = tool({
     description:
-      "Create a BOOKABLE LINK — a shareable, reusable scheduling template that shows up in " +
-      "'My Bookable Links' and any guest can use to self-book. " +
-      "Use for: 'music lessons link', 'office hours', 'coaching sessions', 'sales calls', " +
-      "any named link the host wants to share with multiple people over time. " +
-      "Do NOT use for one-specific-guest scheduling — use personal_link_create. " +
-      "Do NOT use for group events — use group_event_create. " +
-      "name is required.\n\n" +
-      "RECURRENCE: set the recurrence object when the host wants every booking through this link to " +
-      "spawn a recurring series (e.g. 'recurring music lessons link'). The parent template carries " +
-      "the recurrence intent; child bookings inherit it. Omit recurrence for one-off-per-booking links " +
-      "(office hours, sales calls).",
+      "Bookable link — shareable template anyone can self-book. Shows in 'My Bookable Links'. " +
+      "Use for: 'music lessons link', 'office hours', 'sales calls'. name required. " +
+      "Set recurrence when each booking should spawn a series (parent template; children inherit).",
     inputSchema: z.object({
       name: z.string()
         .describe("Display name shown in My Bookable Links. E.g. 'Music Lessons', 'Office Hours'. Per-host unique."),
@@ -293,9 +266,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const bookable_link_update = tool({
     description:
-      "Edit an existing bookable link's settings. " +
-      "Requires id (the rule ID) — call LOAD_preferences first to get the real ID. " +
-      "Do NOT fabricate IDs. Only include fields that are actually changing.",
+      "Edit a bookable link. Requires rule id from LOAD_preferences. Only pass changing fields.",
     inputSchema: z.object({
       id: z.string().describe("Exact rule ID from LOAD_preferences output."),
       name: z.string().optional().describe("Rename the bookable link."),
@@ -334,9 +305,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const bookable_link_archive = tool({
     description:
-      "Archive a bookable link — hides it from My Bookable Links and the agent's view. " +
-      "Existing bookings remain intact. Reversible via bookable_link_unarchive. " +
-      "Requires the rule ID from LOAD_preferences.",
+      "Archive a bookable link. Reversible via bookable_link_unarchive. Requires rule id from LOAD_preferences.",
     inputSchema: z.object({
       id: z.string().describe("Exact rule ID from LOAD_preferences output."),
     }),
@@ -347,9 +316,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const bookable_link_unarchive = tool({
-    description:
-      "Restore a previously archived bookable link. " +
-      "Requires the rule ID from LOAD_preferences.",
+    description: "Restore an archived bookable link. Requires rule id from LOAD_preferences.",
     inputSchema: z.object({
       id: z.string().describe("Exact rule ID from LOAD_preferences output."),
     }),
@@ -365,14 +332,9 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const group_event_create = tool({
     description:
-      "Create a GROUP EVENT for multiple specific guests (renamed from group_coordinate). " +
-      "Use whenever the host names two or more guests for a single event: " +
-      "'team dinner', 'founders sync', 'interview panel', 'group workshop'. " +
-      "Do NOT use for one specific guest — use personal_link_create. " +
-      "Do NOT use for shareable templates — use bookable_link_create. " +
-      "Required: topic (event title), inviteeNames (all participants), windows (date range descriptions). " +
-      "Call ONCE after the host confirms. " +
-      "Recurrence and autoConfirm are NOT supported on group events in v1.",
+      "Group event for multiple named guests (team dinner, founders sync, panel). " +
+      "topic, inviteeNames[], windows[] required. " +
+      "No recurrence or autoConfirm on group events.",
     inputSchema: z.object({
       topic: z.string().describe("Event title or occasion (e.g. 'Founder Dinner')."),
       inviteeNames: z.array(z.string()).min(1).describe("Names or emails of all participants."),
@@ -383,9 +345,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const group_event_update = tool({
-    description:
-      "Edit an existing group event — change topic, invitees, or candidate windows. " +
-      "Requires sessionId from LOAD_active_sessions.",
+    description: "Edit a group event (topic / invitees / windows). Requires sessionId.",
     inputSchema: z.object({
       sessionId: z.string(),
       topic: z.string().optional(),
@@ -397,9 +357,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const group_event_archive = tool({
-    description:
-      "Archive a group event — hides it from the host's view. " +
-      "Reversible via group_event_unarchive. Requires sessionId.",
+    description: "Archive a group event. Reversible via group_event_unarchive. Requires sessionId.",
     inputSchema: z.object({
       sessionId: z.string(),
     }),
@@ -408,8 +366,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const group_event_unarchive = tool({
-    description:
-      "Restore a previously archived group event. Requires sessionId.",
+    description: "Restore an archived group event. Requires sessionId.",
     inputSchema: z.object({
       sessionId: z.string(),
     }),
@@ -423,12 +380,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const primary_link_update = tool({
     description:
-      "Update the host's Primary link — the default 'meet with me' link at /meet/{slug}. " +
-      "Single source of truth for Primary's name, format, duration, availability windows, " +
-      "buffer, location, phone, video provider, Zoom link, and guestPicks. " +
-      "Pass only the fields that change (patch hygiene). " +
-      "Renaming Primary is just `name` on this same tool. " +
-      "Call LOAD_preferences first to see current values when changing existing fields.",
+      "Update the Primary link. Single source for name, format, duration, availability, " +
+      "buffer, location, phone, videoProvider, zoomLink, guestPicks. Pass only changing fields.",
     inputSchema: z.object({
       name: z.string().optional().describe("Rename the Primary link (was 'Primary link' by default)."),
       format: z.enum(["video", "phone", "in-person"]).optional(),
@@ -456,9 +409,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const session_cancel = tool({
     description:
-      "Cancel a negotiation session. Sends a cancellation notice to the guest. " +
-      "Requires sessionId — call LOAD_active_sessions first to confirm it. " +
-      "Strict: irreversible. Do NOT call without explicit host directive.",
+      "Cancel a session and notify the guest. Strict: irreversible. " +
+      "Requires sessionId from LOAD_active_sessions. Only with explicit host directive.",
     inputSchema: z.object({
       sessionId: z.string().describe("ID of the session to cancel."),
       reason: z.string().optional().describe("Optional cancellation reason (not surfaced to guest)."),
@@ -468,10 +420,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const session_archive = tool({
-    description:
-      "Archive a single negotiation session (hides it from the active list). " +
-      "Use for concluded or stale sessions. Reversible (use session_unarchive). " +
-      "Requires sessionId — call LOAD_active_sessions first.",
+    description: "Archive a session (reversible via session_unarchive). Requires sessionId.",
     inputSchema: z.object({
       sessionId: z.string().describe("ID of the session to archive."),
     }),
@@ -480,9 +429,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const session_unarchive = tool({
-    description:
-      "Unarchive a previously archived session, making it active again. " +
-      "Requires sessionId.",
+    description: "Restore an archived session. Requires sessionId.",
     inputSchema: z.object({
       sessionId: z.string().describe("ID of the session to unarchive."),
     }),
@@ -492,10 +439,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const session_archive_bulk = tool({
     description:
-      "Archive multiple sessions at once by filter. " +
-      "Valid filters: 'unconfirmed' (active/proposed/escalated), 'expired', 'cancelled', 'all'. " +
-      "Strict: affects many records. Only call when the host gives an explicit bulk directive " +
-      "(e.g. 'clean up all my old sessions', 'archive everything unconfirmed').",
+      "Archive sessions in bulk by filter (unconfirmed/expired/cancelled/all). " +
+      "Strict: only with explicit bulk directive ('clean up all', 'archive everything').",
     inputSchema: z.object({
       filter: z.enum(["unconfirmed", "expired", "cancelled", "all"])
         .describe("Which sessions to archive."),
@@ -505,8 +450,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const session_update_format = tool({
     description:
-      "Change the meeting format for a session (video, phone, in-person). " +
-      "Requires sessionId. For confirmed sessions, posts a gcal_update_proposal to the feed.",
+      "Change a session's format (video/phone/in-person). Requires sessionId. " +
+      "Confirmed sessions get a gcal_update_proposal posted to the feed.",
     inputSchema: z.object({
       sessionId: z.string(),
       format: z.enum(["video", "phone", "in-person"]).describe("New meeting format."),
@@ -517,10 +462,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const session_update_time = tool({
     description:
-      "Change the proposed or confirmed time for a session. " +
-      "dateTime MUST include UTC offset (e.g. '2026-05-10T14:00:00-07:00'). " +
-      "Never compute timezone offsets — use the value from OFFERABLE SLOTS context. " +
-      "Requires sessionId. At least one of dateTime or duration must be provided.",
+      "Change a session's time/duration. dateTime MUST include UTC offset. " +
+      "Use OFFERABLE SLOTS values; don't compute offsets. Requires sessionId + dateTime or duration.",
     inputSchema: z.object({
       sessionId: z.string(),
       dateTime: z.string().optional()
@@ -536,8 +479,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const session_update_location = tool({
     description:
-      "Set or update the meeting location for a session. " +
-      "For confirmed sessions, posts a gcal_update_proposal to the feed.",
+      "Set/update a session's location. Confirmed sessions get a gcal_update_proposal.",
     inputSchema: z.object({
       sessionId: z.string(),
       location: z.string().describe("Location string (address, place name, or video URL)."),
@@ -548,9 +490,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const session_hold_slot = tool({
     description:
-      "Create a tentative calendar hold for a proposed time slot in a session. " +
-      "Use when the host wants to protect a slot while negotiation is in progress. " +
-      "Strict: writes to the host's calendar. Requires sessionId, slotStart, slotEnd.",
+      "Tentative calendar hold for a session slot. Strict: writes to host's calendar. " +
+      "Requires sessionId, slotStart, slotEnd.",
     inputSchema: z.object({
       sessionId: z.string(),
       slotStart: z.string().describe("ISO 8601 datetime for hold start."),
@@ -563,9 +504,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const session_release_hold = tool({
-    description:
-      "Release a tentative calendar hold created by session_hold_slot. " +
-      "Call when the host confirms, cancels, or wants to free the slot.",
+    description: "Release a calendar hold created by session_hold_slot.",
     inputSchema: z.object({
       sessionId: z.string(),
     }),
@@ -574,9 +513,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const session_lock_duration = tool({
-    description:
-      "Lock the meeting duration for a specific session (overrides link default). " +
-      "Use when the host sets a duration mid-negotiation for one meeting.",
+    description: "Lock a session's duration (overrides link default).",
     inputSchema: z.object({
       sessionId: z.string(),
       durationMinutes: z.number().int().positive()
@@ -587,9 +524,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const session_lock_buffer = tool({
-    description:
-      "Lock the buffer (padding) minutes for a specific session. " +
-      "Use when the host sets a buffer for one meeting, not globally.",
+    description: "Lock buffer minutes on a session (per-meeting, not global).",
     inputSchema: z.object({
       sessionId: z.string(),
       bufferMinutes: z.number().int().min(0)
@@ -600,9 +535,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const session_lock_activity_location = tool({
-    description:
-      "Lock the activity and/or location for a specific session mid-negotiation. " +
-      "Use when host picks where to meet for this one meeting (not globally).",
+    description: "Lock activity/location on a session (per-meeting, not global).",
     inputSchema: z.object({
       sessionId: z.string(),
       activity: z.string().optional().describe("Activity name to lock (e.g. 'coffee')."),
@@ -613,9 +546,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const session_save_guest_info = tool({
-    description:
-      "Save guest contact information (name, email, notes) to a session. " +
-      "Call when the host provides guest details mid-negotiation.",
+    description: "Save guest name/email/notes onto a session.",
     inputSchema: z.object({
       sessionId: z.string(),
       guestName: z.string().optional(),
@@ -660,9 +591,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const rule_add = tool({
     description:
-      "Add a new availability rule (block, protect, allow, buffer, prefer, limit, location, no_in_person). " +
-      "Do NOT use for creating bookable links — use bookable_link_create. " +
-      "Call LOAD_preferences first to see existing rules and avoid duplicates.",
+      "Add an availability rule (block/protect/allow/buffer/prefer/limit/location/no_in_person). " +
+      "NOT for bookable links — use bookable_link_create. Load preferences first to avoid duplicates.",
     inputSchema: z.object({
       rule: ruleBodySchema.describe("Rule body to add."),
     }),
@@ -671,9 +601,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const rule_update = tool({
-    description:
-      "Update an existing availability rule by its ID. " +
-      "Call LOAD_preferences first to get the real rule ID — never fabricate IDs.",
+    description: "Update a rule by ID. Load preferences first; never fabricate IDs.",
     inputSchema: z.object({
       id: z.string().describe("Exact rule ID from LOAD_preferences output."),
       rule: ruleBodySchema.describe("Fields to update on the rule."),
@@ -683,10 +611,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const rule_remove = tool({
-    description:
-      "Remove an availability rule permanently. " +
-      "Strict: irreversible. Call LOAD_preferences first to confirm the ID exists. " +
-      "Do NOT remove without explicit host directive.",
+    description: "Remove a rule. Strict: irreversible. Requires id; explicit host directive.",
     inputSchema: z.object({
       id: z.string().describe("Exact rule ID from LOAD_preferences output."),
     }),
@@ -699,9 +624,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   // ---------------------------------------------------------------------------
 
   const prefs_update_appearance = tool({
-    description:
-      "Update the host's UI appearance preference: theme mode (light, dark, or auto). " +
-      "Use when host says 'switch to dark mode', 'use light theme', 'auto theme', etc.",
+    description: "Update theme mode (light/dark/auto).",
     inputSchema: z.object({
       themeMode: z.enum(["light", "dark", "auto"])
         .describe("'auto' computes light/dark from local time."),
@@ -711,8 +634,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const prefs_update_timezone = tool({
     description:
-      "Update the host's timezone. Strict: changes how all times render across the system. " +
-      "Use only when host explicitly states they're changing timezone (e.g. 'I moved to Berlin', 'set my timezone to Eastern').",
+      "Update IANA timezone. Strict: affects how all times render. " +
+      "Only with explicit host directive ('moved to Berlin', 'set my timezone to Eastern').",
     inputSchema: z.object({
       timezone: z.string()
         .describe("IANA timezone identifier (e.g. 'America/Los_Angeles', 'Europe/Berlin')."),
@@ -722,11 +645,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const knowledge_write = tool({
     description:
-      "Update the host's persistent knowledge or situational notes used by the scheduling agent. " +
-      "persistent = long-lived facts about the host (location, preferences, context). " +
-      "situational = short-term schedule notes ('in NYC this week', 'light week'). " +
-      "blockedWindows = date/time blocks to avoid (conferences, trips). " +
-      "currentLocation = where the host is now (auto-clears after 'until' date).",
+      "Save host knowledge. persistent=long-term facts; situational=short-term notes; " +
+      "blockedWindows=date/time blocks; currentLocation=where host is now.",
     inputSchema: z.object({
       persistent: z.string().optional()
         .describe("Persistent background knowledge about the host."),
