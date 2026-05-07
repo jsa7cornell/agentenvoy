@@ -29,15 +29,15 @@
 
 import { useTheme } from "next-themes";
 import { useEffect } from "react";
-import { resolveTimeOfDayTheme, hasNoStoredThemePreference } from "@/lib/time-of-day-theme";
 
+// Guest surfaces always use light mode — not logged in means no theme preference
+// should ever push dark on them. The time-of-day default was repeatedly causing
+// guests to land in dark mode after 18:00; always-light is the correct rule.
 export function GuestLightTheme() {
   const { setTheme } = useTheme();
 
   useEffect(() => {
-    if (hasNoStoredThemePreference()) {
-      setTheme(resolveTimeOfDayTheme());
-    }
+    setTheme("light");
   }, [setTheme]);
 
   return null;

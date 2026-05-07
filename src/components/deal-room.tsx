@@ -332,6 +332,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [confirmFormExpanded, setConfirmFormExpanded] = useState(false);
   const [formGuestName, setFormGuestName] = useState("");
   const [formGuestEmail, setFormGuestEmail] = useState("");
+  const [formGuestPhone, setFormGuestPhone] = useState("");
   const [formGuestNote, setFormGuestNote] = useState("");
   // Triggers a longer celebratory glow on the top event card right after
   // confirm. Kept separate from statusAnimating (1.5s, existing status pulse).
@@ -2809,7 +2810,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                     {
                       guestName: formGuestName.trim(),
                       guestEmail: formGuestEmail.trim(),
-                      guestNote: formGuestNote.trim() || undefined,
+                      guestNote: [formGuestPhone.trim() ? `Phone: ${formGuestPhone.trim()}` : null, formGuestNote.trim() || null].filter(Boolean).join("\n") || undefined,
                     },
                   );
                 } else {
@@ -2862,9 +2863,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (!canSubmit) return;
             handleConfirm(
               { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effective.location },
-              { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), guestNote: formGuestNote.trim() || undefined }
+              { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), guestNote: [formGuestPhone.trim() ? `Phone: ${formGuestPhone.trim()}` : null, formGuestNote.trim() || null].filter(Boolean).join("\n") || undefined }
             );
           };
+          const metaParts = [
+            `\u{1F4C5} ${dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: slotTimezone })}`,
+            `\u{1F550} ${dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: slotTimezone })} · ${formatDuration(effective.duration)}`,
+            `${getMeetingEmoji(effective.format, null) || "\u{1F550}"} ${effective.format.charAt(0).toUpperCase() + effective.format.slice(1)}`,
+            ...(effective.location ? [`\u{1F4CD} ${effective.location}`] : []),
+          ];
           return (
             <div className="flex justify-start">
               {/* Pick-pulse: one-shot emerald box-shadow pulse that runs when
@@ -2877,84 +2884,99 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   `pendingProposal` so the pulse only fires after a picker
                   click — NOT for the legacy CONFIRMATION_PROPOSAL render
                   path that mounts this same card from a non-picker source. */}
-              <div className={`max-w-[85%] bg-emerald-900/20 border border-emerald-700/50 rounded-xl p-4 space-y-3 ${pendingProposal ? "pick-pulse-once" : ""}`}>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                  {pendingProposal ? "Your pick" : "Proposed meeting"}
-                </div>
-                <div className="space-y-1 text-sm text-primary">
-                  <p>&#128197; {dt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: slotTimezone })}</p>
-                  <p>&#128336; {dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: slotTimezone })} ({formatDuration(effective.duration)})</p>
-                  <p>{getMeetingEmoji(effective.format, null) || "🕐"} {effective.format.charAt(0).toUpperCase() + effective.format.slice(1)}</p>
-                  {effective.location && <p>&#128205; {effective.location}</p>}
+              <div className={`w-full bg-emerald-900/20 border border-emerald-700/50 rounded-xl px-3 pt-2.5 pb-3 space-y-2 ${pendingProposal ? "pick-pulse-once" : ""}`}>
+                {/* Header: "Your Pick:" label + inline meeting meta */}
+                <div className="flex items-baseline gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 shrink-0">
+                    {pendingProposal ? "Your Pick:" : "Proposed Meeting:"}
+                  </span>
+                  <span className="text-xs text-secondary">{metaParts.join("  ·  ")}</span>
                 </div>
                 {inPast && (
                   <p className="text-xs text-amber-400">This time is in the past. Pick another from the calendar.</p>
                 )}
                 {confirmFormExpanded && (
-                  <div className="space-y-2 pt-2 border-t border-emerald-700/30">
-                    <div>
-                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Your name</label>
-                      <input
-                        type="text"
-                        value={formGuestName}
-                        onChange={(e) => setFormGuestName(e.target.value)}
-                        autoComplete="name"
-                        className="w-full px-3 py-2 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500"
-                        placeholder="Jane Doe"
-                      />
+                  <div className="pt-2 border-t border-emerald-700/30 space-y-1.5">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Name</label>
+                        <input
+                          type="text"
+                          value={formGuestName}
+                          onChange={(e) => setFormGuestName(e.target.value)}
+                          autoComplete="name"
+                          className="w-full px-2.5 py-1.5 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500"
+                          placeholder="Jane Doe"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Email</label>
+                        <input
+                          type="email"
+                          value={formGuestEmail}
+                          onChange={(e) => setFormGuestEmail(e.target.value)}
+                          autoComplete="email"
+                          className="w-full px-2.5 py-1.5 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500"
+                          placeholder="jane@example.com"
+                        />
+                      </div>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Your email</label>
+                      <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">
+                        Phone <span className="text-muted font-normal normal-case tracking-normal">(optional)</span>
+                      </label>
                       <input
-                        type="email"
-                        value={formGuestEmail}
-                        onChange={(e) => setFormGuestEmail(e.target.value)}
-                        autoComplete="email"
-                        className="w-full px-3 py-2 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500"
-                        placeholder="jane@example.com"
+                        type="tel"
+                        value={formGuestPhone}
+                        onChange={(e) => setFormGuestPhone(e.target.value)}
+                        autoComplete="tel"
+                        className="w-full px-2.5 py-1.5 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500"
+                        placeholder="+1 (555) 000-0000"
                       />
                     </div>
                     <div>
                       <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">
-                        Anything else to share? <span className="text-muted font-normal normal-case tracking-normal">(optional)</span>
+                        Anything else? <span className="text-muted font-normal normal-case tracking-normal">(optional)</span>
                       </label>
                       <textarea
                         value={formGuestNote}
                         onChange={(e) => setFormGuestNote(e.target.value)}
                         rows={2}
                         maxLength={500}
-                        className="w-full px-3 py-2 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500 resize-none"
-                        placeholder="Dial-in number, agenda notes, anything the other person should know…"
+                        className="w-full px-2.5 py-1.5 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500 resize-none"
+                        placeholder="Agenda notes, anything the other person should know…"
                       />
                     </div>
                   </div>
                 )}
-                <button
-                  onClick={clickConfirmButton}
-                  disabled={isConfirming || inPast || (confirmFormExpanded && !canSubmit)}
-                  className="w-full mt-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-xl transition"
-                >
-                  {isConfirming ? "Confirming..." : confirmFormExpanded ? "Confirm" : "Confirm this time"}
-                </button>
-                <button
-                  onClick={() => {
-                    if (pendingProposal) {
-                      setPendingProposal(null);
-                      setConfirmFormExpanded(false);
-                    } else {
-                      setInput("That\u2019s close, but could we ");
-                      document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-                    }
-                  }}
-                  className="w-full text-center text-xs text-muted hover:text-secondary transition mt-1"
-                >
-                  {pendingProposal ? "Pick a different time" : "Suggest a change"}
-                </button>
+                <div className="flex items-center gap-3 mt-1">
+                  <button
+                    onClick={clickConfirmButton}
+                    disabled={isConfirming || inPast || (confirmFormExpanded && !canSubmit)}
+                    className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition"
+                  >
+                    {isConfirming ? "Confirming..." : confirmFormExpanded ? "Confirm" : "Confirm this time"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (pendingProposal) {
+                        setPendingProposal(null);
+                        setConfirmFormExpanded(false);
+                      } else {
+                        setInput("That’s close, but could we ");
+                        document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+                      }
+                    }}
+                    className="text-xs text-muted hover:text-secondary transition whitespace-nowrap"
+                  >
+                    {pendingProposal ? "Pick a different time" : "Suggest a change"}
+                  </button>
+                </div>
                 {confirmError && (
-                  <p className="mt-2 text-xs text-red-400">{confirmError}</p>
+                  <p className="text-xs text-red-400">{confirmError}</p>
                 )}
                 {emailWarning && (
-                  <p className="mt-2 text-xs text-amber-400">{emailWarning}</p>
+                  <p className="text-xs text-amber-400">{emailWarning}</p>
                 )}
               </div>
             </div>
