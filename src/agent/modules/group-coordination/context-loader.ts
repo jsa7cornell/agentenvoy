@@ -33,7 +33,7 @@ export interface GroupCoordinationContext extends ModuleContextOutput {
 export async function loadGroupCoordinationContext(
   moduleContext: ModuleContext,
   matchResult: MatchResult,
-  _userMessage: string,
+  __userMessage: string,
 ): Promise<GroupCoordinationContext> {
   const userId = moduleContext.user.id;
 

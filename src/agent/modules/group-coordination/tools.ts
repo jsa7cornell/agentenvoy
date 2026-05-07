@@ -57,7 +57,7 @@ Call this when:
 The responses array is append/replace per person — calling again with the same
 person name overwrites the previous entry (latest-wins). All other entries are preserved.`,
   inputSchema: recordAvailabilityInput,
-  execute: async (input: RecordAvailabilityInput, _ctx: ModuleContext) => {
+  execute: async (input: RecordAvailabilityInput, __ctx: ModuleContext) => {
     const gc = await prisma.groupCoordination.findUnique({
       where: { sessionId: input.sessionId },
       select: { id: true, responses: true },
@@ -109,7 +109,7 @@ a generative table or prose summary. You decide the rendering — this is an
 intentional LLM boundary test (decided 2026-05-06). Show candidate windows
 ranked by overlap, flag hard conflicts, and call out who has not responded yet.`,
   inputSchema: proposeConvergenceInput,
-  execute: async (input: ProposeConvergenceInput, _ctx: ModuleContext) => {
+  execute: async (input: ProposeConvergenceInput, __ctx: ModuleContext) => {
     const gc = await prisma.groupCoordination.findUnique({
       where: { sessionId: input.sessionId },
       select: { responses: true, synthesisVersion: true },
@@ -161,7 +161,7 @@ export const collectSuggestionTool: ComposerTool<
 Call this when the host conveys a participant's suggestion (venue idea, activity, etc.).
 Duplicate suggestions (same sessionId + normalizedValue + category) are silently ignored.`,
   inputSchema: collectSuggestionInput,
-  execute: async (input: CollectSuggestionInput, _ctx: ModuleContext) => {
+  execute: async (input: CollectSuggestionInput, __ctx: ModuleContext) => {
     try {
       await prisma.activitySuggestion.create({
         data: {
