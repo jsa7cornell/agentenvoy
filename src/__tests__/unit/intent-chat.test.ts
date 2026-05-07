@@ -279,7 +279,7 @@ describe("unclear + missing/fabricated clarifier → closed-set fallback", () =>
 // ---------------------------------------------------------------------------
 
 describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3 + chat-decisioning-layer-redesign PR1)", () => {
-  it("contains exactly the 10 host-side values in order (PR1 split create_link → create/modify/cancel; create_bookable_link added; PR4 adds book_with_person; PR-A onboarding adds recalibrate)", () => {
+  it("contains exactly the 11 host-side values in order (PR1 split create_link → create/modify/cancel; create_bookable_link added; PR4 adds book_with_person; PR-A onboarding adds recalibrate; Track 2 adds group_coordination)", () => {
     expect([...HOST_CHAT_INTENT_VALUES]).toEqual([
       "edit_preference",
       "create_bookable_link",
@@ -291,8 +291,9 @@ describe("HOST_CHAT_INTENT_VALUES (Phase 5 PR 3 + chat-decisioning-layer-redesig
       "chat",
       "book_with_person",
       "recalibrate",
+      "group_coordination",
     ]);
-    expect(HOST_CHAT_INTENT_VALUES).toHaveLength(10);
+    expect(HOST_CHAT_INTENT_VALUES).toHaveLength(11);
   });
 
   it("every host value normalizes via the full-union normalizeChatIntent", () => {

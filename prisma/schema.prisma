@@ -595,9 +595,11 @@ model NegotiationSession {
   outcome         NegotiationOutcome?
   participants    SessionParticipant[]
   invitees        SessionInvitee[]
-  slotRsvps       InviteeSlotRsvp[]
-  holds           Hold[]
-  rescheduleAttempts RescheduleAttempt[]
+  slotRsvps           InviteeSlotRsvp[]
+  holds               Hold[]
+  rescheduleAttempts  RescheduleAttempt[]
+  groupCoordination   GroupCoordination?
+  activitySuggestions ActivitySuggestion[]
 }
 
 /// Idempotent-replay store for MCP `reschedule_meeting` calls. Mirrors
@@ -774,6 +776,43 @@ model InviteeSlotRsvp {
 
   @@index([sessionId, sessionInviteeId])
   @@index([sessionInviteeId, slotStart])
+}
+
+// GroupCoordination: Track 2 group scheduling state for a NegotiationSession.
+// Created when a group link is confirmed in pre-flight (coordinationTrack: "complex").
+// responses JSON: { person: string, windows: string[], preferences: string|null, unavailable: string[] }[]
+// status: "gathering" | "converging" | "locked" | "abandoned"
+// Per 2026-05-06_group-coordination-composer-module proposal (R2 fold): prompts field retired;
+// free-form availability JSON supersedes the structured prompt-schedule shape.
+model GroupCoordination {
+  id                 String   @id @default(cuid())
+  sessionId          String   @unique
+  responses          Json     @default("[]")
+  synthesisVersion   Int      @default(0)
+  status             String   @default("gathering")
+  suggestionsEnabled Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// ActivitySuggestion: guest-sourced activity/restaurant/location ideas.
+// Written by collect_suggestion tool during gathering phase (bonus feature).
+// normalizedValue = lower(trim(value)) for dedup.
+model ActivitySuggestion {
+  id              String   @id @default(cuid())
+  sessionId       String
+  person          String
+  category        String   // "activity" | "restaurant" | "location"
+  value           String
+  normalizedValue String
+  createdAt       DateTime @default(now())
+
+  session NegotiationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, normalizedValue, category])
+  @@index([sessionId])
 }
 
 // ChannelMessage: feed-level messages between user and Envoy

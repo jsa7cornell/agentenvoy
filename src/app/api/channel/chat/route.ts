@@ -693,6 +693,31 @@ export async function POST(req: NextRequest) {
             return;
           }
 
+          // group_coordination — Track 2 group scheduling (2026-05-06).
+          // Chat-first open-question coordination. Dispatched BEFORE the precheck
+          // block (no event-entity to resolve in pre-flight phase).
+          if (intent === "group_coordination") {
+            await dispatchModuleAndStream({
+              surface: "dashboard-host",
+              intent: "group_coordination",
+              channelId: safeChannel.id,
+              userId: safeUser.id,
+              userName: user.name ?? null,
+              userEmail: user.email ?? "",
+              message,
+              userMsgPersist,
+              controller,
+              encoder,
+              emitStatus: (stage) => emitStatus(stage),
+              matchResult: {
+                kind: "deterministic",
+                resolved: {},
+              },
+            });
+            controller.close();
+            return;
+          }
+
           // book_with_person — PR4 bookings module. Bilateral identity-resolve
           // + availability intersection + commit flow. Dispatched BEFORE the
           // precheck block (precheck only fires for event-shaping intents).

@@ -127,10 +127,10 @@ export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
     pitch:
       "Purpose-built links for events with many guests — Envoy negotiates a time everyone can make.",
     starters: [
-      { label: "Workshop / class", meta: "90m", prefill: "Create a workshop bookable link — 90 min, group" },
-      { label: "Team kickoff", meta: "60m", prefill: "Create a team kickoff bookable link — 60 min, group" },
-      { label: "Founder dinner", meta: "2h", prefill: "Create a founder dinner bookable link — 2 hours, group" },
-      { label: "Panel interview", meta: "45m", prefill: "Create a panel interview bookable link — 45 min, group" },
+      { label: "Workshop / class", meta: "90m", prefill: "I want to coordinate a workshop for a group — 90 min. Help me gather everyone's availability and set it up." },
+      { label: "Team kickoff", meta: "60m", prefill: "Help me schedule a team kickoff — 60 min. I need to find a time that works for the whole group." },
+      { label: "Founder dinner", meta: "2h", prefill: "I want to set up a founder dinner for a group — about 2 hours. Help me coordinate everyone's availability." },
+      { label: "Panel interview", meta: "45m", prefill: "Help me coordinate a panel interview — 45 min. I need to find a time that works for all panelists." },
     ],
     classes: {
       border: "border-l-[3px] border-pink-600",
@@ -139,7 +139,7 @@ export const LINK_TYPE_DEFINITIONS: LinkTypeDef[] = [
       starterHover: "hover:bg-pink-50 dark:hover:bg-pink-950/30",
     },
     icon: GroupIcon,
-    scratchPrefill: "Create a group meeting link — ",
+    scratchPrefill: "Help me coordinate a group event — ",
   },
 ];
 

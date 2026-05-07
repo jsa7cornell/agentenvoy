@@ -30,6 +30,8 @@ import { inquireClusterModule } from "./inquire/module";
 import { bookingsModule } from "./bookings/module";
 // PR-A onboarding: recalibrate — 6th module on dashboard-host.
 import { recalibrateModule } from "./recalibrate/module";
+// Track 2 group scheduling — 7th module on dashboard-host.
+import { groupCoordinationModule } from "./group-coordination/module";
 
 let _registered = false;
 
@@ -52,7 +54,8 @@ export function ensureModulesRegistered(): void {
   // query_calendar and query_event route to inquire via INTENT_TO_CLUSTER.
   registerModule(inquireClusterModule);
   registerModule(bookingsModule);      // PR4 — bookings module
-  registerModule(recalibrateModule);  // PR-A onboarding — recalibrate (6th dashboard-host module)
+  registerModule(recalibrateModule);         // PR-A onboarding — recalibrate (6th dashboard-host module)
+  registerModule(groupCoordinationModule);   // Track 2 group scheduling (7th dashboard-host module)
 }
 
 // Auto-register on first import. Production code paths that import any
