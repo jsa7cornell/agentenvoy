@@ -641,9 +641,6 @@ function scoreSlot(
   allowWindows: AllowWindow[] = [],
 ): ScoredSlot {
   const { hour, minute, dayName } = getLocalParts(slotStart, tz);
-  // slotDateStr is the local date of the slot being scored — used for
-  // date-scoped BlockedWindow matching. todayStr is today's date — used only
-  // for expiry checks on recurring/ongoing windows.
   const slotDateStr = getLocalDateStr(slotStart, tz);
 
   // Open-slot base. blockCost / firmness are filled in per return path.
