@@ -98,8 +98,10 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const LOAD_calendar_context = tool({
     description:
-      "Load calendar: upcoming events, busy blocks, free slots. " +
-      "Call before any time/scheduling question. NOT for prefs/rules/links.",
+      "Load the host's calendar (upcoming events, busy blocks, free slots). " +
+      "Call ONLY when answering a calendar/schedule question or moving a session to a specific time. " +
+      "DO NOT call when CREATING a link — link creation does not need the calendar; the slot picker checks at booking time. " +
+      "DO NOT call when the host says 'next week', 'evenings', 'weekday afternoons' etc. — those are guest-picker windows, not calendar lookups.",
     inputSchema: z.object({
       lookaheadDays: z.number().int().min(1).max(60).default(14)
         .describe("Days of calendar data to load (default 14, max 60)."),
