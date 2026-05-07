@@ -332,14 +332,16 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const group_event_create = tool({
     description:
-      "Group event for multiple named guests (team dinner, founders sync, panel). " +
-      "topic, inviteeNames[], windows[] required. " +
-      "No recurrence or autoConfirm on group events.",
+      "Create a group coordination link — everyone gets the same URL and shares their availability. " +
+      "Use for any multi-person event (dinner, sync, workshop). " +
+      "Call immediately with whatever the host provided; do NOT gather info across turns first. " +
+      "inviteeNames and windows are optional — omit what wasn't mentioned.",
     inputSchema: z.object({
       topic: z.string().describe("Event title or occasion (e.g. 'Founder Dinner')."),
-      inviteeNames: z.array(z.string()).min(1).describe("Names or emails of all participants."),
-      windows: z.array(z.string()).min(1)
-        .describe("Candidate date/time windows as natural language strings (e.g. 'weekday evenings May–July')."),
+      inviteeNames: z.array(z.string()).optional()
+        .describe("Names or emails of participants, if the host mentioned them."),
+      windows: z.array(z.string()).optional()
+        .describe("Candidate windows as natural language (e.g. 'weekday evenings May–July'). Omit if not mentioned."),
     }),
     execute: async (params) => exec("group_event_create", "create_link", { ...params, type: "group" }),
   });
