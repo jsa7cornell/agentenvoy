@@ -706,7 +706,7 @@ export function WeeklyCalendar({
                   )}
                   {cta === "link" && (
                     <a
-                      href="/event-links"
+                      href="/dashboard/event-links"
                       className="block text-indigo-500 dark:text-indigo-400 hover:text-indigo-400 dark:hover:text-indigo-300 transition text-[10px] font-medium"
                     >
                       Edit {linkLabel} preferences &rarr;
