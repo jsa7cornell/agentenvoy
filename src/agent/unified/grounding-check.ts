@@ -142,7 +142,7 @@ export const GROUNDING_DECLARATIONS: Record<string, GroundingDeclaration> = {
         derivable: false,
         // User must have named the meeting type
         patterns: [
-          /\b(?:coffee|lunch|dinner|drinks|call|meeting|chat|ride|run|walk|intro|catch[\s-]?up|sync|interview|consult|session|workshop)\b/i,
+          /\b(?:coffee|lunch|dinner|drinks|call|meetings?|chat|ride|run|walk|intro|catch[\s-]?up|sync|interview|consult(?:ation)?|session|workshop)\b/i,
           /\b(?:create|new|set up|make|build)\s+(?:a\s+)?(?:link|meeting|booking|schedule)\b/i,
         ],
         severity: "advisory",
