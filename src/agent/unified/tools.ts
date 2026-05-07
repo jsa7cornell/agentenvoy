@@ -334,8 +334,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const group_event_create = tool({
     description:
-      "Create a group coordination link where MULTIPLE NAMED INDIVIDUALS each share their availability via one shared URL. " +
-      "Use ONLY when the host names 2+ SPECIFIC INDIVIDUAL PEOPLE (e.g. 'Bob, Sue, and Jane'), or explicitly says 'group dinner', 'team sync', 'interview panel'. " +
+      "Create a group coordination link — one shared URL where each participant shares their own availability. Invitee names are optional: the host may name specific people OR just say 'create a group event' and share the link themselves. Participants self-identify when they open the link. " +
+      "Use when: host names 2+ individuals (e.g. 'Bob, Sue, and Jane'), says 'group dinner/sync/event', says 'I'll share the link and people can RSVP', or uses phrasing like 'team sync', 'panel', 'everyone picks a time'. " +
       "DO NOT use for a 1:1 meeting with one person — use personal_link_create. " +
       "DO NOT use for a meeting with ONE COMPANY/ORG (e.g. 'get time w/ Acme', 'Sequoia VC call', 'Honest Game intro') — that's personal_link_create with inviteeName=the company. A company name is ONE entity, not a group. Don't fabricate 'the team' out of an org name. " +
       "Infer format from event type: dinner/meal/social/gathering → 'in-person'; VC/call/sync/meeting → 'video'; phone → 'phone'. Pass format even when not explicitly stated if the event type makes it obvious. " +

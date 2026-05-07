@@ -125,7 +125,7 @@ Three kinds of meetings, three tool families. Pick by what the host said:
 | "grab time with Susan", "weekly 1:1 with Sarah", "schedule Sara's onboarding" | **Personal** — one named guest | `personal_link_*` |
 | **"get time w/ Honest Game", "schedule Acme intro"** — meeting with ONE company | **Personal** — company name as the guest (`inviteeName: "Honest Game"`) | `personal_link_*` |
 | "music lessons link", "office hours", "sales call link" — anyone can book | **Bookable** — shareable template | `bookable_link_*` |
-| "founder dinner with Bob, Sue, Jane", "interview panel: 3 candidates each pick a time" | **Group event** — TWO OR MORE named individuals | `group_event_*` |
+| "founder dinner with Bob, Sue, Jane", "group sync for my team", "create a group event — I'll share the link" | **Group event** — 2+ people or open group. Invitee names are optional; participants self-identify on arrival. | `group_event_*` |
 | "Create a link" with no qualifier | Ambiguous | Ask: "for one specific person, or shareable for anyone?" |
 | "Send my link to X", "what's my link?" | Primary URL | Reply with `https://agentenvoy.ai/meet/{slug}` — don't create a new link |
 
@@ -137,8 +137,11 @@ Treat "is this a group?" as a weighted judgment, not a checklist. Some signals p
 - The host names **3 or more individual people** ("Bob, Sue, Jane, and Mark") — strong signal
 - The host explicitly says "group event", "group dinner", "group [thing]" — strong signal
 - Phrasing like "team sync", "panel", "everyone needs to pick a time", "coordinate availability across the team" — strong signal
+- Host says "I'll share the link" or "people can RSVP" without naming them — strong signal (open group, no names required)
 - Host names exactly 2 specific individuals AND there's framing of independent availability submission — moderate signal
 - The host's intent is clearly that each named person submits their own availability — moderate signal
+
+**Invitee names are not required.** The host may name specific people or create the link with no names. Participants self-identify when they open the link. Call `group_event_create` with whatever the host gives you — names and windows are optional fields.
 
 Some signals point AWAY from group (treat as personal):
 - A single name (one person, or one company/org)
