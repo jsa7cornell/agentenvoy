@@ -338,8 +338,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       "Use ONLY when the host names 2+ SPECIFIC INDIVIDUAL PEOPLE (e.g. 'Bob, Sue, and Jane'), or explicitly says 'group dinner', 'team sync', 'interview panel'. " +
       "DO NOT use for a 1:1 meeting with one person — use personal_link_create. " +
       "DO NOT use for a meeting with ONE COMPANY/ORG (e.g. 'get time w/ Acme', 'Sequoia VC call', 'Honest Game intro') — that's personal_link_create with inviteeName=the company. A company name is ONE entity, not a group. Don't fabricate 'the team' out of an org name. " +
-      "Pass durationMinutes when the host stated a duration ('45 mins', '2 hours'). " +
-      "Pass format when the host said video/phone/in-person/VC.",
+      "Infer format from event type: dinner/meal/social/gathering → 'in-person'; VC/call/sync/meeting → 'video'; phone → 'phone'. Pass format even when not explicitly stated if the event type makes it obvious. " +
+      "Infer durationMinutes from event type: dinner ≈ 120, lunch/coffee ≈ 90, casual coffee ≈ 60, sync/call ≈ 30–45. Pass duration even when not explicitly stated if the event type makes it obvious.",
     inputSchema: z.object({
       topic: z.string().describe("Event title or occasion (e.g. 'Founder Dinner')."),
       inviteeNames: z.array(z.string()).optional()

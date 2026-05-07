@@ -2659,7 +2659,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               }
             }
 
-            const showPickerAfter = idx === firstAdminIdx;
+            // Group event participants use chat-only availability sharing — no slot picker.
+            const showPickerAfter = idx === firstAdminIdx && !isGroupEvent;
 
             // Inline host_update system messages render as small grey inline text
             // (matches the dashboard ✓ summary style) instead of the emerald bubble.
