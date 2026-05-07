@@ -930,7 +930,9 @@ export async function handleCreateLink(
     : typeof params.inviteeName === "string" && (params.inviteeName as string).trim()
     ? [(params.inviteeName as string).trim()]
     : [];
-  const inviteeName = inviteeNames[0] ?? null; // deprecated bridge — remove after inviteeName column drops
+  // For group links the link is shared with everyone — no single "invitee."
+  // inviteeName stays null so no participant gets greeted by the wrong name.
+  const inviteeName = isGroupLink ? null : (inviteeNames[0] ?? null);
   const inviteeEmail = (params.inviteeEmail as string) || null;
 
   // Partial-attendance (Track 1, proposal 2026-04-23). Off by default — when

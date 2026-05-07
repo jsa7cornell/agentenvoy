@@ -138,12 +138,24 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         const durationMs = Date.now() - startMs;
         const turnCost = computeTurnCost(usage, modelSelection.modelId, modelSelection);
 
+        // Extract sessionId from any tool result that carries one — used to
+        // attach this message to the session card in the feed (threadId).
+        // Mirrors the same logic in dispatch-stream.ts for the module path.
+        // AI SDK uses `.output` (not `.result`) on both static and dynamic results.
+        type ActionResult = { success?: boolean; data?: { sessionId?: string } };
+        const threadId = steps
+          .flatMap((step) => step.toolResults ?? [])
+          .map((tr) => tr.output as ActionResult)
+          .find((r) => r?.success && typeof r?.data?.sessionId === "string")
+          ?.data?.sessionId;
+
         // Persist envoy message with unified turn metadata.
         await prisma.channelMessage.create({
           data: {
             channelId: ctx.channelId,
             role: "envoy",
             content: fullText,
+            ...(threadId ? { threadId } : {}),
             metadata: buildUnifiedMetadata({
               turnCost,
               toolCallNames,

@@ -615,7 +615,7 @@ export async function POST(req: NextRequest) {
         sessionId: session.id,
         userId: visitorUserId,
         email: visitorEmail,
-        name: isHost ? user.name : (link.inviteeName || null),
+        name: isHost ? user.name : null, // participant identifies themselves via chat
         role: isHost ? "host" : "guest",
         status: "active",
       },
@@ -669,7 +669,7 @@ export async function POST(req: NextRequest) {
     hostName: user.name || "the organizer",
     hostPreferences: (user.preferences as Record<string, unknown>) || {},
     hostDirectives: (user.hostDirectives as string[]) || [],
-    guestName: link.inviteeName || undefined,
+    guestName: isGroupEvent ? undefined : (link.inviteeName || undefined),
     guestEmail: link.inviteeEmail || undefined,
     guestTimezone: effectiveGuestTz,
     topic: link.topic || undefined,
@@ -794,8 +794,14 @@ export async function POST(req: NextRequest) {
   let greeting: string;
 
   if (isGroupEvent) {
-    // Group events use AI-generated greeting for dynamic participant context
-    const greetingPrompt = `A new participant just opened the deal room for a group event. Generate your initial greeting following your GREETING STRATEGY and GROUP EVENT COORDINATION instructions. Mention the group context — how many others are involved, who has responded, any emerging time overlaps. Use all context you have — name, topic, format, timing, available slots. Be efficient.`;
+    // Group links are shared with the whole group — the visitor hasn't identified
+    // themselves yet. Greet them generically: reference the event (topic) and
+    // who it's for (inviteeNames on the link), then ask who they are.
+    const knownNames = Array.isArray(link.inviteeNames) && link.inviteeNames.length > 0
+      ? (link.inviteeNames as string[]).join(", ")
+      : null;
+    const forWhom = knownNames ? ` for ${knownNames}` : "";
+    const greetingPrompt = `Someone just opened this group coordination link. This is a shared link — the same URL goes to everyone the host invited. The visitor hasn't told you their name yet. Greet them warmly in 2–3 short sentences: welcome them to the ${link.topic ? `"${link.topic}"` : "group event"} coordination${forWhom}, let them know everyone is sharing their availability here, and ask them to tell you their name so you can record their windows. Do not assume who they are or reference any individual's name as if you know it's them.`;
     greeting = await generateAgentResponse({
       ...context,
       conversationHistory: [{ role: "user", content: greetingPrompt }],
