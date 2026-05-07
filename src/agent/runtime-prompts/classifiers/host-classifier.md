@@ -24,7 +24,7 @@ You classify the host's dashboard-chat turn into one of eleven intents. Output i
 
 The first decision is **group_coordination vs create_bookable_link vs book_with_person vs create_link vs modify vs cancel** for event-shaped utterances — surface this before anything else:
 
-0. **Multiple named participants + gather availability + one-time group event** → group_coordination. Key signals: a guest list ("katie, bob, suzie"), phrases like "coordinate everyone's availability", "find a time that works for the group", "gather responses". Also fires for stickiness continuations when the prior envoy turn was a group coordination summary.
+0. **Multiple named participants + gather availability + one-time group event** → group_coordination. Key signals: a guest list ("katie, bob, suzie"), phrases like "coordinate everyone's availability", "find a time that works for the group", "gather responses". (Multi-turn continuations are handled by the structured prior-turn signal — see "When in doubt" below.)
 1. **Creation verb + "bookable link" / link-type name / no specific named person as guest + NOT a group coordination event** → create_bookable_link.
 2. **Bilateral scheduling verb** ("book a [activity] with [Name]", "find a mutual time with [Name]", "schedule with [Name] that works for both", "book time with [Name]") → book_with_person. Key signal: mutual / bilateral framing. **Override — guest-picks:** if the same turn ALSO contains a guest-picks phrasing ("she/he/they choose(s)", "let them pick", "open invite", "any time works for them", "they choose location/time/format"), route to create_link instead. The host has NOT decided the time, so there's no bilateral booking to commit — they want a link to forward.
 3. **Creation verbs WITHOUT bilateral framing** ("make / create / set up / need a link") + **a specific named person** → create_link. Also includes any "with [Name]" turn that names a guest-picks signal — those are open-invite create_link, not book_with_person.
@@ -41,9 +41,22 @@ Then for the rest:
 
 ## When in doubt
 
-**Group coordination continuations (highest priority — takes precedence over bookable link stickiness):** If your prior turn describes a group event coordination summary — participant list, candidate windows, "Want me to send this out?" or similar — then ANY follow-up confirmation from the host ("yes", "go", "send it", "yep", "do it") is `group_coordination`, regardless of verb. Do NOT route these to `create_bookable_link`.
+**Multi-turn module continuations — read the structured prior-turn signal.** When the user prompt's `Your prior turn` block carries a `module:` line AND `awaitingConfirmation: true`, the prior envoy turn was an open ask from that module. If the host's current message is a bare confirmation, acknowledgment, or near-empty reply ("yes", "yep", "go", "send it", "do it", "ok", "👍", "sure", "perfect", "great"), classify into the **same module's intent** — that's the intent the prior module owns:
 
-**Bookable link setup continuations:** If your prior turn describes a bookable link setup proposal (recurring link, office hours, bookable URL), then ANY follow-up turn from the host is create_bookable_link, regardless of verb. Does NOT apply when the prior turn was a group coordination summary.
+| `module` on prior turn | Bare-confirmation intent to emit |
+|---|---|
+| `group_coordination` | `group_coordination` |
+| `manage_setup` | `create_bookable_link` *(if prior emitted no actions)* or `chat` *(if prior emitted any action — fait accompli)* |
+| `event_action` | `chat` (fait accompli — link already exists) |
+| `recalibrate` | `recalibrate` |
+| `book_with_person` | `book_with_person` |
+
+**Two carve-outs that always override the table above:**
+
+1. **Strong fresh verb wins.** If the host's message contains a clear creation, modification, cancellation, or query verb against a NEW target ("schedule something with Bob", "actually cancel that", "what's on my calendar"), classify by the verb — the host is pivoting topics. The prior `module:` is a hint, not a lock.
+2. **Fait-accompli reads.** When `emittedActions` on the prior turn is non-empty, the prior envoy turn already DID something (created/updated a link, saved a rule). A bare "yes" / "thanks" / "ok" after that is acknowledgment, not a continuation — emit `chat`. Continuations only apply when the prior turn was an open ask, not a status report.
+
+The `module:` and `awaitingConfirmation` fields are populated from persisted envoy-turn metadata; you can trust them. When the `Your prior turn` block has neither field present, fall back to the prose `prose:` line and the rest of this playbook.
 
 When in doubt between create_link and book_with_person — prefer book_with_person when the host's phrasing implies checking the other person's availability (verbs like "book", "find a mutual time", "that works for both"). Prefer create_link for one-sided scheduling. **Guest-picks always wins create_link:** any phrasing where the host says the other party chooses time / location / format / terms ("she chooses location and time", "let them pick", "they decide", "open invite", "any time works for them") is create_link — the host wants a link to forward, not a bilateral booking. The presence of "with [Name]" in the same turn does NOT make it book_with_person.
 

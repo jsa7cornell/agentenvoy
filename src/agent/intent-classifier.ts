@@ -63,6 +63,31 @@ export interface ClassifyContext {
    *  Playbook rule: when set, classifier picks `schedule`. Proposal §4.2
    *  rule 3 / §4.4. */
   echoFlag?: boolean;
+  /** Structured signal about the prior envoy turn — what module ran, whether
+   *  the composer left an open ask. Lets the classifier route bare
+   *  confirmations ("yes", "go", "send it") to the module that asked the
+   *  question, without the playbook needing per-module prose stickiness rules.
+   *  Populated by the route handler from the most recent envoy
+   *  ChannelMessage's `metadata.moduleGuard.bucket` + a heuristic on the
+   *  prose ending with `?`. Optional — when absent, classifier falls back to
+   *  the prose `priorEnvoyTurn` only (legacy behavior). */
+  priorEnvoyMeta?: {
+    /** Module / cluster name that produced the prior envoy turn (e.g.
+     *  "group_coordination", "manage_setup", "event_action"). Read from
+     *  `metadata.moduleGuard.bucket`. */
+    module?: string;
+    /** True when the prior envoy prose ended with a `?` — heuristic for
+     *  "the composer asked an open question." Pure shape detection; no
+     *  module changes needed to populate. */
+    awaitingConfirmation?: boolean;
+    /** Action types the prior envoy turn emitted, if any (e.g.
+     *  ["create_link"], ["update_business_hours","update_availability_rule"]).
+     *  Read from `metadata.moduleGuard.emittedActions`. Useful when the
+     *  prior turn was fait-accompli (action already fired) — bare "yes"
+     *  after that is just acknowledgment, not a continuation that needs
+     *  re-routing. */
+    emittedActions?: string[];
+  };
 }
 
 export interface ClassifyResult {
@@ -131,8 +156,22 @@ function buildUserPrompt(message: string, ctx: ClassifyContext): string {
   if (ctx.activeSessionsSummary) {
     parts.push(`Active sessions (for pronoun resolution):\n${ctx.activeSessionsSummary}`);
   }
-  if (ctx.priorEnvoyTurn) {
-    parts.push(`Your prior turn:\n${ctx.priorEnvoyTurn.slice(0, 300)}`);
+  if (ctx.priorEnvoyTurn || ctx.priorEnvoyMeta) {
+    const priorLines: string[] = ["Your prior turn:"];
+    const meta = ctx.priorEnvoyMeta;
+    if (meta?.module) {
+      priorLines.push(`  module: ${meta.module}`);
+    }
+    if (meta?.awaitingConfirmation) {
+      priorLines.push(`  awaitingConfirmation: true (prose ended with "?")`);
+    }
+    if (meta?.emittedActions && meta.emittedActions.length > 0) {
+      priorLines.push(`  emittedActions: ${meta.emittedActions.join(", ")}`);
+    }
+    if (ctx.priorEnvoyTurn) {
+      priorLines.push(`  prose: ${ctx.priorEnvoyTurn.slice(0, 300)}`);
+    }
+    parts.push(priorLines.join("\n"));
   }
   const echoMarker = ctx.echoFlag ? " [ECHO_OF_PRIOR_ENVOY]" : "";
   parts.push(`Host's message:${echoMarker}\n${message}`);

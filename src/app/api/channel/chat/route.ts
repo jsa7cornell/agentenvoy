@@ -328,17 +328,55 @@ export async function POST(req: NextRequest) {
               .join("\n");
 
             // Fetch last 3 envoy messages to feed the deterministic echo
-            // detector (proposal §4.4) AND to plumb `priorEnvoyTurn` into
-            // the classifier context (proposal §4.1 / PR-α). Most-recent-first.
+            // detector (proposal §4.4) AND to plumb `priorEnvoyTurn` +
+            // `priorEnvoyMeta` into the classifier context (proposal §4.1 /
+            // PR-α). Most-recent-first. `metadata` is selected so the
+            // classifier can see structured signal about the prior turn —
+            // which module ran and whether it left an open ask — letting it
+            // route bare confirmations ("yes", "go", "send it") to the
+            // module that asked the question without per-module prose
+            // stickiness rules in the playbook.
             const recentEnvoy = await prisma.channelMessage.findMany({
               where: { channelId: safeChannel.id, role: "envoy" },
               orderBy: { createdAt: "desc" },
               take: 3,
-              select: { content: true },
+              select: { content: true, metadata: true },
             });
             recentEnvoyContents = recentEnvoy.map((m) => m.content);
             const echoResult = isEchoOfRecentEnvoy(message, recentEnvoyContents);
             echoFlag = echoResult.isEcho;
+
+            // Derive structured prior-turn signal from the most-recent
+            // envoy ChannelMessage's persisted metadata + a heuristic on
+            // the prose ending. No module changes needed: the runner
+            // already writes `metadata.moduleGuard.bucket` (cluster name)
+            // and `metadata.moduleGuard.emittedActions` per turn (see
+            // `_shared/dispatch-stream.ts:309` + types.ts ModuleGuardRecord).
+            const priorEnvoyMeta = (() => {
+              const last = recentEnvoy[0];
+              if (!last) return undefined;
+              const parsed = parseChannelMessageMetadata(last.metadata);
+              const guard = (parsed as { moduleGuard?: { bucket?: unknown; emittedActions?: unknown } }).moduleGuard;
+              const moduleName =
+                guard && typeof guard.bucket === "string" ? guard.bucket : undefined;
+              const emitted =
+                guard && Array.isArray(guard.emittedActions)
+                  ? (guard.emittedActions as unknown[]).filter(
+                      (a): a is string => typeof a === "string",
+                    )
+                  : undefined;
+              const trimmed = (last.content ?? "").trim();
+              const awaitingConfirmation =
+                trimmed.length > 0 && trimmed.endsWith("?");
+              if (!moduleName && !awaitingConfirmation && (!emitted || emitted.length === 0)) {
+                return undefined;
+              }
+              return {
+                module: moduleName,
+                awaitingConfirmation,
+                emittedActions: emitted,
+              };
+            })();
 
             // role: "host" is load-bearing — without it the classifier
             // defaults to "guest", loads the wrong playbook, and emits guest
@@ -350,6 +388,7 @@ export async function POST(req: NextRequest) {
               {
                 activeSessionsSummary: activeSessionsSummary || undefined,
                 priorEnvoyTurn: recentEnvoyContents[0] ?? undefined,
+                priorEnvoyMeta,
                 echoFlag,
               },
               "host",
