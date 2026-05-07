@@ -1,13 +1,13 @@
 /**
- * Unified agent tool registry — Day 2.
+ * Unified agent tool registry — Day 2 (grounding checks wired Day 3).
  *
- * 22 tools in two groups:
+ * 26 tools in two groups:
  *   LOAD_*  — read-only context fetchers (no side effects)
  *   write   — action wrappers over existing actions.ts handlers
  *
  * buildUnifiedTools(ctx) injects request-scoped context into execute closures.
- * Each tool's description IS its micro-playbook: when to use, when NOT to use,
- * anti-fabrication notes. (Layer 3 of the data-fidelity framework.)
+ * Each tool's description IS its micro-playbook (Layer 3 data-fidelity).
+ * Layer 2 grounding checks run inside execAction via _exec.ts.
  */
 
 import { tool } from "ai";
@@ -21,6 +21,8 @@ export type AgentToolContext = {
   userId: string;
   timezone: string;
   meetSlug?: string;
+  /** Current user message — forwarded to Layer 2 grounding check. */
+  userMessage?: string;
 };
 
 // Shared availability window schema — matches AvailabilityWindow[] contract.
@@ -43,7 +45,16 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   const toolCtx: ToolContext = {
     userId: ctx.userId,
     meetSlug: ctx.meetSlug,
+    userMessage: ctx.userMessage,
   };
+
+  // Curried helper so each tool can pass its own name to the grounding check.
+  const exec = (
+    toolName: string,
+    action: string,
+    params: Record<string, unknown>,
+    overrideCtx?: Partial<ToolContext>,
+  ) => execAction(action, params, { ...toolCtx, ...overrideCtx }, toolName);
 
   // ---------------------------------------------------------------------------
   // LOAD tools — read-only, no side effects
@@ -97,7 +108,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       reason: z.string().optional().describe("Optional cancellation reason (not surfaced to guest)."),
     }),
     execute: async (params) =>
-      execAction("cancel", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_cancel", "cancel", params, { sessionId: params.sessionId }),
   });
 
   const session_archive = tool({
@@ -109,7 +120,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       sessionId: z.string().describe("ID of the session to archive."),
     }),
     execute: async (params) =>
-      execAction("archive", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_archive", "archive", params, { sessionId: params.sessionId }),
   });
 
   const session_unarchive = tool({
@@ -120,7 +131,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       sessionId: z.string().describe("ID of the session to unarchive."),
     }),
     execute: async (params) =>
-      execAction("unarchive", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_unarchive", "unarchive", params, { sessionId: params.sessionId }),
   });
 
   const session_archive_bulk = tool({
@@ -133,7 +144,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       filter: z.enum(["unconfirmed", "expired", "cancelled", "all"])
         .describe("Which sessions to archive."),
     }),
-    execute: async (params) => execAction("archive_bulk", params, toolCtx),
+    execute: async (params) => exec("session_archive_bulk", "archive_bulk", params),
   });
 
   const session_update_format = tool({
@@ -145,7 +156,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       format: z.enum(["video", "phone", "in-person"]).describe("New meeting format."),
     }),
     execute: async (params) =>
-      execAction("update_format", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_update_format", "update_format", params, { sessionId: params.sessionId }),
   });
 
   const session_update_time = tool({
@@ -164,7 +175,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         .describe("IANA timezone string (e.g. 'America/Los_Angeles')."),
     }),
     execute: async (params) =>
-      execAction("update_time", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_update_time", "update_time", params, { sessionId: params.sessionId }),
   });
 
   const session_update_location = tool({
@@ -176,7 +187,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       location: z.string().describe("Location string (address, place name, or video URL)."),
     }),
     execute: async (params) =>
-      execAction("update_location", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_update_location", "update_location", params, { sessionId: params.sessionId }),
   });
 
   const session_hold_slot = tool({
@@ -192,7 +203,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         .describe("Hold expiry in hours (default 24)."),
     }),
     execute: async (params) =>
-      execAction("hold_slot", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_hold_slot", "hold_slot", params, { sessionId: params.sessionId }),
   });
 
   const session_release_hold = tool({
@@ -203,7 +214,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       sessionId: z.string(),
     }),
     execute: async (params) =>
-      execAction("release_hold", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_release_hold", "release_hold", params, { sessionId: params.sessionId }),
   });
 
   const session_lock_duration = tool({
@@ -216,7 +227,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         .describe("Duration in minutes to lock for this session."),
     }),
     execute: async (params) =>
-      execAction("lock_session_duration", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_lock_duration", "lock_session_duration", params, { sessionId: params.sessionId }),
   });
 
   const session_lock_buffer = tool({
@@ -229,7 +240,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         .describe("Buffer minutes to add around this session."),
     }),
     execute: async (params) =>
-      execAction("lock_buffer_minutes", { sessionId: params.sessionId, bufferMinutes: params.bufferMinutes }, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_lock_buffer", "lock_buffer_minutes", { sessionId: params.sessionId, bufferMinutes: params.bufferMinutes }, { sessionId: params.sessionId }),
   });
 
   const session_lock_activity_location = tool({
@@ -242,7 +253,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       location: z.string().optional().describe("Location to lock (e.g. 'Blue Bottle on Market')."),
     }),
     execute: async (params) =>
-      execAction("lock_activity_location", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_lock_activity_location", "lock_activity_location", params, { sessionId: params.sessionId }),
   });
 
   const session_save_guest_info = tool({
@@ -256,7 +267,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       notes: z.string().optional(),
     }),
     execute: async (params) =>
-      execAction("save_guest_info", params, { ...toolCtx, sessionId: params.sessionId }),
+      exec("session_save_guest_info", "save_guest_info", params, { sessionId: params.sessionId }),
   });
 
   // ---------------------------------------------------------------------------
@@ -286,7 +297,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         location: z.boolean().optional(),
       }).optional().describe("Fields the guest can choose themselves."),
     }),
-    execute: async (params) => execAction("create_link", params, toolCtx),
+    execute: async (params) => exec("link_create", "create_link", params),
   });
 
   const link_update = tool({
@@ -319,7 +330,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         location: z.boolean().optional(),
       }).optional(),
     }),
-    execute: async (params) => execAction("update_link", params, toolCtx),
+    execute: async (params) => exec("link_update", "update_link", params),
   });
 
   const link_cancel = tool({
@@ -332,7 +343,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       sessionId: z.string().optional().describe("Session ID to resolve the link."),
       reason: z.string().optional(),
     }),
-    execute: async (params) => execAction("cancel", params, toolCtx),
+    execute: async (params) => exec("link_cancel", "cancel", params),
   });
 
   // ---------------------------------------------------------------------------
@@ -354,7 +365,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       }).describe("Rule body to add."),
     }),
     execute: async (params) =>
-      execAction("update_availability_rule", { operation: "add", rule: params.rule }, toolCtx),
+      exec("rule_add", "update_availability_rule", { operation: "add", rule: params.rule }),
   });
 
   const rule_update = tool({
@@ -371,7 +382,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       }).describe("Fields to update on the rule."),
     }),
     execute: async (params) =>
-      execAction("update_availability_rule", { operation: "update", id: params.id, rule: params.rule }, toolCtx),
+      exec("rule_update", "update_availability_rule", { operation: "update", id: params.id, rule: params.rule }),
   });
 
   const rule_remove = tool({
@@ -383,7 +394,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       id: z.string().describe("Exact rule ID from LOAD_preferences output."),
     }),
     execute: async (params) =>
-      execAction("update_availability_rule", { operation: "remove", id: params.id }, toolCtx),
+      exec("rule_remove", "update_availability_rule", { operation: "remove", id: params.id }),
   });
 
   const primary_rename = tool({
@@ -394,7 +405,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       name: z.string().describe("New name for the primary link."),
     }),
     execute: async (params) =>
-      execAction("update_availability_rule", { operation: "rename_primary", rule: { label: params.name } }, toolCtx),
+      exec("primary_rename", "update_availability_rule", { operation: "rename_primary", rule: { label: params.name } }),
   });
 
   // ---------------------------------------------------------------------------
@@ -413,7 +424,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       defaultDuration: z.number().int().positive().optional()
         .describe("Default meeting duration in minutes."),
     }),
-    execute: async (params) => execAction("update_meeting_settings", params, toolCtx),
+    execute: async (params) => exec("prefs_update", "update_meeting_settings", params),
   });
 
   const prefs_update_business_hours = tool({
@@ -429,7 +440,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30),
       ]).optional().describe("Buffer minutes between meetings."),
     }),
-    execute: async (params) => execAction("update_business_hours", params, toolCtx),
+    execute: async (params) => exec("prefs_update_business_hours", "update_business_hours", params),
   });
 
   const knowledge_write = tool({
@@ -456,7 +467,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         until: z.string().optional().describe("ISO date after which location clears."),
       }).nullable().optional(),
     }),
-    execute: async (params) => execAction("update_knowledge", params, toolCtx),
+    execute: async (params) => exec("knowledge_write", "update_knowledge", params),
   });
 
   return {

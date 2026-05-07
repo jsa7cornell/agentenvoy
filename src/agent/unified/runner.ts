@@ -19,6 +19,7 @@ import {
   type TurnCost,
 } from "./model-policy";
 import { buildUnifiedTools } from "./tools";
+import { runSelfCheck, type ToolCallSummary } from "./self-check";
 import type { Prisma } from "@prisma/client";
 
 import { unifiedAgentSystemPrompt } from "@/agent/runtime-prompts";
@@ -64,8 +65,13 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         // Select model tier.
         const modelSelection = selectModelForTurn({ messageLength: ctx.message.length });
 
-        // Build tool surface for this request.
-        const tools = buildUnifiedTools({ userId: ctx.userId, timezone: ctx.timezone, meetSlug: ctx.meetSlug });
+        // Build tool surface for this request (with userMessage for Layer 2 grounding).
+        const tools = buildUnifiedTools({
+          userId: ctx.userId,
+          timezone: ctx.timezone,
+          meetSlug: ctx.meetSlug,
+          userMessage: ctx.message,
+        });
 
         // Load recent conversation history.
         const recentMessages = await loadRecentHistory(ctx.channelId);
@@ -93,6 +99,27 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         const toolCallNames: string[] = steps.flatMap((step) =>
           step.toolCalls.map((tc) => tc.toolName),
         );
+        const toolCallSummaries: ToolCallSummary[] = steps.flatMap((step) =>
+          step.toolCalls.map((tc) => ({
+            toolName: tc.toolName,
+            input: tc.input as Record<string, unknown>,
+          })),
+        );
+
+        // Layer 4 — self-check (post-stream, fast model).
+        // Advisory: logs the result but does not retry in v1 (retry path is Day 5).
+        const selfCheckResult = await runSelfCheck(
+          toolCallSummaries,
+          ctx.message,
+          recentMessages,
+        );
+        if (!selfCheckResult.passed) {
+          console.warn(
+            "[unified-agent] self-check flagged:",
+            selfCheckResult.flaggedTools,
+            selfCheckResult.reason,
+          );
+        }
 
         const durationMs = Date.now() - startMs;
         const turnCost = computeTurnCost(usage, modelSelection.modelId, modelSelection);
@@ -108,6 +135,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
               toolCallNames,
               modelId: modelSelection.modelId,
               durationMs,
+              selfCheck: selfCheckResult,
             }),
           },
         });
@@ -166,8 +194,9 @@ function buildUnifiedMetadata(params: {
   toolCallNames: string[];
   modelId: string;
   durationMs: number;
+  selfCheck: { passed: boolean; flaggedTools?: string[]; reason?: string };
 }): Prisma.InputJsonValue {
-  const { turnCost, toolCallNames, modelId, durationMs } = params;
+  const { turnCost, toolCallNames, modelId, durationMs, selfCheck } = params;
 
   // Synthesize moduleGuard.bucket from tool names for corpus continuity.
   // Maps tool name prefixes to logical bucket names understood by the dashboard.
@@ -179,6 +208,7 @@ function buildUnifiedMetadata(params: {
       tier: turnCost.tier,
       toolCalls: toolCallNames,
       durationMs,
+      selfCheck,
       cost: {
         inputTokens: turnCost.inputTokens,
         outputTokens: turnCost.outputTokens,
