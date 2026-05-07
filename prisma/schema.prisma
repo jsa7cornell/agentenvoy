@@ -791,6 +791,9 @@ model GroupCoordination {
   id                 String   @id @default(cuid())
   sessionId          String   @unique
   responses          Json     @default("[]")
+  // candidateDays: ISO date strings the host confirmed after Envoy proposed them.
+  // e.g. ["2026-05-13", "2026-05-20", "2026-05-27"]. Null until host confirms.
+  candidateDays      Json?
   synthesisVersion   Int      @default(0)
   status             String   @default("gathering")
   suggestionsEnabled Boolean  @default(false)

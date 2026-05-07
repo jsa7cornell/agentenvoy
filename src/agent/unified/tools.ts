@@ -414,6 +414,32 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       exec("group_event_unarchive", "unarchive", params, { sessionId: params.sessionId }),
   });
 
+  const group_event_set_candidate_dates = tool({
+    description:
+      "Store the host-confirmed list of candidate dates for a group event. " +
+      "Call this AFTER the host confirms (or edits) the ranked date list you proposed. " +
+      "These dates seed the event page grid — each participant sees them as rows and marks which work. " +
+      "Requires the NegotiationSession.id (sessionId) for the group event — get it from LOAD_active_sessions.",
+    inputSchema: z.object({
+      sessionId: z.string().describe("NegotiationSession.id of the group event."),
+      candidateDays: z.array(z.string()).min(1)
+        .describe("ISO date strings (YYYY-MM-DD) the host confirmed, in chronological order."),
+    }),
+    execute: async ({ sessionId, candidateDays }) => {
+      const { prisma } = await import("@/lib/prisma");
+      const gc = await prisma.groupCoordination.findUnique({
+        where: { sessionId },
+        select: { id: true },
+      });
+      if (!gc) return { success: false, message: "GroupCoordination row not found for this session." };
+      await prisma.groupCoordination.update({
+        where: { sessionId },
+        data: { candidateDays },
+      });
+      return { success: true, candidateDays };
+    },
+  });
+
   // ---------------------------------------------------------------------------
   // Primary link
   // ---------------------------------------------------------------------------
@@ -727,6 +753,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     group_event_update,
     group_event_archive,
     group_event_unarchive,
+    group_event_set_candidate_dates,
     // Primary link
     primary_link_update,
     // Sessions

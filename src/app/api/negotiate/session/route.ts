@@ -653,6 +653,7 @@ export async function POST(req: NextRequest) {
 
   // Build group participant context if applicable
   let eventParticipants: Array<{ name: string; status: string }> | undefined;
+  let groupCoordinationData: { candidateDays: string[] | null; responses: unknown[] } | undefined;
   if (isGroupEvent) {
     const allParticipants = await prisma.sessionParticipant.findMany({
       where: { linkId: link.id },
@@ -661,6 +662,17 @@ export async function POST(req: NextRequest) {
       name: p.name || p.email || "Unknown",
       status: p.status,
     }));
+    // Load the GroupCoordination row for the grid component
+    const gc = await prisma.groupCoordination.findFirst({
+      where: { session: { linkId: link.id } },
+      select: { candidateDays: true, responses: true },
+    });
+    if (gc) {
+      groupCoordinationData = {
+        candidateDays: Array.isArray(gc.candidateDays) ? (gc.candidateDays as string[]) : null,
+        responses: Array.isArray(gc.responses) ? (gc.responses as unknown[]) : [],
+      };
+    }
   }
 
   // Generate the initial greeting
@@ -978,6 +990,7 @@ export async function POST(req: NextRequest) {
     viewerTimezone: session.viewerTimezone ?? null,
     isGroupEvent: isGroupEvent || undefined,
     participants: participantSummary,
+    groupCoordination: groupCoordinationData,
     hostName: user.name,
     // Guest-negotiated values (set by lock_activity_location in the deal room).
     // Client uses these to display the locked state in the event card thread.

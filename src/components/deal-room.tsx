@@ -102,6 +102,103 @@ interface DealRoomProps {
   code?: string;
 }
 
+function GroupDayGrid({
+  candidateDays,
+  responses,
+  hostName,
+  mySessionId,
+  myPersonLabel,
+  isHost,
+  onVote,
+}: {
+  candidateDays: string[];
+  responses: Array<{ person: string; dayVotes?: Record<string, boolean> }>;
+  hostName: string;
+  mySessionId: string | null;
+  myPersonLabel?: string;
+  isHost: boolean;
+  onVote: (date: string, available: boolean) => void;
+}) {
+  // Collect all participant names from responses (excluding host)
+  const participantNames = Array.from(new Set(responses.map((r) => r.person).filter((n) => n !== hostName)));
+  const columns = [hostName || "Host", ...participantNames];
+
+  const getVote = (person: string, date: string): boolean | undefined => {
+    const row = responses.find((r) => r.person === person);
+    return row?.dayVotes?.[date];
+  };
+
+  const myLabel = myPersonLabel || (mySessionId ? `Guest (${mySessionId.slice(-4)})` : null);
+  const myColIndex = myLabel ? columns.indexOf(myLabel) : -1;
+
+  const formatDay = (iso: string) => {
+    const d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  };
+
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <table className="text-xs border-collapse w-full">
+        <thead>
+          <tr>
+            <th className="text-left pr-3 pb-1 font-medium text-secondary whitespace-nowrap">Day</th>
+            {columns.map((col, i) => (
+              <th key={i} className="px-2 pb-1 font-medium text-secondary text-center whitespace-nowrap max-w-[80px] truncate">
+                {col === hostName ? (hostName ? hostName.split(" ")[0] : "Host") : col.split(" ")[0]}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {candidateDays.map((date) => (
+            <tr key={date} className="border-t border-border/30">
+              <td className="pr-3 py-1 text-secondary whitespace-nowrap">{formatDay(date)}</td>
+              {columns.map((col, colIdx) => {
+                const isHostCol = col === hostName;
+                const vote = isHostCol ? true : getVote(col, date);
+                const isMyCol = !isHost && colIdx === myColIndex;
+                const isMyColByLabel = !isHost && col === myLabel;
+                const canClick = isMyCol || isMyColByLabel;
+
+                const cell =
+                  vote === true ? "✓" :
+                  vote === false ? "✗" :
+                  "·";
+                const cellColor =
+                  vote === true ? "text-emerald-500" :
+                  vote === false ? "text-red-400" :
+                  "text-muted";
+
+                return (
+                  <td key={colIdx} className="px-2 py-1 text-center">
+                    {canClick ? (
+                      <button
+                        onClick={() => onVote(date, vote !== true)}
+                        className={`w-6 h-6 rounded text-sm font-semibold transition-colors ${
+                          vote === true
+                            ? "bg-emerald-500/20 text-emerald-500 hover:bg-red-400/20 hover:text-red-400"
+                            : vote === false
+                            ? "bg-red-400/20 text-red-400 hover:bg-emerald-500/20 hover:text-emerald-500"
+                            : "bg-zinc-700/40 text-muted hover:bg-emerald-500/20 hover:text-emerald-500"
+                        }`}
+                        title={vote === true ? "Click to mark unavailable" : "Click to mark available"}
+                      >
+                        {cell}
+                      </button>
+                    ) : (
+                      <span className={`${cellColor} font-semibold`}>{cell}</span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function DealRoom({ slug, code }: DealRoomProps) {
   const router = useRouter();
   const { setTheme } = useTheme();
@@ -202,6 +299,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [statusAnimating, setStatusAnimating] = useState(false);
   const [isGroupEvent, setIsGroupEvent] = useState(false);
   const [participants, setParticipants] = useState<Array<{ name: string; status: string }>>([]);
+  const [groupCoordination, setGroupCoordination] = useState<{
+    candidateDays: string[] | null;
+    responses: Array<{ person: string; dayVotes?: Record<string, boolean> }>;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const prevStatusRef = useRef<string>("active");
@@ -1087,6 +1188,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         setSessionStatusLabel(data.statusLabel || "");
         if (data.isGroupEvent) setIsGroupEvent(true);
         if (data.participants) setParticipants(data.participants);
+        if (data.groupCoordination) setGroupCoordination(data.groupCoordination as { candidateDays: string[] | null; responses: Array<{ person: string; dayVotes?: Record<string, boolean> }> });
 
         // B3: store child NegotiationLink.code for feedback auth.
         // feedbackCode is the child NegotiationLink.code (e.g. "hf5uex");
@@ -1787,6 +1889,39 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               </span>
             ))}
           </div>
+        )}
+
+        {/* GroupDayGrid — day availability picker for group events */}
+        {isGroupEvent && groupCoordination?.candidateDays && groupCoordination.candidateDays.length > 0 && (
+          <GroupDayGrid
+            candidateDays={groupCoordination.candidateDays}
+            responses={groupCoordination.responses}
+            hostName={hostName}
+            mySessionId={sessionId}
+            myPersonLabel={formGuestName || undefined}
+            isHost={isHost}
+            onVote={(date, available) => {
+              if (!sessionId) return;
+              fetch("/api/negotiate/group-day-vote", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ negotiationSessionId: sessionId, date, available }),
+              }).then(async (res) => {
+                if (res.ok) {
+                  const updated = { ...groupCoordination };
+                  const responses = [...(updated.responses || [])];
+                  const myLabel = formGuestName || `Guest (${sessionId.slice(-4)})`;
+                  const idx = responses.findIndex((r) => r.person === myLabel);
+                  if (idx >= 0) {
+                    responses[idx] = { ...responses[idx], dayVotes: { ...(responses[idx].dayVotes || {}), [date]: available } };
+                  } else {
+                    responses.push({ person: myLabel, dayVotes: { [date]: available } });
+                  }
+                  setGroupCoordination({ ...updated, responses } as typeof groupCoordination);
+                }
+              });
+            }}
+          />
         )}
 
         {/* B5: bookable subtitle — guest-only, not shown to host or after confirm. */}
