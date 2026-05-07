@@ -22,6 +22,8 @@ import { authOptions } from "@/lib/auth";
 import { applyPostureToScope } from "@/lib/links/scope";
 import type { PostureUpdate } from "@/lib/links/scope";
 import type { AvailabilityWindow } from "@/lib/link-parameters";
+import { getLinkPosture } from "@/lib/links/posture";
+import type { UserPreferences } from "@/lib/scoring";
 import { prisma } from "@/lib/prisma";
 
 const ALLOWED_FORMATS = ["video", "phone", "in-person"] as const;
@@ -43,6 +45,38 @@ function isValidAvailabilityWindows(v: unknown): v is AvailabilityWindow[] {
   );
 }
 
+/** Resolve a NegotiationLink by either its Prisma `id` or its short URL `code`. */
+async function findLink(idOrCode: string, userId: string) {
+  // cuid2 ids start with 'c' and are 24+ chars; short codes are ≤8 chars.
+  const byCode = idOrCode.length <= 8;
+  return prisma.negotiationLink.findFirst({
+    where: byCode
+      ? { code: idOrCode, userId }
+      : { id: idOrCode, userId },
+  });
+}
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const { id } = await params;
+  const link = await findLink(id, session.user.id);
+  if (!link) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { preferences: true },
+  });
+  const posture = getLinkPosture(link, user as { preferences?: UserPreferences | null } | null);
+  return NextResponse.json(posture);
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -61,14 +95,12 @@ export async function PATCH(
     );
   }
 
-  // Verify the caller owns this link.
-  const link = await prisma.negotiationLink.findUnique({
-    where: { id },
-    select: { userId: true },
-  });
-  if (!link || link.userId !== session.user.id) {
+  // Verify the caller owns this link (by id or short code).
+  const link = await findLink(id, session.user.id);
+  if (!link) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  const resolvedId = link.id;
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) {
@@ -135,6 +167,6 @@ export async function PATCH(
     return NextResponse.json({ error: "No recognized fields in payload" }, { status: 400 });
   }
 
-  const result = await applyPostureToScope(updates, [id], session.user.id);
+  const result = await applyPostureToScope(updates, [resolvedId], session.user.id);
   return NextResponse.json({ ok: true, varianceWrites: result.varianceWrites });
 }

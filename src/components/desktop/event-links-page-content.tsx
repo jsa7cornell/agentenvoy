@@ -342,6 +342,7 @@ export function EventLinksPageContent() {
   const [filter, setFilter] = useState<EventFilter>(DEFAULT_EVENT_FILTER);
   const [editing, setEditing] = useState<ReusableLinkRow | null>(null);
   const [editingPrimary, setEditingPrimary] = useState(false);
+  const [editingLinkCode, setEditingLinkCode] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
   const [archiving, setArchiving] = useState<string | null>(null);
@@ -372,11 +373,14 @@ export function EventLinksPageContent() {
     }
   }
 
-  // Route the Edit click on a Primary card to the PrimaryEditDialog;
-  // bookable / other variance rows continue to use EventLinksEditDialog.
+  // Route the Edit click on a Primary card to LinkEditModal (primary mode);
+  // bookable rows with a linkCode go to LinkEditModal (link mode);
+  // legacy rows without a linkCode fall back to EventLinksEditDialog.
   function handleEditClick(row: ReusableLinkRow) {
     if (row.kind === "primary") {
       setEditingPrimary(true);
+    } else if (row.linkCode) {
+      setEditingLinkCode(row.linkCode);
     } else {
       setEditing(row);
     }
@@ -431,6 +435,7 @@ export function EventLinksPageContent() {
               icon: "🕐",
               status: (rStatus === "paused" ? "paused" : "active") as "active" | "paused",
               ruleId: r.id,
+              linkCode: oh.linkCode,
               recurringWindowConfig: {
                 title: oh.title,
                 name: oh.name,
@@ -1065,6 +1070,16 @@ export function EventLinksPageContent() {
           refetchReusable();
         }}
         onClose={() => setEditingPrimary(false)}
+      />
+      <LinkEditModal
+        isOpen={!!editingLinkCode}
+        mode="link"
+        linkId={editingLinkCode ?? undefined}
+        onSaved={() => {
+          setReusableLoaded(false);
+          refetchReusable();
+        }}
+        onClose={() => setEditingLinkCode(null)}
       />
       {/* hostFirstName reserved for header chrome refactor; suppress unused
           state warning until that lands. */}

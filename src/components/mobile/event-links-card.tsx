@@ -50,6 +50,9 @@ export interface ReusableLinkRow {
    *  Edit dialog. Office Hours is the most common variant today; other
    *  recurring-window-backed variants populate this the same way. */
   ruleId?: string;
+  /** Short URL code (e.g. "btnhg8") — used as the linkId param when
+   *  routing bookable-link edits to LinkEditModal. */
+  linkCode?: string;
   /** Set when the link has an attached recurring window — the editable
    *  config the Edit dialog hydrates from (title / format / duration /
    *  window / days). The Edit dialog gates its editable form on the

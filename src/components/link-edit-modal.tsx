@@ -170,17 +170,10 @@ export function LinkEditModal({
 
     // Fetch current values from the appropriate API.
     setIsLoading(true);
-    const url = mode === "primary"
-      ? "/api/me/scheduling-defaults"
-      : `/api/me/links`;
 
-    fetch(url)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!data) return;
-
-        if (mode === "primary") {
-          // scheduling-defaults returns flat fields.
+    const fetchPromise = mode === "primary"
+      ? fetch("/api/me/scheduling-defaults").then((r) => r.ok ? r.json() : null).then((data) => {
+          if (!data) return;
           const startMin = data.businessHoursStartMinutes ?? (data.businessHoursStart ?? 9) * 60;
           const endMin = data.businessHoursEndMinutes ?? (data.businessHoursEnd ?? 18) * 60;
           seedForm({
@@ -189,14 +182,16 @@ export function LinkEditModal({
             bufferMinutes: data.bufferMinutes,
             format: data.defaultFormat,
           });
-        } else if (mode === "link" && linkId && Array.isArray(data.links)) {
-          // Find the specific link in the list and read its parameters via posture.
-          // For now seed with defaults — the caller should supply `initial` for link mode.
-          seedForm({});
-        }
-      })
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
+        })
+      : linkId
+        ? fetch(`/api/me/links/${linkId}/posture`).then((r) => r.ok ? r.json() : null).then((data) => {
+            if (!data) return;
+            // GET posture returns a ResolvedPosture — seed directly.
+            seedForm(data);
+          })
+        : Promise.resolve();
+
+    fetchPromise.catch(() => {}).finally(() => setIsLoading(false));
   }, [isOpen, mode, linkId, initial, seedForm]);
 
   // ---- Dirty-aware change wrappers ----
