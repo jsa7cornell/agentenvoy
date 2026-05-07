@@ -5,7 +5,7 @@ import { applyEventOverrides, type LinkParameters, type ScoredSlot } from "@/lib
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserTimezone } from "@/lib/timezone";
-import { getActiveLocationRule, compileBookableLinks, type AvailabilityPreference } from "@/lib/availability-rules";
+import { getActiveLocationRule, compileBookableLinks, type AvailabilityRule } from "@/lib/availability-rules";
 import { computeDensityHorizon } from "@/lib/availability-density";
 import { getSchedulingMode } from "@/lib/scheduling-mode";
 import { applyBookableWindow, type ConfirmedBooking } from "@/lib/bookable-links";
@@ -156,7 +156,7 @@ export async function GET(req: NextRequest) {
 
     // Widget display: combine both signals — active location rule + Google workingLocation.
     // The host's private defaultLocation is NEVER surfaced here (guest-facing widget).
-    const activeLocRule = getActiveLocationRule((explicit?.structuredRules as AvailabilityPreference[] | undefined) ?? []);
+    const activeLocRule = getActiveLocationRule((explicit?.structuredRules as AvailabilityRule[] | undefined) ?? []);
     const activePrefLocation = activeLocRule?.locationLabel
       ? { label: activeLocRule.locationLabel, until: activeLocRule.expiryDate }
       : null;
@@ -193,7 +193,7 @@ export async function GET(req: NextRequest) {
     // rule, filter slots through the rule's window + days, override soft
     // protection, and subtract already-booked sibling sessions for the same rule.
     if (recurringWindowId) {
-      const allRules = (explicit?.structuredRules as AvailabilityPreference[] | undefined) ?? [];
+      const allRules = (explicit?.structuredRules as AvailabilityRule[] | undefined) ?? [];
       const compiledLinks = compileBookableLinks(allRules);
       const compiled = compiledLinks.find((l) => l.ruleId === recurringWindowId);
       if (compiled) {

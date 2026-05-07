@@ -20,6 +20,7 @@ import { hasScope, type HostPrincipalContext } from "@/app/api/mcp/host/auth";
 import {
   HOST_MCP_TOOLS,
   createLinkInput,
+  modifyLinkInput,
   getMyAvailabilityInput,
   listMySessionsInput,
   type HostMcpToolName,
@@ -36,6 +37,8 @@ import {
   deriveEmittedScore,
   deriveEmittedPreferred,
 } from "@/lib/scoring-emit";
+import { applyPostureToScope } from "@/lib/links/scope";
+import type { PostureUpdate } from "@/lib/links/scope";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,12 +99,60 @@ async function handleCreateLinkTool(
     title: string;
   };
 
+  // PR-C: apply canvas + buffer overrides after creation so they win over
+  // the user-default posture snapshot that handleCreateLink seeds.
+  const canvasOverride: PostureUpdate = {};
+  if (args.availability) canvasOverride.availability = args.availability;
+  if (args.bufferMinutes !== undefined) canvasOverride.bufferMinutes = args.bufferMinutes;
+  if (Object.keys(canvasOverride).length > 0) {
+    await applyPostureToScope(canvasOverride, [d.linkId], userId).catch(() => {
+      // Non-fatal: link was created; log and continue.
+      console.error("[create_link] canvas override failed for", d.linkId);
+    });
+  }
+
   // Derive the slug from the URL — format is always `<origin>/meet/<slug>/<code>`.
   const urlParts = d.url.split("/meet/");
   const slugAndCode = urlParts[1] ?? "";
   const slug = slugAndCode.split("/")[0] ?? "";
 
   return ok({ linkCode: d.code, slug, url: d.url });
+}
+
+// ---------------------------------------------------------------------------
+// modify_link  (PR-C, proposal §8 Rule 13 parity)
+// ---------------------------------------------------------------------------
+
+async function handleModifyLinkTool(
+  args: z.infer<typeof modifyLinkInput>,
+  userId: string
+): Promise<CallToolResult> {
+  const link = await prisma.negotiationLink.findUnique({
+    where: { id: args.linkId },
+    select: { id: true, userId: true, topic: true },
+  });
+  if (!link) return fail("link_not_found", `Link ${args.linkId} not found`);
+  if (link.userId !== userId) return fail("not_authorized", "Link does not belong to this host");
+
+  const update: PostureUpdate = {};
+  const fieldsUpdated: string[] = [];
+
+  if (args.availability !== undefined) { update.availability = args.availability; fieldsUpdated.push("availability"); }
+  if (args.duration !== undefined) { update.duration = args.duration; fieldsUpdated.push("duration"); }
+  if (args.bufferMinutes !== undefined) { update.bufferMinutes = args.bufferMinutes; fieldsUpdated.push("bufferMinutes"); }
+  if (args.format !== undefined) { update.format = args.format; fieldsUpdated.push("format"); }
+  if (args.eveningsPosture !== undefined) { update.eveningsPosture = args.eveningsPosture; fieldsUpdated.push("eveningsPosture"); }
+
+  if (Object.keys(update).length > 0) {
+    await applyPostureToScope(update, [args.linkId], userId);
+  }
+
+  if (args.topic !== undefined) {
+    await prisma.negotiationLink.update({ where: { id: args.linkId }, data: { topic: args.topic } });
+    fieldsUpdated.push("topic");
+  }
+
+  return ok({ linkId: args.linkId, fieldsUpdated });
 }
 
 // ---------------------------------------------------------------------------
@@ -350,6 +401,11 @@ export function registerHostMcpTools(
     create_link: (args) =>
       handleCreateLinkTool(
         args as z.infer<typeof createLinkInput>,
+        principalCtx.userId
+      ),
+    modify_link: (args) =>
+      handleModifyLinkTool(
+        args as z.infer<typeof modifyLinkInput>,
         principalCtx.userId
       ),
     get_my_availability: (args) =>

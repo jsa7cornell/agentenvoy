@@ -24,7 +24,7 @@ import { prisma } from "@/lib/prisma";
 import { invalidateSchedule } from "@/lib/calendar";
 import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
 import {
-  type AvailabilityPreference,
+  type AvailabilityRule,
   normalizeLinkName,
 } from "@/lib/availability-rules";
 import type { UserPreferences } from "@/lib/scoring";
@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
   const explicit = { ...(prefs.explicit ?? {}) };
   const existingRules =
     ((explicit as Record<string, unknown>).structuredRules as
-      | AvailabilityPreference[]
+      | AvailabilityRule[]
       | undefined) ?? [];
   const generalLinkName =
     typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName : undefined;
@@ -195,7 +195,7 @@ export async function POST(req: NextRequest) {
   const formatChanged = parsed.format !== prevFormat;
 
   const nowIso = new Date().toISOString();
-  const updated: AvailabilityPreference = {
+  const updated: AvailabilityRule = {
     ...target,
     action: "bookable",
     timeStart: parsed.timeStart,

@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getOrComputeSchedule, CalendarEvent } from "@/lib/calendar";
-import { type AvailabilityPreference, compileBookableLinks } from "@/lib/availability-rules";
+import { type AvailabilityRule, compileBookableLinks } from "@/lib/availability-rules";
 import { applyBookableWindow } from "@/lib/bookable-links";
 import type { EventProtectionOverride } from "@/lib/scoring";
 
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   // Read prefs once — used for both office-hours transforms and locationByDay.
   const prefs = (user.preferences as Record<string, unknown>) || {};
   const explicit = (prefs.explicit as Record<string, unknown>) || {};
-  const structuredRules = (explicit.structuredRules as AvailabilityPreference[] | undefined) ?? [];
+  const structuredRules = (explicit.structuredRules as AvailabilityRule[] | undefined) ?? [];
   const eventProtectionOverrides = (explicit.eventProtectionOverrides as EventProtectionOverride[] | undefined) ?? [];
   // Per-event resolution: an explicit instance override wins over a series
   // override for the same underlying recurring master.

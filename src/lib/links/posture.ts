@@ -34,19 +34,41 @@ import type {
   CompiledRules,
   UserPreferences,
 } from "../scoring";
+import {
+  type AvailabilityWindow,
+} from "../link-parameters";
 
-/** Resolved posture — the unified shape every reader site consumes.
- *  Fields mirror what `User.preferences.explicit.*` and
- *  `User.preferences.compiled.*` together hold today, plus a few
- *  scalars the V1.5 proposal hoists out of structuredRules. */
+/**
+ * Resolved posture — the unified shape every reader site consumes.
+ *
+ * `availability` is the canonical Layer 1 canvas (added PR-B 2026-05-06).
+ * `hoursStartMinutes`, `hoursEndMinutes`, `daysOfWeek` are derived from
+ * `availability` for backward compat — they are the bounding-box of the
+ * windows. New code should read `availability[]` directly. These flat
+ * fields will be removed after all reader sites migrate to `availability[]`.
+ */
 export interface ResolvedPosture {
-  /** Window start, minute-of-day 0–1440 (30-minute aligned). */
+  /**
+   * Layer 1 canvas — the link's offerable windows. Canonical source.
+   * Replaces flat hoursStart/End + daysOfWeek (which are now derived).
+   */
+  availability: AvailabilityWindow[];
+  /**
+   * @deprecated Derived from availability[]. Kept for reader-site compat.
+   * = Math.min(...availability.map(w => w.startMinutes)) or DEFAULT.
+   */
   hoursStartMinutes: number;
-  /** Window end, minute-of-day 0–1440 (30-minute aligned). */
+  /**
+   * @deprecated Derived from availability[]. Kept for reader-site compat.
+   * = Math.max(...availability.map(w => w.endMinutes)) or DEFAULT.
+   */
   hoursEndMinutes: number;
-  /** Days the link is offerable, ISO weekday numbers (0=Sun..6=Sat). */
+  /**
+   * @deprecated Derived from availability[]. Kept for reader-site compat.
+   * = union of all days[] across windows.
+   */
   daysOfWeek: number[];
-  /** Slot length in minutes (15, 30, 45, 60, 90). */
+  /** Slot length in minutes (15, 25, 30, 45, 60, 90). */
   defaultDuration: number;
   /** Buffer minutes around bookings. 0 = no buffer (explicit). */
   bufferMinutes: number;
@@ -70,13 +92,71 @@ export interface LinkContext {
   parameters?: NegotiationLink["parameters"];
 }
 
-const DEFAULT_DAYS_OF_WEEK = [1, 2, 3, 4, 5]; // Mon–Fri
+/**
+ * Returns true when a variance (personalized/bookable) link's `parameters`
+ * JSON is missing any of the four fields required for scheduling to work:
+ * availability, duration, bufferMinutes, format.
+ *
+ * Used by:
+ *  - GET /api/me/links → `needsSetup` flag on personalized link entries
+ *  - MyLinksPopover → orange dot badge next to incomplete links
+ *
+ * "Needs setup" means the link was created with insufficient config and
+ * must be edited before it can offer slots correctly. Links with all four
+ * fields present — even if the values are the inherited defaults — are
+ * considered valid.
+ *
+ * PR-D (proposal 2026-05-06_link-config-canonical-model-and-unified-edit §15)
+ */
+export function linkNeedsSetup(parameters: unknown): boolean {
+  if (parameters == null || typeof parameters !== "object") return true;
+  const p = parameters as Record<string, unknown>;
+
+  // availability: must be a non-empty array
+  const hasAvailability =
+    Array.isArray(p.availability) && (p.availability as unknown[]).length > 0;
+  // legacy canvas fields as fallback (transition window)
+  const hasLegacyCanvas =
+    typeof p.hoursStartMinutes === "number" &&
+    typeof p.hoursEndMinutes === "number" &&
+    Array.isArray(p.daysOfWeek);
+
+  if (!hasAvailability && !hasLegacyCanvas) return true;
+  if (typeof p.duration !== "number") return true;
+  if (typeof p.bufferMinutes !== "number") return true;
+  if (p.format !== "video" && p.format !== "phone" && p.format !== "in-person") return true;
+
+  return false;
+}
+
 const DEFAULT_DURATION_MINUTES = 30;
 const DEFAULT_BUFFER_MINUTES = 0;
 const DEFAULT_FORMAT: ResolvedPosture["format"] = "video";
 const DEFAULT_EVENINGS_POSTURE: ResolvedPosture["eveningsPosture"] = "protected";
-const DEFAULT_HOURS_START_MINUTES = 9 * 60;
-const DEFAULT_HOURS_END_MINUTES = 18 * 60;
+const DEFAULT_HOURS_START_MINUTES = 9 * 60;   // 540
+const DEFAULT_HOURS_END_MINUTES = 18 * 60;    // 1080
+
+/** Default canvas: Mon–Fri 9–18. Seeded on new links and used as fallback
+ *  when a link has no availability[] and no flat canvas fields. */
+const DEFAULT_AVAILABILITY: AvailabilityWindow[] = [
+  { days: [1, 2, 3, 4, 5], startMinutes: DEFAULT_HOURS_START_MINUTES, endMinutes: DEFAULT_HOURS_END_MINUTES },
+];
+
+/**
+ * Derive legacy flat fields from an AvailabilityWindow[] canvas.
+ * These are the bounding-box values — not precise for multi-window configs,
+ * but correct enough for all existing reader sites (scoring window, UI display).
+ */
+function flattenAvailability(windows: AvailabilityWindow[]): Pick<ResolvedPosture, "hoursStartMinutes" | "hoursEndMinutes" | "daysOfWeek"> {
+  if (windows.length === 0) {
+    return { hoursStartMinutes: DEFAULT_HOURS_START_MINUTES, hoursEndMinutes: DEFAULT_HOURS_END_MINUTES, daysOfWeek: [1, 2, 3, 4, 5] };
+  }
+  return {
+    hoursStartMinutes: Math.min(...windows.map(w => w.startMinutes)),
+    hoursEndMinutes: Math.max(...windows.map(w => w.endMinutes)),
+    daysOfWeek: [...new Set(windows.flatMap(w => w.days))].sort((a, b) => a - b),
+  };
+}
 
 /** Resolve scheduling posture for a link.
  *
@@ -107,11 +187,11 @@ function resolveFromVariance(link: LinkContext): ResolvedPosture {
   const params: ParsedLinkParameters = parseLinkParameters(link.parameters);
   const missing: string[] = [];
 
-  // Hours
-  if (!("hoursStartMinutes" in params)) missing.push("hoursStartMinutes");
-  if (!("hoursEndMinutes" in params)) missing.push("hoursEndMinutes");
-  // Days
-  if (!("daysOfWeek" in params)) missing.push("daysOfWeek");
+  // Canvas: accept availability[] (new) OR flat hoursStart/End+daysOfWeek (legacy).
+  const hasNewCanvas = Array.isArray(params.availability) && (params.availability as unknown[]).length > 0;
+  const hasLegacyCanvas = "hoursStartMinutes" in params && "hoursEndMinutes" in params && "daysOfWeek" in params;
+  if (!hasNewCanvas && !hasLegacyCanvas) missing.push("availability (or hoursStartMinutes+hoursEndMinutes+daysOfWeek)");
+
   // Duration
   if (!("duration" in params)) missing.push("duration");
   // Buffer
@@ -131,10 +211,25 @@ function resolveFromVariance(link: LinkContext): ResolvedPosture {
     );
   }
 
+  // Resolve the canonical availability[] canvas.
+  // Priority: new availability[] > derived from legacy flat fields > default.
+  let availability: AvailabilityWindow[];
+  if (hasNewCanvas) {
+    availability = params.availability as AvailabilityWindow[];
+  } else {
+    // Legacy row: derive a single-window canvas from flat fields.
+    availability = [{
+      days: params.daysOfWeek as number[],
+      startMinutes: params.hoursStartMinutes as number,
+      endMinutes: params.hoursEndMinutes as number,
+    }];
+  }
+
+  const flat = flattenAvailability(availability);
+
   return {
-    hoursStartMinutes: params.hoursStartMinutes!,
-    hoursEndMinutes: params.hoursEndMinutes!,
-    daysOfWeek: params.daysOfWeek!,
+    availability,
+    ...flat,
     defaultDuration: params.duration!,
     bufferMinutes: params.bufferMinutes!,
     format: (params.format as ResolvedPosture["format"]) ?? DEFAULT_FORMAT,
@@ -144,9 +239,7 @@ function resolveFromVariance(link: LinkContext): ResolvedPosture {
       allowWindows: params.compiled?.allowWindows ?? [],
       buffers: params.compiled?.buffers ?? [],
       priorityBuckets: params.compiled?.priorityBuckets ?? [],
-      conditionalBuffers: [],
       ambiguities: params.compiled?.ambiguities ?? [],
-      blackoutDays: [],
     } as unknown as CompiledRules,
     blackoutDays: [],
     // defaultLocation intentionally omitted on variance reads — host-private
@@ -172,9 +265,13 @@ function resolveFromUser(
       ? explicit.businessHoursEnd * 60
       : DEFAULT_HOURS_END_MINUTES);
 
-  // Days: not stored at the user-level today (implicit weekdays). Use
-  // Mon–Fri default. Per-day overrides live in compiled.allowWindows.
-  const daysOfWeek = DEFAULT_DAYS_OF_WEEK;
+  // Derive the canonical availability[] from user-level hours. Primary's
+  // canvas is Mon–Fri at the user's configured hours. Per-day overrides
+  // live in compiled.allowWindows today; they'll move to availability[]
+  // when the Primary link gets its own LinkParameters (PR-B follow-up).
+  const availability: AvailabilityWindow[] = [
+    { days: [1, 2, 3, 4, 5], startMinutes: hoursStartMinutes, endMinutes: hoursEndMinutes },
+  ];
 
   // Compiled rules read straight off preferences (existing convention).
   const compiledRaw = (prefs as { compiled?: unknown }).compiled;
@@ -186,15 +283,14 @@ function resolveFromUser(
           allowWindows: [],
           buffers: [],
           priorityBuckets: [],
-          conditionalBuffers: [],
           ambiguities: [],
-          blackoutDays: [],
         } as unknown as CompiledRules);
 
   return {
+    availability,
     hoursStartMinutes,
     hoursEndMinutes,
-    daysOfWeek,
+    daysOfWeek: [1, 2, 3, 4, 5],
     defaultDuration: explicit.defaultDuration ?? DEFAULT_DURATION_MINUTES,
     bufferMinutes: explicit.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
     format:

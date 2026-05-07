@@ -691,6 +691,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   let meetLink: string | undefined;
   let eventLink: string | undefined;
   let confirmedCalendarEventId: string | undefined;
+  let bufferCalendarEventId: string | undefined;
   let calendarWriteUnavailable = false;
 
   const guestNoteStr = typeof bodyGuestNote === "string" && bodyGuestNote.trim()
@@ -796,6 +797,33 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       }
     }
 
+    // Buffer event — write a private GCal event immediately after the meeting
+    // when bufferMinutes > 0. Non-blocking: if it fails, the confirmation
+    // proceeds and bufferCalendarEventId stays undefined.
+    const effectiveBufferMinutes =
+      session.negotiatedBufferMinutes ??
+      (parseLinkParameters(session.link?.parameters).bufferMinutes as number | undefined) ??
+      0;
+    if (effectiveBufferMinutes > 0 && confirmedCalendarEventId) {
+      const bufferStart = endTime; // endTime already = startTime + durationMin minutes
+      const bufferEnd = new Date(bufferStart.getTime() + effectiveBufferMinutes * 60 * 1000);
+      try {
+        const bufferResult = await createCalendarEvent(session.hostId, {
+          summary: `🛡 Buffer — ${guestLabel}`,
+          startTime: bufferStart,
+          endTime: bufferEnd,
+          attendeeEmails: [],
+          addMeetLink: false,
+          visibility: "private",
+          transparency: "opaque",
+          bufferForEventId: confirmedCalendarEventId,
+        });
+        bufferCalendarEventId = bufferResult.eventId ?? undefined;
+      } catch (e) {
+        console.warn("[confirm] buffer event creation failed (non-blocking):", e);
+      }
+    }
+
     // Guard: in production, a synthetic (dryrun/log) or missing event ID
     // means `EFFECT_MODE_CALENDAR` isn't set to `live`. The session UI will
     // show "confirmed" but no real GCal event exists. Surface loudly via
@@ -855,6 +883,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     data: {
       meetLink: meetLink || null,
       calendarEventId: confirmedCalendarEventId || null,
+      bufferCalendarEventId: bufferCalendarEventId || null,
       summary: confirmSummary,
     },
   });

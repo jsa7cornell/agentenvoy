@@ -36,6 +36,26 @@ export const dayNameSchema = z.enum([
 ]);
 export type DayName = z.infer<typeof dayNameSchema>;
 
+/**
+ * One offerable window for a link — Layer 1 (Canvas) of the four-layer model.
+ *
+ * `days`         ISO weekday numbers 0=Sun..6=Sat
+ * `startMinutes` minute-of-day start, 0..1440
+ * `endMinutes`   minute-of-day end, 0..1440; must be > startMinutes
+ *
+ * Simple case:  `[{ days:[1,2,3,4,5], startMinutes:540, endMinutes:1020 }]`  Mon–Fri 9–5
+ * Advanced:     `[{days:[1],540,1020}, {days:[2],540,720}, {days:[2],840,1020}]`  Mon 9–5 + Tue split
+ */
+export const availabilityWindowSchema = z.object({
+  days: z.array(z.number().int().min(0).max(6)).min(1),
+  startMinutes: z.number().int().min(0).max(1439),
+  endMinutes: z.number().int().min(1).max(1440),
+}).refine(w => w.endMinutes > w.startMinutes, {
+  message: "endMinutes must be greater than startMinutes",
+});
+
+export type AvailabilityWindow = z.infer<typeof availabilityWindowSchema>;
+
 export const timeWindowSchema = z.object({
   start: z.string().regex(/^\d{2}:\d{2}$/, "HH:MM 24-hour format"),
   end: z.string().regex(/^\d{2}:\d{2}$/, "HH:MM 24-hour format"),
@@ -251,15 +271,23 @@ export const linkParametersSchema = z
     timingLabel: z.string().optional(),
     intent: intentSchema.optional(),
 
-    // 2026-05-01 — three-band model. See proposal
-    // 2026-05-01_event-availability-vs-preferred-vs-calendar-scoring.
-    availability: availabilitySpecSchema.optional(),
+    // 2026-05-01 — three-band model (preferred layer unchanged).
     preferred: preferredSpecSchema.optional(),
 
-    // 2026-05-02 — V1.5 per-link posture fields. See proposal
-    // 2026-05-02_per-link-config-storage-and-scoring-link-scope.
+    // 2026-05-06 — PR-B canvas collapse. Layer 1 of the four-layer model.
+    // Replaces flat hoursStartMinutes/hoursEndMinutes/daysOfWeek + AvailabilitySpec.
+    // See proposal 2026-05-06_link-config-canonical-model-and-unified-edit.
+    availability: z.array(availabilityWindowSchema).optional(),
+
+    // 2026-05-02 — V1.5 per-link posture fields (kept as deprecated for
+    // transition window — backfill script converts these to availability[]).
+    // Do not write these fields on new links; getLinkPosture reads them as
+    // fallback when availability[] is absent.
+    /** @deprecated Use availability[] instead. Kept for transition-window reads. */
     hoursStartMinutes: z.number().int().min(0).max(1440).optional(),
+    /** @deprecated Use availability[] instead. */
     hoursEndMinutes: z.number().int().min(0).max(1440).optional(),
+    /** @deprecated Use availability[] instead. */
     daysOfWeek: z.array(z.number().int().min(0).max(6)).optional(),
     bufferMinutes: z.number().int().min(0).optional(),
     eveningsPosture: eveningsPostureSchema.optional(),

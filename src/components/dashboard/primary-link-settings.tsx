@@ -11,6 +11,7 @@
  */
 
 import { useState } from "react";
+import Link from "next/link";
 
 interface PrimaryLinkGuestPicks {
   format?: boolean;
@@ -98,6 +99,9 @@ export function PrimaryLinkSettings({
         Off by default. When on, guests can ask for a different format or length in chat
         and the meeting locks to their pick (within sensible bounds).
       </p>
+      <Link href="/dashboard/availability" className="text-[11px] font-medium text-accent hover:text-accent-hover transition mt-3 inline-block">
+        Manage rules →
+      </Link>
     </div>
   );
 }

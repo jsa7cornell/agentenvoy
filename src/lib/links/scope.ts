@@ -27,15 +27,20 @@
  */
 
 import { prisma } from "../prisma";
-import { parseLinkParameters } from "../link-parameters";
+import { parseLinkParameters, type AvailabilityWindow } from "../link-parameters";
 import type { ResolvedPosture } from "./posture";
 
 /** Subset of posture fields a propagation can carry. Mirror the
  *  `LinkParameters` posture additions from V1.5 — every field optional
  *  so callers can send only what changed. */
 export type PostureUpdate = Partial<{
+  /** Canonical canvas — replaces flat hoursStart/End+daysOfWeek. */
+  availability: AvailabilityWindow[];
+  /** @deprecated Send availability[] instead. Kept for callers not yet migrated. */
   hoursStartMinutes: number;
+  /** @deprecated Send availability[] instead. */
   hoursEndMinutes: number;
+  /** @deprecated Send availability[] instead. */
   daysOfWeek: number[];
   duration: number;
   bufferMinutes: number;
@@ -107,9 +112,18 @@ export async function applyPostureToScope(
         (prevPrefs.explicit as Record<string, unknown> | undefined) ?? {};
       const nextExplicit = { ...prevExplicit };
 
-      if ("hoursStartMinutes" in updates)
+      // availability[] is the canonical canvas; translate to flat fields for
+      // User.preferences (Primary doesn't store availability[] yet — it reads
+      // businessHoursStart/EndMinutes). On the PR-B follow-up when Primary
+      // gets its own LinkParameters, this translation will be removed.
+      if ("availability" in updates && updates.availability?.length) {
+        const windows = updates.availability;
+        nextExplicit.businessHoursStartMinutes = Math.min(...windows.map(w => w.startMinutes));
+        nextExplicit.businessHoursEndMinutes = Math.max(...windows.map(w => w.endMinutes));
+      }
+      if ("hoursStartMinutes" in updates && !("availability" in updates))
         nextExplicit.businessHoursStartMinutes = updates.hoursStartMinutes;
-      if ("hoursEndMinutes" in updates)
+      if ("hoursEndMinutes" in updates && !("availability" in updates))
         nextExplicit.businessHoursEndMinutes = updates.hoursEndMinutes;
       if ("bufferMinutes" in updates)
         nextExplicit.bufferMinutes = updates.bufferMinutes;
@@ -151,6 +165,7 @@ export async function applyPostureToScope(
     const existing = parseLinkParameters(link.parameters);
     const next = { ...existing };
 
+    if ("availability" in updates) next.availability = updates.availability;
     if ("hoursStartMinutes" in updates)
       next.hoursStartMinutes = updates.hoursStartMinutes;
     if ("hoursEndMinutes" in updates)
@@ -203,6 +218,7 @@ export async function findAffectedVariances(
   for (const link of links) {
     const params = parseLinkParameters(link.parameters);
     let differs = false;
+    if ("availability" in updates && JSON.stringify(params.availability) !== JSON.stringify(updates.availability)) differs = true;
     if ("hoursStartMinutes" in updates && params.hoursStartMinutes !== updates.hoursStartMinutes) differs = true;
     if ("hoursEndMinutes" in updates && params.hoursEndMinutes !== updates.hoursEndMinutes) differs = true;
     if ("duration" in updates && params.duration !== updates.duration) differs = true;

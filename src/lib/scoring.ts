@@ -4,6 +4,39 @@
  * Computes protection scores for 30-min slots across an 8-week window.
  * Scores range from -2 (exclusive) to 5 (immovable).
  *
+ * ## Four-layer model (canonical)
+ *
+ * Every slot is evaluated through four ordered layers before scoring:
+ *
+ *   LAYER 1 — Canvas
+ *     The link's offerable windows: `AvailabilityWindow[]` on `LinkParameters`.
+ *     "Where could this link in principle offer time?" Slots outside any window
+ *     are not offerable regardless of what the other layers say.
+ *
+ *   LAYER 2 — Calendar
+ *     Real Google Calendar events on the host's tracked calendars. Each event
+ *     is scored by its nature (tentative=3, confirmed=5, declined=0, etc.).
+ *     Overlapping events subtract from what the canvas opened.
+ *
+ *   LAYER 3 — Ad-hoc rules  (see `CompiledRules`)
+ *     Pattern-based modifications authored by the host via natural language:
+ *       BlockedWindow   — firm subtraction (score 5; VIPs cannot stretch in)
+ *       ProtectedWindow — soft subtraction (score 3; VIPs / overrides may admit)
+ *       AllowWindow     — override a calendar conflict (make event transparent)
+ *       CompiledBuffer  — pad N minutes around meetings of type X
+ *       LocationRule    — per-pattern location override
+ *       FormatFilter    — per-pattern format restriction
+ *       BlackoutDay     — full day off
+ *
+ *   LAYER 4 — Per-meeting overlay
+ *     4a. Personalized-link customization — baked into LinkParameters at create
+ *     4b. Session-level negotiation — negotiated{Duration,Format,Location,Buffer}
+ *         on NegotiationSession, written by lock_* actions during live negotiation
+ *
+ *   SCORER (this file) — `scoreSlot()` consumes all four layers and emits
+ *     { score, tier, preferred, resolvedLocation, allowedFormats } per slot.
+ *     Scoring is the function, not a layer. It is the single exit point.
+ *
  * ## Score bands (canonical — all consumers align to these)
  *
  *   -2, -1 → **Preferred**    Host-explicit boost. Bookable; Envoy stack-
@@ -93,6 +126,15 @@ export interface ScoredSlot {
   isShortSlot?: boolean;
 }
 
+/**
+ * LAYER 3 rule — firm subtraction from the canvas.
+ *
+ * The host has declared this time off-limits and means it. Score 5 — VIPs
+ * cannot stretch into a BlockedWindow. Use `ProtectedWindow` for the softer
+ * "please don't, but you can if it really matters" register.
+ *
+ * Compiled from `AvailabilityRule` rows with `action: "block"`.
+ */
 export interface BlockedWindow {
   start: string; // "HH:MM" 24-hour
   end: string;
@@ -123,6 +165,28 @@ export interface BlockedWindow {
    * buffer).
    */
   firmness?: BlockFirmness;
+}
+
+/**
+ * LAYER 3 rule — soft subtraction from the canvas (stretch band).
+ *
+ * The host has declared this time protected but is willing to stretch into it
+ * for the right meeting. Score 3 — distinct from BlockedWindow because the
+ * host vocabulary, scorer behavior, and composer narration all need to
+ * distinguish them. "I'm protecting Tuesday afternoons" ≠ "I'm blocked."
+ *
+ * Default offer-set excludes protected slots. VIP guests, post-tier-escalation,
+ * or explicit host overrides can admit them.
+ *
+ * Compiled from `AvailabilityRule` rows with `action: "protect"`.
+ */
+export interface ProtectedWindow {
+  start: string; // "HH:MM" 24-hour
+  end: string;
+  days?: string[]; // short day names: "Mon", "Tue", etc.
+  label?: string;
+  expires?: string; // ISO date "YYYY-MM-DD"
+  date?: string;   // ISO date "YYYY-MM-DD" — single-date scope (same semantics as BlockedWindow.date)
 }
 
 /** A host-set protection override for a Google Calendar event.
@@ -211,8 +275,20 @@ export interface CompiledPriorityBucket {
   keywords: string[];
 }
 
-/** An allow window overrides event-based blocking during the specified time.
- *  Events overlapping this window are treated as transparent (score 0). */
+/**
+ * LAYER 3 rule — override a calendar conflict (NOT a canvas opener).
+ *
+ * AllowWindow means "ignore overlapping calendar events during this window" —
+ * it makes a calendar event transparent (score 0) instead of blocking. It does
+ * NOT open time that the canvas doesn't already offer. Use case: a protein-shake
+ * reminder at 1:00–1:05 PM shouldn't block a meeting slot.
+ *
+ * Canvas is positive/intrinsic ("the link is open here").
+ * AllowWindow is reactive/conditional ("if there's a conflict here, ignore it").
+ * Both are "positive" but at different layers — do not conflate them.
+ *
+ * Compiled from `AvailabilityRule` rows with `action: "allow"`.
+ */
 export interface AllowWindow {
   start: string; // "HH:MM" 24-hour
   end: string;
@@ -223,6 +299,9 @@ export interface AllowWindow {
 
 export interface CompiledRules {
   blockedWindows: BlockedWindow[];
+  /** Soft-subtraction windows (score 3 / stretch band). VIPs / explicit overrides may admit.
+   *  Optional for back-compat: existing serialized CompiledRules lack this field until PR-B re-compiles. */
+  protectedWindows?: ProtectedWindow[];
   allowWindows: AllowWindow[];
   buffers: CompiledBuffer[];
   priorityBuckets: CompiledPriorityBucket[];
@@ -804,6 +883,12 @@ function scoreSlot(
     else if (titleMatches(ev.summary, SACRED_KEYWORDS)) {
       ev_ = { score: 5, reason: "immovable", confidence: "high", summary: ev.summary, blockCost: "commitment", firmness: "strong" };
     }
+    // AgentEnvoy buffer event — tagged via GCal extendedProperties when
+    // written by the confirm pipeline. Treat as score 3 (protected/stretch-band)
+    // so it blocks regular guests but can be displaced for VIP bookings.
+    else if (ev.extendedProperties?.private?.["agentenvoy_buffer_for_event_id"]) {
+      ev_ = { score: 3, reason: "buffer for meeting", confidence: "high", summary: ev.summary, blockCost: "commitment", firmness: "weak" };
+    }
     // Soft-hold events ("Focus Time", "Hold", "Buffer") = preference:weak.
     // Protected tier — hidden from regular guests, VIP-reschedulable.
     else if (titleMatches(ev.summary, SOFT_HOLD_KEYWORDS)) {
@@ -1023,7 +1108,11 @@ function slotMatchesInstance(
  * (which is now expressed as `availability.expand: [{ days: ["Sat","Sun"] }]`).
  */
 export function inExpansion(slot: ScoredSlot, rules: LinkParameters, tz: string): boolean {
-  const expand = rules.availability?.expand;
+  // Transition: old rows carry AvailabilitySpec object; new rows carry AvailabilityWindow[].
+  // AvailabilitySpec.expand has no equivalent in the canvas model — the canvas itself defines
+  // what is offerable. Return false for new-model (array) links.
+  const spec = !Array.isArray(rules.availability) ? rules.availability : undefined;
+  const expand = spec?.expand;
   if (!expand?.length) return false;
   const slotDate = new Date(slot.start);
   const slotDay = localDayName(slotDate, tz);
@@ -1042,7 +1131,10 @@ export function inExpansion(slot: ScoredSlot, rules: LinkParameters, tz: string)
  * explicitly selected them).
  */
 export function inRestrictToSlots(slot: ScoredSlot, rules: LinkParameters): boolean {
-  const slots = rules.availability?.restrictToSlots;
+  // Transition: old rows carry AvailabilitySpec with restrictToSlots; new rows carry
+  // AvailabilityWindow[]. Returns false for new-model (array) links.
+  const spec = !Array.isArray(rules.availability) ? rules.availability : undefined;
+  const slots = spec?.restrictToSlots;
   if (!slots?.length) return false;
   return slots.some((s) => slotMatchesInstance(slot, s));
 }
@@ -1472,7 +1564,7 @@ export function computeInputHash(
 
 // --- Event-Level Override Application ---
 
-import type { AvailabilitySpec, PreferredSpec } from "./link-parameters";
+import type { AvailabilitySpec, AvailabilityWindow, PreferredSpec } from "./link-parameters";
 
 export interface LinkParameters {
   format?: string;
@@ -1509,17 +1601,16 @@ export interface LinkParameters {
    */
   isVip?: boolean;
   /**
-   * Event-availability layer (per-link). Defines what THIS link makes
-   * bookable, additively or restrictively relative to the host's calendar
-   * availability. Subject to real calendar conflicts.
+  /**
+   * Layer 1 canvas — the link's offerable windows. Canonical after PR-B
+   * (2026-05-06). New links write `AvailabilityWindow[]`. Old links still
+   * carry the retired `AvailabilitySpec` object during the transition window;
+   * use `Array.isArray(availability)` to distinguish at runtime.
+   * Backfill script `backfill-availability-windows.ts` converts old rows.
    *
-   * Replaces `preferredTimeStart/End`, `preferredTimeWindows`,
-   * `preferredDays` (in restrictive intent), `allowWeekends`,
-   * `slotOverrides` (`-2` exclusive + `5` blocked), `exclusiveSlots`.
-   *
-   * See proposal 2026-05-01_event-availability-vs-preferred-vs-calendar-scoring.
+   * @deprecated AvailabilitySpec — will be removed after backfill completes.
    */
-  availability?: AvailabilitySpec;
+  availability?: AvailabilityWindow[] | AvailabilitySpec;
   /**
    * Preferred layer (per-link). Decoration only — picker shows everything
    * available; greeting + MCP `slot.preferred` flag indicate which subset
@@ -1948,8 +2039,12 @@ export function applyEventOverrides(
     }
   }
 
+  // availability spec filters (transition: old rows carry AvailabilitySpec object).
+  // New rows carry AvailabilityWindow[] — canvas enforces what's offerable.
+  const availSpec = !Array.isArray(rules.availability) ? rules.availability : undefined;
+
   // availability.blockedSlots (named singular slot exclusions).
-  const blockedSlots = rules.availability?.blockedSlots;
+  const blockedSlots = availSpec?.blockedSlots;
   if (blockedSlots?.length) {
     slots = slots.filter((slot) => {
       const sStart = new Date(slot.start).getTime();
@@ -1958,7 +2053,7 @@ export function applyEventOverrides(
   }
 
   // availability.restrictToDays.
-  const restrictToDays = rules.availability?.restrictToDays;
+  const restrictToDays = availSpec?.restrictToDays;
   if (restrictToDays?.length) {
     const allowed = new Set<string>(
       (restrictToDays as readonly string[]).filter((d) => SHORT_DAY_SET.has(d)),
@@ -1970,7 +2065,7 @@ export function applyEventOverrides(
   }
 
   // availability.restrictToWindows.
-  const restrictToWindows = rules.availability?.restrictToWindows;
+  const restrictToWindows = availSpec?.restrictToWindows;
   if (restrictToWindows?.length) {
     slots = slots.filter((s) => {
       const { hour, minute } = getLocalParts(new Date(s.start), tz);
@@ -1980,7 +2075,7 @@ export function applyEventOverrides(
   }
 
   // availability.restrictToSlots — when present, ONLY these are bookable.
-  const restrictToSlots = rules.availability?.restrictToSlots;
+  const restrictToSlots = availSpec?.restrictToSlots;
   if (restrictToSlots?.length) {
     slots = slots.filter((s) => {
       const sStart = new Date(s.start).getTime();

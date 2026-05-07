@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
-import type { AvailabilityPreference } from "@/lib/availability-rules";
+import type { AvailabilityRule } from "@/lib/availability-rules";
 import { normalizeLinkParameters } from "@/lib/scoring";
 import {
   deriveLegacy,
@@ -299,6 +299,8 @@ async function executeAction(
       return handleLockActivityLocation(action.params, userId, context?.sessionId);
     case "lock_session_duration":
       return handleLockSessionDuration(action.params, userId, context?.sessionId);
+    case "lock_buffer_minutes":
+      return handleLockBufferMinutes(action.params, userId, context?.sessionId);
     default:
       return { success: false, message: `Unknown action: ${action.action}` };
   }
@@ -1512,7 +1514,7 @@ async function handleUpdateKnowledge(
     if (currentLocation !== undefined) {
       // Location is now stored as an availability rule with action: "location".
       // null clears the active location rule(s); object upserts a new one.
-      const existingRules = (newExplicit.structuredRules as AvailabilityPreference[] | undefined) ?? [];
+      const existingRules = (newExplicit.structuredRules as AvailabilityRule[] | undefined) ?? [];
       if (currentLocation === null) {
         // Remove any active location rules
         const filtered = existingRules.filter(
@@ -1526,7 +1528,7 @@ async function handleUpdateKnowledge(
             ? ({ ...r, status: "paused" as const })
             : r
         );
-        const newRule: AvailabilityPreference = {
+        const newRule: AvailabilityRule = {
           id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           originalText: currentLocation.until
             ? `Currently in ${currentLocation.label} until ${currentLocation.until}`
@@ -2877,6 +2879,14 @@ async function handleUpdateBusinessHours(
   // AND writes to every variance link. Fan-out failure is non-fatal — Primary
   // was already written; log and continue so the agent response isn't blocked.
   const postureUpdate: Record<string, unknown> = {};
+  // Emit availability[] (canonical canvas) when hours change; legacy flat fields
+  // are kept as fallback for un-migrated readers but availability[] is the source
+  // of truth written to variance links going forward.
+  if (start !== undefined || end !== undefined) {
+    postureUpdate.availability = [
+      { days: [1, 2, 3, 4, 5], startMinutes: effectiveStart * 60, endMinutes: effectiveEnd * 60 },
+    ];
+  }
   if (start !== undefined) postureUpdate.hoursStartMinutes = start * 60;
   if (end !== undefined) postureUpdate.hoursEndMinutes = end * 60;
   if (buffer !== undefined) postureUpdate.bufferMinutes = buffer;
@@ -2905,7 +2915,7 @@ async function handleUpdateBusinessHours(
 /**
  * Add, update, or remove a structured availability rule. Rules live at
  * `preferences.explicit.structuredRules` — see src/lib/availability-rules.ts
- * for the AvailabilityPreference shape and compileStructuredRules pathway.
+ * for the AvailabilityRule shape and compileStructuredRules pathway.
  *
  * This handler does not recompile rules itself — that happens on the next
  * availability query via the normal scoring path. It does call
@@ -2932,7 +2942,7 @@ function normalizeNameForGuard(name: string): string {
 }
 
 function collectNormalizedLinkNames(
-  existing: AvailabilityPreference[],
+  existing: AvailabilityRule[],
   primaryLinkName: string | undefined,
   opts: { exceptRuleId?: string; includeGeneral?: boolean } = {},
 ): Set<string> {
@@ -2967,7 +2977,7 @@ export async function handleUpdateAvailabilityRule(
     | "rename_primary"
     | undefined;
   const id = typeof params.id === "string" ? params.id : undefined;
-  const ruleInput = params.rule as Partial<AvailabilityPreference> | undefined;
+  const ruleInput = params.rule as Partial<AvailabilityRule> | undefined;
 
   if (
     operation !== "add" &&
@@ -2991,11 +3001,11 @@ export async function handleUpdateAvailabilityRule(
   const prefs: UserPreferences = (user?.preferences as UserPreferences | null) ?? {};
   const explicit = { ...(prefs.explicit ?? {}) };
   const existing =
-    ((explicit as Record<string, unknown>).structuredRules as AvailabilityPreference[] | undefined) ?? [];
+    ((explicit as Record<string, unknown>).structuredRules as AvailabilityRule[] | undefined) ?? [];
   const currentGeneralName =
     typeof explicit.primaryLinkName === "string" ? explicit.primaryLinkName : undefined;
 
-  let nextRules: AvailabilityPreference[] = existing;
+  let nextRules: AvailabilityRule[] = existing;
   let summary: string;
   let linkUrl: string | undefined;
   let addedRuleId: string | undefined;
@@ -3027,13 +3037,13 @@ export async function handleUpdateAvailabilityRule(
   } else if (operation === "add") {
     const newId = `rule_${generateCode(8)}`;
     const nowIso = new Date().toISOString();
-    const action = (ruleInput!.action as AvailabilityPreference["action"]) ?? "block";
+    const action = (ruleInput!.action as AvailabilityRule["action"]) ?? "block";
 
     // Bookable-link-specific validation + population (R1, R4 folds).
-    let bookable: AvailabilityPreference["bookable"] | undefined;
+    let bookable: AvailabilityRule["bookable"] | undefined;
     if (action === "bookable") {
       const bookableInput =
-        (ruleInput!.bookable as Partial<NonNullable<AvailabilityPreference["bookable"]>> | undefined) ?? {};
+        (ruleInput!.bookable as Partial<NonNullable<AvailabilityRule["bookable"]>> | undefined) ?? {};
       const nameRaw = typeof bookableInput.name === "string" ? bookableInput.name.trim() : "";
       if (!nameRaw) {
         return {
@@ -3080,10 +3090,10 @@ export async function handleUpdateAvailabilityRule(
         ? true
         : inputAllDay;
 
-    const rule: AvailabilityPreference = {
+    const rule: AvailabilityRule = {
       id: newId,
       originalText: String(ruleInput!.originalText ?? "").trim() || "(no description)",
-      type: (ruleInput!.type as AvailabilityPreference["type"]) ?? "recurring",
+      type: (ruleInput!.type as AvailabilityRule["type"]) ?? "recurring",
       action,
       timeStart: inputTimeStart,
       timeEnd: inputTimeEnd,
@@ -3168,11 +3178,11 @@ export async function handleUpdateAvailabilityRule(
     const mergedBookable = ruleBookableInput
       ? { ...(priorBookable ?? {}), ...(ruleBookableInput as object) }
       : prior.bookable;
-    const merged: AvailabilityPreference = {
+    const merged: AvailabilityRule = {
       ...prior,
       ...ruleInput,
       id: prior.id,
-      bookable: mergedBookable as AvailabilityPreference["bookable"],
+      bookable: mergedBookable as AvailabilityRule["bookable"],
     };
     nextRules = [...existing];
     nextRules[idx] = merged;
@@ -3514,5 +3524,64 @@ async function handleLockSessionDuration(
       // new duration — refetch /api/negotiate/slots before showing the picker.
       refetchSlots: true,
     },
+  };
+}
+
+/**
+ * `lock_buffer_minutes` — host-negotiated buffer override for a session.
+ *
+ * Symmetry with `lock_session_duration`. Writes `negotiatedBufferMinutes` on
+ * the session. Read at confirm time as:
+ *   session.negotiatedBufferMinutes ?? link.parameters.bufferMinutes ?? 0
+ *
+ * PR-C 2026-05-06 (proposal 2026-05-06_link-config-canonical-model-and-unified-edit §10 Item 13).
+ */
+async function handleLockBufferMinutes(
+  params: Record<string, unknown>,
+  userId: string,
+  sessionId?: string
+): Promise<ActionResult> {
+  const resolvedSessionId = (params.sessionId as string) || sessionId;
+  if (!resolvedSessionId) {
+    return { success: false, message: "Missing sessionId for lock_buffer_minutes" };
+  }
+
+  const raw = params.bufferMinutes;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || !Number.isInteger(raw)) {
+    return { success: false, message: "lock_buffer_minutes requires integer bufferMinutes" };
+  }
+  if (!ALLOWED_BUFFERS.has(raw)) {
+    return {
+      success: false,
+      message: `Invalid bufferMinutes: ${raw}. Allowed values: ${[...ALLOWED_BUFFERS].join(", ")}.`,
+    };
+  }
+
+  const session = await prisma.negotiationSession.findUnique({
+    where: { id: resolvedSessionId },
+    select: { id: true, hostId: true, status: true, link: { select: { parameters: true } } },
+  });
+  if (!session) return { success: false, message: `Session not found: ${resolvedSessionId}` };
+  if (session.hostId !== userId) return { success: false, message: "Not authorized for this session" };
+  if (session.status === "agreed") {
+    return { success: false, message: "Session is already confirmed — buffer cannot be changed post-confirm" };
+  }
+
+  const linkParams = parseLinkParameters(session.link?.parameters);
+  const linkBuffer = typeof linkParams.bufferMinutes === "number" ? linkParams.bufferMinutes : 0;
+
+  if (raw === linkBuffer) {
+    return { success: true, message: `Buffer ${raw} min matches the link default — no change needed.`, data: {} };
+  }
+
+  await prisma.negotiationSession.update({
+    where: { id: resolvedSessionId },
+    data: { negotiatedBufferMinutes: raw },
+  });
+
+  return {
+    success: true,
+    message: `Buffer set to ${raw} minutes for this meeting.`,
+    data: { negotiatedBufferMinutes: raw },
   };
 }

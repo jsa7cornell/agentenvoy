@@ -9,7 +9,7 @@ import { generateCode } from "@/lib/utils";
 import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
 import type { ScoredSlot, LinkParameters } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
-import { compileBookableLinks, type AvailabilityPreference } from "@/lib/availability-rules";
+import { compileBookableLinks, type AvailabilityRule } from "@/lib/availability-rules";
 import { applyBookableWindow } from "@/lib/bookable-links";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
@@ -108,11 +108,11 @@ export async function POST(req: NextRequest) {
   // this visitor. Each visit creates a new session (primary-link semantics).
   // Runs BEFORE the standard NegotiationLink lookup so bookable link codes
   // don't collide with personalized link codes.
-  let officeHoursRule: AvailabilityPreference | null = null; // variable retained for diff-locality; represents the matched bookable rule
+  let officeHoursRule: AvailabilityRule | null = null; // variable retained for diff-locality; represents the matched bookable rule
   if (code) {
     const prefsRaw = (user.preferences as Record<string, unknown>) || {};
     const explicit = (prefsRaw.explicit as Record<string, unknown>) || {};
-    const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
+    const rules = (explicit.structuredRules as AvailabilityRule[] | undefined) || [];
     const match = rules.find(
       (r) => r.action === "bookable" && r.bookable?.linkCode === code,
     );

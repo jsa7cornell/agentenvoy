@@ -3,7 +3,7 @@
  * one-time, date-scoped block rules.
  *
  * Ground bug (2026-05-05): user said "Protect next Tuesday all day" via the
- * composer. Resulting AvailabilityPreference had `type: "one-time"` and
+ * composer. Resulting AvailabilityRule had `type: "one-time"` and
  * `effectiveDate: "2026-05-12"` but no `allDay: true` flag. The compiler at
  * `availability-rules.ts:208` checked `if (rule.allDay)` and fell through to
  * the time-range branch which built a window with `start: "00:00"`,
@@ -15,9 +15,9 @@
  * with `date` set for partial-day) regardless of whether `allDay` is set.
  */
 import { describe, it, expect } from "vitest";
-import { compileStructuredRules, type AvailabilityPreference } from "@/lib/availability-rules";
+import { compileStructuredRules, type AvailabilityRule } from "@/lib/availability-rules";
 
-function mkRule(overrides: Partial<AvailabilityPreference>): AvailabilityPreference {
+function mkRule(overrides: Partial<AvailabilityRule>): AvailabilityRule {
   return {
     id: "rule_test",
     originalText: "test",
@@ -88,7 +88,7 @@ describe("compileStructuredRules — one-time block rules with effectiveDate", (
   });
 
   it("invariant: for any one-time block rule with effectiveDate, no compiled blockedWindow is left date-unscoped", () => {
-    const cases: AvailabilityPreference[] = [
+    const cases: AvailabilityRule[] = [
       mkRule({ type: "one-time", action: "block", effectiveDate: "2026-05-12" }),
       mkRule({ type: "one-time", action: "block", effectiveDate: "2026-05-12", allDay: true }),
       mkRule({ type: "one-time", action: "block", effectiveDate: "2026-05-12", timeStart: "09:00", timeEnd: "10:00" }),

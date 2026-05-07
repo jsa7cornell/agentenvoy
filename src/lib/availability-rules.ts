@@ -6,15 +6,26 @@
  * format consumed by the scoring engine — no LLM needed at compilation time.
  */
 
-import type { CompiledRules, BlockedWindow, AllowWindow, CompiledBuffer, CompiledPriorityBucket } from "./scoring";
+import type { CompiledRules, BlockedWindow, ProtectedWindow, AllowWindow, CompiledBuffer, CompiledPriorityBucket } from "./scoring";
 
 // --- Types ---
 
-export interface AvailabilityPreference {
+/**
+ * A structured availability rule row. Authored by the host via natural language;
+ * compiled deterministically into `CompiledRules` by `compileStructuredRules()`.
+ *
+ * DB column is `AvailabilityPreference` (legacy name — unchanged to avoid migration).
+ * TS type is `AvailabilityRule` (renamed 2026-05-06 for vocabulary clarity).
+ *
+ * Note: `daysOfWeek` here means "when this rule applies" — separate from Layer 1
+ * canvas `AvailabilityWindow.days` ("when the link offers time"). Both coexist;
+ * do not conflate.
+ */
+export interface AvailabilityRule {
   id: string;
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "location" | "bookable" | "no_in_person";
+  action: "block" | "protect" | "allow" | "buffer" | "prefer" | "limit" | "location" | "bookable" | "no_in_person";
   timeStart?: string;     // "HH:MM" 24h
   timeEnd?: string;       // "HH:MM" 24h
   allDay?: boolean;
@@ -61,6 +72,9 @@ export interface AvailabilityPreference {
   createdAt: string;      // ISO datetime
 }
 
+/** @deprecated Use `AvailabilityRule`. DB column name kept for legacy serialization. */
+export type AvailabilityPreference = AvailabilityRule;
+
 /**
  * Compiled bookable link entry — emitted from compileStructuredRules() alongside
  * CompiledRules. Each active bookable rule produces one entry. Consumed by the
@@ -86,7 +100,7 @@ export interface CompiledBookableLink {
  * 2026-04-23. Used for "My links" popover labels, uniqueness checks, and recall
  * matching. Trimmed; case preserved.
  */
-export function getBookableLinkDisplayName(bookable: NonNullable<AvailabilityPreference["bookable"]>): string {
+export function getBookableLinkDisplayName(bookable: NonNullable<AvailabilityRule["bookable"]>): string {
   const n = (bookable.name ?? "").trim();
   if (n) return n;
   return (bookable.title ?? "").trim() || "Bookable Link";
@@ -105,7 +119,7 @@ export function normalizeLinkName(name: string): string {
  * An active rule is one with status "active" whose effectiveDate has started
  * and whose expiryDate has not passed. Picks highest priority.
  */
-export function getActiveLocationRule(rules: AvailabilityPreference[] | undefined | null): AvailabilityPreference | null {
+export function getActiveLocationRule(rules: AvailabilityRule[] | undefined | null): AvailabilityRule | null {
   if (!rules || rules.length === 0) return null;
   const today = new Date().toISOString().slice(0, 10);
   const candidates = rules
@@ -124,7 +138,7 @@ const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
  * Expire rules whose expiryDate has passed. Returns the updated list and
  * whether any changes were made.
  */
-export function expireRules(rules: AvailabilityPreference[]): { rules: AvailabilityPreference[]; changed: boolean } {
+export function expireRules(rules: AvailabilityRule[]): { rules: AvailabilityRule[]; changed: boolean } {
   const today = new Date().toISOString().slice(0, 10);
   let changed = false;
 
@@ -150,7 +164,7 @@ export function expireRules(rules: AvailabilityPreference[]): { rules: Availabil
  *
  * Pure function — no LLM, no async, fully deterministic.
  */
-export function compileBookableLinks(rules: AvailabilityPreference[]): CompiledBookableLink[] {
+export function compileBookableLinks(rules: AvailabilityRule[]): CompiledBookableLink[] {
   const today = new Date().toISOString().slice(0, 10);
   const out: CompiledBookableLink[] = [];
 
@@ -187,11 +201,12 @@ export function compileBookableLinks(rules: AvailabilityPreference[]): CompiledB
  * compileBookableLinks(). The scoring engine is global; bookable links are per-link.
  */
 export function compileStructuredRules(
-  rules: AvailabilityPreference[],
+  rules: AvailabilityRule[],
   defaultBizStart: number = 9,
   defaultBizEnd: number = 18,
 ): CompiledRules {
   const blockedWindows: BlockedWindow[] = [];
+  const protectedWindows: ProtectedWindow[] = [];
   const allowWindows: AllowWindow[] = [];
   const buffers: CompiledBuffer[] = [];
   const priorityBuckets: CompiledPriorityBucket[] = [];
@@ -270,6 +285,24 @@ export function compileStructuredRules(
 
           blockedWindows.push(bw);
         }
+        break;
+      }
+
+      case "protect": {
+        // Protect rules produce a soft-subtraction (score 3 / stretch band).
+        // The host has declared this time protected but is willing to admit
+        // VIPs or explicit overrides. Distinct from "block" (score 5 / hard).
+        const pw: ProtectedWindow = {
+          start: rule.timeStart || "00:00",
+          end: rule.timeEnd || "23:59",
+          label: rule.originalText,
+        };
+        if (rule.daysOfWeek && rule.daysOfWeek.length > 0) {
+          pw.days = rule.daysOfWeek.map(d => DAY_NAMES[d]);
+        }
+        if (rule.expiryDate) pw.expires = rule.expiryDate;
+        if (rule.type === "one-time" && rule.effectiveDate) pw.date = rule.effectiveDate;
+        protectedWindows.push(pw);
         break;
       }
 
@@ -386,6 +419,7 @@ export function compileStructuredRules(
 
   return {
     blockedWindows,
+    protectedWindows,
     allowWindows,
     buffers,
     priorityBuckets,

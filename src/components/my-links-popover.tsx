@@ -3,15 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import type { AvailabilityPreference } from "@/lib/availability-rules";
+import type { AvailabilityRule } from "@/lib/availability-rules";
 import { getBookableLinkDisplayName } from "@/lib/availability-rules";
 
 type LinkRow = {
   key: string;
-  kind: "primary" | "bookable";
+  kind: "primary" | "bookable" | "personalized";
   name: string;
   url: string;
   ruleId?: string;
+  /** True when the link is missing required posture fields. PR-D §15. */
+  needsSetup?: boolean;
 };
 
 export function prefillComposer(text: string) {
@@ -34,21 +36,29 @@ export function MyLinksPopover() {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    fetch("/api/tuner/preferences")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled || !data) return;
+
+    Promise.all([
+      fetch("/api/tuner/preferences").then((r) => (r.ok ? r.json() : null)),
+      fetch("/api/me/links").then((r) => (r.ok ? r.json() : null)),
+    ])
+      .then(([prefs, linksData]) => {
+        if (cancelled) return;
         const origin = window.location.origin;
-        const slug = data.meetSlug as string | null | undefined;
+        const slug = prefs?.meetSlug as string | null | undefined;
         if (!slug) return;
+
         const out: LinkRow[] = [];
+
+        // Primary link
         out.push({
           key: "primary",
           kind: "primary",
-          name: (data.primaryLinkName as string) || "Primary link",
+          name: (prefs?.primaryLinkName as string) || "Primary link",
           url: `${origin}/meet/${slug}`,
         });
-        const structured = (data.structuredRules as AvailabilityPreference[]) ?? [];
+
+        // Bookable links from structuredRules
+        const structured = (prefs?.structuredRules as AvailabilityRule[]) ?? [];
         for (const r of structured) {
           const bookableData = r.bookable;
           if (r.action !== "bookable" || r.status !== "active" || !bookableData) continue;
@@ -62,6 +72,26 @@ export function MyLinksPopover() {
             ruleId: r.id,
           });
         }
+
+        // Personalized links from /api/me/links (includes needsSetup flag)
+        const apiLinks = (linksData?.links ?? []) as Array<{
+          kind: string;
+          title: string;
+          url: string;
+          code: string;
+          needsSetup?: boolean;
+        }>;
+        for (const l of apiLinks) {
+          if (l.kind !== "personalized") continue;
+          out.push({
+            key: l.code,
+            kind: "personalized",
+            name: l.title,
+            url: l.url,
+            needsSetup: l.needsSetup,
+          });
+        }
+
         setRows(out);
       })
       .catch(() => {});
@@ -163,6 +193,15 @@ export function MyLinksPopover() {
                       <span className="text-xs font-medium text-primary truncate">{r.name}</span>
                       {r.kind === "primary" && (
                         <span className="text-[9px] uppercase tracking-wide text-muted">default</span>
+                      )}
+                      {r.needsSetup && (
+                        <span
+                          className="inline-flex items-center gap-0.5 text-[9px] text-orange-400 font-medium"
+                          title="This link needs setup — missing required scheduling fields"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-orange-400 inline-block" />
+                          setup needed
+                        </span>
                       )}
                     </div>
                     <div className="text-[11px] font-mono text-muted truncate">{r.url.replace(/^https?:\/\//, "")}</div>

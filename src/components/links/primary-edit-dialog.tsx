@@ -494,7 +494,7 @@ export function PrimaryEditDialog({ open, onSaved, onDismiss }: PrimaryEditDialo
               </div>
 
               <p className="text-[11px] text-muted leading-relaxed mt-1">
-                Days are Monday–Friday by default. To customize per-day windows,
+                Days are Monday–Friday by default. To customize advanced windows,
                 say so in chat or create a separate Bookable Hours link.
               </p>
             </>

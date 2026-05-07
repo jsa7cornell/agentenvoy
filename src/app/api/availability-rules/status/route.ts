@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { type AvailabilityPreference } from "@/lib/availability-rules";
+import { type AvailabilityRule } from "@/lib/availability-rules";
 import type { UserPreferences } from "@/lib/scoring";
 import type { Prisma } from "@prisma/client";
 
@@ -53,7 +53,7 @@ export async function PATCH(req: NextRequest) {
   const prefs = (user.preferences as UserPreferences | null) ?? {};
   const explicit = { ...(prefs.explicit ?? {}) } as Record<string, unknown>;
   const existingRules =
-    (explicit.structuredRules as AvailabilityPreference[] | undefined) ?? [];
+    (explicit.structuredRules as AvailabilityRule[] | undefined) ?? [];
 
   const targetIdx = existingRules.findIndex((r) => r.id === ruleId);
   if (targetIdx === -1) {

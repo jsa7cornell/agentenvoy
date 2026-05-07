@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { invalidateSchedule } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
 import { compileStructuredRules, expireRules } from "@/lib/availability-rules";
-import type { AvailabilityPreference } from "@/lib/availability-rules";
+import type { AvailabilityRule } from "@/lib/availability-rules";
 import { generateBookableLinkCode } from "@/lib/bookable-links";
 import { getUserTimezone } from "@/lib/timezone";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
@@ -37,7 +37,7 @@ export async function GET() {
   const prefs = (user.preferences as Record<string, unknown>) || {};
   const explicit = (prefs.explicit as Record<string, unknown>) || {};
   const compiled = (prefs as Record<string, unknown>).compiled as Record<string, unknown> | undefined;
-  const structuredRules = (explicit.structuredRules as AvailabilityPreference[]) ?? [];
+  const structuredRules = (explicit.structuredRules as AvailabilityRule[]) ?? [];
 
   // Auto-expire rules on read
   const { rules: expiredCleaned, changed: expiryChanged } = expireRules(structuredRules);
@@ -62,7 +62,7 @@ export async function GET() {
   const changed = expiryChanged || linksChanged;
 
   // Re-compile structured rules on read to pick up compiler fixes
-  const activeRules = cleanedRules.filter((r: AvailabilityPreference) => r.status === "active");
+  const activeRules = cleanedRules.filter((r: AvailabilityRule) => r.status === "active");
   let compiledFromStructured = null;
   if (activeRules.length > 0) {
     const bizStart = (explicit.businessHoursStart as number) ?? 9;
@@ -142,7 +142,7 @@ export async function PUT(req: NextRequest) {
     // Hydrate bookable rules with linkSlug + linkCode if missing (first save).
     // The slug is denormalized from user.meetSlug; the code is generated once
     // and frozen for the life of the rule.
-    const hydrated = (structuredRules as AvailabilityPreference[]).map((rule) => {
+    const hydrated = (structuredRules as AvailabilityRule[]).map((rule) => {
       const isBookable = rule.action === "bookable";
       const bookableData = rule.bookable;
       if (!isBookable || !bookableData) return rule;
@@ -179,8 +179,8 @@ export async function PUT(req: NextRequest) {
       : getUserTimezone({ ...prefs, explicit: newExplicit });
   let compiledRules = null;
 
-  const rules = (structuredRules as AvailabilityPreference[] | undefined) ?? (newExplicit.structuredRules as AvailabilityPreference[] | undefined);
-  const activeRules = rules?.filter((r: AvailabilityPreference) => r.status === "active");
+  const rules = (structuredRules as AvailabilityRule[] | undefined) ?? (newExplicit.structuredRules as AvailabilityRule[] | undefined);
+  const activeRules = rules?.filter((r: AvailabilityRule) => r.status === "active");
 
   if (activeRules && activeRules.length > 0) {
     // Deterministic compilation from structured rules — no LLM needed

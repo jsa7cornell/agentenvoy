@@ -26,6 +26,7 @@ import {
   invalidateSchedule,
   GcalOwnershipError,
 } from "@/lib/calendar";
+import { parseLinkParameters } from "@/lib/link-parameters";
 
 export type RescheduleInitiator = "host" | "guest" | "external" | "agent";
 
@@ -128,7 +129,7 @@ export async function rescheduleSession(
   const session = await prisma.negotiationSession.findUnique({
     where: { id: sessionId },
     include: {
-      link: { select: { inviteeName: true } },
+      link: { select: { inviteeName: true, parameters: true } },
       holds: {
         where: { status: "active" },
         select: { id: true, calendarEventId: true },
@@ -248,6 +249,31 @@ export async function rescheduleSession(
       outcome: "gcal_patch_failed",
       error: "Google Calendar refused the patch (transient). Try again.",
     };
+  }
+
+  // 4b. Patch the buffer event if one exists. Non-blocking — a failure here
+  // should not abort the reschedule (the main event already moved).
+  const effectiveBufferMinutes =
+    session.negotiatedBufferMinutes ??
+    (parseLinkParameters(session.link?.parameters).bufferMinutes as number | undefined) ??
+    0;
+  if (session.bufferCalendarEventId && effectiveBufferMinutes > 0) {
+    const bufferStart = new Date(toStart.getTime() + durationMin * 60_000);
+    const bufferEnd = new Date(bufferStart.getTime() + effectiveBufferMinutes * 60_000);
+    try {
+      await updateCalendarEvent(
+        hostId,
+        session.bufferCalendarEventId,
+        sessionId,
+        { startTime: bufferStart, endTime: bufferEnd },
+        { notifyAttendees: false },
+      );
+    } catch (e) {
+      console.warn(
+        `[rescheduleSession] buffer event patch failed (non-blocking, eventId=${session.bufferCalendarEventId}):`,
+        e,
+      );
+    }
   }
 
   // 5. Release any active holds (defensive — agreed sessions usually have none).

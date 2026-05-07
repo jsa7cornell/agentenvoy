@@ -19,14 +19,16 @@
  *    §2.2 (every variance stores its own complete config)
  */
 
-import type { ParsedLinkParameters } from "../link-parameters";
+import type { ParsedLinkParameters, AvailabilityWindow } from "../link-parameters";
 import type { UserPreferences } from "../scoring";
 import type { ResolvedPosture } from "./posture";
 
-/** Subset of `LinkParameters` that carries posture state. Matches the
- *  V1.5 schema additions in `link-parameters.ts`. */
+/** Subset of `LinkParameters` that carries posture state.
+ *  `availability` is the canonical canvas field (PR-B 2026-05-06).
+ *  Legacy flat fields kept for transition-window compat. */
 export type PostureSnapshot = Pick<
   ParsedLinkParameters,
+  | "availability"
   | "hoursStartMinutes"
   | "hoursEndMinutes"
   | "daysOfWeek"
@@ -37,7 +39,6 @@ export type PostureSnapshot = Pick<
   | "compiled"
 >;
 
-const DEFAULT_DAYS_OF_WEEK = [1, 2, 3, 4, 5]; // Mon–Fri
 const DEFAULT_DURATION_MINUTES = 30;
 const DEFAULT_BUFFER_MINUTES = 0;
 const DEFAULT_FORMAT = "video";
@@ -51,8 +52,8 @@ const DEFAULT_HOURS_END_MINUTES = 18 * 60;
  *
  *  Reads `User.preferences.explicit.*` and `User.preferences.compiled.*`
  *  with the same scalar-mapping logic `getLinkPosture` uses for Primary.
- *  Defaults fill any field the user hasn't set yet (Mon–Fri, 9–18,
- *  30 min, 0 buffer, video).
+ *  Writes `availability[]` (new canonical) + legacy flat fields (for
+ *  transition reads by un-migrated callers).
  */
 export function snapshotPostureFromUser(user: {
   preferences?: UserPreferences | null;
@@ -76,10 +77,15 @@ export function snapshotPostureFromUser(user: {
       ? explicit.businessHoursEnd * 60
       : DEFAULT_HOURS_END_MINUTES);
 
+  const availability: AvailabilityWindow[] = [
+    { days: [1, 2, 3, 4, 5], startMinutes: hoursStartMinutes, endMinutes: hoursEndMinutes },
+  ];
+
   return {
+    availability,
     hoursStartMinutes,
     hoursEndMinutes,
-    daysOfWeek: DEFAULT_DAYS_OF_WEEK,
+    daysOfWeek: [1, 2, 3, 4, 5],
     duration: explicit.defaultDuration ?? DEFAULT_DURATION_MINUTES,
     bufferMinutes: explicit.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
     format: DEFAULT_FORMAT,
@@ -105,6 +111,7 @@ export function applyCreateEdits(
   edits: Partial<PostureSnapshot>
 ): PostureSnapshot {
   const result: PostureSnapshot = { ...snapshot };
+  if ("availability" in edits) result.availability = edits.availability;
   if ("hoursStartMinutes" in edits) result.hoursStartMinutes = edits.hoursStartMinutes;
   if ("hoursEndMinutes" in edits) result.hoursEndMinutes = edits.hoursEndMinutes;
   if ("daysOfWeek" in edits) result.daysOfWeek = edits.daysOfWeek;

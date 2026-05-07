@@ -26,7 +26,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { AvailabilityPreference } from "@/lib/availability-rules";
+import type { AvailabilityRule } from "@/lib/availability-rules";
 import { getBookableLinkDisplayName } from "@/lib/availability-rules";
 import {
   classifySession,
@@ -95,7 +95,7 @@ function format12h(hhmm: string | undefined): string {
   return m === 0 ? `${h12}${suffix}` : `${h12}:${String(m).padStart(2, "0")}${suffix}`;
 }
 
-function buildBookableLinkSub(rule: AvailabilityPreference): string {
+function buildBookableLinkSub(rule: AvailabilityRule): string {
   const oh = rule.bookable ?? (rule as unknown as { officeHours?: typeof rule.bookable }).officeHours;
   if (!oh) return "Drop-in Hours";
   const days = formatDayList(rule.daysOfWeek);
@@ -184,7 +184,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
             icon: "🔗",
           });
           const structured =
-            (data.structuredRules as AvailabilityPreference[]) ?? [];
+            (data.structuredRules as AvailabilityRule[]) ?? [];
           for (const r of structured) {
             const bookableData = r.bookable;
             const rStatus = (r.status as string | undefined) ?? "active";

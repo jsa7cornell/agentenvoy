@@ -6,7 +6,7 @@ import {
   Plus, Check, X, Pencil, Trash2, Loader2, ToggleLeft, ToggleRight,
   Ban, Lock, Timer, CheckCircle2, Star, MapPin, Megaphone, Copy, UserX,
 } from "lucide-react";
-import type { AvailabilityPreference } from "@/lib/availability-rules";
+import type { AvailabilityRule } from "@/lib/availability-rules";
 import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
 
 // --- Types ---
@@ -40,7 +40,7 @@ interface PreferenceData {
   timezone: string;
   businessHoursStart: number;
   businessHoursEnd: number;
-  structuredRules: AvailabilityPreference[];
+  structuredRules: AvailabilityRule[];
   defaultLocation?: string;
   videoProvider?: string; // "google-meet" | "zoom"
   // Legacy fields (read-only, kept for backwards compat)
@@ -168,7 +168,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
 
   // --- Save (auto-save on rule changes) ---
 
-  async function saveRules(rules: AvailabilityPreference[]) {
+  async function saveRules(rules: AvailabilityRule[]) {
     if (!data) return;
     setIsSaving(true);
     try {
@@ -244,11 +244,11 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
       return;
     }
 
-    const rule: AvailabilityPreference = {
+    const rule: AvailabilityRule = {
       id: uuid(),
       originalText: pendingRule.originalText,
       type: pendingRule.type,
-      action: pendingRule.action as AvailabilityPreference["action"],
+      action: pendingRule.action as AvailabilityRule["action"],
       timeStart: pendingRule.timeStart,
       timeEnd: pendingRule.timeEnd,
       allDay: pendingRule.allDay,
@@ -283,7 +283,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
   function toggleRule(id: string) {
     if (!data) return;
     const newRules = data.structuredRules.map((r) =>
-      r.id === id ? { ...r, status: (r.status === "active" ? "paused" : "active") as AvailabilityPreference["status"] } : r
+      r.id === id ? { ...r, status: (r.status === "active" ? "paused" : "active") as AvailabilityRule["status"] } : r
     );
     saveRules(newRules);
   }
@@ -314,7 +314,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
         bufferMinutesAfter: editFields.bufferMinutesAfter ?? r.bufferMinutesAfter,
         locationLabel: editFields.locationLabel ?? r.locationLabel,
         type: editFields.type ?? r.type,
-      } as AvailabilityPreference;
+      } as AvailabilityRule;
     });
     setEditingRule(null);
     setEditFields({});
@@ -358,7 +358,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
         <div className="p-4 space-y-4">
           {/* Header */}
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-primary">Schedule Rules</h2>
+            <h2 className="text-sm font-semibold text-primary">Availability Rules</h2>
             <div className="flex items-center gap-2">
               {isSaving && (
                 <span className="flex items-center gap-1 text-[10px] text-muted">
@@ -599,7 +599,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-DEFAULT">
-          <h3 className="text-sm font-semibold text-primary">How schedule rules work</h3>
+          <h3 className="text-sm font-semibold text-primary">How availability rules work</h3>
           <button onClick={onClose} className="text-muted hover:text-secondary transition">
             <X className="w-4 h-4" />
           </button>
@@ -1100,7 +1100,7 @@ function ConfirmationCard({
       {/* Bookable link override warning */}
       {rule.action === "bookable" && (
         <div className="bg-surface border border-DEFAULT rounded-lg px-3 py-2 text-[11px] text-muted leading-relaxed">
-          Bookable Links override other soft blocks. Envoy will offer these slots even if your schedule shows them protected &mdash; real calendar events and blackout days stay blocked.
+          Bookable Links override other soft blocks. Envoy will offer these slots even if your availability shows them protected &mdash; real calendar events and blackout days stay blocked.
         </div>
       )}
 
@@ -1148,7 +1148,7 @@ function RuleCard({
   onSaveEdit,
   onCancelEdit,
 }: {
-  rule: AvailabilityPreference;
+  rule: AvailabilityRule;
   expanded: boolean;
   editing: boolean;
   editFields: Partial<ParsedRule>;

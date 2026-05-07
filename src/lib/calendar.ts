@@ -40,6 +40,13 @@ export interface CalendarEvent {
    *  icon on the weekly-calendar tile. See lib/attendee-rollup.ts for the
    *  precedence rules. Null when there are no other attendees. */
   attendeeRollup?: AttendeeRollup | null;
+  /** GCal extendedProperties — private/shared key-value bags. Used by
+   *  AgentEnvoy to tag events (sessionId, buffer linkage) for scoring and
+   *  ownership checks. Populated when fetched via fields mask. */
+  extendedProperties?: {
+    private?: Record<string, string>;
+    shared?: Record<string, string>;
+  };
 }
 
 export interface CreateEventParams {
@@ -136,6 +143,12 @@ class GoogleCalendarProvider implements CalendarProvider {
               isTransparent: ev.transparency === "transparent",
               htmlLink: ev.htmlLink || undefined,
               attendeeRollup: rollupAttendeeStatus(ev.attendees, this.hostEmail),
+              extendedProperties: ev.extendedProperties
+                ? {
+                    private: (ev.extendedProperties.private as Record<string, string> | undefined) || undefined,
+                    shared: (ev.extendedProperties.shared as Record<string, string> | undefined) || undefined,
+                  }
+                : undefined,
             } as CalendarEvent;
           });
         } catch (e) {
@@ -422,6 +435,10 @@ interface StoredCalendarEvent {
   eventType?: string;
   htmlLink?: string;
   attendeeRollup?: AttendeeRollup | null;
+  extendedProperties?: {
+    private?: Record<string, string>;
+    shared?: Record<string, string>;
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -776,6 +793,12 @@ async function fullSync(
         eventType: evType,
         htmlLink: ev.htmlLink || undefined,
         attendeeRollup: rollupAttendeeStatus(ev.attendees, hostEmail),
+        extendedProperties: ev.extendedProperties
+          ? {
+              private: (ev.extendedProperties.private as Record<string, string> | undefined) || undefined,
+              shared: (ev.extendedProperties.shared as Record<string, string> | undefined) || undefined,
+            }
+          : undefined,
       });
     }
 
@@ -855,6 +878,12 @@ async function incrementalSync(
           eventType: evType,
           htmlLink: ev.htmlLink || undefined,
           attendeeRollup: rollupAttendeeStatus(ev.attendees, hostEmail),
+          extendedProperties: ev.extendedProperties
+            ? {
+                private: (ev.extendedProperties.private as Record<string, string> | undefined) || undefined,
+                shared: (ev.extendedProperties.shared as Record<string, string> | undefined) || undefined,
+              }
+            : undefined,
         });
         changedIds.add(ev.id!);
       }
@@ -1228,6 +1257,13 @@ export async function createCalendarEvent(
      * `NegotiationLink.seriesGcalEventId`. See `lib/recurrence.ts:toRRule`.
      */
     recurrence?: string[];
+    /** If set, marks this as a buffer event — parent meeting's GCal event ID.
+     *  Stored as extendedProperty so scoring can recognize and treat as score 3. */
+    bufferForEventId?: string;
+    /** Override GCal visibility. "private" for buffer events. */
+    visibility?: "default" | "private" | "public";
+    /** Override GCal transparency. "opaque" blocks time (default). */
+    transparency?: "opaque" | "transparent";
   }
 ) {
   // Routed through the side-effect dispatcher — preview deploys return fake
@@ -1245,6 +1281,9 @@ export async function createCalendarEvent(
     addMeetLink: params.addMeetLink,
     sessionId: params.sessionId,
     recurrence: params.recurrence,
+    bufferForEventId: params.bufferForEventId,
+    visibility: params.visibility,
+    transparency: params.transparency,
   });
   return {
     eventId: result.eventId,

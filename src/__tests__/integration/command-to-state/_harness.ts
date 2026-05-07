@@ -57,7 +57,7 @@ import {
 } from "@/agent/actions";
 import {
   compileStructuredRules,
-  type AvailabilityPreference,
+  type AvailabilityRule,
 } from "@/lib/availability-rules";
 import type { CompiledRules, UserPreferences } from "@/lib/scoring";
 import { prisma } from "../helpers/db";
@@ -90,7 +90,7 @@ export interface TurnResult {
   /** Convenience: `user.preferences as UserPreferences`. Null if unset. */
   preferences: UserPreferences | null;
   /** Convenience: `preferences.explicit.structuredRules ?? []`. */
-  structuredRules: AvailabilityPreference[];
+  structuredRules: AvailabilityRule[];
   /**
    * Compiled rules — recomputed from active structuredRules using the same
    * `compileStructuredRules` the tuner-preferences GET route uses.
@@ -117,7 +117,7 @@ export async function seedTestUser(
     name: string;
     meetSlug: string;
     timezone: string;
-    structuredRules: AvailabilityPreference[];
+    structuredRules: AvailabilityRule[];
     businessHoursStart: number;
     businessHoursEnd: number;
   }> = {},
@@ -186,7 +186,7 @@ export async function runTurn(input: RunTurnInput): Promise<TurnResult> {
     (preferences?.explicit as Record<string, unknown> | undefined) ?? {};
   const structuredRules =
     ((explicit as Record<string, unknown>).structuredRules as
-      | AvailabilityPreference[]
+      | AvailabilityRule[]
       | undefined) ?? [];
 
   const bizStart = (explicit.businessHoursStart as number) ?? 9;

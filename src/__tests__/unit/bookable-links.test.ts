@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { applyBookableWindow, generateBookableLinkCode } from "@/lib/bookable-links";
-import { compileBookableLinks, type AvailabilityPreference } from "@/lib/availability-rules";
+import { compileBookableLinks, type AvailabilityRule } from "@/lib/availability-rules";
 import type { ScoredSlot, SlotKind } from "@/lib/scoring";
 import type { CompiledBookableLink } from "@/lib/availability-rules";
 
@@ -308,7 +308,7 @@ describe("applyBookableWindow — expiry", () => {
 });
 
 describe("compileBookableLinks", () => {
-  function ruleOf(overrides: Partial<AvailabilityPreference> = {}): AvailabilityPreference {
+  function ruleOf(overrides: Partial<AvailabilityRule> = {}): AvailabilityRule {
     return {
       id: "r1",
       originalText: "office hours Tue 2-4pm",
@@ -353,7 +353,7 @@ describe("compileBookableLinks", () => {
   });
 
   it("skips non-bookable rules", () => {
-    const blockRule: AvailabilityPreference = {
+    const blockRule: AvailabilityRule = {
       id: "b1",
       originalText: "no meetings before 10am",
       type: "recurring",

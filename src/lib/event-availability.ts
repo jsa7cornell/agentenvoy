@@ -15,6 +15,7 @@
  */
 
 import type { ScoredSlot, LinkParameters } from "./scoring";
+import type { AvailabilitySpec } from "./link-parameters";
 import { getLocalParts } from "./scoring";
 
 const SHORT_DAY_SET = new Set(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
@@ -109,8 +110,14 @@ export function computeEventAvailability(
     });
   }
 
+  // Transition: old rows carry AvailabilitySpec object; new rows carry AvailabilityWindow[].
+  // AvailabilitySpec fields (blockedSlots, restrictToDays, etc.) are no-ops for new-model links.
+  const availSpec: AvailabilitySpec | undefined = !Array.isArray(rules.availability)
+    ? rules.availability
+    : undefined;
+
   // availability.blockedSlots (named singular slot exclusions).
-  const blockedSlots = rules.availability?.blockedSlots;
+  const blockedSlots = availSpec?.blockedSlots;
   if (blockedSlots?.length) {
     slots = slots.filter(
       (slot) => !blockedSlots.some((b) => slotMatchesInstance(slot, b)),
@@ -118,7 +125,7 @@ export function computeEventAvailability(
   }
 
   // availability.restrictToDays.
-  const restrictToDays = rules.availability?.restrictToDays;
+  const restrictToDays = availSpec?.restrictToDays;
   if (restrictToDays?.length) {
     const allowed = new Set<string>(
       (restrictToDays as readonly string[]).filter((d) => SHORT_DAY_SET.has(d)),
@@ -129,7 +136,7 @@ export function computeEventAvailability(
   }
 
   // availability.restrictToWindows.
-  const restrictToWindows = rules.availability?.restrictToWindows;
+  const restrictToWindows = availSpec?.restrictToWindows;
   if (restrictToWindows?.length) {
     slots = slots.filter((s) => {
       const t = localHHMM(new Date(s.start), tz);
@@ -138,7 +145,7 @@ export function computeEventAvailability(
   }
 
   // availability.restrictToSlots — when present, ONLY these are bookable.
-  const restrictToSlots = rules.availability?.restrictToSlots;
+  const restrictToSlots = availSpec?.restrictToSlots;
   if (restrictToSlots?.length) {
     slots = slots.filter((s) =>
       restrictToSlots.some((r) => slotMatchesInstance(s, r)),
@@ -147,7 +154,7 @@ export function computeEventAvailability(
 
   // ── Phase 2 — annotate `expanded` ─────────────────────────────────────
 
-  const expand = rules.availability?.expand;
+  const expand = availSpec?.expand;
   return slots.map((slot) => ({
     slot,
     expanded: !!expand?.length && matchesAnyExpand(slot, expand, tz),
@@ -156,7 +163,7 @@ export function computeEventAvailability(
 
 function matchesAnyExpand(
   slot: ScoredSlot,
-  expand: NonNullable<NonNullable<LinkParameters["availability"]>["expand"]>,
+  expand: NonNullable<AvailabilitySpec["expand"]>,
   tz: string,
 ): boolean {
   const slotDate = new Date(slot.start);

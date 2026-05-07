@@ -19,7 +19,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { compileBookableLinks } from "@/lib/availability-rules";
-import type { AvailabilityPreference } from "@/lib/availability-rules";
+import type { AvailabilityRule } from "@/lib/availability-rules";
+import { linkNeedsSetup } from "@/lib/links/posture";
 
 type LinkEntry =
   | {
@@ -56,6 +57,9 @@ type LinkEntry =
       // verbatim.
       lastMaterialEditAt: string | null;
       lastEditedFields: string[];
+      /** True when the link is missing one or more required posture fields
+       *  (availability, duration, bufferMinutes, format). PR-D §15. */
+      needsSetup: boolean;
     };
 
 export async function GET() {
@@ -91,7 +95,7 @@ export async function GET() {
   // Bookable links — compiled from structuredRules.
   const prefs = (user.preferences as Record<string, unknown> | null) || {};
   const explicit = (prefs.explicit as Record<string, unknown> | undefined) || {};
-  const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
+  const rules = (explicit.structuredRules as AvailabilityRule[] | undefined) || [];
   const bookableLinks = compileBookableLinks(rules);
   for (const oh of bookableLinks) {
     links.push({
@@ -125,6 +129,7 @@ export async function GET() {
       createdAt: true,
       lastMaterialEditAt: true,
       lastEditedFields: true,
+      parameters: true,
     },
     orderBy: { createdAt: "desc" },
     take: 30,
@@ -145,6 +150,7 @@ export async function GET() {
       createdAt: c.createdAt.toISOString(),
       lastMaterialEditAt: c.lastMaterialEditAt ? c.lastMaterialEditAt.toISOString() : null,
       lastEditedFields: c.lastEditedFields ?? [],
+      needsSetup: linkNeedsSetup(c.parameters),
     });
   }
 

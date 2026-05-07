@@ -90,8 +90,19 @@ export async function handleCalendarCreateEvent(
       start: { dateTime: effect.startTime.toISOString() },
       end: { dateTime: effect.endTime.toISOString() },
       attendees: effect.attendeeEmails.map((email) => ({ email })),
-      ...(effect.sessionId && {
-        extendedProperties: { private: { agentenvoySessionId: effect.sessionId } },
+      ...((effect.sessionId || effect.bufferForEventId) && {
+        extendedProperties: {
+          private: {
+            ...(effect.sessionId ? { agentenvoySessionId: effect.sessionId } : {}),
+            ...(effect.bufferForEventId ? { agentenvoy_buffer_for_event_id: effect.bufferForEventId } : {}),
+          },
+        },
+      }),
+      ...(effect.visibility && effect.visibility !== "default" && {
+        visibility: effect.visibility,
+      }),
+      ...(effect.transparency && {
+        transparency: effect.transparency,
       }),
       ...(effect.addMeetLink && {
         conferenceData: {

@@ -45,7 +45,7 @@ import {
 import { getOrComputeSchedule } from "@/lib/calendar";
 import {
   compileBookableLinks,
-  type AvailabilityPreference,
+  type AvailabilityRule,
 } from "@/lib/availability-rules";
 import {
   applyBookableWindow,
@@ -219,7 +219,7 @@ export async function buildAgentSnapshot(
   if (link.recurringWindowId) {
     const explicit = prefsRecord.explicit as Record<string, unknown> | undefined;
     const allRules =
-      (explicit?.structuredRules as AvailabilityPreference[] | undefined) ?? [];
+      (explicit?.structuredRules as AvailabilityRule[] | undefined) ?? [];
     const compiledLinks = compileBookableLinks(allRules);
     const compiled = compiledLinks.find((l) => l.ruleId === link.recurringWindowId);
     if (compiled) {

@@ -97,6 +97,18 @@ export async function cancelSession(
     }
   }
 
+  // 1b. Delete the buffer event if one exists. Non-blocking.
+  if (session.bufferCalendarEventId) {
+    try {
+      await deleteCalendarEvent(hostId, session.bufferCalendarEventId);
+    } catch (e) {
+      console.warn(
+        `[cancelSession] failed to delete buffer event ${session.bufferCalendarEventId}:`,
+        e
+      );
+    }
+  }
+
   // 2. Release any active holds (tentative calendar events).
   if (session.holds.length > 0) {
     await Promise.all(

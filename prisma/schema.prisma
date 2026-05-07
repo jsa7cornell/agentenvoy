@@ -513,6 +513,10 @@ model NegotiationSession {
   /// Google Calendar event ID of the confirmed meeting event.
   /// Saved on confirmation so cancel can delete it cleanly.
   calendarEventId      String?
+  /// Google Calendar event ID of the buffer event written immediately after
+  /// the confirmed meeting (when bufferMinutes > 0). Null when no buffer exists.
+  /// PR-E 2026-05-06 (proposal 2026-05-06_link-config-canonical-model-and-unified-edit §9 Item 16).
+  bufferCalendarEventId String?
   guestEmail           String?
   /// Guest's display name, captured on the confirm card. Session-scoped so a
   /// single primary link can host many named guests without overwriting
@@ -551,6 +555,11 @@ model NegotiationSession {
   /// has opted into guestPicks.duration. Cleared if the host subsequently edits the link's
   /// duration. Reusable-link guest-picks proposal, decided 2026-04-28.
   negotiatedDuration   Int?
+  /// Buffer minutes negotiated for this session (mirror of negotiatedDuration). Set by
+  /// lock_buffer_minutes agent action. Read at confirm time as
+  ///   session.negotiatedBufferMinutes ?? link.parameters.bufferMinutes ?? 0.
+  /// PR-C 2026-05-06 (proposal 2026-05-06_link-config-canonical-model-and-unified-edit §10 Item 13).
+  negotiatedBufferMinutes Int?
   /// Who last wrote the negotiated values. Always "guest" in v1; "host" reserved for future multi-round use.
   negotiatedLockedBy   String?
   createdAt            DateTime  @default(now())

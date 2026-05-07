@@ -9,12 +9,16 @@
  *   - PR-3a (create_link)               — 2026-04-30 commit da4c8a4
  *   - PR-2  (get_my_availability,
  *            list_my_sessions)          — 2026-04-30 (this file)
+ *   - PR-C  (modify_link,
+ *            create_link canvas ext.)   — 2026-05-06
  *
  * Pending: PR-3b (post_to_deal_room, confirm_session) — deferred per
  * John's prioritization 2026-04-30.
  *
  * Parent proposal: 2026-04-29_host-side-mcp-act-as-me_*_decided-2026-04-29.md
  *   §5.3 create_link, §5.4 get_my_availability, §5.5 list_my_sessions
+ * PR-C proposal: 2026-05-06_link-config-canonical-model-and-unified-edit.md
+ *   §8 (Rule 13 parity — host MCP modify_link + create_link canvas extension)
  */
 import { z } from "zod";
 import type { HostScope } from "@/app/api/mcp/host/auth";
@@ -22,12 +26,15 @@ import {
   availabilitySlotSchema,
   sessionStatusSchema,
 } from "@/lib/mcp/schemas";
+import { availabilityWindowSchema } from "@/lib/link-parameters";
 
 // ---------------------------------------------------------------------------
 // Shared primitives (reused from guest surface where identical)
 // ---------------------------------------------------------------------------
 
 const formatSchema = z.enum(["video", "phone", "in-person"]);
+
+const eveningsPostureSchema = z.enum(["protected", "vip_only", "open"]);
 
 // ---------------------------------------------------------------------------
 // create_link
@@ -45,6 +52,16 @@ export const createLinkInput = z
     hostNote: z.string().min(1).max(280).optional(),
     timingLabel: z.string().min(1).max(80).optional(),
     location: z.string().min(1).max(300).optional(),
+    // PR-C: optional canvas fields — seed the new link's Layer 1 canvas
+    // instead of snapshotting from user preferences.
+    availability: z.array(availabilityWindowSchema).min(1).optional().describe(
+      "Canvas windows. When provided, seeds the link with these windows instead of snapshotting from your Primary. " +
+      "Each entry: { days: number[] (0=Sun..6=Sat), startMinutes: number, endMinutes: number }. " +
+      "Example: [{ days:[1,2,3,4,5], startMinutes:540, endMinutes:1020 }] = Mon–Fri 9–5."
+    ),
+    bufferMinutes: z.number().int().min(0).optional().describe(
+      "Buffer around meetings in minutes. Allowed values: 0, 5, 15, 30."
+    ),
   })
   .strict();
 
@@ -61,6 +78,62 @@ export const createLinkOutput = z.discriminatedUnion("ok", [
     .object({
       ok: z.literal(false),
       reason: z.enum(["validation_failed", "calendar_not_connected", "no_slug"]),
+      message: z.string(),
+    })
+    .strict(),
+]);
+
+// ---------------------------------------------------------------------------
+// modify_link  (PR-C, proposal §8 Rule 13 parity)
+// ---------------------------------------------------------------------------
+//
+// Modifies an existing link by applying a partial posture update. The host
+// can update canvas windows, duration, buffer, format, eveningsPosture, or
+// topic. All fields are optional — only provided fields are written.
+//
+// Validation parity: same AvailabilityWindow[] schema as the modal and
+// action handlers. Structured errors are emitted in the same shape as
+// other host tools (ok: false, reason, message).
+//
+// Rate limits: inherits the same per-user per-minute rate limit as other
+// host tools (enforced at the MCP middleware layer).
+export const modifyLinkInput = z
+  .object({
+    linkId: z.string().min(1).describe("The ID of the link to modify."),
+    availability: z.array(availabilityWindowSchema).min(1).optional().describe(
+      "New canvas windows for the link. Replaces the entire existing availability. " +
+      "Each entry: { days: number[] (0=Sun..6=Sat), startMinutes: number, endMinutes: number }."
+    ),
+    duration: z.number().int().min(5).max(480).optional().describe(
+      "Meeting duration in minutes."
+    ),
+    bufferMinutes: z.number().int().min(0).optional().describe(
+      "Buffer around meetings in minutes. Allowed values: 0, 5, 15, 30."
+    ),
+    format: formatSchema.optional().describe(
+      "Default meeting format: video, phone, or in-person."
+    ),
+    eveningsPosture: eveningsPostureSchema.optional().describe(
+      "Evening slot policy: protected (default), vip_only, or open."
+    ),
+    topic: z.string().min(1).max(200).optional().describe(
+      "Link display name shown in the host's links list."
+    ),
+  })
+  .strict();
+
+export const modifyLinkOutput = z.discriminatedUnion("ok", [
+  z
+    .object({
+      ok: z.literal(true),
+      linkId: z.string(),
+      fieldsUpdated: z.array(z.string()),
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      reason: z.enum(["validation_failed", "link_not_found", "not_authorized"]),
       message: z.string(),
     })
     .strict(),
@@ -189,7 +262,18 @@ export const HOST_MCP_TOOLS = {
       "Mint a new scheduling link for the host. Returns a shareable URL the host can send to the person they want to meet. No email required — the URL is the capability. " +
       "If `activity` is one of {run, walk, bike ride, yoga, workout, swim, breakfast, lunch, dinner, drinks, surf, coffee, hike, brainstorm, intro, interview}, " +
       "omitting `durationMinutes` produces a sensible activity-default (e.g., coffee=30, lunch=60, hike=120). " +
-      "Otherwise duration falls back to 30. The activity also seeds the link title and the post-confirm event card icon.",
+      "Otherwise duration falls back to 30. The activity also seeds the link title and the post-confirm event card icon. " +
+      "Pass `availability` to seed the link with specific canvas windows; omit to inherit from the host's Primary.",
+  },
+  modify_link: {
+    input: modifyLinkInput,
+    output: modifyLinkOutput,
+    requiredScope: "schedule" as HostScope,
+    description:
+      "Modify an existing scheduling link. Accepts a partial update — only fields you provide are changed. " +
+      "Can update: canvas availability windows (availability[]), meeting duration, buffer, format, evenings posture, and topic. " +
+      "The link must belong to the authenticated host. " +
+      "All writes go through the same validation as the dashboard modal — invalid values return a structured error.",
   },
   get_my_availability: {
     input: getMyAvailabilityInput,

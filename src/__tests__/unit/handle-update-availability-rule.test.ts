@@ -37,7 +37,7 @@ vi.mock("@/lib/utils", async (importOriginal) => {
 
 import { handleUpdateAvailabilityRule } from "@/agent/actions";
 import { prisma } from "@/lib/prisma";
-import type { AvailabilityPreference } from "@/lib/availability-rules";
+import type { AvailabilityRule } from "@/lib/availability-rules";
 
 const USER_ID = "user_test";
 
@@ -45,11 +45,11 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-function getWrittenRules(): AvailabilityPreference[] {
+function getWrittenRules(): AvailabilityRule[] {
   const updateCall = (prisma.user.update as ReturnType<typeof vi.fn>).mock.calls[0];
   if (!updateCall) return [];
   const data = updateCall[0].data;
-  return (data.preferences as { explicit: { structuredRules: AvailabilityPreference[] } })
+  return (data.preferences as { explicit: { structuredRules: AvailabilityRule[] } })
     .explicit.structuredRules;
 }
 
@@ -135,7 +135,7 @@ describe("handleUpdateAvailabilityRule — add — allDay inference", () => {
 });
 
 describe("handleUpdateAvailabilityRule — add — write-time dedupe", () => {
-  const existingRule: AvailabilityPreference = {
+  const existingRule: AvailabilityRule = {
     id: "rule_existing",
     originalText: "Protect next Tuesday all day",
     type: "one-time",

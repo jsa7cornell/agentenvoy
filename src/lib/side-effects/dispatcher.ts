@@ -137,6 +137,7 @@ function scrubPayload(effect: SideEffect): Record<string, unknown> {
         sendUpdatesOverride: effect.sendUpdatesOverride ?? null,
         descriptionBytes: effect.description?.length ?? 0,
         recurrence: effect.recurrence ?? null,
+        bufferForEventId: effect.bufferForEventId ?? null,
       };
     }
     case "calendar.create_hold": {

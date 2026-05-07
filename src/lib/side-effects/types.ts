@@ -77,6 +77,13 @@ export interface CalendarCreateEventEffect {
    * `2026-05-01_recurring-meeting-rendering-and-shareable-template` §5.9).
    */
   recurrence?: string[];
+  /** If set, marks this as a buffer event — stores parent meeting's GCal event ID
+   *  as an extendedProperty so it can be identified during scoring. */
+  bufferForEventId?: string;
+  /** Override GCal visibility. Defaults to "default". "private" for buffer events. */
+  visibility?: "default" | "private" | "public";
+  /** Override GCal transparency. "opaque" blocks time; "transparent" is FYI only. Defaults to "opaque". */
+  transparency?: "opaque" | "transparent";
   context?: Record<string, unknown>;
 }
 

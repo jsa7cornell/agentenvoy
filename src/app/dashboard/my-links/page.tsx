@@ -16,7 +16,7 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { compileBookableLinks, type AvailabilityPreference } from "@/lib/availability-rules";
+import { compileBookableLinks, type AvailabilityRule } from "@/lib/availability-rules";
 import { CopyLinkButton } from "./copy-link-button";
 import { PrimaryLinkSettings } from "@/components/dashboard/primary-link-settings";
 import type { UserPreferences } from "@/lib/scoring";
@@ -97,7 +97,7 @@ export default async function MyLinksPage() {
   // ── Bookable links (from structured rules) ─────────────────────────────
   const prefs = (user.preferences as Record<string, unknown> | null) || {};
   const explicit = (prefs.explicit as Record<string, unknown> | undefined) || {};
-  const rules = (explicit.structuredRules as AvailabilityPreference[] | undefined) || [];
+  const rules = (explicit.structuredRules as AvailabilityRule[] | undefined) || [];
   const officeHours = compileBookableLinks(rules);
 
   // ── Personalized links ──────────────────────────────────────────────────

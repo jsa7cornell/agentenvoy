@@ -27,6 +27,7 @@
  */
 
 import type { ScoredSlot, LinkParameters } from "./scoring";
+import type { AvailabilitySpec } from "./link-parameters";
 
 export type BlockedDayEntry = {
   /** Local date in YYYY-MM-DD form. */
@@ -78,8 +79,12 @@ export function computeBlockedDays(
     slotsByDate.get(date)!.push(s);
   }
 
-  const restrictToDays = rules.availability?.restrictToDays;
-  const restrictToWindows = rules.availability?.restrictToWindows;
+  // Transition: old rows carry AvailabilitySpec; new rows carry AvailabilityWindow[].
+  const availSpec: AvailabilitySpec | undefined = !Array.isArray(rules.availability)
+    ? rules.availability
+    : undefined;
+  const restrictToDays = availSpec?.restrictToDays;
+  const restrictToWindows = availSpec?.restrictToWindows;
 
   const result: BlockedDayEntry[] = [];
   for (let i = 0; i < horizonDays; i++) {
