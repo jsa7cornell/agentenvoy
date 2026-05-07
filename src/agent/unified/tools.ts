@@ -332,10 +332,10 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const group_event_create = tool({
     description:
-      "Create a group coordination link — everyone gets the same URL and shares their availability. " +
-      "Use for any multi-person event (dinner, sync, workshop). " +
-      "Call immediately with whatever the host provided; do NOT gather info across turns first. " +
-      "inviteeNames and windows are optional — omit what wasn't mentioned.",
+      "Create a group coordination link where MULTIPLE people each share their availability via one shared URL. " +
+      "Use ONLY when the host says 'group', 'coordinate everyone', 'team dinner/sync/workshop', or names 2+ specific individuals who all need to submit their schedule. " +
+      "Do NOT use for a 1:1 meeting with one person or company — use personal_link_create for that. " +
+      "Call immediately with whatever the host provided; inviteeNames and windows are optional.",
     inputSchema: z.object({
       topic: z.string().describe("Event title or occasion (e.g. 'Founder Dinner')."),
       inviteeNames: z.array(z.string()).optional()
