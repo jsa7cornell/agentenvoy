@@ -373,13 +373,18 @@ export function EventLinksPageContent() {
     }
   }
 
-  // Route the Edit click on a Primary card to LinkEditModal (primary mode);
-  // bookable rows with a linkCode go to LinkEditModal (link mode);
-  // legacy rows without a linkCode fall back to EventLinksEditDialog.
+  // Route the Edit click on a Primary card to LinkEditModal (primary mode).
+  // Bookable/recurring rows are backed by structuredRules and must use
+  // EventLinksEditDialog — their config lives on the rule, not on
+  // NegotiationLink.parameters, so the posture modal would show defaults
+  // and saves would not update the session schedule.
+  // LinkEditModal link-mode is reserved for future parameter-first links
+  // (no ruleId) once the create flow populates NegotiationLink.parameters.
   function handleEditClick(row: ReusableLinkRow) {
     if (row.kind === "primary") {
       setEditingPrimary(true);
-    } else if (row.linkCode) {
+    } else if (!row.ruleId && row.linkCode) {
+      // Parameter-first link (future — no structured rule backing it).
       setEditingLinkCode(row.linkCode);
     } else {
       setEditing(row);
