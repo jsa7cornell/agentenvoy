@@ -332,10 +332,10 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const group_event_create = tool({
     description:
-      "Create a group coordination link where MULTIPLE people each share their availability via one shared URL. " +
-      "Use ONLY when the host says 'group', 'coordinate everyone', 'team dinner/sync/workshop', or names 2+ specific individuals who all need to submit their schedule. " +
-      "Do NOT use for a 1:1 meeting with one person or company — use personal_link_create for that. " +
-      "Call immediately with whatever the host provided; inviteeNames and windows are optional. " +
+      "Create a group coordination link where MULTIPLE NAMED INDIVIDUALS each share their availability via one shared URL. " +
+      "Use ONLY when the host names 2+ SPECIFIC INDIVIDUAL PEOPLE (e.g. 'Bob, Sue, and Jane'), or explicitly says 'group dinner', 'team sync', 'interview panel'. " +
+      "DO NOT use for a 1:1 meeting with one person — use personal_link_create. " +
+      "DO NOT use for a meeting with ONE COMPANY/ORG (e.g. 'get time w/ Acme', 'Sequoia VC call', 'Honest Game intro') — that's personal_link_create with inviteeName=the company. A company name is ONE entity, not a group. Don't fabricate 'the team' out of an org name. " +
       "Pass durationMinutes when the host stated a duration ('45 mins', '2 hours'). " +
       "Pass format when the host said video/phone/in-person/VC.",
     inputSchema: z.object({

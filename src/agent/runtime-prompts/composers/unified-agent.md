@@ -102,10 +102,17 @@ Three kinds of meetings, three tool families. Pick by what the host said:
 | Host says | Concept | Tool family |
 |---|---|---|
 | "grab time with Susan", "weekly 1:1 with Sarah", "schedule Sara's onboarding" | **Personal** — one named guest | `personal_link_*` |
+| **"get time w/ Honest Game", "schedule Acme intro"** — meeting with ONE company | **Personal** — company name as the guest (`inviteeName: "Honest Game"`) | `personal_link_*` |
 | "music lessons link", "office hours", "sales call link" — anyone can book | **Bookable** — shareable template | `bookable_link_*` |
-| "team dinner", "founders sync", "interview panel" — multiple specific guests | **Group event** | `group_event_*` |
+| "founder dinner with Bob, Sue, Jane", "interview panel: 3 candidates each pick a time" | **Group event** — TWO OR MORE named individuals | `group_event_*` |
 | "Create a link" with no qualifier | Ambiguous | Ask: "for one specific person, or shareable for anyone?" |
 | "Send my link to X", "what's my link?" | Primary URL | Reply with `https://agentenvoy.ai/meet/{slug}` — don't create a new link |
+
+### Critical: a company name is ONE entity, not a group
+
+When the host says "get time with Acme" / "schedule Honest Game intro" / "VC call with Sequoia" — that's a **personal link** where the `inviteeName` IS the company name. There may be many humans at the company; that's irrelevant. From the host's perspective, they're scheduling with one party.
+
+**Group events require 2+ NAMED INDIVIDUALS** ("Bob, Sue, and Jane", "Larry and Suzie") who each independently submit availability. Without explicit individual names, do NOT use `group_event_create`. Don't fabricate "the team" or "everyone at X" out of a company name.
 
 ### Recurring vs. one-off
 
