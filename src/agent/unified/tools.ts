@@ -335,15 +335,30 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       "Create a group coordination link where MULTIPLE people each share their availability via one shared URL. " +
       "Use ONLY when the host says 'group', 'coordinate everyone', 'team dinner/sync/workshop', or names 2+ specific individuals who all need to submit their schedule. " +
       "Do NOT use for a 1:1 meeting with one person or company — use personal_link_create for that. " +
-      "Call immediately with whatever the host provided; inviteeNames and windows are optional.",
+      "Call immediately with whatever the host provided; inviteeNames and windows are optional. " +
+      "Pass durationMinutes when the host stated a duration ('45 mins', '2 hours'). " +
+      "Pass format when the host said video/phone/in-person/VC.",
     inputSchema: z.object({
       topic: z.string().describe("Event title or occasion (e.g. 'Founder Dinner')."),
       inviteeNames: z.array(z.string()).optional()
         .describe("Names or emails of participants, if the host mentioned them."),
       windows: z.array(z.string()).optional()
         .describe("Candidate windows as natural language (e.g. 'weekday evenings May–July'). Omit if not mentioned."),
+      durationMinutes: z.number().int().positive().optional()
+        .describe("Meeting duration in minutes if host specified (e.g. 45, 60, 120)."),
+      format: z.enum(["video", "phone", "in-person"]).optional()
+        .describe("Meeting format if host specified. 'VC' / 'video call' → 'video'."),
     }),
-    execute: async (params) => exec("group_event_create", "create_link", { ...params, type: "group" }),
+    execute: async (params) => {
+      // create_link handler reads `duration` (not durationMinutes) on group links;
+      // map here so the host's "45 mins" actually persists.
+      const { durationMinutes, ...rest } = params;
+      return exec("group_event_create", "create_link", {
+        ...rest,
+        type: "group",
+        ...(durationMinutes !== undefined ? { duration: durationMinutes } : {}),
+      });
+    },
   });
 
   const group_event_update = tool({
