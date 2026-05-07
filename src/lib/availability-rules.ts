@@ -7,6 +7,7 @@
  */
 
 import type { CompiledRules, BlockedWindow, ProtectedWindow, AllowWindow, CompiledBuffer, CompiledPriorityBucket } from "./scoring";
+import type { LinkRecurrence } from "./recurrence";
 
 // --- Types ---
 
@@ -66,6 +67,20 @@ export interface AvailabilityRule {
       format?: boolean;
       duration?: boolean;
     };
+    /**
+     * Recurrence template for child bookings made through this bookable link.
+     * When set, every guest who books through the link gets a recurring series
+     * anchored at their picked first slot. The child NegotiationLink inherits
+     * `recurrence` from this field at session-spawn time. Omit for one-off-per-
+     * booking bookable links (sales calls, office hours).
+     *
+     * The shape uses pre-anchor-commit semantics — `firstDateLocal` and `timeLocal`
+     * are not set on the parent template; they're filled in on the child when the
+     * guest picks. See `LinkRecurrence` in `lib/recurrence.ts` for the full shape.
+     *
+     * Added 2026-05-07 (UA refactor — UNIFIEDAGENT.md).
+     */
+    recurrence?: LinkRecurrence;
   };
   status: "active" | "paused" | "expired";
   priority: number;       // 1-5

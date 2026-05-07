@@ -67,13 +67,13 @@ export const GROUNDING_DECLARATIONS: Record<string, GroundingDeclaration> = {
 
   // --- Strict tools (irreversible) ---
 
-  link_cancel: {
-    toolName: "link_cancel",
+  session_cancel: {
+    toolName: "session_cancel",
     toolSeverity: "strict",
     fields: [
       {
-        field: "code",
-        derivable: true, // must come from LOAD_ output or context
+        field: "sessionId",
+        derivable: true, // must come from LOAD_active_sessions output
         severity: "strict",
       },
     ],
@@ -108,6 +108,51 @@ export const GROUNDING_DECLARATIONS: Record<string, GroundingDeclaration> = {
     ],
   },
 
+  // primary_link_update — touches global host config; reversible but high blast radius.
+  primary_link_update: {
+    toolName: "primary_link_update",
+    toolSeverity: "strict",
+    fields: [], // No specific field gate — declaration alone makes the call strict-marked in telemetry.
+  },
+
+  // prefs_update_timezone — changes how all times render across the system.
+  prefs_update_timezone: {
+    toolName: "prefs_update_timezone",
+    toolSeverity: "strict",
+    fields: [
+      {
+        field: "timezone",
+        derivable: false,
+        patterns: [
+          /\b(?:timezone|tz|america|europe|asia|africa|pacific|eastern|central|mountain|pst|est|cst|mst|gmt|utc|berlin|london|tokyo|sydney|moved|moving|relocate)\b/i,
+        ],
+        severity: "strict",
+      },
+    ],
+  },
+
+  // personal_link_create with autoConfirm — irreversible calendar write.
+  // Strict only when autoConfirm is set; otherwise advisory.
+  // The declaration uses field-level severity so the check evaluates per call.
+  personal_link_create: {
+    toolName: "personal_link_create",
+    toolSeverity: "advisory",
+    fields: [
+      {
+        field: "inviteeName",
+        derivable: false,
+        // The user must name the guest somewhere in the message.
+        // Heuristic: presence of any capitalized word longer than 1 char,
+        // OR explicit deferral phrases. We accept liberally; falls advisory.
+        patterns: [
+          /\b[A-Z][a-z]+\b/,
+          /\b(?:with|for)\s+\w+/i,
+        ],
+        severity: "advisory",
+      },
+    ],
+  },
+
   session_hold_slot: {
     toolName: "session_hold_slot",
     toolSeverity: "strict",
@@ -133,17 +178,17 @@ export const GROUNDING_DECLARATIONS: Record<string, GroundingDeclaration> = {
 
   // --- Advisory tools (common write ops) ---
 
-  link_create: {
-    toolName: "link_create",
+  bookable_link_create: {
+    toolName: "bookable_link_create",
     toolSeverity: "advisory",
     fields: [
       {
-        field: "activity",
+        field: "name",
         derivable: false,
-        // User must have named the meeting type
+        // User must have named the bookable link or its purpose
         patterns: [
-          /\b(?:coffee|lunch|dinner|drinks|call|meetings?|chat|ride|run|walk|intro|catch[\s-]?up|sync|interview|consult(?:ation)?|session|workshop)\b/i,
-          /\b(?:create|new|set up|make|build)\s+(?:a\s+)?(?:link|meeting|booking|schedule)\b/i,
+          /\b(?:music|piano|lessons|office\s*hours|sales|coaching|consult(?:ation)?|tutoring|coffee|intro|sync|interview|workshop|session)\b/i,
+          /\b(?:create|new|set up|make|build|add)\s+(?:a\s+)?(?:bookable\s+)?(?:link|template)\b/i,
         ],
         severity: "advisory",
       },

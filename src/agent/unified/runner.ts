@@ -182,22 +182,38 @@ function emitStatus(enqueue: EnqueueFn, stage: string, seq: number, copy = "Work
 }
 
 const TOOL_STATUS_COPY: Record<string, string> = {
+  // LOAD
   LOAD_calendar_context:    "Reading your calendar…",
   LOAD_active_sessions:     "Loading your sessions…",
   LOAD_preferences:         "Loading your preferences…",
-  group_coordinate:         "Setting up group link…",
-  link_create:              "Creating link…",
-  link_update:              "Updating link…",
-  link_cancel:              "Cancelling link…",
+  // Personal links
+  personal_link_create:     "Creating personal link…",
+  personal_link_update:     "Updating personal link…",
+  personal_link_archive:    "Archiving personal link…",
+  personal_link_unarchive:  "Restoring personal link…",
+  // Bookable links
+  bookable_link_create:     "Creating bookable link…",
+  bookable_link_update:     "Updating bookable link…",
+  bookable_link_archive:    "Archiving bookable link…",
+  bookable_link_unarchive:  "Restoring bookable link…",
+  // Group events
+  group_event_create:       "Setting up group event…",
+  group_event_update:       "Updating group event…",
+  group_event_archive:      "Archiving group event…",
+  group_event_unarchive:    "Restoring group event…",
+  // Primary link
+  primary_link_update:      "Updating primary link…",
+  // Sessions
   session_update_time:      "Updating session…",
   session_hold_slot:        "Holding slot…",
   session_archive_bulk:     "Archiving sessions…",
+  // Rules
   rule_add:                 "Adding rule…",
   rule_update:              "Updating rule…",
   rule_remove:              "Removing rule…",
-  primary_link_rename:      "Renaming primary link…",
-  prefs_update_meeting_settings: "Saving settings…",
-  prefs_update_business_hours:   "Saving hours…",
+  // Preferences
+  prefs_update_appearance:  "Saving appearance…",
+  prefs_update_timezone:    "Saving timezone…",
   knowledge_write:          "Saving note…",
 };
 
@@ -263,12 +279,13 @@ function inferBucket(toolCallNames: string[]): string {
   if (toolCallNames.length === 0) return "chat";
   const first = toolCallNames[0];
   if (first.startsWith("LOAD_")) return "chat"; // read-only, no write bucket
-  if (first.startsWith("link_")) return "event_action";
+  if (first.startsWith("personal_link_")) return "event_action";
+  if (first.startsWith("bookable_link_")) return "manage_setup";
+  if (first.startsWith("group_event_")) return "group_coordination";
+  if (first.startsWith("primary_link_")) return "manage_setup";
   if (first.startsWith("session_")) return "event_action";
   if (first.startsWith("rule_")) return "rule";
   if (first.startsWith("prefs_")) return "manage_setup";
   if (first.startsWith("knowledge_")) return "profile";
-  if (first.startsWith("primary_")) return "manage_setup";
-  if (first.startsWith("group_")) return "group_coordination";
   return "chat";
 }

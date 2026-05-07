@@ -294,6 +294,12 @@ async function executeAction(
       return handleUpdateBusinessHours(action.params, userId);
     case "update_availability_rule":
       return handleUpdateAvailabilityRule(action.params, userId);
+    case "update_appearance":
+      return handleUpdateAppearance(action.params, userId);
+    case "update_timezone":
+      return handleUpdateTimezone(action.params, userId);
+    case "update_primary_link":
+      return handleUpdatePrimaryLink(action.params, userId);
     case "save_guest_info":
       return handleSaveGuestInfo(action.params, userId, context?.sessionId);
     case "lock_activity_location":
@@ -2989,6 +2995,8 @@ export async function handleUpdateAvailabilityRule(
     | "update"
     | "remove"
     | "rename_primary"
+    | "archive_bookable"
+    | "unarchive_bookable"
     | undefined;
   const id = typeof params.id === "string" ? params.id : undefined;
   const ruleInput = params.rule as Partial<AvailabilityRule> | undefined;
@@ -2997,11 +3005,16 @@ export async function handleUpdateAvailabilityRule(
     operation !== "add" &&
     operation !== "update" &&
     operation !== "remove" &&
-    operation !== "rename_primary"
+    operation !== "rename_primary" &&
+    operation !== "archive_bookable" &&
+    operation !== "unarchive_bookable"
   ) {
     return { success: false, message: `Invalid operation: ${String(operation)}` };
   }
-  if ((operation === "update" || operation === "remove") && !id) {
+  if (
+    (operation === "update" || operation === "remove" ||
+     operation === "archive_bookable" || operation === "unarchive_bookable") && !id
+  ) {
     return { success: false, message: `Operation "${operation}" requires an id` };
   }
   if ((operation === "add" || operation === "update") && !ruleInput) {
@@ -3080,6 +3093,21 @@ export async function handleUpdateAvailabilityRule(
       }
       const linkCode = generateCode(8);
       const title = typeof bookableInput.title === "string" && bookableInput.title.trim() ? bookableInput.title.trim() : nameRaw;
+      // Bookable parent template can carry recurrence (added 2026-05-07 — UA refactor).
+      // When set, child bookings inherit it at session-spawn time. Validated via
+      // parseRecurrence; malformed configs drop to undefined (one-off-per-booking
+      // bookable link) rather than blocking creation. See lib/recurrence.ts.
+      let bookableRecurrence: LinkRecurrence | undefined;
+      const rawBookableRec = (bookableInput as { recurrence?: unknown }).recurrence;
+      if (rawBookableRec != null) {
+        try {
+          bookableRecurrence = parseRecurrence(rawBookableRec);
+        } catch (e) {
+          console.warn(
+            `[bookable_link_create] recurrence rejected (${(e as Error).message}) — raw: ${JSON.stringify(rawBookableRec).slice(0, 200)}`,
+          );
+        }
+      }
       bookable = {
         name: nameRaw,
         title,
@@ -3087,6 +3115,10 @@ export async function handleUpdateAvailabilityRule(
         durationMinutes: typeof bookableInput.durationMinutes === "number" ? bookableInput.durationMinutes : 30,
         linkSlug: user.meetSlug,
         linkCode,
+        ...(bookableRecurrence ? { recurrence: bookableRecurrence } : {}),
+        ...(bookableInput.guestPicks && typeof bookableInput.guestPicks === "object"
+          ? { guestPicks: bookableInput.guestPicks as { format?: boolean; duration?: boolean } }
+          : {}),
       };
       linkUrl = buildBookableLinkUrl(user.meetSlug, linkCode);
     }
@@ -3208,6 +3240,29 @@ export async function handleUpdateAvailabilityRule(
     if (merged.action === "bookable" && merged.bookable) {
       linkUrl = buildBookableLinkUrl(merged.bookable.linkSlug, merged.bookable.linkCode);
     }
+  } else if (operation === "archive_bookable" || operation === "unarchive_bookable") {
+    // Bookable-link archive/unarchive — flips status between "active" and "paused".
+    // The UA's `bookable_link_archive` / `bookable_link_unarchive` tools route here.
+    // Archive hides the link from My Bookable Links and the agent's view; existing
+    // bookings remain intact. Reversible.
+    const idx = existing.findIndex((r) => r.id === id);
+    if (idx < 0) return { success: false, message: `No rule found with id ${id}` };
+    const target = existing[idx];
+    if (target.action !== "bookable") {
+      return {
+        success: false,
+        message: `Rule ${id} is not a bookable link (action=${target.action})`,
+      };
+    }
+    const nextStatus: AvailabilityRule["status"] =
+      operation === "archive_bookable" ? "paused" : "active";
+    nextRules = [...existing];
+    nextRules[idx] = { ...target, status: nextStatus };
+    const linkName = target.bookable?.name ?? target.bookable?.title ?? id;
+    summary =
+      operation === "archive_bookable"
+        ? `Archived "${linkName}".`
+        : `Restored "${linkName}".`;
   } else {
     // remove
     const idx = existing.findIndex((r) => r.id === id);
@@ -3617,4 +3672,145 @@ async function handleLockBufferMinutes(
     message: `Buffer set to ${raw} minutes for this meeting.`,
     data: { negotiatedBufferMinutes: raw },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Preferences (slim) and Primary link composite handlers
+// Added 2026-05-07 (UA refactor — UNIFIEDAGENT.md).
+// ---------------------------------------------------------------------------
+
+/**
+ * Update the host's UI appearance preference (theme mode).
+ * Routes the UA's `prefs_update_appearance` tool. Writes themeMode to
+ * preferences.explicit.themeMode. The /api/me/ui-prefs route uses the same
+ * field as the source of truth.
+ */
+async function handleUpdateAppearance(
+  params: Record<string, unknown>,
+  userId: string,
+): Promise<ActionResult> {
+  const themeMode = params.themeMode;
+  if (themeMode !== "light" && themeMode !== "dark" && themeMode !== "auto") {
+    return { success: false, message: "themeMode must be 'light', 'dark', or 'auto'" };
+  }
+  const validThemeMode: "light" | "dark" | "auto" = themeMode;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferences: true },
+  });
+  const prefs: UserPreferences = (user?.preferences as UserPreferences | null) ?? {};
+  const explicit = { ...(prefs.explicit ?? {}), themeMode: validThemeMode };
+  const nextPrefs: UserPreferences = { ...prefs, explicit };
+  await prisma.user.update({
+    where: { id: userId },
+    data: { preferences: nextPrefs as unknown as Prisma.InputJsonValue },
+  });
+  return { success: true, message: `Theme set to ${themeMode}.` };
+}
+
+/**
+ * Update the host's IANA timezone. Strict: changes how all times render.
+ * Routes the UA's `prefs_update_timezone` tool. Validates via Intl.DateTimeFormat;
+ * invalid zones return an error rather than silently saving.
+ */
+async function handleUpdateTimezone(
+  params: Record<string, unknown>,
+  userId: string,
+): Promise<ActionResult> {
+  const timezone = params.timezone;
+  if (typeof timezone !== "string" || timezone.length === 0 || timezone.length > 64) {
+    return { success: false, message: "timezone must be a non-empty IANA string (e.g. 'America/Los_Angeles')" };
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+  } catch {
+    return { success: false, message: `Invalid IANA timezone: ${timezone}` };
+  }
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { preferences: true },
+  });
+  const prefs: UserPreferences = (user?.preferences as UserPreferences | null) ?? {};
+  const explicit = { ...(prefs.explicit ?? {}), timezone };
+  const nextPrefs: UserPreferences = { ...prefs, timezone, explicit };
+  await prisma.user.update({
+    where: { id: userId },
+    data: { preferences: nextPrefs as unknown as Prisma.InputJsonValue },
+  });
+  invalidateBehaviorSnapshot(userId);
+  return { success: true, message: `Timezone set to ${timezone}.` };
+}
+
+/**
+ * Composite handler for `primary_link_update` — single source of truth for
+ * Primary link config. Routes individual fields to existing per-concern handlers
+ * during the link-config storage migration (proposal
+ * 2026-05-06_link-config-canonical-model-and-unified-edit). Once that migration
+ * lands, this composite can write directly to the unified link record.
+ */
+async function handleUpdatePrimaryLink(
+  params: Record<string, unknown>,
+  userId: string,
+): Promise<ActionResult> {
+  const meetingFields: Record<string, unknown> = {};
+  if (params.phone !== undefined) meetingFields.phone = params.phone;
+  if (params.videoProvider !== undefined) meetingFields.videoProvider = params.videoProvider;
+  if (params.zoomLink !== undefined) meetingFields.zoomLink = params.zoomLink;
+  if (params.duration !== undefined) meetingFields.defaultDuration = params.duration;
+
+  const businessFields: Record<string, unknown> = {};
+  if (params.buffer !== undefined) businessFields.buffer = params.buffer;
+  // availability[] supersedes business hours start/end once the canvas-collapse
+  // migration lands. For now the agent surface accepts availability but routing
+  // to the legacy start/end is a follow-up; surface a helpful message if the
+  // host tried to set windows directly.
+  const hasAvailability = Array.isArray(params.availability) && (params.availability as unknown[]).length > 0;
+
+  const summaries: string[] = [];
+
+  if (Object.keys(meetingFields).length > 0) {
+    const r = await handleUpdateMeetingSettings(meetingFields, userId);
+    if (!r.success) return r;
+    summaries.push(r.message);
+  }
+
+  if (Object.keys(businessFields).length > 0) {
+    const r = await handleUpdateBusinessHours(businessFields, userId);
+    if (!r.success) return r;
+    summaries.push(r.message);
+  }
+
+  if (typeof params.name === "string" && params.name.trim().length > 0) {
+    const r = await handleUpdateAvailabilityRule(
+      { operation: "rename_primary", rule: { label: params.name } },
+      userId,
+    );
+    if (!r.success) return r;
+    summaries.push(r.message);
+  }
+
+  if (hasAvailability) {
+    summaries.push(
+      "availability windows on Primary will land with the canvas-collapse migration (PR-B); " +
+      "for now use prefs_update_business_hours start/end or pass buffer here.",
+    );
+  }
+
+  // format and location on Primary aren't yet in scope for this composite —
+  // the underlying storage doesn't carry them on Primary today. Bookable links
+  // do, via bookable_link_update. Surface a noop hint if the host tried.
+  if (params.format !== undefined) {
+    summaries.push("format on Primary isn't editable via the agent yet — use the dashboard.");
+  }
+  if (params.location !== undefined) {
+    summaries.push("location on Primary isn't editable via the agent yet — use the dashboard.");
+  }
+  if (params.guestPicks !== undefined) {
+    summaries.push("guestPicks on Primary isn't editable via the agent yet — use the dashboard.");
+  }
+
+  if (summaries.length === 0) {
+    return { success: false, message: "No primary-link fields provided to update" };
+  }
+  return { success: true, message: summaries.join(" ") };
 }
