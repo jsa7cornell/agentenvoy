@@ -1363,6 +1363,7 @@ export async function handleCreateLink(
     data: {
       userId,
       type: "personalized",
+      ...(isGroupLink ? { mode: "group" } : {}),
       slug: meetSlug,
       code,
       inviteeName,
