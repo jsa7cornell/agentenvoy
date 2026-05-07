@@ -80,6 +80,10 @@ export interface AgentContext {
    * from auth (session.user.id === negotiationSession.hostId).
    */
   isHost?: boolean;
+  /** The GroupCoordination row's sessionId (= host NegotiationSession.id).
+   *  Passed to record_availability / propose_convergence / collect_suggestion
+   *  so the agent persists data to the right row. Only set for group events. */
+  groupCoordinationSessionId?: string;
 }
 
 function getDomain(context: AgentContext): DomainType {
@@ -108,6 +112,7 @@ function buildComposeOptions(context: AgentContext) {
     hostDirectives: context.hostDirectives,
     isGroupEvent: context.isGroupEvent,
     eventParticipants: context.eventParticipants,
+    groupCoordinationSessionId: context.groupCoordinationSessionId,
     role: context.role,
     negotiatedActivity: context.negotiatedActivity,
     negotiatedLocation: context.negotiatedLocation,

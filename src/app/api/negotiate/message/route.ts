@@ -14,6 +14,17 @@ import { sanitizeHistory } from "@/lib/conversation";
 import { mergeChannelMetadata } from "@/lib/channel/metadata-schema";
 import type { ChannelMessageMetadata } from "@/lib/channel/metadata-schema";
 import { parseLinkParameters } from "@/lib/link-parameters";
+import { z } from "zod";
+import { tool } from "ai";
+import {
+  recordAvailabilityTool,
+  proposeConvergenceTool,
+  collectSuggestionTool,
+  recordAvailabilityInput,
+  proposeConvergenceInput,
+  collectSuggestionInput,
+} from "@/agent/modules/group-coordination/tools";
+import type { ModuleContext } from "@/agent/modules/types";
 
 const VALID_STATUSES = ["active", "proposed", "cancelled", "escalated"];
 
@@ -174,6 +185,7 @@ export async function POST(req: NextRequest) {
   // Build group context if applicable
   const isGroupEvent = (session.link as { mode?: string }).mode === "group";
   let eventParticipants: Array<{ name: string; status: string; statedAvailability?: string }> | undefined;
+  let groupCoordinationSessionId: string | undefined;
 
   if (isGroupEvent) {
     const allParticipants = await prisma.sessionParticipant.findMany({
@@ -212,6 +224,32 @@ export async function POST(req: NextRequest) {
         })
     );
     eventParticipants = participantContexts;
+
+    // Resolve the GroupCoordination row for this link (keyed to the host's
+    // NegotiationSession, not the participant's). Used to pass the right
+    // sessionId to record_availability / propose_convergence tool calls.
+    // Lazy-create: links created before this feature shipped won't have a row.
+    let gc = await prisma.groupCoordination.findFirst({
+      where: { session: { linkId: session.linkId } },
+      select: { sessionId: true },
+    });
+    if (!gc) {
+      // Find the host's original session for this link (earliest, host-owned).
+      const hostSession = await prisma.negotiationSession.findFirst({
+        where: { linkId: session.linkId, hostId: session.hostId },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+      if (hostSession) {
+        gc = await prisma.groupCoordination.upsert({
+          where: { sessionId: hostSession.id },
+          create: { sessionId: hostSession.id },
+          update: {},
+          select: { sessionId: true },
+        });
+      }
+    }
+    groupCoordinationSessionId = gc?.sessionId;
   }
 
   // Build agent context
@@ -252,6 +290,7 @@ export async function POST(req: NextRequest) {
     activityOptions: parseLinkParameters(session.link.parameters).activityOptions ?? null,
     // PR3: select the deal-room host vs. guest composer in composer.ts.
     isHost,
+    groupCoordinationSessionId,
     // F2 of proposal 2026-05-04_update-time-action-state-drift. When the
     // session has a live calendar event (calendarEventId set), surface that
     // to the composer so it doesn't treat a re-time-in-flight session as a
@@ -280,11 +319,13 @@ export async function POST(req: NextRequest) {
   const promptSnapshotEnabled = process.env.PROMPT_SNAPSHOT_ENABLED !== "false";
   let invocationInfo: { systemPrompt: string; modelId: string } | null = null;
 
-  // Tool registry — guest-side composer ONLY gets `get_matched_availability`.
-  // Host composer + greeting path stay tool-less per the bundled review's B2
-  // scoping decision (`proposals/2026-04-29_bilateral-and-picker-unified-execution-plan_decided-2026-04-29.md` §7).
-  // Cut 2 privacy gate is enforced inside the tool's execute closure —
-  // `includeConflicts: false` is hard-coded; titles never reach Sonnet.
+  // Tool registry — guest-side composer gets `get_matched_availability` plus,
+  // for group events, the three group-coordination tools (record_availability,
+  // propose_convergence, collect_suggestion). These persist participant windows
+  // and synthesize overlap. ComposerTool.execute takes (input, ctx) but ctx is
+  // voided in all three — wrap each in tool() to match the AI SDK ToolSet shape.
+  // Host composer + greeting path stay tool-less per the B2 scoping decision
+  // (proposals/2026-04-29_bilateral-and-picker-unified-execution-plan_decided-2026-04-29.md §7).
   let tools: import("@/agent/tools/registry").ToolRegistry | undefined;
   if (!isHost) {
     const { buildGetMatchedAvailabilityTool } = await import(
@@ -293,6 +334,31 @@ export async function POST(req: NextRequest) {
     tools = {
       get_matched_availability: buildGetMatchedAvailabilityTool(sessionId),
     };
+
+    if (isGroupEvent && groupCoordinationSessionId) {
+      const gcCtx = {} as ModuleContext;
+      tools = {
+        ...tools,
+        record_availability: tool({
+          description: recordAvailabilityTool.description,
+          inputSchema: recordAvailabilityInput,
+          execute: async (input: z.infer<typeof recordAvailabilityInput>) =>
+            recordAvailabilityTool.execute(input, gcCtx),
+        }),
+        propose_convergence: tool({
+          description: proposeConvergenceTool.description,
+          inputSchema: proposeConvergenceInput,
+          execute: async (input: z.infer<typeof proposeConvergenceInput>) =>
+            proposeConvergenceTool.execute(input, gcCtx),
+        }),
+        collect_suggestion: tool({
+          description: collectSuggestionTool.description,
+          inputSchema: collectSuggestionInput,
+          execute: async (input: z.infer<typeof collectSuggestionInput>) =>
+            collectSuggestionTool.execute(input, gcCtx),
+        }),
+      };
+    }
   }
 
   const streamResult = await streamAgentResponse(context, {

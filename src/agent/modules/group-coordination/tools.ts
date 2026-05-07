@@ -19,7 +19,7 @@ import { prisma } from "@/lib/prisma";
 // record_availability
 // ---------------------------------------------------------------------------
 
-const recordAvailabilityInput = z.object({
+export const recordAvailabilityInput = z.object({
   sessionId: z.string().describe("GroupCoordination sessionId."),
   person: z.string().describe("Display name or email of the participant."),
   windows: z
@@ -91,7 +91,7 @@ person name overwrites the previous entry (latest-wins). All other entries are p
 // propose_convergence
 // ---------------------------------------------------------------------------
 
-const proposeConvergenceInput = z.object({
+export const proposeConvergenceInput = z.object({
   sessionId: z.string().describe("GroupCoordination sessionId."),
 }).strict();
 
@@ -138,7 +138,7 @@ ranked by overlap, flag hard conflicts, and call out who has not responded yet.`
 // collect_suggestion
 // ---------------------------------------------------------------------------
 
-const collectSuggestionInput = z.object({
+export const collectSuggestionInput = z.object({
   sessionId: z.string().describe("GroupCoordination sessionId."),
   person: z.string().describe("Who is making the suggestion."),
   category: z

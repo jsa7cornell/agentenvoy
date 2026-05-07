@@ -72,6 +72,7 @@ export interface ComposeOptions {
     status: string;
     statedAvailability?: string;
   }>;
+  groupCoordinationSessionId?: string;
   /**
    * Agent role this composer is serving. Today: `AgentRole`
    * (`"coordinator" | "administrator"`) from the deal-room negotiator
@@ -411,6 +412,9 @@ function buildSessionContext(options: ComposeOptions): string {
         const availNote = p.statedAvailability ? ` — ${p.statedAvailability}` : "";
         parts.push(`  - ${p.name} (${p.status}${availNote})`);
       }
+    }
+    if (options.groupCoordinationSessionId) {
+      parts.push(`[GROUND TRUTH] Group coordination session ID: ${options.groupCoordinationSessionId} — pass this exact value as sessionId when calling record_availability, propose_convergence, or collect_suggestion.`);
     }
   }
 
