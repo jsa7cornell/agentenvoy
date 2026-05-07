@@ -46,7 +46,7 @@ import {
 } from "@/lib/event-links-buckets";
 import { type ReusableLinkRow } from "@/components/mobile/event-links-card";
 import { EventLinksEditDialog } from "@/components/mobile/event-links-edit-dialog";
-import { PrimaryEditDialog } from "@/components/links/primary-edit-dialog";
+import { LinkEditModal } from "@/components/link-edit-modal";
 import { CreateLinkPicker, CreateLinkPickerMobile } from "@/components/desktop/create-link-picker";
 
 interface UpcomingEventRow extends SessionLike {
@@ -1020,13 +1020,14 @@ export function EventLinksPageContent() {
         }}
         onDismiss={() => setEditing(null)}
       />
-      <PrimaryEditDialog
-        open={editingPrimary}
+      <LinkEditModal
+        isOpen={editingPrimary}
+        mode="primary"
         onSaved={() => {
           setReusableLoaded(false);
           refetchReusable();
         }}
-        onDismiss={() => setEditingPrimary(false)}
+        onClose={() => setEditingPrimary(false)}
       />
       {/* hostFirstName reserved for header chrome refactor; suppress unused
           state warning until that lands. */}

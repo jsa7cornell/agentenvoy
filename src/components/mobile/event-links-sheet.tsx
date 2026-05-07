@@ -40,7 +40,7 @@ import {
 } from "@/lib/event-links-buckets";
 import { EventLinksCard, type ReusableLinkRow } from "./event-links-card";
 import { EventLinksEditDialog } from "./event-links-edit-dialog";
-import { PrimaryEditDialog } from "@/components/links/primary-edit-dialog";
+import { LinkEditModal } from "@/components/link-edit-modal";
 import { CreateLinkPickerMobile } from "@/components/desktop/create-link-picker";
 
 interface EventLinksSheetProps {
@@ -643,13 +643,14 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
         }}
         onDismiss={() => setEditing(null)}
       />
-      <PrimaryEditDialog
-        open={editingPrimary}
+      <LinkEditModal
+        isOpen={editingPrimary}
+        mode="primary"
         onSaved={() => {
           setReusableLoaded(false);
           refetchReusable();
         }}
-        onDismiss={() => setEditingPrimary(false)}
+        onClose={() => setEditingPrimary(false)}
       />
     </div>
   );
