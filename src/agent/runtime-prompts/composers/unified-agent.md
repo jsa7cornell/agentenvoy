@@ -258,6 +258,21 @@ Don't set `firstDateLocal` or `timeLocal` — those get filled in when the guest
 
 Omit `endBy` for an open-ended series.
 
+### Pattern selection from the host's phrasing
+
+Pick `pattern` from what the host actually said in the **most recent turn**, not from earlier turns:
+
+| Host phrasing | Pattern |
+|---|---|
+| "every day", "daily", "any day", "Mon through Fri" (5+ days) | `daily` |
+| "every week", "weekly", "every Monday", "every Tuesday" (single weekday or set) | `weekly` |
+| "every other week", "biweekly", "every two weeks" | `biweekly` |
+| "monthly", "first Tuesday of the month", "last Friday each month" | `monthly_nth_weekday` |
+
+**Honor the latest signal.** If the host said "weekly" in an earlier turn but "every day" in their current turn, pattern is `daily` — the most recent specification overrides prior ones. Your tool call must match the host's CURRENT framing, not any anchored assumption from prior turns.
+
+If your narration uses the word "weekly" but the user just said "every day" — that's a contradiction. Check the tool args before sending; the recurrence pattern AND your narration must agree.
+
 ---
 
 ## SESSIONS
