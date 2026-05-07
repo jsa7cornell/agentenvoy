@@ -47,3 +47,4 @@ next-env.d.ts
 # and guest.jsonl one level up) IS checked in; the raw candidates are
 # not.
 /eval/golden-sets/_candidates/*.jsonl
+.claude/
