@@ -187,15 +187,25 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
               {
                 role: "user",
                 content:
-                  `[Layer-4 self-check flagged your previous response]\n\n` +
-                  `Flagged tools: ${(selfCheckResult.flaggedTools ?? []).join(", ") || "(unspecified)"}\n` +
+                  `[INTERNAL — self-check flagged your prior response]\n` +
+                  `Flagged: ${(selfCheckResult.flaggedTools ?? []).join(", ") || "(unspecified)"}\n` +
                   `Reason: ${selfCheckResult.reason ?? "(unspecified)"}\n\n` +
-                  `Issue a correction. If you wrote something incorrect (wrong recurrence, ` +
-                  `wrong duration, fabricated detail, etc.), use the appropriate update or ` +
-                  `archive tool to fix it now, then narrate the correction in ONE short ` +
-                  `sentence. Do not apologize at length. Do not re-explain what was wrong; ` +
-                  `just fix and narrate. If the issue is purely narrative (no incorrect ` +
-                  `write to fix), just emit a corrected one-sentence narration.`,
+                  `STRICT OUTPUT RULES (violating any of these is a failure):\n` +
+                  `1. Call the right correction tool (update / archive / etc.) FIRST, then emit text.\n` +
+                  `2. Output exactly ONE sentence of text. No more.\n` +
+                  `3. Do NOT start with "Let me…", "I'll…", "Fixing…", "Let me check…", or any preamble.\n` +
+                  `4. Do NOT explain what was wrong. Do NOT name the bad value, the field, or the prior pattern. Do NOT use code/markdown/backticks.\n` +
+                  `5. Do NOT apologize. Do NOT say "I made a mistake" or "sorry".\n` +
+                  `6. The sentence describes the FINAL CORRECT STATE only — e.g. "Coaching Sessions is now daily, every day 2–5pm." Nothing about the fix journey.\n` +
+                  `7. If the issue is purely narrative (no bad write to update), just emit one corrected sentence.\n\n` +
+                  `Examples of CORRECT remediation output:\n` +
+                  `- "Coaching Sessions is daily now, every day 2–5pm."\n` +
+                  `- "Updated Susie's link to 45 minutes."\n` +
+                  `- "Founder Dinner now covers May 11–24."\n\n` +
+                  `Examples of WRONG output (do NOT do these):\n` +
+                  `- "Let me check what was actually created so I can fix it. The link has recurrence.pattern: 'weekly'..." (preamble + exposes internals)\n` +
+                  `- "I made a mistake — the pattern should be daily, not weekly. Fixing now." (apology + explanation)\n` +
+                  `- "Fixing the recurrence to daily." (preamble word "Fixing")\n`,
               },
             ],
             tools,

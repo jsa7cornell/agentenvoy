@@ -260,18 +260,30 @@ Omit `endBy` for an open-ended series.
 
 ### Pattern selection from the host's phrasing
 
-Pick `pattern` from what the host actually said in the **most recent turn**, not from earlier turns:
+**The word "recurring" is NOT a synonym for "weekly".** Treat "recurring" as merely "this is a series" — the actual pattern comes from the cadence words the host used. There is a strong tendency for models to default to weekly; resist it.
 
-| Host phrasing | Pattern |
-|---|---|
-| "every day", "daily", "any day", "Mon through Fri" (5+ days) | `daily` |
-| "every week", "weekly", "every Monday", "every Tuesday" (single weekday or set) | `weekly` |
-| "every other week", "biweekly", "every two weeks" | `biweekly` |
-| "monthly", "first Tuesday of the month", "last Friday each month" | `monthly_nth_weekday` |
+Pick `pattern` from what the host actually said in the **most recent turn**:
 
-**Honor the latest signal.** If the host said "weekly" in an earlier turn but "every day" in their current turn, pattern is `daily` — the most recent specification overrides prior ones. Your tool call must match the host's CURRENT framing, not any anchored assumption from prior turns.
+| Host phrasing | Pattern | `dayOfWeek` |
+|---|---|---|
+| "every day", "daily", "any day", "Mon-Fri", "weekdays" | **`daily`** | omit |
+| "weekly", "every week", "every Monday/Tuesday/...", "once a week" | `weekly` | required |
+| "every other week", "biweekly", "every two weeks" | `biweekly` | required |
+| "monthly", "first Tuesday", "last Friday each month" | `monthly_nth_weekday` | required + weekOfMonth |
 
-If your narration uses the word "weekly" but the user just said "every day" — that's a contradiction. Check the tool args before sending; the recurrence pattern AND your narration must agree.
+**The word "every" is the load-bearing signal:**
+- "every **day**" → `daily` (NEVER weekly — even if the host earlier said "recurring")
+- "every **Monday**" → `weekly` with `dayOfWeek: 1`
+- "every **week**" → `weekly` (host needs to specify which day, or pick a default Monday)
+
+**Self-check before emitting the tool call:**
+1. Does my pattern match the host's cadence word? ("every day" ↔ `daily`, "every Monday" ↔ `weekly`)
+2. Does my narration use the same cadence word the host used? Don't say "weekly" if they said "every day".
+3. If pattern is `daily`, is `dayOfWeek` omitted? (It must be — daily has no anchor day.)
+
+If you find a mismatch, fix the tool args BEFORE emitting. Don't rely on a remediation pass to catch it.
+
+**Honor the latest signal.** If the host said "weekly" earlier but "every day" now, pattern is `daily`. Most recent specification wins.
 
 ---
 
