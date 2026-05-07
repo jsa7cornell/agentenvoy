@@ -88,11 +88,22 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         });
 
         // Stream the unified agent response.
+        //
         // Anthropic prompt caching: mark the system prompt as ephemeral so
         // every turn's static prefix (system + tool definitions) hits the
-        // cache. 5-min TTL fits typical conversational pacing; cache write
-        // happens on first turn, then all reads in the next 5 min are ~10x
-        // cheaper. See proposal 2026-05-07_ua-cost-reduction.
+        // cache. 5-min TTL; cache write on first turn, reads ~10x cheaper.
+        //
+        // Extended thinking (Rank 1 from proposal 2026-05-07_unified-agent-
+        // model-selection-research): captures the model's reasoning trace into
+        // metadata so we can see WHY it made each decision (e.g., why it
+        // asked for clarification instead of calling a tool). Anthropic also
+        // reports thinking-mode improves rule adherence on long instruction
+        // stacks — so this doubles as a partial fix.
+        //
+        // Disable in env (UA_THINKING_DISABLED=true) if cost overhead is
+        // prohibitive after the diagnostic period. Default: enabled with
+        // 1024-token budget (~$0.015/turn extra at Sonnet output rates).
+        const thinkingEnabled = process.env.UA_THINKING_DISABLED !== "true";
         const startMs = Date.now();
         const result = streamText({
           model: envoyModel(modelSelection.modelId),
@@ -109,13 +120,26 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           ],
           tools,
           stopWhen: stepCountIs(MAX_STEPS),
+          providerOptions: thinkingEnabled
+            ? {
+                anthropic: {
+                  thinking: { type: "enabled", budgetTokens: 1024 },
+                },
+              }
+            : undefined,
         });
 
         // Consume fullStream progressively — emit text tokens as they arrive
         // so the client sees streaming output rather than waiting for the full
         // response. Status frames fire on tool calls so the UI stays active
         // during multi-step turns (LOAD → write).
+        //
+        // We also accumulate `reasoning-*` chunks (extended thinking) into
+        // a separate `reasoningTrace` buffer that gets persisted to metadata.
+        // The trace is admin-only diagnostic — never streamed to the client
+        // (would leak the model's internal reasoning to the host).
         let fullText = "";
+        let reasoningTrace = "";
         let statusSeq = 2;
         for await (const chunk of result.fullStream) {
           if (chunk.type === "text-delta") {
@@ -126,6 +150,10 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
             // Emit a human-readable status for the tool being called.
             const copy = TOOL_STATUS_COPY[chunk.toolName] ?? "Working on it…";
             emitStatus(enqueue, chunk.toolName, statusSeq++, copy);
+          } else if (chunk.type === "reasoning-delta") {
+            // Accumulate reasoning into the trace. Not streamed to client.
+            const text = (chunk as { text?: string }).text;
+            if (typeof text === "string") reasoningTrace += text;
           }
         }
 
@@ -295,6 +323,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
                 selfCheck: selfCheckResult,
                 remediated,
                 remediationDurationMs,
+                reasoningTrace: reasoningTrace.trim() ? reasoningTrace : null,
               }) as object),
               ...(linkCardExtras
                 ? {
@@ -425,12 +454,22 @@ function buildUnifiedMetadata(params: {
   remediated?: boolean;
   /** Wall-clock duration of the remediation streamText call (ms). Null if not remediated. */
   remediationDurationMs?: number | null;
+  /** Anthropic extended-thinking trace if enabled. Admin-only diagnostic — never
+   *  surfaced to the host. Null when the feature is disabled or no trace was
+   *  emitted. Capped at ~8KB to keep metadata payloads reasonable. */
+  reasoningTrace?: string | null;
 }): Prisma.InputJsonValue {
-  const { turnCost, toolCallNames, modelId, durationMs, selfCheck, remediated, remediationDurationMs } = params;
+  const { turnCost, toolCallNames, modelId, durationMs, selfCheck, remediated, remediationDurationMs, reasoningTrace } = params;
 
   // Synthesize moduleGuard.bucket from tool names for corpus continuity.
   // Maps tool name prefixes to logical bucket names understood by the dashboard.
   const bucket = inferBucket(toolCallNames);
+
+  // Cap reasoning trace size — long traces can balloon JSON payload.
+  const trimmedReasoning =
+    reasoningTrace && reasoningTrace.length > 8192
+      ? reasoningTrace.slice(0, 8192) + "…[truncated]"
+      : reasoningTrace ?? null;
 
   return {
     unifiedTurn: {
@@ -441,6 +480,7 @@ function buildUnifiedMetadata(params: {
       durationMs,
       selfCheck,
       ...(remediated ? { remediated: true, remediationDurationMs } : {}),
+      ...(trimmedReasoning ? { reasoningTrace: trimmedReasoning } : {}),
       cost: {
         inputTokens: turnCost.inputTokens,
         outputTokens: turnCost.outputTokens,
