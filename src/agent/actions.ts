@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
 import type { AvailabilityRule } from "@/lib/availability-rules";
+import { compileStructuredRules } from "@/lib/availability-rules";
 import { normalizeLinkParameters } from "@/lib/scoring";
 import {
   deriveLegacy,
@@ -3204,7 +3205,22 @@ export async function handleUpdateAvailabilityRule(
   }
 
   (explicit as Record<string, unknown>).structuredRules = nextRules;
-  const nextPrefs: UserPreferences = { ...prefs, explicit };
+
+  // Recompile structured rules so preferences.compiled is always in sync.
+  // Without this, the scoring engine's compiled.blackoutDays never picks up
+  // newly-added one-time block rules until the user hits the GET endpoint.
+  const activeForCompile = nextRules.filter((r) => r.status === "active");
+  const bizStart = (explicit.businessHoursStart as number) ?? 9;
+  const bizEnd = (explicit.businessHoursEnd as number) ?? 18;
+  const recompiled = activeForCompile.length > 0
+    ? compileStructuredRules(activeForCompile, bizStart, bizEnd)
+    : null;
+
+  const nextPrefs: UserPreferences = {
+    ...prefs,
+    explicit,
+    ...(recompiled ? { compiled: recompiled } : {}),
+  };
 
   await prisma.user.update({
     where: { id: userId },
