@@ -929,55 +929,168 @@ function renderMarkdown(text: string): React.ReactNode[] {
 }
 
 // B4: exported so dispatch-stream.ts bookableMeta cast site can reference it.
+// Extended to carry personal/group card fields written by the UA runner.
 export type BookableMeta = {
   title?: string;
   linkUrl?: string;
+  // Bookable-specific schedule fields
   daysOfWeek?: number[];
   timeStart?: string;
   timeEnd?: string;
+  // Shared across all link kinds
   durationMinutes?: number;
   format?: string;
+  // Personal / group extras
+  activityIcon?: string;
+  inviteeNames?: string[];
+  guestPicks?: Record<string, unknown>;
+  recurrence?: { pattern?: string };
 };
 
-function BookableLinkCard({ url, meta }: { url: string; meta?: BookableMeta }) {
+function fmtTime(t: string): string {
+  const [h, m] = t.split(":").map(Number);
+  const hour = h % 12 || 12;
+  const ampm = h < 12 ? "am" : "pm";
+  return m === 0 ? `${hour}${ampm}` : `${hour}:${String(m).padStart(2, "0")}${ampm}`;
+}
+
+function fmtFormat(f?: string): string {
+  return f === "video" ? "Video" : f === "phone" ? "Phone" : f === "in-person" ? "In person" : "";
+}
+
+function recurrenceLabel(r?: { pattern?: string }): string {
+  if (!r?.pattern) return "";
+  return r.pattern === "weekly" ? "Weekly"
+    : r.pattern === "biweekly" ? "Biweekly"
+    : r.pattern === "daily" ? "Daily"
+    : r.pattern === "monthly_nth_weekday" ? "Monthly"
+    : "";
+}
+
+/** Unified link card for bookable, personal, and group links in the chat feed. */
+function LinkCard({
+  url,
+  kind,
+  meta,
+}: {
+  url: string;
+  kind: "bookable" | "personal" | "group";
+  meta?: BookableMeta;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  // Badge label + colour per kind
+  const badge =
+    kind === "bookable"
+      ? { label: "🔗 Bookable", cls: "bg-violet-500/15 text-violet-300 border-violet-500/30" }
+      : kind === "personal"
+        ? { label: "↗ Personal", cls: "bg-purple-500/15 text-purple-300 border-purple-500/30" }
+        : { label: "◈ Group", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" };
+
+  // Schedule summary line
   const DAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const days = meta?.daysOfWeek?.length ? meta.daysOfWeek.map((d) => DAY_ABBR[d]).join(", ") : "";
-  const fmtTime = (t: string) => {
-    const [h, m] = t.split(":").map(Number);
-    const hour = h % 12 || 12;
-    const ampm = h < 12 ? "am" : "pm";
-    return m === 0 ? `${hour}${ampm}` : `${hour}:${String(m).padStart(2, "0")}${ampm}`;
-  };
+  const days = meta?.daysOfWeek?.length
+    ? meta.daysOfWeek.map((d) => DAY_ABBR[d]).join(", ")
+    : "";
   const timeWindow =
-    meta?.timeStart && meta?.timeEnd ? `${fmtTime(meta.timeStart)}–${fmtTime(meta.timeEnd)}` : "";
+    meta?.timeStart && meta?.timeEnd
+      ? `${fmtTime(meta.timeStart)}–${fmtTime(meta.timeEnd)}`
+      : "";
   const duration = meta?.durationMinutes ? `${meta.durationMinutes} min` : "";
-  const format =
-    meta?.format === "video"
-      ? "Video"
-      : meta?.format === "phone"
-        ? "Phone"
-        : meta?.format === "in-person"
-          ? "In person"
-          : "";
+  const format = fmtFormat(meta?.format);
   const summaryParts = [days, timeWindow, duration, format].filter(Boolean);
+
+  // guestPicks deferral — ✏️ suffix on deferred fields, 🤔 prose line
+  const gp = meta?.guestPicks;
+  const formatDeferred = gp?.format === true || Array.isArray(gp?.format);
+  const durationDeferred = gp?.duration === true || Array.isArray(gp?.duration);
+  const locationDeferred = gp?.location === true;
+  const deferredFields: string[] = [
+    ...(formatDeferred ? ["format"] : []),
+    ...(durationDeferred ? ["length"] : []),
+    ...(locationDeferred ? ["location"] : []),
+  ];
+  const deferralLine =
+    deferredFields.length > 0
+      ? `🤔 Guest picks ${deferredFields.join(" and ")}`
+      : null;
+
+  // Recurrence chip
+  const recLabel = recurrenceLabel(meta?.recurrence);
+
+  // Title: fall back by kind
+  const title =
+    meta?.title ??
+    (kind === "bookable" ? "Bookable Link" : kind === "group" ? "Group Event" : "Meeting Link");
+
   return (
-    <div className="rounded-lg border border-DEFAULT bg-surface-inset p-3 flex flex-col gap-2 text-sm">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
-          Bookable
-        </span>
-        <span className="font-medium">{meta?.title ?? "Bookable Link"}</span>
-      </div>
-      {summaryParts.length > 0 && (
-        <div className="text-xs text-secondary">{summaryParts.join(" · ")}</div>
-      )}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted truncate flex-1">{url}</span>
-        <button
-          onClick={() => navigator.clipboard.writeText(url)}
-          className="text-xs text-secondary hover:text-primary"
+    <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.04] p-3 flex flex-col gap-2 text-sm">
+      {/* Header row: emoji · badge · title · recurrence chip */}
+      <div className="flex items-center gap-2 flex-wrap min-w-0">
+        {meta?.activityIcon && (
+          <span className="text-base leading-none flex-shrink-0">{meta.activityIcon}</span>
+        )}
+        <span
+          className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border flex-shrink-0 ${badge.cls}`}
         >
-          Copy
+          {badge.label}
+        </span>
+        <span className="font-semibold text-sm text-primary truncate flex-1 min-w-0">{title}</span>
+        {recLabel && (
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-500/15 text-green-300 border border-green-500/30 flex-shrink-0">
+            ↻ {recLabel}
+          </span>
+        )}
+      </div>
+
+      {/* Guest chips (group only) */}
+      {kind === "group" && meta?.inviteeNames && meta.inviteeNames.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {meta.inviteeNames.map((name) => (
+            <span
+              key={name}
+              className="text-[11px] px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-secondary"
+            >
+              {name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Schedule summary */}
+      {summaryParts.length > 0 && (
+        <div className="text-xs text-secondary">
+          {summaryParts.map((part, i) => {
+            const isDeferred =
+              (i === summaryParts.indexOf(duration) && durationDeferred) ||
+              (i === summaryParts.indexOf(format) && formatDeferred);
+            return (
+              <span key={i}>
+                {i > 0 && <span className="mx-1 text-muted">·</span>}
+                {part}{isDeferred ? " ✏️" : ""}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Deferral prose line */}
+      {deferralLine && (
+        <div className="text-xs text-muted italic">{deferralLine}</div>
+      )}
+
+      {/* URL + copy button */}
+      <div className="flex items-center gap-2 bg-white/[0.04] border border-white/8 rounded-lg px-2.5 py-1.5 mt-0.5">
+        <span className="text-[11px] text-purple-300 truncate flex-1 font-mono">{url}</span>
+        <button
+          onClick={() => {
+            void navigator.clipboard.writeText(url);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+          className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-purple-600 hover:bg-purple-500 text-white transition flex-shrink-0"
+        >
+          {copied ? "Copied!" : "Copy link"}
         </button>
       </div>
     </div>
@@ -2108,7 +2221,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
             : null;
           const meetLinkUrl =
             meetLinkMetaUrl ?? (meetLinkRegexMatch ? meetLinkRegexMatch[1] : undefined);
-          const meetLinkKind = (msg.metadata as Record<string, unknown> | null)?.linkKind as "bookable" | "recurring" | undefined;
+          const meetLinkKind = (msg.metadata as Record<string, unknown> | null)?.linkKind as "bookable" | "personal" | "group" | "recurring" | undefined;
           const reaction = isUser ? (msg.metadata?.reaction as string | undefined) : undefined;
           // §1n item 2: suppress speaker label on consecutive same-speaker bubbles
           // (modern messaging-app convention). Treat threads / system messages as
@@ -2137,17 +2250,19 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                       </div>
                     )}
                     <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
-                    {meetLinkUrl && meetLinkKind === "bookable" ? (
-                      <BookableLinkCard
+                    {meetLinkUrl && (meetLinkKind === "bookable" || meetLinkKind === "personal" || meetLinkKind === "group") ? (
+                      <LinkCard
                         url={meetLinkUrl}
+                        kind={meetLinkKind}
                         meta={
-                          (msg.metadata as Record<string, unknown> | null)?.bookableMeta as
+                          ((msg.metadata as Record<string, unknown> | null)?.linkCardMeta
+                            ?? (msg.metadata as Record<string, unknown> | null)?.bookableMeta) as
                             | BookableMeta
                             | undefined
                         }
                       />
                     ) : meetLinkUrl ? (
-                      <MeetLinkCard url={meetLinkUrl} kind={meetLinkKind} />
+                      <MeetLinkCard url={meetLinkUrl} kind={meetLinkKind as "bookable" | "recurring" | undefined} />
                     ) : null}
                   </div>
                   {reaction && (

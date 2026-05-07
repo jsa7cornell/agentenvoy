@@ -167,7 +167,17 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       guestPicks: guestPicksFullSchema.optional()
         .describe("Fields the guest decides themselves. Only set when host explicitly defers."),
     }),
-    execute: async (params) => exec("personal_link_create", "create_link", params),
+    execute: async (params) => {
+      // The legacy create_link handler builds the meeting title from `topic`, not
+      // `activity`. The unified personal_link_create schema only exposes `activity`,
+      // so mirror it onto `topic` here when topic isn't separately provided.
+      // Without this, "coffee with Susan" produces a title like "Susan + John" with
+      // no activity prefix, and the card emoji-from-title fallback can't fire.
+      const enriched = (params.activity && !(params as { topic?: unknown }).topic)
+        ? { ...params, topic: params.activity }
+        : params;
+      return exec("personal_link_create", "create_link", enriched);
+    },
   });
 
   const personal_link_update = tool({

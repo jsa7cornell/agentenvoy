@@ -3318,6 +3318,7 @@ export async function handleUpdateAvailabilityRule(
           timeEnd: addedRule.timeEnd ?? null,
           durationMinutes: addedRule.bookable.durationMinutes ?? null,
           format: addedRule.bookable.format ?? null,
+          activityIcon: addedRule.bookable.activityIcon ?? null,
         }
       : {};
 

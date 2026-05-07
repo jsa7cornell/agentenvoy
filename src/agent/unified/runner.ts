@@ -484,7 +484,27 @@ function extractLinkCardMeta(
       if (!out?.success) continue;
       const data = out.data as Record<string, unknown> | undefined;
 
+      // Helper: pick the best-available emoji for a link.
+      // Priority: 1) explicit activityIcon arg the model passed (canonical, takes
+      //   precedence), 2) emoji derived from an activity arg, 3) emoji derived
+      //   from the activity prefix in the handler-generated title (legacy fallback).
+      const resolveActivityIcon = (
+        args: Record<string, unknown> | undefined,
+        title: string | undefined,
+      ): string | undefined => {
+        const argIcon = typeof args?.activityIcon === "string" && args.activityIcon.trim()
+          ? args.activityIcon.trim()
+          : null;
+        if (argIcon) return argIcon;
+        const argActivity = typeof args?.activity === "string" ? args.activity : null;
+        const fromActivityArg = argActivity ? emojiForActivity(argActivity) : null;
+        if (fromActivityArg) return fromActivityArg;
+        const titlePrefix = title?.split(":")[0]?.trim() ?? null;
+        return emojiForActivity(titlePrefix) ?? undefined;
+      };
+
       if (tc.toolName === "bookable_link_create") {
+        const args = tc.input as Record<string, unknown> | undefined;
         const meta: Record<string, unknown> = {};
         if (data?.bookableName) meta.title = data.bookableName;
         if (data?.linkUrl) meta.linkUrl = data.linkUrl;
@@ -493,6 +513,19 @@ function extractLinkCardMeta(
         if (data?.timeEnd) meta.timeEnd = data.timeEnd;
         if (data?.durationMinutes) meta.durationMinutes = data.durationMinutes;
         if (data?.format) meta.format = data.format;
+        // activityIcon resolution priority:
+        //   1. data.activityIcon (handler-persisted, source of truth)
+        //   2. args.activityIcon (model passed, may not have persisted if rejected)
+        //   3. derived from activity arg or title prefix
+        const dataIcon = typeof data?.activityIcon === "string" && data.activityIcon.trim()
+          ? (data.activityIcon as string).trim()
+          : null;
+        const icon = dataIcon
+          ?? resolveActivityIcon(args, (data?.bookableName as string) ?? undefined);
+        if (icon) meta.activityIcon = icon;
+        // Surface recurrence so a recurring bookable link renders the 🔁 affordance.
+        if (args?.recurrence) meta.recurrence = args.recurrence;
+        if (args?.guestPicks) meta.guestPicks = args.guestPicks;
         return {
           linkKind: "bookable",
           linkUrl: data?.linkUrl as string | undefined,
@@ -504,14 +537,10 @@ function extractLinkCardMeta(
         const url = data?.url as string | undefined;
         const title = data?.title as string | undefined;
         const args = tc.input as Record<string, unknown> | undefined;
-        // Derive emoji from the activity prefix in the generated title
-        // (e.g. "Coffee: Sarah + John" → "coffee" → ☕). No activity field
-        // in the tool schema yet — server-side fallback until it's added.
-        const activityPrefix = title?.split(":")[0]?.trim() ?? null;
-        const activityIcon = emojiForActivity(activityPrefix) ?? undefined;
         const meta: Record<string, unknown> = {};
         if (title) meta.title = title;
-        if (activityIcon) meta.activityIcon = activityIcon;
+        const icon = resolveActivityIcon(args, title);
+        if (icon) meta.activityIcon = icon;
         if (args?.format) meta.format = args.format;
         if (args?.duration) meta.durationMinutes = args.duration;
         if (args?.availability) meta.availability = args.availability;
@@ -526,6 +555,8 @@ function extractLinkCardMeta(
         const args = tc.input as Record<string, unknown> | undefined;
         const meta: Record<string, unknown> = {};
         if (title) meta.title = title;
+        const icon = resolveActivityIcon(args, title);
+        if (icon) meta.activityIcon = icon;
         if (args?.format) meta.format = args.format;
         if (args?.durationMinutes) meta.durationMinutes = args.durationMinutes;
         if (args?.inviteeNames) meta.inviteeNames = args.inviteeNames;
