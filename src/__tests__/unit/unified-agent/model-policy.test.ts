@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import type { LanguageModelUsage } from "ai";
 import {
   selectModelForTurn,
   computeTurnCost,
@@ -48,7 +49,7 @@ describe("computeTurnCost", () => {
 
   it("computes zero cost for zero-token usage", () => {
     const cost = computeTurnCost(
-      { inputTokens: 0, outputTokens: 0 },
+      { inputTokens: 0, outputTokens: 0 } as LanguageModelUsage,
       MODEL_TIERS.default,
       defaultSelection,
     );
@@ -59,7 +60,7 @@ describe("computeTurnCost", () => {
 
   it("computes correct Sonnet cost for 1000 input + 200 output tokens", () => {
     const cost = computeTurnCost(
-      { inputTokens: 1000, outputTokens: 200 },
+      { inputTokens: 1000, outputTokens: 200 } as LanguageModelUsage,
       MODEL_TIERS.default,
       defaultSelection,
     );
@@ -74,7 +75,7 @@ describe("computeTurnCost", () => {
 
   it("falls back to Sonnet pricing for unknown modelId", () => {
     const cost = computeTurnCost(
-      { inputTokens: 1000, outputTokens: 100 },
+      { inputTokens: 1000, outputTokens: 100 } as LanguageModelUsage,
       "claude-unknown-model",
       defaultSelection,
     );
@@ -88,12 +89,12 @@ describe("computeTurnCost", () => {
   it("computes Haiku cost correctly (cheaper than Sonnet)", () => {
     const fastSelection = selectModelForTurn({ messageLength: 10, forceFast: true });
     const haikuCost = computeTurnCost(
-      { inputTokens: 1000, outputTokens: 200 },
+      { inputTokens: 1000, outputTokens: 200 } as LanguageModelUsage,
       MODEL_TIERS.fast,
       fastSelection,
     );
     const sonnetCost = computeTurnCost(
-      { inputTokens: 1000, outputTokens: 200 },
+      { inputTokens: 1000, outputTokens: 200 } as LanguageModelUsage,
       MODEL_TIERS.default,
       defaultSelection,
     );
@@ -102,7 +103,7 @@ describe("computeTurnCost", () => {
 
   it("cache fields are zero in v1 (SDK does not expose them yet)", () => {
     const cost = computeTurnCost(
-      { inputTokens: 5000, outputTokens: 500 },
+      { inputTokens: 5000, outputTokens: 500 } as LanguageModelUsage,
       MODEL_TIERS.default,
       defaultSelection,
     );
