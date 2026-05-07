@@ -279,10 +279,11 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   // also mints a GroupCoordination row for the gathering phase.
   const group_coordinate = tool({
     description:
-      "Coordinate a group event where multiple people need to find a shared time. " +
-      "Use this when the host wants to send availability requests to a group (dinner, kickoff, workshop, etc.). " +
-      "Gather: topic (event title), inviteeNames (all participants), windows (candidate date ranges). " +
-      "Only call after the host confirms — never before. Never call link_create for group events.",
+      "Create a GROUP coordination link — use this (not link_create) whenever the host says " +
+      "'group event', 'coordinate everyone's availability', 'group dinner/workshop/kickoff', " +
+      "or wants to collect availability from multiple people. " +
+      "Requires: topic (event title), inviteeNames (all participants), windows (date range descriptions). " +
+      "Call ONCE after the host confirms. Never use link_create for multi-participant coordination.",
     inputSchema: z.object({
       topic: z.string().describe("Event title or occasion (e.g. 'Founder Dinner')."),
       inviteeNames: z.array(z.string()).min(1).describe("Names or emails of all participants."),
@@ -294,10 +295,10 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const link_create = tool({
     description:
-      "Create a new bookable scheduling link. " +
-      "Call when the host explicitly asks to create a new link or meeting type. " +
-      "Do NOT call for edits to an existing link — use link_update instead. " +
-      "Do NOT use for group coordination — use group_coordinate instead. " +
+      "Create a bookable 1-on-1 scheduling link for a SINGLE guest to book time. " +
+      "Use ONLY for one-person booking links (coffee, call, consulting, etc.). " +
+      "Do NOT use for group events or coordinating multiple people's schedules — use group_coordinate for that. " +
+      "Do NOT use for edits to an existing link — use link_update. " +
       "activity is required (e.g. 'coffee', 'intro call', 'bike ride').",
     inputSchema: z.object({
       activity: z.string().describe("Meeting activity or type (required)."),
