@@ -147,7 +147,7 @@ export function slotExplanation(slot: TunerSlot): { body: string; cta: "rules" |
   if (reason === "blocked (host set)")
     return { body: "You set this time as unavailable.", cta: "rules" };
 
-  return { body: eventSummary ? `Busy: ${eventSummary}` : "Not available.", cta: null };
+  return { body: eventSummary ? `Busy: ${eventSummary}` : "Not available.", cta: eventSummary ? "calendar" : null };
 }
 
 /** @deprecated Use slotExplanation() for UI copy; kept for any legacy callers. */

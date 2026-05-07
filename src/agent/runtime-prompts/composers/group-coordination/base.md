@@ -43,11 +43,13 @@ The context block will show how many responses have arrived. When the host asks 
 
 ## Action emission — Phase 1
 
-When the host confirms, emit in the same response:
+When the host confirms — any affirmative ("go", "yes", "send it", "looks good") — emit immediately in that same response, no re-ask:
 
 ```
-[ACTION]{"action":"create_link","params":{"type":"group","title":"<event title>","participants":["<email or name>",...],"windows":[{"label":"<label>","start":"<ISO>","end":"<ISO>"}],"questions":["availability","preferences"]}}[/ACTION]
+[ACTION]{"action":"create_link","params":{"type":"group","topic":"<event title>","inviteeNames":["<name or email>",...],"windows":["<natural language window, e.g. weekday evenings May 12–June 6>",...]}}[/ACTION]
 ```
+
+`windows` is a plain string array — natural language phrases describing the candidate windows (no ISO dates required). Use whatever the host described.
 
 Brief confirmation prose alongside ("Sending this out to Bob, Larry, and Suzie now."). Do not re-show the full summary.
 

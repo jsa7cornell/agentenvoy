@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { generateCode } from "@/lib/utils";
 import { getUserTimezone, shortTimezoneLabel } from "@/lib/timezone";
 import type { AvailabilityRule } from "@/lib/availability-rules";
+import { compileStructuredRules } from "@/lib/availability-rules";
 import { normalizeLinkParameters } from "@/lib/scoring";
 import {
   deriveLegacy,
@@ -913,9 +914,11 @@ export async function handleCreateLink(
   }
 
   const code = generateCode();
+  const isGroupLink = params.type === "group";
   // Accept inviteeNames[] (multi-guest) or legacy inviteeName (single string).
+  // Group coordination prompt emits `participants` — accept as alias for inviteeNames.
   // LLM should emit inviteeNames for new links; inviteeName is a shim for old prompts.
-  const rawInviteeNames = params.inviteeNames;
+  const rawInviteeNames = params.inviteeNames ?? params.participants;
   const inviteeNames: string[] = Array.isArray(rawInviteeNames)
     ? (rawInviteeNames as string[]).filter((n): n is string => typeof n === "string" && n.trim().length > 0)
     : typeof params.inviteeName === "string" && (params.inviteeName as string).trim()
@@ -1432,6 +1435,16 @@ export async function handleCreateLink(
         email: i === 0 ? inviteeEmail : null,
         role: "guest",
       })),
+    });
+  }
+
+  // Group coordination — mint the GroupCoordination gathering row (Model A,
+  // decided 2026-05-06). The row ties the session to the response-collection
+  // state machine. Created here so the context-loader can resolve it by
+  // sessionId on subsequent host turns.
+  if (isGroupLink) {
+    await prisma.groupCoordination.create({
+      data: { sessionId: session.id },
     });
   }
 
@@ -3114,20 +3127,24 @@ export async function handleUpdateAvailabilityRule(
     // 2026-05-05 hardening — Fix 3 (write-time dedupe): bookable rules are
     // already name-uniqueness-checked above; for everything else, scan
     // active rules for a structural match and short-circuit if found.
-    // Repro: the same "Protect next Tuesday all day" composer turn fired
-    // twice and wrote two structurally-identical rules.
+    // One-time block/protect rules dedupe on (action, effectiveDate) alone —
+    // two rules protecting the same date are always duplicates regardless of
+    // how the originalText was phrased or which flags the composer included.
     if (action !== "bookable") {
+      const isOneTimeDate = rule.type === "one-time" && !!rule.effectiveDate && (action === "block" || action === "protect");
       const dup = existing.find(
         (r) =>
           r.status === "active" &&
           r.action === rule.action &&
-          r.type === rule.type &&
-          (r.effectiveDate ?? null) === (rule.effectiveDate ?? null) &&
-          (r.expiryDate ?? null) === (rule.expiryDate ?? null) &&
-          (r.timeStart ?? null) === (rule.timeStart ?? null) &&
-          (r.timeEnd ?? null) === (rule.timeEnd ?? null) &&
-          JSON.stringify(r.daysOfWeek ?? []) === JSON.stringify(rule.daysOfWeek ?? []) &&
-          r.originalText === rule.originalText,
+          (isOneTimeDate
+            ? r.type === "one-time" && r.effectiveDate === rule.effectiveDate
+            : r.type === rule.type &&
+              (r.effectiveDate ?? null) === (rule.effectiveDate ?? null) &&
+              (r.expiryDate ?? null) === (rule.expiryDate ?? null) &&
+              (r.timeStart ?? null) === (rule.timeStart ?? null) &&
+              (r.timeEnd ?? null) === (rule.timeEnd ?? null) &&
+              JSON.stringify(r.daysOfWeek ?? []) === JSON.stringify(rule.daysOfWeek ?? []) &&
+              r.originalText === rule.originalText),
       );
       if (dup) {
         return {
@@ -3204,7 +3221,22 @@ export async function handleUpdateAvailabilityRule(
   }
 
   (explicit as Record<string, unknown>).structuredRules = nextRules;
-  const nextPrefs: UserPreferences = { ...prefs, explicit };
+
+  // Recompile structured rules so preferences.compiled is always in sync.
+  // Without this, the scoring engine's compiled.blackoutDays never picks up
+  // newly-added one-time block rules until the user hits the GET endpoint.
+  const activeForCompile = nextRules.filter((r) => r.status === "active");
+  const bizStart = (explicit.businessHoursStart as number) ?? 9;
+  const bizEnd = (explicit.businessHoursEnd as number) ?? 18;
+  const recompiled = activeForCompile.length > 0
+    ? compileStructuredRules(activeForCompile, bizStart, bizEnd)
+    : null;
+
+  const nextPrefs: UserPreferences = {
+    ...prefs,
+    explicit,
+    ...(recompiled ? { compiled: recompiled } : {}),
+  };
 
   await prisma.user.update({
     where: { id: userId },

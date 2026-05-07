@@ -705,10 +705,10 @@ function scoreSlot(
     if (blackoutDays.includes(slotLocalDate)) {
       return {
         ...base,
-        score: 5,
+        score: 4,
         reason: `blackout day: ${slotLocalDate}`,
         kind: "blackout",
-        blockCost: "commitment",
+        blockCost: "preference",
         firmness: "strong",
       };
     }

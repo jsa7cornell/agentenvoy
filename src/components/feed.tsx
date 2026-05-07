@@ -23,6 +23,7 @@ import { SendFeedbackLink } from "./send-feedback";
 import { ThumbsDownFeedback } from "./thumbs-down-feedback";
 import { useOAuthSignIn } from "./oauth/use-oauth-signin";
 import { canNativeShare, shareInvite } from "@/lib/share-invite";
+import { TurnCostOverlay } from "./turn-cost-overlay";
 
 interface ChannelMsg {
   id: string;
@@ -1059,6 +1060,9 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
   const [initialLoading, setInitialLoading] = useState(true);
   const [calendarConnected, setCalendarConnected] = useState(true);
   const [isCalibrated, setIsCalibrated] = useState(true);
+  // Admin flag — fetched once on mount from /api/me/ui-prefs.
+  // Enables TurnCostOverlay on unified-agent turns (Day 6 telemetry).
+  const [isAdmin, setIsAdmin] = useState(false);
   // Primary-link guided setup flow — toggled from the 🔗 welcome card.
   // Per SPEC §6.6 and proposal `2026-04-30_onboarding-and-tuning-as-chat`:
   // the flow now reads/writes `ChannelMessage`s with subkind=primary-link-tuning
@@ -1228,6 +1232,14 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Fetch admin flag once for TurnCostOverlay visibility.
+  useEffect(() => {
+    fetch("/api/me/ui-prefs")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.isAdmin) setIsAdmin(true); })
+      .catch(() => {});
   }, []);
 
   // Auto-resume tuning if the channel has unfinished tuning history. Per
@@ -2101,41 +2113,49 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
             !!prev && !prev.threadId && prev.role === msg.role && (prev.role === "user" || prev.role === "envoy");
           return (
             <div key={msg.id} className={`flex items-end gap-1 ${isUser ? "self-end justify-end" : "self-start justify-start"} max-w-[88%]`}>
-              <div className="relative">
-                <div
-                  className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                    isUser
-                      ? "bg-purple-600 text-white rounded-br-sm"
-                      : "bg-black/5 dark:bg-white/7 rounded-bl-sm"
-                  }`}
-                >
-                  {!sameSpeakerAsPrev && (
-                    <div
-                      className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${
-                        isUser ? "text-white/60" : "text-purple-400"
-                      }`}
-                    >
-                      {isUser ? "You" : "Envoy"}
+              <div className="flex flex-col">
+                <div className="relative">
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                      isUser
+                        ? "bg-purple-600 text-white rounded-br-sm"
+                        : "bg-black/5 dark:bg-white/7 rounded-bl-sm"
+                    }`}
+                  >
+                    {!sameSpeakerAsPrev && (
+                      <div
+                        className={`text-[10px] font-semibold uppercase tracking-wide mb-1 ${
+                          isUser ? "text-white/60" : "text-purple-400"
+                        }`}
+                      >
+                        {isUser ? "You" : "Envoy"}
+                      </div>
+                    )}
+                    <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
+                    {meetLinkUrl && meetLinkKind === "bookable" ? (
+                      <BookableLinkCard
+                        url={meetLinkUrl}
+                        meta={
+                          (msg.metadata as Record<string, unknown> | null)?.bookableMeta as
+                            | BookableMeta
+                            | undefined
+                        }
+                      />
+                    ) : meetLinkUrl ? (
+                      <MeetLinkCard url={meetLinkUrl} kind={meetLinkKind} />
+                    ) : null}
+                  </div>
+                  {reaction && (
+                    <div className="absolute -bottom-3 right-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/10 rounded-full px-1.5 py-0.5 text-sm shadow-sm select-none">
+                      {reaction}
                     </div>
                   )}
-                  <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
-                  {meetLinkUrl && meetLinkKind === "bookable" ? (
-                    <BookableLinkCard
-                      url={meetLinkUrl}
-                      meta={
-                        (msg.metadata as Record<string, unknown> | null)?.bookableMeta as
-                          | BookableMeta
-                          | undefined
-                      }
-                    />
-                  ) : meetLinkUrl ? (
-                    <MeetLinkCard url={meetLinkUrl} kind={meetLinkKind} />
-                  ) : null}
                 </div>
-                {reaction && (
-                  <div className="absolute -bottom-3 right-2 bg-white dark:bg-zinc-800 border border-black/10 dark:border-white/10 rounded-full px-1.5 py-0.5 text-sm shadow-sm select-none">
-                    {reaction}
-                  </div>
+                {!isUser && (
+                  <TurnCostOverlay
+                    metadata={msg.metadata}
+                    isAdmin={isAdmin}
+                  />
                 )}
               </div>
               {!isUser && (
