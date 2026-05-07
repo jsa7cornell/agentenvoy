@@ -89,12 +89,26 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           stopWhen: stepCountIs(MAX_STEPS),
         });
 
-        // Consume stream — await promises after iteration.
-        const [fullText, steps, usage] = await Promise.all([
-          result.text,
-          result.steps,
-          result.usage,
-        ]);
+        // Consume fullStream progressively — emit text tokens as they arrive
+        // so the client sees streaming output rather than waiting for the full
+        // response. Status frames fire on tool calls so the UI stays active
+        // during multi-step turns (LOAD → write).
+        let fullText = "";
+        let statusSeq = 2;
+        for await (const chunk of result.fullStream) {
+          if (chunk.type === "text-delta") {
+            fullText += chunk.text;
+            // Emit partial text — client parser keeps the last text frame.
+            emitText(enqueue, fullText);
+          } else if (chunk.type === "tool-call") {
+            // Emit a human-readable status for the tool being called.
+            const copy = TOOL_STATUS_COPY[chunk.toolName] ?? "Working on it…";
+            emitStatus(enqueue, chunk.toolName, statusSeq++, copy);
+          }
+        }
+
+        // Promises resolve once fullStream is exhausted.
+        const [steps, usage] = await Promise.all([result.steps, result.usage]);
 
         const toolCallNames: string[] = steps.flatMap((step) =>
           step.toolCalls.map((tc) => tc.toolName),
@@ -140,7 +154,8 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           },
         });
 
-        // Emit the text frame.
+        // Final text frame — ensures the client has the complete content even
+        // if a partial frame was the last one emitted during streaming.
         emitText(enqueue, fullText);
         controller.close();
 
@@ -161,11 +176,29 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
 // Helpers
 // ---------------------------------------------------------------------------
 
-function emitStatus(enqueue: EnqueueFn, stage: string, seq: number): void {
-  // Minimal status frame — full copy rotation can be added in Day 6.
-  const frame = { type: "status", stage, copy: "Working on it…", seq };
+function emitStatus(enqueue: EnqueueFn, stage: string, seq: number, copy = "Working on it…"): void {
+  const frame = { type: "status", stage, copy, seq };
   enqueue(JSON.stringify(frame) + "\n");
 }
+
+const TOOL_STATUS_COPY: Record<string, string> = {
+  LOAD_calendar_context:    "Reading your calendar…",
+  LOAD_active_sessions:     "Loading your sessions…",
+  LOAD_preferences:         "Loading your preferences…",
+  link_create:              "Creating link…",
+  link_update:              "Updating link…",
+  link_cancel:              "Cancelling link…",
+  session_update_time:      "Updating session…",
+  session_hold_slot:        "Holding slot…",
+  session_archive_bulk:     "Archiving sessions…",
+  rule_add:                 "Adding rule…",
+  rule_update:              "Updating rule…",
+  rule_remove:              "Removing rule…",
+  primary_link_rename:      "Renaming primary link…",
+  prefs_update_meeting_settings: "Saving settings…",
+  prefs_update_business_hours:   "Saving hours…",
+  knowledge_write:          "Saving note…",
+};
 
 function emitText(enqueue: EnqueueFn, content: string): void {
   enqueue(JSON.stringify({ type: "text", content }) + "\n");
