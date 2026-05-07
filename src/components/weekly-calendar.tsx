@@ -88,7 +88,7 @@ export function slotTierLabel(score: number): string {
  * and the click popover. No internal jargon (no scores, no "VIP", no
  * "preference:weak").
  */
-export function slotExplanation(slot: TunerSlot): { body: string; cta: "rules" | "calendar" | null } {
+export function slotExplanation(slot: TunerSlot): { body: string; cta: "rules" | "calendar" | "link" | null } {
   const { reason, score, eventSummary } = slot;
 
   // ── Open / preferred ──────────────────────────────────────────────────
@@ -103,11 +103,11 @@ export function slotExplanation(slot: TunerSlot): { body: string; cta: "rules" |
   // ── Protected (score 2–3) — shown but not offered to guests ──────────
   if (score <= 3) {
     if (reason === "just outside business hours")
-      return { body: "Just past when your day ends — Envoy doesn't offer this to guests.", cta: "rules" };
+      return { body: "Just past when this link's hours end — not offered to guests.", cta: "link" };
     if (reason === "off hours")
-      return { body: "Outside your business hours — not offered to guests. Adjust your hours to open this up.", cta: "rules" };
+      return { body: "Outside this link's available hours — not offered to guests.", cta: "link" };
     if (reason === "weekend daytime")
-      return { body: "Weekend — not offered by default. Tell Envoy if you'd like to take weekend meetings.", cta: "rules" };
+      return { body: "Weekend — not offered by this link. Edit link preferences to open weekends.", cta: "link" };
     if (reason === "soft hold")
       return { body: `Hold block${eventSummary ? ` (${eventSummary})` : ""} — Envoy protects calendar holds. Delete the event to make this available.`, cta: "calendar" };
     if (reason === "tentative meeting")
@@ -127,19 +127,19 @@ export function slotExplanation(slot: TunerSlot): { body: string; cta: "rules" |
   if (reason === "immovable")
     return { body: `${eventSummary || "Fixed event"} — marked immovable, never offered.`, cta: null };
   if (reason === "confirmed meeting" || reason === "confirmed group meeting")
-    return { body: `Confirmed: ${eventSummary || "meeting"}`, cta: null };
+    return { body: `Confirmed: ${eventSummary || "meeting"}`, cta: "calendar" };
   if (reason === "tentative group meeting")
     return { body: `Group meeting (tentative): ${eventSummary || "meeting"} — Envoy blocks this to avoid double-booking.`, cta: "calendar" };
   if (reason === "high priority")
-    return { body: `${eventSummary || "High-priority event"} — Envoy never books over this.`, cta: null };
+    return { body: `${eventSummary || "High-priority event"} — Envoy never books over this.`, cta: "calendar" };
   if (reason === "out of office")
     return { body: "Out of office — not available.", cta: "calendar" };
   if (reason === "sleep hours")
     return { body: "Sleep hours — Envoy never books this.", cta: null };
   if (reason === "early morning / late evening")
-    return { body: "Very early or very late — not offered to guests. Adjust your business hours to change this.", cta: "rules" };
+    return { body: "Very early or very late — not offered to guests.", cta: "link" };
   if (reason === "weekend edge" || reason === "weekend off-hours (sleep)")
-    return { body: "Weekend hours — Envoy doesn't offer this time.", cta: null };
+    return { body: "Weekend hours — not offered by this link.", cta: "link" };
   if (reason?.startsWith("all-day event:"))
     return { body: `All-day event — Envoy blocks this time.`, cta: "calendar" };
   if (reason?.startsWith("blackout day:"))
@@ -182,6 +182,9 @@ interface WeeklyCalendarProps {
    *  (above the all-day row and time grid). Used to place the score
    *  legend under the day chips on mobile. */
   legendSlot?: React.ReactNode;
+  /** Name of the currently selected bookable link. Shown in slot popup
+   *  attribution when the block source is link preferences. */
+  selectedLinkName?: string;
 }
 
 export function WeeklyCalendar({
@@ -197,6 +200,7 @@ export function WeeklyCalendar({
   hideToolbar = false,
   headerGutterSlot,
   legendSlot,
+  selectedLinkName,
 }: WeeklyCalendarProps) {
   const dayCount = Math.max(1, Math.min(7, daysToShow));
   // Build array of day strings
@@ -679,6 +683,13 @@ export function WeeklyCalendar({
           >
             {(() => {
               const { body, cta } = slotExplanation(s);
+              // For calendar CTAs, look up the blocking event's GCal deep-link
+              // by matching eventSummary against the events list.
+              const blockingEvent = cta === "calendar" && s.eventSummary
+                ? events.find((e) => e.summary === s.eventSummary && !e.isAllDay)
+                : null;
+              const gcalLink = blockingEvent?.htmlLink ?? "https://calendar.google.com";
+              const linkLabel = selectedLinkName ?? "Primary link";
               return (
                 <>
                   <div className="font-semibold mb-1 text-primary">
@@ -693,14 +704,22 @@ export function WeeklyCalendar({
                       Adjust your rules &rarr;
                     </a>
                   )}
+                  {cta === "link" && (
+                    <a
+                      href="/event-links"
+                      className="block text-indigo-500 dark:text-indigo-400 hover:text-indigo-400 dark:hover:text-indigo-300 transition text-[10px] font-medium"
+                    >
+                      Edit {linkLabel} preferences &rarr;
+                    </a>
+                  )}
                   {cta === "calendar" && (
                     <a
-                      href="https://calendar.google.com"
+                      href={gcalLink}
                       target="_blank"
                       rel="noreferrer"
                       className="block text-indigo-500 dark:text-indigo-400 hover:text-indigo-400 dark:hover:text-indigo-300 transition text-[10px] font-medium"
                     >
-                      Open Google Calendar &rarr;
+                      Open in Google Calendar &rarr;
                     </a>
                   )}
                 </>

@@ -69,8 +69,15 @@ export async function GET(req: NextRequest) {
   // reflects any bookable rules (soft-protection override inside window).
   // Confirmed bookings are already present as real calendar events via the
   // Google Calendar sync path, so we pass an empty array here.
+  //
+  // If ?linkCode= is provided, scope to that bookable link only so the
+  // calendar shows availability from that link's perspective.
+  const linkCodeParam = req.nextUrl.searchParams.get("linkCode");
   const compiledOH = compileBookableLinks(structuredRules);
-  for (const ohRule of compiledOH) {
+  const ohRulesToApply = linkCodeParam
+    ? compiledOH.filter((r) => r.linkCode === linkCodeParam)
+    : compiledOH;
+  for (const ohRule of ohRulesToApply) {
     const transformed = applyBookableWindow({
       rule: ohRule,
       slots,

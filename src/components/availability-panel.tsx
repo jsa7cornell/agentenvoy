@@ -148,6 +148,23 @@ export function AvailabilityPanel({
   const desktopAnchor = weekRange === "full" ? weekStart : mondayAnchor;
   const desktopDays = weekRange === "full" ? 7 : 5;
 
+  // Bookable link dropdown — fetch standard + bookable links on mount.
+  // Dropdown hidden when only a primary link exists (nothing to switch to).
+  const [bookableLinks, setBookableLinks] = useState<Array<{ kind: string; title: string; code?: string }>>([]);
+  const [selectedLinkCode, setSelectedLinkCode] = useState<string | null>(null);
+  const selectedLinkName = bookableLinks.find((l) =>
+    selectedLinkCode ? l.code === selectedLinkCode : l.kind === "standard"
+  )?.title ?? "Primary link";
+  useEffect(() => {
+    fetch("/api/me/links")
+      .then((r) => r.json())
+      .then((data) => {
+        const links = (data.links ?? []) as Array<{ kind: string; title: string; code?: string }>;
+        setBookableLinks(links.filter((l) => l.kind === "standard" || l.kind === "bookable"));
+      })
+      .catch(() => {});
+  }, []);
+
   // Rules modal
   const [rulesOpen, setRulesOpen] = useState(false);
 
@@ -165,7 +182,10 @@ export function AvailabilityPanel({
 
   const fetchSchedule = useCallback(async () => {
     try {
-      const res = await fetch(`/api/tuner/schedule?weekStart=${weekStart}`);
+      const qs = selectedLinkCode
+        ? `?weekStart=${weekStart}&linkCode=${selectedLinkCode}`
+        : `?weekStart=${weekStart}`;
+      const res = await fetch(`/api/tuner/schedule${qs}`);
       if (!res.ok) return;
       const data = await res.json();
       setEvents(data.events || []);
@@ -179,7 +199,7 @@ export function AvailabilityPanel({
     } finally {
       setIsLoading(false);
     }
-  }, [weekStart]);
+  }, [weekStart, selectedLinkCode]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -516,6 +536,23 @@ export function AvailabilityPanel({
     >
       <div className="flex items-center gap-1.5 min-w-0">
         {headerSlot}
+        {/* Link dropdown — only shown when the user has more than just the primary link */}
+        {bookableLinks.length > 1 && (
+          <select
+            value={selectedLinkCode ?? ""}
+            onChange={(e) => {
+              setSelectedLinkCode(e.target.value || null);
+            }}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-DEFAULT bg-surface text-primary hover:border-indigo-400 transition cursor-pointer max-w-[140px] truncate"
+            title="View availability for a specific link"
+          >
+            {bookableLinks.map((l) => (
+              <option key={l.kind === "standard" ? "" : (l.code ?? l.kind)} value={l.kind === "standard" ? "" : (l.code ?? "")}>
+                {l.title}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <div className="flex items-center justify-center gap-1.5">
         <button
@@ -940,6 +977,7 @@ export function AvailabilityPanel({
               legendSlot={legendChips}
               primaryCalendar={calendars[0]}
               onEventClick={handleEventClick}
+              selectedLinkName={selectedLinkName}
             />
           ) : mobileView === "workweek" ? (
             // Work week — Mon through Fri (5 days), anchored to Monday of
@@ -956,6 +994,7 @@ export function AvailabilityPanel({
               legendSlot={legendChips}
               primaryCalendar={calendars[0]}
               onEventClick={handleEventClick}
+              selectedLinkName={selectedLinkName}
             />
           ) : (
             <DayView
@@ -981,6 +1020,7 @@ export function AvailabilityPanel({
             headerGutterSlot={tzChip}
             primaryCalendar={calendars[0]}
             onEventClick={handleEventClick}
+            selectedLinkName={selectedLinkName}
           />
         )}
       </div>
