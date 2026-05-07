@@ -641,6 +641,10 @@ function scoreSlot(
   allowWindows: AllowWindow[] = [],
 ): ScoredSlot {
   const { hour, minute, dayName } = getLocalParts(slotStart, tz);
+  // slotDateStr is the local date of the slot being scored — used for
+  // date-scoped BlockedWindow matching. todayStr is today's date — used only
+  // for expiry checks on recurring/ongoing windows.
+  const slotDateStr = getLocalDateStr(slotStart, tz);
   const todayStr = getLocalDateStr(new Date(), tz);
 
   // Open-slot base. blockCost / firmness are filled in per return path.
@@ -666,7 +670,7 @@ function scoreSlot(
   // `blockCost` (preference vs commitment) and `firmness` (weak vs strong)
   // based on the host's natural-language description. Scoring reads those
   // tags directly, defaulting to preference:strong when unset.
-  const blockedMatch = isInBlockedWindow(hour, minute, dayName, blockedWindows, todayStr);
+  const blockedMatch = isInBlockedWindow(hour, minute, dayName, blockedWindows, slotDateStr);
   if (blockedMatch) {
     const blockCost: BlockCost = blockedMatch.blockCost ?? "preference";
     const firmness: BlockFirmness = blockedMatch.firmness ?? "strong";
@@ -768,7 +772,7 @@ function scoreSlot(
   // are treated as transparent. Blackouts, OOO, and all-day blocks (above)
   // still hold. This lets the host say "protein shake reminder at 1pm
   // shouldn't block availability" or "allow meetings during Focus Time".
-  const allowMatch = isInAllowWindow(hour, minute, dayName, allowWindows, todayStr);
+  const allowMatch = isInAllowWindow(hour, minute, dayName, allowWindows, slotDateStr);
 
   // Find overlapping calendar events (timed, not all-day).
   // Zero-duration events (start === end, e.g. Google Calendar reminders) use a
