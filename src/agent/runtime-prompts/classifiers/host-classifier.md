@@ -1,11 +1,12 @@
 # Host chat intent classifier
 
-You classify the host's dashboard-chat turn into one of ten intents. Output is a structured tool call — no prose.
+You classify the host's dashboard-chat turn into one of eleven intents. Output is a structured tool call — no prose.
 
-## The ten intents
+## The eleven intents
 
 - **edit_preference** — Host wants to update a **single specific** default: working hours, default duration, default format (video / phone / in-person), buffer time, time zone, phone number, video link. "Set my default to 30 min", "make my hours 9–5", "always use Zoom", "I prefer in-person", "update my phone". Single-field change. **Distinguish from recalibrate:** `edit_preference` is one thing changing; `recalibrate` is wholesale retune.
-- **create_bookable_link** — Host wants to create a NEW shareable bookable link: a permanent URL that guests can use repeatedly to self-schedule. All three card types qualify: drop-in hours ("Create a sales discovery bookable link"), recurring session links ("Create a recurring coaching bookable link"), and group meeting links ("Create a workshop bookable link"). Key signals: the word "bookable", names of link types ("drop-in hours", "office hours", "recurring sessions", "group meeting"), or a creation verb + a meeting-type name without a specific named person as the guest. "Set up a bookable link for candidate screens", "I want a recurring tutoring link", "create a mentor sessions link".
+- **create_bookable_link** — Host wants to create a NEW shareable bookable link: a permanent URL that guests can use repeatedly to self-schedule. Drop-in hours and recurring session links qualify. Key signals: the word "bookable", names of link types ("drop-in hours", "office hours", "recurring sessions"), or a creation verb + a meeting-type name without a specific named person as the guest. "Set up a bookable link for candidate screens", "I want a recurring tutoring link", "create a mentor sessions link". **Exclude group coordination:** if the host describes a one-time group event and wants to gather everyone's availability (not create a reusable link), use `group_coordination` instead.
+- **group_coordination** — Host wants to coordinate a one-time group event by gathering availability from multiple named participants. Key signals: mentions of a guest list + candidate windows + coordinating/scheduling with a group, OR a continuation of a group coordination conversation. "Set up a founder dinner — I need to find a time that works for everyone", "help me coordinate a team kickoff with the whole group", "I want to schedule a group dinner for my co-founders". **Distinguished from create_bookable_link:** `group_coordination` is for one-time group events where the host provides a specific participant list and wants to gather responses — not a reusable self-scheduling link. **Distinguished from create_link:** `group_coordination` involves multiple participants and open-question scheduling ("find a time that works for all of us"), not a single named guest.
 - **create_link** — Host wants to schedule a meeting with a SPECIFIC named person WITHOUT bilateral availability checking. Creation verbs + a named guest: "Make a link for [Name]", "set up something for [Name] next week", "I need a 30-min link for the bike ride", "grab 30 min with [Name] on Thursday", "find time for [Name] next week". NOTE: if the host uses bilateral framing ("book a time that works for both of us", "check both our calendars") — classify as book_with_person instead. **Guest-picks signal (also create_link):** if the host indicates the OTHER PARTY chooses the time, location, format, or other terms — e.g. "she/he/they choose(s)/decide(s)", "let them pick", "they can pick", "they choose location/time/format", "open invite", "send a generic link", "any time works for them", "flexible on their end" — this is an open-invite scheduling link. The host wants a link to forward; they have NOT decided the time. Route to create_link, NOT book_with_person.
 - **modify_link** — Host wants to CHANGE an EXISTING link / session / event. Modification verbs targeting an existing thing: "change / move / shift / reschedule / update the [existing X]". "Shift the bike ride to Friday", "move my [Name] meeting to Thursday", "change the [Name] link to 45 min", "update the office hours window to 1–3pm", "reschedule lunch with [Name]".
 - **cancel_link** — Host wants to REMOVE an EXISTING link / session / event. Cancellation verbs: "cancel / remove / drop / delete the [existing X]". "Cancel my [Name] link", "drop the bike ride", "remove [Name]'s office hours slot", "delete the team sync link".
@@ -21,9 +22,10 @@ You classify the host's dashboard-chat turn into one of ten intents. Output is a
 
 ## Discriminators
 
-The first decision is **create_bookable_link vs book_with_person vs create_link vs modify vs cancel** for event-shaped utterances — surface this before anything else:
+The first decision is **group_coordination vs create_bookable_link vs book_with_person vs create_link vs modify vs cancel** for event-shaped utterances — surface this before anything else:
 
-1. **Creation verb + "bookable link" / link-type name / no specific named person as guest** → create_bookable_link.
+0. **Multiple named participants + gather availability + one-time group event** → group_coordination. Key signals: a guest list ("katie, bob, suzie"), phrases like "coordinate everyone's availability", "find a time that works for the group", "gather responses". Also fires for stickiness continuations when the prior envoy turn was a group coordination summary.
+1. **Creation verb + "bookable link" / link-type name / no specific named person as guest + NOT a group coordination event** → create_bookable_link.
 2. **Bilateral scheduling verb** ("book a [activity] with [Name]", "find a mutual time with [Name]", "schedule with [Name] that works for both", "book time with [Name]") → book_with_person. Key signal: mutual / bilateral framing. **Override — guest-picks:** if the same turn ALSO contains a guest-picks phrasing ("she/he/they choose(s)", "let them pick", "open invite", "any time works for them", "they choose location/time/format"), route to create_link instead. The host has NOT decided the time, so there's no bilateral booking to commit — they want a link to forward.
 3. **Creation verbs WITHOUT bilateral framing** ("make / create / set up / need a link") + **a specific named person** → create_link. Also includes any "with [Name]" turn that names a guest-picks signal — those are open-invite create_link, not book_with_person.
 4. **Modification verbs targeting an existing thing** → modify_link.
@@ -39,7 +41,9 @@ Then for the rest:
 
 ## When in doubt
 
-**Bookable link setup continuations (highest priority rule):** If Your prior turn describes a bookable link setup proposal, then ANY follow-up turn from the host is create_bookable_link, regardless of verb.
+**Group coordination continuations (highest priority — takes precedence over bookable link stickiness):** If your prior turn describes a group event coordination summary — participant list, candidate windows, "Want me to send this out?" or similar — then ANY follow-up confirmation from the host ("yes", "go", "send it", "yep", "do it") is `group_coordination`, regardless of verb. Do NOT route these to `create_bookable_link`.
+
+**Bookable link setup continuations:** If your prior turn describes a bookable link setup proposal (recurring link, office hours, bookable URL), then ANY follow-up turn from the host is create_bookable_link, regardless of verb. Does NOT apply when the prior turn was a group coordination summary.
 
 When in doubt between create_link and book_with_person — prefer book_with_person when the host's phrasing implies checking the other person's availability (verbs like "book", "find a mutual time", "that works for both"). Prefer create_link for one-sided scheduling. **Guest-picks always wins create_link:** any phrasing where the host says the other party chooses time / location / format / terms ("she chooses location and time", "let them pick", "they decide", "open invite", "any time works for them") is create_link — the host wants a link to forward, not a bilateral booking. The presence of "with [Name]" in the same turn does NOT make it book_with_person.
 
@@ -76,9 +80,6 @@ Display-settings or app-chrome requests are not modify_link — emit chat.
 - "Create a recurring coaching bookable link — 45 min, weekly" → {kind: "create_bookable_link"}
 - "Create a recurring tutoring bookable link — 30 min, weekly" → {kind: "create_bookable_link"}
 - "Create a recurring customer check-in bookable link — 30 min, monthly" → {kind: "create_bookable_link"}
-- "Create a workshop bookable link — 90 min, group" → {kind: "create_bookable_link"}
-- "Create a team kickoff bookable link — 60 min, group" → {kind: "create_bookable_link"}
-- "Create a panel interview bookable link — 45 min, group" → {kind: "create_bookable_link"}
 - "Set up a bookable link" → {kind: "create_bookable_link"}
 - "I want a recurring tutoring link" → {kind: "create_bookable_link"}
 - "Set up office hours Tuesdays 2–4" → {kind: "create_bookable_link"}
@@ -166,6 +167,21 @@ Negative examples (guest-picks → create_link, NOT book_with_person):
 - "Coffee with [Name] sometime, let them pick" → {kind: "create_link"} (guest-picks)
 - "30 min with [Name] — open invite, any time works for them" → {kind: "create_link"} (guest-picks)
 
+### group_coordination
+
+- "Help me coordinate a founder dinner for a group — I need to find a time that works for everyone" → {kind: "group_coordination"}
+- "I want to set up a group kickoff with Katie, Bob, and Suzie — help me gather their availability" → {kind: "group_coordination"}
+- "Schedule a workshop for my team — I need to see when everyone can make it" → {kind: "group_coordination"}
+- "Help me coordinate a panel interview — 45 min, I need all panelists available" → {kind: "group_coordination"}
+- "I want to set up a founder dinner for a group — about 2 hours. Help me coordinate everyone's availability." → {kind: "group_coordination"}
+- "Help me coordinate a group event — " → {kind: "group_coordination"}
+
+Group coordination continuations (prior turn was a group coordination summary):
+- Prior: "Here's what I have: - Event: Founder Dinner (~2 hours) - Participants: Katie, Bob, Suzie ... Want me to send this out?" + Current: "yes" → {kind: "group_coordination"}
+- Prior: "Here's what I have: ... Want me to send this out?" + Current: "go" → {kind: "group_coordination"}
+- Prior: "Here's what I have: ... Want me to send this out?" + Current: "send it" → {kind: "group_coordination"}
+- Prior: "Here's what I have: ... Want me to send this out?" + Current: "yep do it" → {kind: "group_coordination"}
+
 ### recalibrate
 
 - "My schedule has changed" → {kind: "recalibrate"}
@@ -195,7 +211,8 @@ Negative examples (guest-picks → create_link, NOT book_with_person):
 | `query_calendar`, `query_event` | `inquire` | Read-only; same composer for both |
 | `chat` | `chat` | Unchanged |
 | `book_with_person` | `book_with_person` | Unchanged — bilateral flow is genuinely distinct |
-| `recalibrate` | `recalibrate` | 1:1 — new 6th module, not a cluster collapse |
+| `recalibrate` | `recalibrate` | 1:1 — 6th module on dashboard-host |
+| `group_coordination` | `group_coordination` | 1:1 — 7th module, Track 2 group scheduling |
 
 **What this means for you:**
 
