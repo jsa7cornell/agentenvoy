@@ -763,8 +763,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       format,
       location: linkLocation,
     });
-    // Collapse the form initially — one click to expand into name/email.
-    setConfirmFormExpanded(false);
+    setConfirmFormExpanded(true);
     setConfirmError(null);
     // Seed form inputs from whatever we know already.
     if (!formGuestName && (guestUser?.name || inviteeName)) {
@@ -2856,10 +2855,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formGuestEmail.trim());
           const canSubmit = !inPast && nameOk && emailOk;
           const clickConfirmButton = () => {
-            if (!confirmFormExpanded) {
-              setConfirmFormExpanded(true);
-              return;
-            }
             if (!canSubmit) return;
             handleConfirm(
               { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effective.location },
@@ -2884,7 +2879,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   `pendingProposal` so the pulse only fires after a picker
                   click — NOT for the legacy CONFIRMATION_PROPOSAL render
                   path that mounts this same card from a non-picker source. */}
-              <div className={`w-full bg-emerald-900/20 border border-emerald-700/50 rounded-xl px-3 pt-2.5 pb-3 space-y-2 ${pendingProposal ? "pick-pulse-once" : ""}`}>
+              <div className={`max-w-[85%] w-full bg-emerald-900/20 border border-emerald-700/50 rounded-xl px-3 pt-2.5 pb-3 space-y-2 ${pendingProposal ? "pick-pulse-once" : ""}`}>
                 {/* Header: "Your Pick:" label + inline meeting meta */}
                 <div className="flex items-baseline gap-1.5 flex-wrap">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 shrink-0">
@@ -2895,8 +2890,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 {inPast && (
                   <p className="text-xs text-amber-400">This time is in the past. Pick another from the calendar.</p>
                 )}
-                {confirmFormExpanded && (
-                  <div className="pt-2 border-t border-emerald-700/30 space-y-1.5">
+                <div className="pt-2 border-t border-emerald-700/30 space-y-1.5">
                     <div className="grid grid-cols-2 gap-1.5">
                       <div>
                         <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">Name</label>
@@ -2947,15 +2941,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                         placeholder="Agenda notes, anything the other person should know…"
                       />
                     </div>
-                  </div>
-                )}
+                </div>
                 <div className="flex items-center gap-3 mt-1">
                   <button
                     onClick={clickConfirmButton}
-                    disabled={isConfirming || inPast || (confirmFormExpanded && !canSubmit)}
+                    disabled={isConfirming || inPast || !canSubmit}
                     className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition"
                   >
-                    {isConfirming ? "Confirming..." : confirmFormExpanded ? "Confirm" : "Confirm this time"}
+                    {isConfirming ? "Confirming..." : "Confirm"}
                   </button>
                   <button
                     onClick={() => {
