@@ -9,34 +9,74 @@ import {
 
 describe("selectModelForTurn", () => {
   // v2 policy (cost-reduction PR 2026-05-07):
-  //   short (≤200) + no multi-step → fast (Haiku)
+  //   short (≤200) + no multi-step + established channel → fast (Haiku)
   //   long (>500) → deep (Opus)
   //   else → default (Sonnet)
+  // Cold channels (priorEnvoyTurnCount < 2) stay on Sonnet regardless.
 
-  it("returns fast (Haiku) for short messages with no multi-step in progress", () => {
-    const r = selectModelForTurn({ messageLength: 50 });
+  // Helper for the established-channel default state.
+  const established = { priorEnvoyTurnCount: 5 } as const;
+
+  it("returns fast (Haiku) for short messages with no multi-step on established channel", () => {
+    const r = selectModelForTurn({ messageLength: 50, ...established });
     expect(r.tier).toBe("fast");
     expect(r.modelId).toBe(MODEL_TIERS.fast);
     expect(r.reason).toBe("short-no-multistep");
   });
 
-  it("returns default (Sonnet) for short messages when prior tool use is in history", () => {
-    const r = selectModelForTurn({ messageLength: 50, priorToolUseInHistory: true });
+  it("returns default (Sonnet) on cold channels even for short messages", () => {
+    // First-ever turn — no history. "create music lessons link M/T 3-5" is
+    // short but should still get Sonnet's better tool routing.
+    const r = selectModelForTurn({ messageLength: 50, priorEnvoyTurnCount: 0 });
     expect(r.tier).toBe("default");
   });
 
+  it("returns default (Sonnet) on near-cold channels with only 1 prior envoy turn", () => {
+    const r = selectModelForTurn({ messageLength: 50, priorEnvoyTurnCount: 1 });
+    expect(r.tier).toBe("default");
+  });
+
+  it("returns fast at exactly 2 prior envoy turns (the boundary)", () => {
+    const r = selectModelForTurn({ messageLength: 50, priorEnvoyTurnCount: 2 });
+    expect(r.tier).toBe("fast");
+  });
+
+  it("returns default (Sonnet) for short messages when prior tool use is in history", () => {
+    const r = selectModelForTurn({
+      messageLength: 50,
+      priorToolUseInHistory: true,
+      ...established,
+    });
+    expect(r.tier).toBe("default");
+  });
+
+  it("returns default (Sonnet) when prior envoy turn used tools (priorTurnToolCount)", () => {
+    // Mid-flow case: user just said "yes" after a LOAD proposal.
+    const r = selectModelForTurn({
+      messageLength: 5,
+      priorTurnToolCount: 2,
+      ...established,
+    });
+    expect(r.tier).toBe("default");
+  });
+
+  it("returns fast at exactly 200 chars (the upper boundary)", () => {
+    const r = selectModelForTurn({ messageLength: 200, ...established });
+    expect(r.tier).toBe("fast");
+  });
+
   it("returns default for medium messages above the Haiku ceiling (>200, ≤500)", () => {
-    const r = selectModelForTurn({ messageLength: 201 });
+    const r = selectModelForTurn({ messageLength: 201, ...established });
     expect(r.tier).toBe("default");
   });
 
   it("returns default for messages at the deep-escalation boundary (500)", () => {
-    const r = selectModelForTurn({ messageLength: 500 });
+    const r = selectModelForTurn({ messageLength: 500, ...established });
     expect(r.tier).toBe("default");
   });
 
   it("escalates to deep for messages over 500 chars", () => {
-    const r = selectModelForTurn({ messageLength: 501 });
+    const r = selectModelForTurn({ messageLength: 501, ...established });
     expect(r.tier).toBe("deep");
     expect(r.modelId).toBe(MODEL_TIERS.deep);
   });
@@ -57,6 +97,19 @@ describe("selectModelForTurn", () => {
   it("forceDeep takes precedence over forceFast when both set", () => {
     const r = selectModelForTurn({ messageLength: 10, forceDeep: true, forceFast: true });
     expect(r.tier).toBe("deep");
+  });
+
+  it("UA_DISABLE_HAIKU env var keeps short turns on Sonnet (kill switch)", () => {
+    const prev = process.env.UA_DISABLE_HAIKU;
+    process.env.UA_DISABLE_HAIKU = "true";
+    try {
+      const r = selectModelForTurn({ messageLength: 50, ...established });
+      expect(r.tier).toBe("default");
+      expect(r.reason).toBe("haiku-disabled");
+    } finally {
+      if (prev === undefined) delete process.env.UA_DISABLE_HAIKU;
+      else process.env.UA_DISABLE_HAIKU = prev;
+    }
   });
 });
 
@@ -118,7 +171,7 @@ describe("computeTurnCost", () => {
     expect(haikuCost.costUsd).toBeLessThan(sonnetCost.costUsd);
   });
 
-  it("cache fields are zero in v1 (SDK does not expose them yet)", () => {
+  it("defaults cache fields to zero when SDK omits inputTokenDetails", () => {
     const cost = computeTurnCost(
       { inputTokens: 5000, outputTokens: 500 } as LanguageModelUsage,
       MODEL_TIERS.default,
@@ -126,5 +179,54 @@ describe("computeTurnCost", () => {
     );
     expect(cost.cacheReadTokens).toBe(0);
     expect(cost.cacheWriteTokens).toBe(0);
+  });
+
+  it("bills cached input correctly: read tokens at 0.1× rate, non-cached at full rate", () => {
+    // Total 1000 input tokens; 800 came from cache read, 200 fresh, 0 write.
+    const cost = computeTurnCost(
+      {
+        inputTokens: 1000,
+        outputTokens: 200,
+        inputTokenDetails: {
+          noCacheTokens: 200,
+          cacheReadTokens: 800,
+          cacheWriteTokens: 0,
+        },
+      } as LanguageModelUsage,
+      MODEL_TIERS.default,
+      defaultSelection,
+    );
+    const pricing = MODEL_PRICING[MODEL_TIERS.default];
+    const expected =
+      (200 / 1_000_000) * pricing.inputPer1M +          // 200 fresh input
+      (800 / 1_000_000) * pricing.cacheReadPer1M +      // 800 cache read
+      (200 / 1_000_000) * pricing.outputPer1M;          // 200 output
+    expect(cost.costUsd).toBeCloseTo(expected, 8);
+    expect(cost.cacheReadTokens).toBe(800);
+    expect(cost.inputTokens).toBe(200); // non-cached only
+  });
+
+  it("bills cache write correctly: 1.25× multiplier on first turn", () => {
+    // First turn: 0 read, 800 write, 200 fresh.
+    const cost = computeTurnCost(
+      {
+        inputTokens: 1000,
+        outputTokens: 100,
+        inputTokenDetails: {
+          noCacheTokens: 200,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 800,
+        },
+      } as LanguageModelUsage,
+      MODEL_TIERS.default,
+      defaultSelection,
+    );
+    const pricing = MODEL_PRICING[MODEL_TIERS.default];
+    const expected =
+      (200 / 1_000_000) * pricing.inputPer1M +
+      (800 / 1_000_000) * pricing.cacheWritePer1M +
+      (100 / 1_000_000) * pricing.outputPer1M;
+    expect(cost.costUsd).toBeCloseTo(expected, 8);
+    expect(cost.cacheWriteTokens).toBe(800);
   });
 });

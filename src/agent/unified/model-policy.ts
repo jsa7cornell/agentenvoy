@@ -52,10 +52,20 @@ export type TurnContext = {
   /** Whether any prior envoy turn in the loaded history made a tool call.
    *  Conservative gate to avoid Haiku stepping into the middle of a tool sequence. */
   priorToolUseInHistory?: boolean;
+  /** Number of prior envoy turns in history. Used to recognize cold channels
+   *  (first-turn-ever) where complex create-link requests should stay on Sonnet
+   *  even when short, since there's no context to disambiguate. */
+  priorEnvoyTurnCount?: number;
   // Reserved for future escalation signals (multi-session, deep rule edits, etc.)
   forceDeep?: boolean;
   forceFast?: boolean;
 };
+
+/** Minimum prior envoy turns before we trust the multi-step gate enough to
+ *  route to Haiku. Cold channels stay on Sonnet — first-ever turns are often
+ *  load-bearing creates ("create music lessons link M/T 3-5") that shouldn't
+ *  go to Haiku just because they happen to be short. */
+const COLD_CHANNEL_MIN_HISTORY = 2;
 
 /**
  * Selects the appropriate model tier for a turn.
@@ -88,14 +98,25 @@ export function selectModelForTurn(ctx: TurnContext): ModelSelection {
       reason: "long-message-escalation",
     };
   }
-  // Drop to Haiku for short turns when no multi-step flow is in progress.
+  // Operational kill-switch: setting UA_DISABLE_HAIKU=true in Vercel env keeps
+  // every turn on Sonnet without a redeploy. Use if Haiku produces a regression
+  // we need to revert immediately. Caching + tool trim + history cut still
+  // apply; only the tier router falls back.
+  if (process.env.UA_DISABLE_HAIKU === "true") {
+    return { tier: "default", modelId: MODEL_TIERS.default, reason: "haiku-disabled" };
+  }
+  // Drop to Haiku for short turns when no multi-step flow is in progress AND
+  // the channel has enough history to be confident the gate is meaningful.
   // The 200-char threshold catches confirmations ("go for it", "yes please"),
   // simple acks, and single-shot questions while leaving room for short
   // create-link asks ("schedule coffee with Susan tomorrow") on Sonnet.
+  // Cold channels (first-ever turns) stay on Sonnet — see COLD_CHANNEL_MIN_HISTORY.
   const noMultiStep =
     !ctx.priorTurnToolCount &&
     !ctx.priorToolUseInHistory;
-  if (ctx.messageLength <= 200 && noMultiStep) {
+  const hasEstablishedHistory =
+    (ctx.priorEnvoyTurnCount ?? 0) >= COLD_CHANNEL_MIN_HISTORY;
+  if (ctx.messageLength <= 200 && noMultiStep && hasEstablishedHistory) {
     return {
       tier: "fast",
       modelId: MODEL_TIERS.fast,

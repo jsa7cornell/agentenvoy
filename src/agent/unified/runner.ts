@@ -70,14 +70,16 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           userMessage: ctx.message,
         });
 
-        // Load recent conversation history (now also returns multi-step signal).
-        const { messages: recentMessages, priorToolUseInHistory } =
+        // Load recent conversation history (now also returns tier signals).
+        const { messages: recentMessages, priorToolUseInHistory, priorEnvoyTurnCount } =
           await loadRecentHistory(ctx.channelId);
 
-        // Select model tier — Haiku for short single-turn cases, Sonnet otherwise.
+        // Select model tier — Haiku for short single-turn cases on established
+        // channels, Sonnet for cold-channel and multi-step turns, Opus for long.
         const modelSelection = selectModelForTurn({
           messageLength: ctx.message.length,
           priorToolUseInHistory,
+          priorEnvoyTurnCount,
         });
 
         // Stream the unified agent response.
@@ -123,7 +125,9 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         }
 
         // Promises resolve once fullStream is exhausted.
-        const [steps, usage] = await Promise.all([result.steps, result.usage]);
+        // totalUsage is the SUM across all steps in this turn (LOAD → write → narrate);
+        // result.usage would be just the last step's tokens (PR #217 review fix).
+        const [steps, usage] = await Promise.all([result.steps, result.totalUsage]);
 
         const toolCallNames: string[] = steps.flatMap((step) =>
           step.toolCalls.map((tc) => tc.toolName),
@@ -253,6 +257,7 @@ async function loadRecentHistory(
 ): Promise<{
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   priorToolUseInHistory: boolean;
+  priorEnvoyTurnCount: number;
 }> {
   // Window cut from 20 → 10 (cost-reduction PR 2026-05-07). 10 turns covers
   // the typical multi-turn conversation; longer-tail context is rarely
@@ -277,7 +282,10 @@ async function loadRecentHistory(
     const md = r.metadata as { unifiedTurn?: { toolCalls?: string[] } } | null;
     return Array.isArray(md?.unifiedTurn?.toolCalls) && md.unifiedTurn.toolCalls.length > 0;
   });
-  return { messages, priorToolUseInHistory };
+  // Count envoy turns to recognize cold channels. New users with no history
+  // ought to stay on Sonnet for create-link requests even when short.
+  const priorEnvoyTurnCount = rows.filter((r) => r.role === "envoy").length;
+  return { messages, priorToolUseInHistory, priorEnvoyTurnCount };
 }
 
 function buildUnifiedMetadata(params: {
