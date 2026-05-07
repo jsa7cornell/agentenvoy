@@ -62,6 +62,8 @@ function ThumbsDownModal({
   const [selectedTags, setSelectedTags] = useState<Set<FeedbackTag>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [reportId, setReportId] = useState<string | null>(null);
+  const [agentPrompt, setAgentPrompt] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const toggleTag = useCallback((tag: FeedbackTag) => {
@@ -99,10 +101,12 @@ function ThumbsDownModal({
       const json = (await res.json()) as {
         ok: boolean;
         reportId?: string;
+        agentPrompt?: string;
         error?: string;
       };
       if (!res.ok || !json.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       setReportId(json.reportId ?? null);
+      setAgentPrompt(json.agentPrompt ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send");
     } finally {
@@ -141,6 +145,19 @@ function ThumbsDownModal({
                 </div>
               )}
             </div>
+            {agentPrompt && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(agentPrompt);
+                  setPromptCopied(true);
+                  setTimeout(() => setPromptCopied(false), 2000);
+                }}
+                className="w-full rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-1.5 text-[11px] text-sky-300 hover:bg-sky-500/10 text-left"
+              >
+                {promptCopied ? "Copied ✓" : "Copy debug curl (15 min token)"}
+              </button>
+            )}
             <div className="flex justify-end pt-1">
               <button
                 type="button"
