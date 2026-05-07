@@ -1,7 +1,7 @@
 /**
  * Unified agent tool registry — Day 2 (grounding checks wired Day 3).
  *
- * 26 tools in two groups:
+ * 27 tools in two groups:
  *   LOAD_*  — read-only context fetchers (no side effects)
  *   write   — action wrappers over existing actions.ts handlers
  *
@@ -274,11 +274,30 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   // Write tools — link actions
   // ---------------------------------------------------------------------------
 
+  // Group coordination — Track 2 multi-participant scheduling (2026-05-07).
+  // Separate from link_create; emits type:"group" to handleCreateLink which
+  // also mints a GroupCoordination row for the gathering phase.
+  const group_coordinate = tool({
+    description:
+      "Coordinate a group event where multiple people need to find a shared time. " +
+      "Use this when the host wants to send availability requests to a group (dinner, kickoff, workshop, etc.). " +
+      "Gather: topic (event title), inviteeNames (all participants), windows (candidate date ranges). " +
+      "Only call after the host confirms — never before. Never call link_create for group events.",
+    inputSchema: z.object({
+      topic: z.string().describe("Event title or occasion (e.g. 'Founder Dinner')."),
+      inviteeNames: z.array(z.string()).min(1).describe("Names or emails of all participants."),
+      windows: z.array(z.string()).min(1)
+        .describe("Candidate date/time windows as natural language strings (e.g. 'weekday evenings May–July'). No ISO dates required."),
+    }),
+    execute: async (params) => exec("group_coordinate", "create_link", { ...params, type: "group" }),
+  });
+
   const link_create = tool({
     description:
       "Create a new bookable scheduling link. " +
       "Call when the host explicitly asks to create a new link or meeting type. " +
       "Do NOT call for edits to an existing link — use link_update instead. " +
+      "Do NOT use for group coordination — use group_coordinate instead. " +
       "activity is required (e.g. 'coffee', 'intro call', 'bike ride').",
     inputSchema: z.object({
       activity: z.string().describe("Meeting activity or type (required)."),
@@ -490,6 +509,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     session_lock_activity_location,
     session_save_guest_info,
     // Link actions
+    group_coordinate,
     link_create,
     link_update,
     link_cancel,

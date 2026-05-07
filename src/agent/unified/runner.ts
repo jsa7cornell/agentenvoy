@@ -185,6 +185,7 @@ const TOOL_STATUS_COPY: Record<string, string> = {
   LOAD_calendar_context:    "Reading your calendar…",
   LOAD_active_sessions:     "Loading your sessions…",
   LOAD_preferences:         "Loading your preferences…",
+  group_coordinate:         "Setting up group link…",
   link_create:              "Creating link…",
   link_update:              "Updating link…",
   link_cancel:              "Cancelling link…",
@@ -268,6 +269,6 @@ function inferBucket(toolCallNames: string[]): string {
   if (first.startsWith("prefs_")) return "manage_setup";
   if (first.startsWith("knowledge_")) return "profile";
   if (first.startsWith("primary_")) return "manage_setup";
-  if (first.startsWith("group_coord_")) return "group_coordination";
+  if (first.startsWith("group_")) return "group_coordination";
   return "chat";
 }
