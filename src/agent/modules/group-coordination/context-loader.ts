@@ -102,8 +102,8 @@ export async function loadGroupCoordinationContext(
   } else {
     contextLines.push("Phase: pre-flight (no active group session)");
     contextLines.push(
-      "Guide the host through: event title, participant list, candidate windows, " +
-        "and what you'll ask participants. When host confirms, emit create_link.",
+      "Gather only what's missing from the conversation. Do not re-ask for anything the host already said. " +
+        "When you have event title, participant list, and candidate windows, confirm once and emit create_link.",
     );
   }
 

@@ -914,9 +914,11 @@ export async function handleCreateLink(
   }
 
   const code = generateCode();
+  const isGroupLink = params.type === "group";
   // Accept inviteeNames[] (multi-guest) or legacy inviteeName (single string).
+  // Group coordination prompt emits `participants` — accept as alias for inviteeNames.
   // LLM should emit inviteeNames for new links; inviteeName is a shim for old prompts.
-  const rawInviteeNames = params.inviteeNames;
+  const rawInviteeNames = params.inviteeNames ?? params.participants;
   const inviteeNames: string[] = Array.isArray(rawInviteeNames)
     ? (rawInviteeNames as string[]).filter((n): n is string => typeof n === "string" && n.trim().length > 0)
     : typeof params.inviteeName === "string" && (params.inviteeName as string).trim()
@@ -1433,6 +1435,16 @@ export async function handleCreateLink(
         email: i === 0 ? inviteeEmail : null,
         role: "guest",
       })),
+    });
+  }
+
+  // Group coordination — mint the GroupCoordination gathering row (Model A,
+  // decided 2026-05-06). The row ties the session to the response-collection
+  // state machine. Created here so the context-loader can resolve it by
+  // sessionId on subsequent host turns.
+  if (isGroupLink) {
+    await prisma.groupCoordination.create({
+      data: { sessionId: session.id },
     });
   }
 
