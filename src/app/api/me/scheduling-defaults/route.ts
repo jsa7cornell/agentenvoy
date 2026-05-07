@@ -237,6 +237,7 @@ export async function GET() {
     businessHoursEndMinutes: bheMin,
     defaultDuration: e.defaultDuration ?? 30,
     bufferMinutes: e.bufferMinutes ?? 0,
+    defaultFormat: (e as { defaultFormat?: string }).defaultFormat ?? "video",
     meetSlug: user.meetSlug ?? null,
     // Counts surface on the scheduling status chip.
     linkCount,

@@ -188,41 +188,35 @@ function resolveFromVariance(link: LinkContext): ResolvedPosture {
   const missing: string[] = [];
 
   // Canvas: accept availability[] (new) OR flat hoursStart/End+daysOfWeek (legacy).
+  // Legacy AvailabilitySpec objects (pre-V1.5) are neither — fall back to DEFAULT_AVAILABILITY.
   const hasNewCanvas = Array.isArray(params.availability) && (params.availability as unknown[]).length > 0;
   const hasLegacyCanvas = "hoursStartMinutes" in params && "hoursEndMinutes" in params && "daysOfWeek" in params;
-  if (!hasNewCanvas && !hasLegacyCanvas) missing.push("availability (or hoursStartMinutes+hoursEndMinutes+daysOfWeek)");
-
-  // Duration
-  if (!("duration" in params)) missing.push("duration");
-  // Buffer
-  if (!("bufferMinutes" in params)) missing.push("bufferMinutes");
-  // Format
-  if (!("format" in params)) missing.push("format");
-  // Evenings posture — defaultable; not a hard error if missing
-  // Compiled rules — defaultable to empty arrays if missing
+  // An AvailabilitySpec object satisfies the availability field check but isn't usable as a canvas.
+  const hasLegacySpec = params.availability != null && !Array.isArray(params.availability);
+  if (!hasNewCanvas && !hasLegacyCanvas && !hasLegacySpec) missing.push("canvas");
 
   if (missing.length > 0) {
-    throw new Error(
-      `[getLinkPosture] variance link is missing required posture fields: ${missing.join(
-        ", "
-      )}. ` +
-        `Variance parameters must be complete by construction — backfill the link or audit ` +
-        `the variance-create path. See proposal 2026-05-02_per-link-config-storage-and-scoring-link-scope §2.2.`
+    console.warn(
+      `[getLinkPosture] variance link is missing required posture fields: ${missing.join(", ")}. ` +
+        `Using defaults — backfill the link or audit the variance-create path.`
     );
   }
 
   // Resolve the canonical availability[] canvas.
-  // Priority: new availability[] > derived from legacy flat fields > default.
+  // Priority: new availability[] > derived from legacy flat fields > DEFAULT_AVAILABILITY.
   let availability: AvailabilityWindow[];
   if (hasNewCanvas) {
     availability = params.availability as AvailabilityWindow[];
-  } else {
+  } else if (hasLegacyCanvas) {
     // Legacy row: derive a single-window canvas from flat fields.
     availability = [{
       days: params.daysOfWeek as number[],
       startMinutes: params.hoursStartMinutes as number,
       endMinutes: params.hoursEndMinutes as number,
     }];
+  } else {
+    // Pre-V1.5 link with AvailabilitySpec or no canvas at all — use defaults.
+    availability = DEFAULT_AVAILABILITY;
   }
 
   const flat = flattenAvailability(availability);
@@ -230,8 +224,8 @@ function resolveFromVariance(link: LinkContext): ResolvedPosture {
   return {
     availability,
     ...flat,
-    defaultDuration: params.duration!,
-    bufferMinutes: params.bufferMinutes!,
+    defaultDuration: params.duration ?? DEFAULT_DURATION_MINUTES,
+    bufferMinutes: params.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
     format: (params.format as ResolvedPosture["format"]) ?? DEFAULT_FORMAT,
     eveningsPosture: params.eveningsPosture ?? DEFAULT_EVENINGS_POSTURE,
     compiled: {
@@ -294,7 +288,7 @@ function resolveFromUser(
     defaultDuration: explicit.defaultDuration ?? DEFAULT_DURATION_MINUTES,
     bufferMinutes: explicit.bufferMinutes ?? DEFAULT_BUFFER_MINUTES,
     format:
-      (explicit.videoProvider === "zoom" ? "video" : undefined) ??
+      ((explicit as { defaultFormat?: string }).defaultFormat as ResolvedPosture["format"]) ??
       DEFAULT_FORMAT,
     eveningsPosture: DEFAULT_EVENINGS_POSTURE,
     compiled,

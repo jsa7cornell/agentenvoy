@@ -277,7 +277,9 @@ export const linkParametersSchema = z
     // 2026-05-06 — PR-B canvas collapse. Layer 1 of the four-layer model.
     // Replaces flat hoursStartMinutes/hoursEndMinutes/daysOfWeek + AvailabilitySpec.
     // See proposal 2026-05-06_link-config-canonical-model-and-unified-edit.
-    availability: z.array(availabilityWindowSchema).optional(),
+    // Union accepts both new AvailabilityWindow[] and legacy AvailabilitySpec object
+    // so existing prod links are not broken during the migration window.
+    availability: z.union([z.array(availabilityWindowSchema), availabilitySpecSchema]).optional(),
 
     // 2026-05-02 — V1.5 per-link posture fields (kept as deprecated for
     // transition window — backfill script converts these to availability[]).
