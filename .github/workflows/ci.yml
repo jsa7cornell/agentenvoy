@@ -132,10 +132,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Rule 19c — all .md loads go through playbooks/index.ts
+      - name: Rule 19c — all .md loads go through runtime-prompts/index.ts
         run: |
           HITS=$(grep -rn 'readFileSync.*\.md' src/ \
-            | grep -v 'src/agent/playbooks/index.ts' \
+            | grep -v 'src/agent/runtime-prompts/index.ts' \
             | grep -v '__tests__' || true)
           if [ -n "$HITS" ]; then
             echo "::error::Rule 19c violated — direct readFileSync(.md) outside playbooks/index.ts"

@@ -112,24 +112,37 @@ describe("getLinkPosture — variance path", () => {
     expect(posture.hoursStartMinutes).toBe(13 * 60);
   });
 
-  it("throws when variance is missing required posture fields", () => {
+  it("falls back to defaults when variance is missing canvas (warn, no throw)", () => {
     const sparseVariance: LinkContext = {
       type: "bookable",
-      parameters: { duration: 30 }, // missing hours, days, buffer, format
+      parameters: { duration: 30 }, // missing canvas, buffer, format
     };
-    expect(() => getLinkPosture(sparseVariance, PRIMARY_USER)).toThrow(
-      /missing required posture fields/
-    );
+    // Should NOT throw — resolveFromVariance warns and uses defaults.
+    const posture = getLinkPosture(sparseVariance, PRIMARY_USER);
+    // Canvas falls back to DEFAULT_AVAILABILITY (Mon–Fri 9–18).
+    expect(posture.availability).toHaveLength(1);
+    expect(posture.hoursStartMinutes).toBe(9 * 60);
+    expect(posture.hoursEndMinutes).toBe(18 * 60);
+    expect(posture.daysOfWeek).toEqual([1, 2, 3, 4, 5]);
+    // Scalar fields fall back to their defaults.
+    expect(posture.defaultDuration).toBe(30); // from parameters.duration
+    expect(posture.bufferMinutes).toBe(0);    // DEFAULT_BUFFER_MINUTES
+    expect(posture.format).toBe("video");     // DEFAULT_FORMAT
   });
 
-  it("error message names every missing field", () => {
+  it("falls back to defaults when variance has completely empty parameters", () => {
     const sparseVariance: LinkContext = {
       type: "bookable",
       parameters: {},
     };
-    expect(() => getLinkPosture(sparseVariance, PRIMARY_USER)).toThrow(
-      /hoursStartMinutes.*hoursEndMinutes.*daysOfWeek/
-    );
+    // Should NOT throw — uses full defaults.
+    const posture = getLinkPosture(sparseVariance, PRIMARY_USER);
+    expect(posture.hoursStartMinutes).toBe(9 * 60);
+    expect(posture.hoursEndMinutes).toBe(18 * 60);
+    expect(posture.daysOfWeek).toEqual([1, 2, 3, 4, 5]);
+    expect(posture.defaultDuration).toBe(30);
+    expect(posture.bufferMinutes).toBe(0);
+    expect(posture.format).toBe("video");
   });
 
   it("preserves explicit empty array for daysOfWeek", () => {
