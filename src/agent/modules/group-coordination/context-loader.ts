@@ -33,7 +33,7 @@ export interface GroupCoordinationContext extends ModuleContextOutput {
 export async function loadGroupCoordinationContext(
   moduleContext: ModuleContext,
   matchResult: MatchResult,
-  __userMessage: string,
+  userMessage: string,
 ): Promise<GroupCoordinationContext> {
   const userId = moduleContext.user.id;
 
@@ -55,6 +55,8 @@ export async function loadGroupCoordinationContext(
     timeZoneName: "short",
     ...(hostTimezone ? { timeZone: hostTimezone } : {}),
   });
+
+  void userMessage;
 
   const contextLines: string[] = [
     `Host: ${moduleContext.user.name ?? "unknown"} (${moduleContext.user.email})`,
