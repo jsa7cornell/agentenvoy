@@ -23,6 +23,7 @@ import { runSelfCheck, type ToolCallSummary } from "./self-check";
 import type { Prisma } from "@prisma/client";
 
 import { unifiedAgentSystemPrompt } from "@/agent/runtime-prompts";
+import { emojiForActivity } from "@/lib/activity-vocab";
 
 // Loaded once at module init — readFileSync inside, so cached across requests.
 const SYSTEM_PROMPT = unifiedAgentSystemPrompt();
@@ -274,6 +275,10 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           .find((r) => r?.success && typeof r?.data?.sessionId === "string")
           ?.data?.sessionId;
 
+        // Extract link card metadata for all three link-create tool types so
+        // feed.tsx renders a structured card instead of a bare URL blob.
+        const linkCardExtras = extractLinkCardMeta(steps);
+
         // Persist envoy message with unified turn metadata.
         await prisma.channelMessage.create({
           data: {
@@ -281,15 +286,29 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
             role: "envoy",
             content: fullText,
             ...(threadId ? { threadId } : {}),
-            metadata: buildUnifiedMetadata({
-              turnCost,
-              toolCallNames: allToolCallNames,
-              modelId: modelSelection.modelId,
-              durationMs,
-              selfCheck: selfCheckResult,
-              remediated,
-              remediationDurationMs,
-            }),
+            metadata: {
+              ...(buildUnifiedMetadata({
+                turnCost,
+                toolCallNames: allToolCallNames,
+                modelId: modelSelection.modelId,
+                durationMs,
+                selfCheck: selfCheckResult,
+                remediated,
+                remediationDurationMs,
+              }) as object),
+              ...(linkCardExtras
+                ? {
+                    linkKind: linkCardExtras.linkKind,
+                    ...(linkCardExtras.linkUrl ? { linkUrl: linkCardExtras.linkUrl } : {}),
+                    ...(linkCardExtras.linkCardMeta ? { linkCardMeta: linkCardExtras.linkCardMeta } : {}),
+                    // Keep legacy bookableMeta key populated for bookable links
+                    // so rows written before linkCardMeta existed still render.
+                    ...(linkCardExtras.linkKind === "bookable" && linkCardExtras.linkCardMeta
+                      ? { bookableMeta: linkCardExtras.linkCardMeta }
+                      : {}),
+                  }
+                : {}),
+            } as Prisma.InputJsonValue,
           },
         });
 
@@ -436,6 +455,86 @@ function buildUnifiedMetadata(params: {
       emittedActions: toolCallNames,
     },
   } satisfies Prisma.InputJsonValue;
+}
+
+type LinkCardExtras = {
+  linkKind: "bookable" | "personal" | "group";
+  linkUrl?: string;
+  linkCardMeta?: Record<string, unknown>;
+};
+
+/**
+ * Scans completed steps for link-create tool calls and extracts the metadata
+ * needed to render a link card in the chat feed. Mirrors the legacy
+ * dispatch-stream.ts bookableMeta stamp logic, extended for personal and group.
+ */
+function extractLinkCardMeta(
+  steps: Array<{
+    toolCalls: Array<{ toolName: string; input: unknown }>;
+    toolResults?: Array<{ output: unknown }> | null;
+  }>,
+): LinkCardExtras | null {
+  for (const step of steps) {
+    const calls = step.toolCalls ?? [];
+    const results = step.toolResults ?? [];
+    for (let i = 0; i < calls.length; i++) {
+      const tc = calls[i];
+      const tr = results[i];
+      const out = tr?.output as Record<string, unknown> | undefined;
+      if (!out?.success) continue;
+      const data = out.data as Record<string, unknown> | undefined;
+
+      if (tc.toolName === "bookable_link_create") {
+        const meta: Record<string, unknown> = {};
+        if (data?.bookableName) meta.title = data.bookableName;
+        if (data?.linkUrl) meta.linkUrl = data.linkUrl;
+        if (data?.daysOfWeek) meta.daysOfWeek = data.daysOfWeek;
+        if (data?.timeStart) meta.timeStart = data.timeStart;
+        if (data?.timeEnd) meta.timeEnd = data.timeEnd;
+        if (data?.durationMinutes) meta.durationMinutes = data.durationMinutes;
+        if (data?.format) meta.format = data.format;
+        return {
+          linkKind: "bookable",
+          linkUrl: data?.linkUrl as string | undefined,
+          linkCardMeta: meta,
+        };
+      }
+
+      if (tc.toolName === "personal_link_create") {
+        const url = data?.url as string | undefined;
+        const title = data?.title as string | undefined;
+        const args = tc.input as Record<string, unknown> | undefined;
+        // Derive emoji from the activity prefix in the generated title
+        // (e.g. "Coffee: Sarah + John" → "coffee" → ☕). No activity field
+        // in the tool schema yet — server-side fallback until it's added.
+        const activityPrefix = title?.split(":")[0]?.trim() ?? null;
+        const activityIcon = emojiForActivity(activityPrefix) ?? undefined;
+        const meta: Record<string, unknown> = {};
+        if (title) meta.title = title;
+        if (activityIcon) meta.activityIcon = activityIcon;
+        if (args?.format) meta.format = args.format;
+        if (args?.duration) meta.durationMinutes = args.duration;
+        if (args?.availability) meta.availability = args.availability;
+        if (args?.guestPicks) meta.guestPicks = args.guestPicks;
+        if (args?.recurrence) meta.recurrence = args.recurrence;
+        return { linkKind: "personal", linkUrl: url, linkCardMeta: meta };
+      }
+
+      if (tc.toolName === "group_event_create") {
+        const url = data?.url as string | undefined;
+        const title = data?.title as string | undefined;
+        const args = tc.input as Record<string, unknown> | undefined;
+        const meta: Record<string, unknown> = {};
+        if (title) meta.title = title;
+        if (args?.format) meta.format = args.format;
+        if (args?.durationMinutes) meta.durationMinutes = args.durationMinutes;
+        if (args?.inviteeNames) meta.inviteeNames = args.inviteeNames;
+        if (args?.windows) meta.windows = args.windows;
+        return { linkKind: "group", linkUrl: url, linkCardMeta: meta };
+      }
+    }
+  }
+  return null;
 }
 
 function inferBucket(toolCallNames: string[]): string {

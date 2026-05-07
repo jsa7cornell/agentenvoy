@@ -131,7 +131,10 @@ export function dealroomHostComposer(): string {
 // ── Unified agent (collapse classifier + composer, 2026-05-06) ────────────
 export function unifiedAgentSystemPrompt(): string {
   try {
-    return readFileSync(join(cwd, "src/agent/runtime-prompts/composers/unified-agent.md"), "utf-8");
+    const raw = readFileSync(join(cwd, "src/agent/runtime-prompts/composers/unified-agent.md"), "utf-8");
+    // Apply `{{ACTIVITY_VOCAB_TABLE}}` and other build-time substitutions so
+    // the canonical vocab from `lib/activity-vocab.ts` is the single source.
+    return applySubstitutions(raw);
   } catch (err) {
     throw new Error(`[runtime-prompts/index] failed to load composers/unified-agent.md: ${err}`);
   }

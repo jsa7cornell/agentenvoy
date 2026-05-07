@@ -137,6 +137,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       "Set recurrence for ongoing 1:1. Set autoConfirm + inviteeEmail only with exact date+time and no optionality.",
     inputSchema: z.object({
       activity: z.string().describe("Meeting type. E.g. 'intro call', 'coffee', 'coaching'. Required."),
+      activityIcon: z.string().max(8).optional()
+        .describe("Single emoji for the activity (☕ coffee, 🥾 hike, 🎵 music lessons, 🍽️ dinner, etc.). Omit if no clear match."),
       inviteeName: z.string().describe("Guest's name. Required for personal links."),
       duration: z.number().int().positive().optional()
         .describe("Override duration in minutes. Inherits from seed link if omitted."),
@@ -225,6 +227,10 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     inputSchema: z.object({
       name: z.string()
         .describe("Display name shown in My Bookable Links. E.g. 'Music Lessons', 'Office Hours'. Per-host unique."),
+      activity: z.string().optional()
+        .describe("Canonical activity word ('music lessons', 'coffee', 'office hours'). Drives icon/format defaults. Often the same as name; omit if name already captures it."),
+      activityIcon: z.string().max(8).optional()
+        .describe("Single emoji for the link (🎵 music lessons, ☕ coffee, 🕐 office hours, 🎤 interview, etc.)."),
       format: z.enum(["video", "phone", "in-person"])
         .describe("Meeting format for every booking through this link."),
       durationMinutes: z.number().int().positive()
@@ -259,6 +265,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
           title: params.name,
           format: params.format,
           durationMinutes: params.durationMinutes,
+          ...(params.activityIcon ? { activityIcon: params.activityIcon } : {}),
           ...(params.recurrence ? { recurrence: params.recurrence } : {}),
           ...(params.guestPicks ? { guestPicks: params.guestPicks } : {}),
         },
@@ -342,6 +349,10 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       "Infer durationMinutes from event type: dinner ≈ 120, lunch/coffee ≈ 90, casual coffee ≈ 60, sync/call ≈ 30–45. Pass duration even when not explicitly stated if the event type makes it obvious.",
     inputSchema: z.object({
       topic: z.string().describe("Event title or occasion (e.g. 'Founder Dinner')."),
+      activity: z.string().optional()
+        .describe("Canonical activity word ('dinner', 'sync', 'workshop'). Drives icon/format defaults. Often inferable from topic."),
+      activityIcon: z.string().max(8).optional()
+        .describe("Single emoji for the event (🍽️ dinner, 🍻 drinks, 👋 meet-and-greet, 🎤 panel, etc.)."),
       inviteeNames: z.array(z.string()).optional()
         .describe("Names or emails of participants, if the host mentioned them."),
       windows: z.array(z.string()).optional()

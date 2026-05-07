@@ -81,6 +81,13 @@ export interface AvailabilityRule {
      * Added 2026-05-07 (UA refactor — UNIFIEDAGENT.md).
      */
     recurrence?: LinkRecurrence;
+    /**
+     * Single emoji shown next to the bookable link in lists and cards.
+     * Picked from the canonical activity vocab (`lib/activity-vocab.ts`).
+     * Free-form on persistence — handler validates ≤ 8 chars to prevent abuse.
+     * Added 2026-05-07.
+     */
+    activityIcon?: string;
   };
   status: "active" | "paused" | "expired";
   priority: number;       // 1-5
