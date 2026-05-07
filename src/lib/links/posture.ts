@@ -138,7 +138,7 @@ const DEFAULT_HOURS_END_MINUTES = 18 * 60;    // 1080
 
 /** Default canvas: Mon–Fri 9–18. Seeded on new links and used as fallback
  *  when a link has no availability[] and no flat canvas fields. */
-const DEFAULT_AVAILABILITY: AvailabilityWindow[] = [
+export const DEFAULT_AVAILABILITY: AvailabilityWindow[] = [
   { days: [1, 2, 3, 4, 5], startMinutes: DEFAULT_HOURS_START_MINUTES, endMinutes: DEFAULT_HOURS_END_MINUTES },
 ];
 
