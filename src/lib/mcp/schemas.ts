@@ -748,7 +748,7 @@ export const MCP_TOOLS = {
     input: getAvailabilityInput,
     output: getAvailabilityOutput,
     description:
-      "Read the host's scored, filtered slot list. Pass busyWindows (UTC start/end pairs from your own calendar) to get back only mutually open times. Response includes slotsThrough (furthest date the host offered time) — if slots is empty, the host didn't offer time in this window; use post_message to contact them directly.",
+      "Read the host's scored, filtered slot list. Pass busyWindows (UTC start/end pairs from your own calendar) to get back only mutually open times. Response includes slotsThrough (furthest date the host offered time) — if slots is empty, the host didn't offer time in this window; the response hint will include their email address to contact directly.",
   },
   get_session_status: {
     input: getSessionStatusInput,
