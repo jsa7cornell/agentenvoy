@@ -1028,6 +1028,31 @@ export async function handleCreateLink(
     : null;
   const rules = (params.rules as Record<string, unknown>) || {};
 
+  // seedFromBookableCode — when the agent passes a bookable link code, look up
+  // that rule and use its properties as defaults. Explicit params still win.
+  // Fixes: feedback cmow7v02n000zkj7k48ii2ugm ("30 min card" for 60-min bookable seed).
+  const seedCode = typeof params.seedFromBookableCode === "string" ? params.seedFromBookableCode.trim() : null;
+  let seedBookable: { durationMinutes: number; format: string; timeStart?: string; timeEnd?: string; daysOfWeek?: number[] } | null = null;
+  if (seedCode) {
+    const prefs = userRow?.preferences as UserPreferences | null;
+    const structuredRules = ((prefs?.explicit as Record<string, unknown> | undefined)?.structuredRules as AvailabilityRule[] | undefined) ?? [];
+    const seedRule = structuredRules.find(
+      (r) => r.action === "bookable" && r.bookable?.linkCode === seedCode && r.status === "active",
+    );
+    if (seedRule?.bookable) {
+      seedBookable = {
+        durationMinutes: seedRule.bookable.durationMinutes,
+        format: seedRule.bookable.format,
+        timeStart: seedRule.timeStart,
+        timeEnd: seedRule.timeEnd,
+        daysOfWeek: seedRule.daysOfWeek,
+      };
+      console.log(`[create_link] seeding from bookable "${seedRule.bookable.name}" — duration=${seedBookable.durationMinutes} format=${seedBookable.format}`);
+    } else {
+      console.warn(`[create_link] seedFromBookableCode "${seedCode}" not found in structuredRules`);
+    }
+  }
+
   // Physical-activity guard (2026-04-22, feedback cmoa81lmy + cmoacqq5r).
   // When the LLM omits `format` or `location` for a physical activity (bike
   // ride, hike, etc.), the host's video default silently applies — sending
@@ -1052,7 +1077,8 @@ export async function handleCreateLink(
     !!activity &&
     PHYSICAL_ACTIVITY_TOKENS.some((t) => activityLower.includes(t));
 
-  let effectiveFormat = (params.format as string) || null;
+  // Format: explicit param > seed bookable > physical-activity guard > null.
+  let effectiveFormat = (params.format as string) || seedBookable?.format || null;
   if (isPhysicalActivity && !effectiveFormat) {
     effectiveFormat = "in-person";
     console.warn(
@@ -1060,15 +1086,9 @@ export async function handleCreateLink(
     );
   }
 
-  // Activity-driven duration default (2026-04-30). When the host names a
-  // canonical activity but doesn't specify a duration, use the activity's
-  // sensible default from `activity-vocab.ts` (run → 60, hike → 120,
-  // lunch → 60, coffee → 30, etc.) instead of falling through to the
-  // global 30-min default. Solves "set up a run with John" producing a
-  // 30-min run. Host's explicit `params.duration` always wins. Compose
-  // cleanly with `guestPicks.duration: true` — when the host defers to
-  // the guest, the activity default seeds the suggestion the guest sees
-  // and they can still change it via the picker's ✏️ affordance.
+  // Duration: explicit param > activity-vocab default > seed bookable > unset (→ 30 fallback).
+  // Seed comes after vocab so a recognizable activity ("coffee") still applies its natural
+  // default even when seeding from a bookable with a different duration.
   let effectiveDurationParam: number | undefined;
   if (typeof params.duration === "number") {
     effectiveDurationParam = params.duration;
@@ -1078,6 +1098,11 @@ export async function handleCreateLink(
       effectiveDurationParam = activityDefault;
       console.log(
         `[create_link] activity "${activity}" → defaultDuration=${activityDefault}min`,
+      );
+    } else if (seedBookable) {
+      effectiveDurationParam = seedBookable.durationMinutes;
+      console.log(
+        `[create_link] duration from bookable seed → ${effectiveDurationParam}min`,
       );
     }
   }
@@ -1139,8 +1164,18 @@ export async function handleCreateLink(
   // event-spanning concept (e.g. surf trip "noon to noon"). Drop the
   // restrictToWindows when the link is date-mode, leaving the day-level
   // `restrictToDays` and other restrictions intact.
-  const rawAvailability =
+  let rawAvailability =
     paramsAvail && typeof paramsAvail === "object" ? { ...paramsAvail } : undefined;
+  // When no explicit availability was provided but a bookable seed has windows,
+  // apply them so the slot picker respects the bookable's schedule (e.g. M/T 3–5pm).
+  if (!rawAvailability && seedBookable && (seedBookable.timeStart || seedBookable.daysOfWeek)) {
+    const seedWindow: Record<string, unknown> = {};
+    if (seedBookable.daysOfWeek?.length) seedWindow.restrictToDays = seedBookable.daysOfWeek.map(String);
+    if (seedBookable.timeStart && seedBookable.timeEnd) {
+      seedWindow.restrictToWindows = [{ start: seedBookable.timeStart, end: seedBookable.timeEnd }];
+    }
+    if (Object.keys(seedWindow).length) rawAvailability = seedWindow as Record<string, unknown> & typeof paramsAvail;
+  }
   if (rawAvailability && isDateModeLink) {
     delete (rawAvailability as Record<string, unknown>).restrictToWindows;
   }
