@@ -119,7 +119,14 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
               role: "system",
               content: SYSTEM_PROMPT,
               providerOptions: {
-                anthropic: { cacheControl: { type: "ephemeral" } },
+                // 1-hour TTL on the static prefix (system prompt + tools — the
+                // tools array is cached because it's before this block in the
+                // request order). Anthropic's 1h cache write costs 2x input
+                // (vs 1.25x for 5m default), but for John's traffic pattern
+                // (turns spaced 10-60 min apart), 1h dramatically reduces
+                // cold-start cache rewrites. Per-turn cost analysis 2026-05-08
+                // showed cache writes were 60-87% of total cost on cold starts.
+                anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
               },
             },
             ...cachedHistory,
@@ -214,7 +221,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
                 role: "system",
                 content: SYSTEM_PROMPT,
                 providerOptions: {
-                  anthropic: { cacheControl: { type: "ephemeral" } },
+                  anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
                 },
               },
               ...withTrailingCacheBreakpoint(recentMessages),
@@ -228,7 +235,8 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
                   `Reason: ${selfCheckResult.reason ?? "(unspecified)"}\n\n` +
                   `Call the correction tool first, then emit one short sentence describing the final correct state. ` +
                   `Match the confirmation-template style from the system prompt (e.g. "Coaching Sessions is daily now, every day 2–5pm."). ` +
-                  `Skip preamble, apology, and any reference to the prior turn.`,
+                  `Do not add preamble. Do not add apology. Do not reference the prior turn.\n\n` +
+                  `If on review the prior turn's tool calls were actually correct (the self-check flag was a false positive), do NOT call any correction tool. Output a single sentence in the system prompt's confirmation-template style describing what was done. Do not say "no correction tool available". Do not expose internal field names like \`guestPicks\`, \`recurrence\`, or \`availability\`. Do not explain why the original was correct — just confirm the action.`,
               },
             ],
             tools,

@@ -78,6 +78,7 @@ For each tool call, check: are the key input field VALUES grounded in the user's
 - Reasonable inferences from context are grounded (e.g. "video" format inferred from "video call").
 
 ## SCHEMA NOTES — these are grounded, do NOT flag
+- IDs and codes returned by LOAD_* tools (sessionId, linkCode, rule id, bookable code, etc.) are grounded by definition when they appear in a subsequent tool call. Do NOT flag them as "invented" or "not grounded in the user's message" — they came from tool output, which is a valid grounding source. Only flag IDs/codes that don't match any LOAD result in the conversation.
 - guestPicks.{field}: true is grounded when the user offered multiple options for that field (e.g. "Coupa or Konditori"), said "they decide / their call / wherever works", or named the field as the guest's choice.
 - Generic activity defaults like "meeting", "call", or "sync" are grounded when the user named only the guest with no specific activity (e.g. "grab an hour with Calle").
 - On bookable_link_create, timeStart/timeEnd describe the booking-window during which guests may pick a slot — NOT the session end time. A 60-min session inside a 3–5 PM window correctly uses timeEnd "17:00" (the guest can still start at 3:00, 3:30, or 4:00).
