@@ -52,12 +52,18 @@ export default function Home() {
 
   // Force light theme for the logged-out marketing home. Once the user signs
   // in, ThemePreferenceSync hydrates the server-stored mode and overrides
-  // this. Logged-in users hit the redirect above before this fires.
+  // Apply light theme visually on the marketing home WITHOUT writing to
+  // localStorage. Using setTheme("light") here poisoned localStorage for new
+  // users: after sign-in, next-themes reads the stale "light" value and
+  // ThemePreferenceSync has to fight it with an async correction → flicker.
+  // Direct class manipulation skips the localStorage write entirely so
+  // ThemePreferenceSync gets a clean slate on the dashboard.
   useEffect(() => {
     if (status === "unauthenticated") {
-      setTheme("light");
+      document.documentElement.classList.remove("dark");
+      document.documentElement.classList.add("light");
     }
-  }, [status, setTheme]);
+  }, [status]);
 
   // `mode: "login"` serves both new and returning users. First-timers (no
   // `ae_returning` cookie) see the first-connect trust modal; returning users
