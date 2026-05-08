@@ -2250,18 +2250,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                       </div>
                     )}
                     <div className="whitespace-pre-wrap">{renderMarkdown(msg.content)}</div>
-                    {meetLinkUrl && (meetLinkKind === "bookable" || meetLinkKind === "personal" || meetLinkKind === "group") ? (
-                      <LinkCard
-                        url={meetLinkUrl}
-                        kind={meetLinkKind}
-                        meta={
-                          ((msg.metadata as Record<string, unknown> | null)?.linkCardMeta
-                            ?? (msg.metadata as Record<string, unknown> | null)?.bookableMeta) as
-                            | BookableMeta
-                            | undefined
-                        }
-                      />
-                    ) : meetLinkUrl ? (
+                    {meetLinkUrl && !(meetLinkKind === "bookable" || meetLinkKind === "personal" || meetLinkKind === "group") ? (
                       <MeetLinkCard url={meetLinkUrl} kind={meetLinkKind as "bookable" | "recurring" | undefined} />
                     ) : null}
                   </div>
@@ -2271,6 +2260,18 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     </div>
                   )}
                 </div>
+                {meetLinkUrl && (meetLinkKind === "bookable" || meetLinkKind === "personal" || meetLinkKind === "group") && (
+                  <LinkCard
+                    url={meetLinkUrl}
+                    kind={meetLinkKind}
+                    meta={
+                      ((msg.metadata as Record<string, unknown> | null)?.linkCardMeta
+                        ?? (msg.metadata as Record<string, unknown> | null)?.bookableMeta) as
+                        | BookableMeta
+                        | undefined
+                    }
+                  />
+                )}
                 {!isUser && (
                   <TurnCostOverlay
                     metadata={msg.metadata}
