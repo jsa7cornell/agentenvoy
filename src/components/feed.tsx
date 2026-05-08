@@ -998,10 +998,7 @@ function LinkCard({
       : "";
   const duration = meta?.durationMinutes ? `${meta.durationMinutes} min` : "";
   const format = fmtFormat(meta?.format);
-  // For bookable links with no explicit windows, show "Primary availability" so
-  // the card conveys that the bookable inherits the host's default schedule.
-  const availability = (kind === "bookable" && !days && !timeWindow) ? "Primary availability" : "";
-  const summaryParts = [availability, days, timeWindow, duration, format].filter(Boolean);
+  const summaryParts = [days, timeWindow, duration, format].filter(Boolean);
 
   // guestPicks deferral — ✏️ suffix on deferred fields, 🤔 prose line
   const gp = meta?.guestPicks;
