@@ -548,7 +548,7 @@ function WindowCards({
 }) {
   const [revealMore, setRevealMore] = useState(false);
 
-  if (durationMinutes === 30) {
+  if (durationMinutes <= 30) {
     return (
       <SlotChipRows
         windows={windows}
@@ -1340,7 +1340,7 @@ export function WeekView({
         // DragSlotPicker; Detailed tab there is future work per the unified
         // plan §7.
         const tabsAvailable =
-          !!bilateralPayload?.available && durationMinutes === 30;
+          !!bilateralPayload?.available && durationMinutes <= 30;
         // Per-day match count for the tab pill (Decision 4 / Placement B).
         const dayPayload = bilateralPayload?.byDay.find(
           (d) => d.date === selectedDay,
