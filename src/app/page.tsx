@@ -3,7 +3,6 @@
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { useTheme } from "next-themes";
 import { LogoFull } from "@/components/logo";
 import { TryItChat } from "@/components/tryit-chat";
 import { useOAuthSignIn } from "@/components/oauth/use-oauth-signin";
@@ -42,7 +41,6 @@ function SectionLabel({ children, className = "" }: { children: React.ReactNode;
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const { setTheme } = useTheme();
 
   useEffect(() => {
     if (status === "authenticated") {
