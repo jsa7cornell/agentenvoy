@@ -365,11 +365,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // when bilateralByDay first becomes non-empty, then resets next tick.
   const [justMatched, setJustMatched] = useState(false);
   const prevHadMatchRef = useRef(false);
-  // Sticky "we celebrated this session" — once justMatched fires, this stays
-  // true for the remainder of the page lifecycle so the celebration banner
-  // (which has no close affordance, by design) lingers as the post-match
-  // callout instead of vanishing on the next render tick. Refresh resets.
-  const [hasCelebrated, setHasCelebrated] = useState(false);
 
   // TZ recovery banner state (Slice 7). When someone raced ahead of the human
   // guest — host, MCP agent, or a proxy — the session's guestTimezone ends up
@@ -644,26 +639,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // T4: detect bilateralByDay empty → non-empty transition and fire the
   // MatchPulse one-shot. Reset justMatched immediately so the next render
   // doesn't re-fire the animation.
-  //
-  // Celebration-banner gate (2026-04-29): the banner is for the moment a
-  // guest just returned from OAuth — NOT every revisit where bilateral
-  // matches. Read the sessionStorage flag set by DealRoomConnectCtas's
-  // click handler and consume it once. Without the flag, we still fire
-  // MatchPulse (the subtle ✨ animation) but skip the sticky banner.
   useEffect(() => {
     const hasMatchNow = !!bilateralByDay && Object.keys(bilateralByDay).length > 0;
     if (hasMatchNow && !prevHadMatchRef.current) {
-      let justConnected = false;
-      try {
-        if (typeof window !== "undefined" && window.sessionStorage.getItem("aenv-cal-just-connected") === "1") {
-          window.sessionStorage.removeItem("aenv-cal-just-connected");
-          justConnected = true;
-        }
-      } catch {
-        // ignore — Safari private mode etc.
-      }
       setJustMatched(true);
-      if (justConnected) setHasCelebrated(true);
       const t = setTimeout(() => setJustMatched(false), 50);
       prevHadMatchRef.current = true;
       return () => clearTimeout(t);
