@@ -8,11 +8,12 @@ import {
 } from "@/agent/unified/model-policy";
 
 describe("selectModelForTurn", () => {
-  // v2 policy (cost-reduction PR 2026-05-07):
-  //   short (≤200) + no multi-step + established channel → fast (Haiku)
+  // v2.1 policy (loosened gate 2026-05-07):
+  //   short (≤200) + no multi-step → fast (Haiku) — cold channels included
   //   long (>500) → deep (Opus)
   //   else → default (Sonnet)
-  // Cold channels (priorEnvoyTurnCount < 2) stay on Sonnet regardless.
+  // Grounding-check + self-check cover the load-bearing-create concern that
+  // previously kept cold channels on Sonnet.
 
   // Helper for the established-channel default state.
   const established = { priorEnvoyTurnCount: 5 } as const;
@@ -24,19 +25,20 @@ describe("selectModelForTurn", () => {
     expect(r.reason).toBe("short-no-multistep");
   });
 
-  it("returns default (Sonnet) on cold channels even for short messages", () => {
-    // First-ever turn — no history. "create music lessons link M/T 3-5" is
-    // short but should still get Sonnet's better tool routing.
+  it("returns fast (Haiku) on cold channels for short messages (gate loosened)", () => {
+    // First-ever turn — no history. With grounding-check + self-check covering
+    // load-bearing creates, short cold-channel turns now route to Haiku.
     const r = selectModelForTurn({ messageLength: 50, priorEnvoyTurnCount: 0 });
-    expect(r.tier).toBe("default");
+    expect(r.tier).toBe("fast");
+    expect(r.reason).toBe("short-no-multistep");
   });
 
-  it("returns default (Sonnet) on near-cold channels with only 1 prior envoy turn", () => {
+  it("returns fast (Haiku) on near-cold channels with only 1 prior envoy turn", () => {
     const r = selectModelForTurn({ messageLength: 50, priorEnvoyTurnCount: 1 });
-    expect(r.tier).toBe("default");
+    expect(r.tier).toBe("fast");
   });
 
-  it("returns fast at exactly 2 prior envoy turns (the boundary)", () => {
+  it("returns fast at exactly 2 prior envoy turns", () => {
     const r = selectModelForTurn({ messageLength: 50, priorEnvoyTurnCount: 2 });
     expect(r.tier).toBe("fast");
   });

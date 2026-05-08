@@ -12,6 +12,7 @@ type LoadActiveSessionsResult = {
     activity: string | null;
     createdAt: string;
   }>;
+  overflow: number;
   note: string;
 };
 
@@ -22,13 +23,14 @@ type LoadActiveSessionsResult = {
 export async function loadActiveSessions(
   userId: string,
 ): Promise<LoadActiveSessionsResult> {
+  const where = {
+    hostId: userId,
+    archived: false,
+  };
   const rows = await prisma.negotiationSession.findMany({
-    where: {
-      hostId: userId,
-      archived: false,
-    },
+    where,
     orderBy: { createdAt: "desc" },
-    take: 30,
+    take: 8,
     select: {
       id: true,
       status: true,
@@ -62,8 +64,17 @@ export async function loadActiveSessions(
     };
   });
 
+  const totalActive = await prisma.negotiationSession.count({ where });
+  const overflow = Math.max(0, totalActive - sessions.length);
+
+  const note =
+    overflow > 0
+      ? `${sessions.length} active session(s) returned (${overflow} more older).`
+      : `${sessions.length} active session(s) returned.`;
+
   return {
     sessions,
-    note: `${sessions.length} active session(s) returned.`,
+    overflow,
+    note,
   };
 }

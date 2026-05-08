@@ -28,6 +28,14 @@ export async function loadCalendar({
   try {
     const calendarContext = await getCachedCalendarContext(userId, timezone);
     const eventCount = calendarContext?.events?.length ?? 0;
+    try {
+      const size = JSON.stringify(calendarContext).length;
+      if (size > 12000) {
+        console.warn("[load-calendar] payload size:", size, "bytes — consider trimming");
+      }
+    } catch {
+      // ignore stringify failures (circular refs, etc.) — telemetry only
+    }
     return {
       calendarContext,
       lookaheadDays,

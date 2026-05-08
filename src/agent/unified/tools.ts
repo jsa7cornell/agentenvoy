@@ -222,23 +222,16 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     execute: async (params) => exec("personal_link_update", "update_link", params),
   });
 
-  const personal_link_archive = tool({
+  const personal_link_set_archived = tool({
     description:
-      "Archive a personal link. Reversible via personal_link_unarchive. Requires code or sessionId.",
+      "Set the archived state of a personal link. Pass archived: true to archive (reversible), archived: false to restore. Requires code or sessionId from LOAD_active_sessions.",
     inputSchema: z.object({
       code: z.string().optional().describe("Link short code."),
       sessionId: z.string().optional().describe("Session ID to resolve the link."),
+      archived: z.boolean().describe("true to archive, false to restore."),
     }),
-    execute: async (params) => exec("personal_link_archive", "cancel", params),
-  });
-
-  const personal_link_unarchive = tool({
-    description: "Restore an archived personal link. Requires code or sessionId.",
-    inputSchema: z.object({
-      code: z.string().optional().describe("Link short code."),
-      sessionId: z.string().optional().describe("Session ID to resolve the link."),
-    }),
-    execute: async (params) => exec("personal_link_unarchive", "unarchive", params),
+    execute: async ({ archived, ...rest }) =>
+      exec("personal_link_set_archived", archived ? "cancel" : "unarchive", rest),
   });
 
   // ---------------------------------------------------------------------------
@@ -338,27 +331,18 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     },
   });
 
-  const bookable_link_archive = tool({
+  const bookable_link_set_archived = tool({
     description:
-      "Archive a bookable link. Reversible via bookable_link_unarchive. Requires rule id from LOAD_preferences.",
+      "Set the archived state of a bookable link. Pass archived: true to archive (reversible), archived: false to restore. Requires rule id from LOAD_preferences.",
     inputSchema: z.object({
       id: z.string().describe("Exact rule ID from LOAD_preferences output."),
+      archived: z.boolean().describe("true to archive, false to restore."),
     }),
-    execute: async (params) => exec("bookable_link_archive", "update_availability_rule", {
-      operation: "archive_bookable",
-      id: params.id,
-    }),
-  });
-
-  const bookable_link_unarchive = tool({
-    description: "Restore an archived bookable link. Requires rule id from LOAD_preferences.",
-    inputSchema: z.object({
-      id: z.string().describe("Exact rule ID from LOAD_preferences output."),
-    }),
-    execute: async (params) => exec("bookable_link_unarchive", "update_availability_rule", {
-      operation: "unarchive_bookable",
-      id: params.id,
-    }),
+    execute: async ({ id, archived }) =>
+      exec("bookable_link_set_archived", "update_availability_rule", {
+        operation: archived ? "archive_bookable" : "unarchive_bookable",
+        id,
+      }),
   });
 
   // ---------------------------------------------------------------------------
@@ -412,22 +396,15 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       exec("group_event_update", "update_link", params, { sessionId: params.sessionId }),
   });
 
-  const group_event_archive = tool({
-    description: "Archive a group event. Reversible via group_event_unarchive. Requires sessionId.",
+  const group_event_set_archived = tool({
+    description:
+      "Set the archived state of a group event. Pass archived: true to archive (reversible), archived: false to restore. Requires sessionId.",
     inputSchema: z.object({
       sessionId: z.string(),
+      archived: z.boolean().describe("true to archive, false to restore."),
     }),
-    execute: async (params) =>
-      exec("group_event_archive", "cancel", params, { sessionId: params.sessionId }),
-  });
-
-  const group_event_unarchive = tool({
-    description: "Restore an archived group event. Requires sessionId.",
-    inputSchema: z.object({
-      sessionId: z.string(),
-    }),
-    execute: async (params) =>
-      exec("group_event_unarchive", "unarchive", params, { sessionId: params.sessionId }),
+    execute: async ({ sessionId, archived }) =>
+      exec("group_event_set_archived", archived ? "cancel" : "unarchive", { sessionId }, { sessionId }),
   });
 
   const group_event_set_candidate_dates = tool({
@@ -501,22 +478,16 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       exec("session_cancel", "cancel", params, { sessionId: params.sessionId }),
   });
 
-  const session_archive = tool({
-    description: "Archive a session (reversible via session_unarchive). Requires sessionId.",
+  const session_set_archived = tool({
+    description:
+      "Set the archived state of a session. Pass archived: true to archive (reversible), archived: false to restore. " +
+      "Distinct from session_cancel — archive removes from default views; cancel notifies the guest and is irreversible.",
     inputSchema: z.object({
-      sessionId: z.string().describe("ID of the session to archive."),
+      sessionId: z.string().describe("ID of the session."),
+      archived: z.boolean().describe("true to archive, false to restore."),
     }),
-    execute: async (params) =>
-      exec("session_archive", "archive", params, { sessionId: params.sessionId }),
-  });
-
-  const session_unarchive = tool({
-    description: "Restore an archived session. Requires sessionId.",
-    inputSchema: z.object({
-      sessionId: z.string().describe("ID of the session to unarchive."),
-    }),
-    execute: async (params) =>
-      exec("session_unarchive", "unarchive", params, { sessionId: params.sessionId }),
+    execute: async ({ sessionId, archived }) =>
+      exec("session_set_archived", archived ? "archive" : "unarchive", { sessionId }, { sessionId }),
   });
 
   const session_archive_bulk = tool({
@@ -757,25 +728,21 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     // Personal links
     personal_link_create,
     personal_link_update,
-    personal_link_archive,
-    personal_link_unarchive,
+    personal_link_set_archived,
     // Bookable links
     bookable_link_create,
     bookable_link_update,
-    bookable_link_archive,
-    bookable_link_unarchive,
+    bookable_link_set_archived,
     // Group events
     group_event_create,
     group_event_update,
-    group_event_archive,
-    group_event_unarchive,
+    group_event_set_archived,
     group_event_set_candidate_dates,
     // Primary link
     primary_link_update,
     // Sessions
     session_cancel,
-    session_archive,
-    session_unarchive,
+    session_set_archived,
     session_archive_bulk,
     session_update_format,
     session_update_time,
