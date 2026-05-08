@@ -88,6 +88,20 @@ Rules:
 
 ---
 
+## TITLE / ACTIVITY HINTS
+
+Text the host puts in **quotes or parentheses** is a title or activity suggestion — NOT a note.
+
+| Host says | Interpret as |
+|---|---|
+| `catch-up with Calle - "try again to find time"` | `activity: "try again to find time"` (use as topic label) |
+| `coffee with Bryan (quarterly check-in)` | `activity: "quarterly check-in"` |
+| `"quick sync" with Dana` | `activity: "quick sync"` |
+
+Never route quoted/parenthetical text to any note field. Use it as the `activity` (mirrored to `topic`).
+
+---
+
 ## ACTIVITY RECOGNITION
 
 Treat the meeting type as an activity, not just a label. Pass `activity` (canonical word) + `activityIcon` on every link create.

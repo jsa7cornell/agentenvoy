@@ -152,8 +152,6 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         .describe("Guest's email address. REQUIRED for autoConfirm."),
       inviteeTimezone: z.string().optional()
         .describe("Guest's IANA timezone if host mentioned it (e.g. 'America/New_York')."),
-      hostNote: z.string().max(280).optional()
-        .describe("Host context surfaced to the guest in the greeting (no URLs/emails/phones, max 280 chars)."),
       seedFromBookableCode: z.string().optional()
         .describe("Code of a bookable link to use as the canvas seed (host named it explicitly). Omit to use Primary."),
       recurrence: recurrenceSchema.optional()
@@ -198,7 +196,6 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       inviteeName: z.string().nullable().optional(),
       inviteeEmail: z.string().email().nullable().optional(),
       inviteeTimezone: z.string().nullable().optional(),
-      hostNote: z.string().max(280).nullable().optional(),
       guestPicks: guestPicksFullSchema.optional(),
       recurrence: recurrenceSchema.nullable().optional()
         .describe("Set to update the recurrence pattern; null to clear."),
