@@ -18,6 +18,7 @@ import { loadCalendar } from "./tool-impls/load-calendar";
 import { loadActiveSessions } from "./tool-impls/load-active-sessions";
 import { loadPreferences } from "./tool-impls/load-preferences";
 import { execAction, type ToolContext } from "./tool-impls/_exec";
+import type { ActionResult } from "@/agent/actions";
 
 export type AgentToolContext = {
   userId: string;
@@ -84,13 +85,31 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     userMessage: ctx.userMessage,
   };
 
+  // Per-request seen-call set. Guards against the model issuing the same write
+  // tool with identical params twice in one turn (observed prod failure shape:
+  // duplicate bookable_link_create on a single user request). LOAD_* tools call
+  // their own impls directly and bypass this — read-only, dedup not needed.
+  const seenCalls = new Set<string>();
+
   // Curried helper so each tool can pass its own name to the grounding check.
-  const exec = (
+  const exec = async (
     toolName: string,
     action: string,
     params: Record<string, unknown>,
     overrideCtx?: Partial<ToolContext>,
-  ) => execAction(action, params, { ...toolCtx, ...overrideCtx }, toolName);
+  ): Promise<ActionResult> => {
+    const key = `${toolName}:${action}:${JSON.stringify(params)}`;
+    if (seenCalls.has(key)) {
+      return {
+        success: false,
+        message:
+          `Duplicate call: ${toolName} was already executed this turn with these exact parameters. ` +
+          `The prior call's result is the source of truth — do not retry. If you intended a different action, change the parameters.`,
+      };
+    }
+    seenCalls.add(key);
+    return execAction(action, params, { ...toolCtx, ...overrideCtx }, toolName);
+  };
 
   // ---------------------------------------------------------------------------
   // LOAD tools — read-only, no side effects

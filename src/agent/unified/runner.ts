@@ -9,7 +9,7 @@
  *   {"type":"text","content":"..."}                        — final envoy text
  */
 
-import { streamText, stepCountIs } from "ai";
+import { streamText, stepCountIs, type ModelMessage } from "ai";
 import { prisma } from "@/lib/prisma";
 import { envoyModel } from "@/lib/model";
 import { narrateFinalizeError } from "@/agent/action-narration";
@@ -105,6 +105,15 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         // 1024-token budget (~$0.015/turn extra at Sonnet output rates).
         const thinkingEnabled = process.env.UA_THINKING_DISABLED !== "true";
         const startMs = Date.now();
+        // Two cache breakpoints:
+        //   1) tools + system prompt (always-stable prefix; written on first turn
+        //      of a conversation, read on every subsequent turn within 5-min TTL).
+        //   2) the most recent message in history (slides forward each turn).
+        //      Anthropic does longest-prefix matching across breakpoints, so the
+        //      conversation prefix accumulates cache hits turn-over-turn instead
+        //      of replaying uncached. On a 5-turn conversation this drops input
+        //      cost ~30-50% beyond the system-only baseline.
+        const cachedHistory = withTrailingCacheBreakpoint(recentMessages);
         const result = streamText({
           model: envoyModel(modelSelection.modelId),
           messages: [
@@ -115,7 +124,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
                 anthropic: { cacheControl: { type: "ephemeral" } },
               },
             },
-            ...recentMessages,
+            ...cachedHistory,
             { role: "user", content: ctx.message },
           ],
           tools,
@@ -210,31 +219,18 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
                   anthropic: { cacheControl: { type: "ephemeral" } },
                 },
               },
-              ...recentMessages,
+              ...withTrailingCacheBreakpoint(recentMessages),
               { role: "user", content: ctx.message },
               { role: "assistant", content: fullText },
               {
                 role: "user",
                 content:
-                  `[INTERNAL — self-check flagged your prior response]\n` +
+                  `[INTERNAL — self-check flagged your prior turn]\n` +
                   `Flagged: ${(selfCheckResult.flaggedTools ?? []).join(", ") || "(unspecified)"}\n` +
                   `Reason: ${selfCheckResult.reason ?? "(unspecified)"}\n\n` +
-                  `STRICT OUTPUT RULES (violating any of these is a failure):\n` +
-                  `1. Call the right correction tool (update / archive / etc.) FIRST, then emit text.\n` +
-                  `2. Output exactly ONE sentence of text. No more.\n` +
-                  `3. Do NOT start with "Let me…", "I'll…", "Fixing…", "Let me check…", or any preamble.\n` +
-                  `4. Do NOT explain what was wrong. Do NOT name the bad value, the field, or the prior pattern. Do NOT use code/markdown/backticks.\n` +
-                  `5. Do NOT apologize. Do NOT say "I made a mistake" or "sorry".\n` +
-                  `6. The sentence describes the FINAL CORRECT STATE only — e.g. "Coaching Sessions is now daily, every day 2–5pm." Nothing about the fix journey.\n` +
-                  `7. If the issue is purely narrative (no bad write to update), just emit one corrected sentence.\n\n` +
-                  `Examples of CORRECT remediation output:\n` +
-                  `- "Coaching Sessions is daily now, every day 2–5pm."\n` +
-                  `- "Updated Susie's link to 45 minutes."\n` +
-                  `- "Founder Dinner now covers May 11–24."\n\n` +
-                  `Examples of WRONG output (do NOT do these):\n` +
-                  `- "Let me check what was actually created so I can fix it. The link has recurrence.pattern: 'weekly'..." (preamble + exposes internals)\n` +
-                  `- "I made a mistake — the pattern should be daily, not weekly. Fixing now." (apology + explanation)\n` +
-                  `- "Fixing the recurrence to daily." (preamble word "Fixing")\n`,
+                  `Call the correction tool first, then emit one short sentence describing the final correct state. ` +
+                  `Match the confirmation-template style from the system prompt (e.g. "Coaching Sessions is daily now, every day 2–5pm."). ` +
+                  `Skip preamble, apology, and any reference to the prior turn.`,
               },
             ],
             tools,
@@ -406,6 +402,29 @@ const TOOL_STATUS_COPY: Record<string, string> = {
 
 function emitText(enqueue: EnqueueFn, content: string): void {
   enqueue(JSON.stringify({ type: "text", content }) + "\n");
+}
+
+/**
+ * Mark the LAST message in a history array with an Anthropic ephemeral cache
+ * breakpoint. Anthropic does longest-prefix matching across breakpoints, so this
+ * lets the conversation prefix (tools + system + everything-up-to-here) accumulate
+ * cache hits turn-over-turn within the 5-min TTL.
+ *
+ * No-op on empty arrays.
+ */
+function withTrailingCacheBreakpoint(
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+): ModelMessage[] {
+  if (messages.length === 0) return messages as ModelMessage[];
+  const lastIdx = messages.length - 1;
+  const cacheOpts = { anthropic: { cacheControl: { type: "ephemeral" as const } } };
+  return messages.map((m, i): ModelMessage =>
+    i === lastIdx
+      ? m.role === "user"
+        ? { role: "user", content: m.content, providerOptions: cacheOpts }
+        : { role: "assistant", content: m.content, providerOptions: cacheOpts }
+      : m,
+  );
 }
 
 async function loadRecentHistory(

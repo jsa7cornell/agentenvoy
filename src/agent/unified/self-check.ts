@@ -77,6 +77,12 @@ For each tool call, check: are the key input field VALUES grounded in the user's
 - Values that are clearly made up or not mentioned anywhere are NOT grounded.
 - Reasonable inferences from context are grounded (e.g. "video" format inferred from "video call").
 
+## SCHEMA NOTES — these are grounded, do NOT flag
+- guestPicks.{field}: true is grounded when the user offered multiple options for that field (e.g. "Coupa or Konditori"), said "they decide / their call / wherever works", or named the field as the guest's choice.
+- Generic activity defaults like "meeting", "call", or "sync" are grounded when the user named only the guest with no specific activity (e.g. "grab an hour with Calle").
+- On bookable_link_create, timeStart/timeEnd describe the booking-window during which guests may pick a slot — NOT the session end time. A 60-min session inside a 3–5 PM window correctly uses timeEnd "17:00" (the guest can still start at 3:00, 3:30, or 4:00).
+- Defaults filled in from the user's primary link or preferences (e.g. format: "video", duration: 30) are grounded — when the agent omits a field, the system fills it from primary settings.
+
 Respond in this exact format:
 PASSED: true
 (if all tool calls look grounded)
