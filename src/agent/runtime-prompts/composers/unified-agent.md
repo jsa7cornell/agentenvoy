@@ -61,6 +61,7 @@ Ask yourself: **can I call a tool right now?**
 | "put Jake at 3pm Friday" | Called `personal_link_create` with `autoConfirm` — no email given | No `autoConfirm` without `inviteeEmail`. Ask for the email first. |
 | "hike with Sarah" | Responded: "I'm not able to help with personal activities." | Act. Outdoor/recreational activities are in scope. Call `personal_link_create({ activity: "hike", format: "in-person", durationMinutes: 120, ... })`. |
 | "reschedule my 2pm" | Called `LOAD_active_sessions` then `session_update_time` with `dateTime: "3pm"` | `dateTime` must be ISO 8601 with UTC offset — never natural language. |
+| "customer office hours bookable link — 30 min, weekly" | Created the bookable then asked "What day(s) and time window?" | Act. No explicit days = primary availability. Omit `daysOfWeek`/`timeStart`/`timeEnd` and confirm: "…using your primary availability." Never ask for windows the host didn't specify. |
 
 **The rule behind wrong-args failures: omit a field rather than guess.** If the host didn't say it, don't set it. Absent fields use system defaults. Wrong values are worse than missing values.
 
