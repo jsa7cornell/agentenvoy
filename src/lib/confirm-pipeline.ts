@@ -966,7 +966,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       data: {
         sessionId,
         role: "administrator",
-        content: `Great — you're confirmed for ${confirmSummary}. Details are above. ✓`,
+        content: `🎉 You're all set! Your ${confirmSummary} is on the calendar. We'll see you then!`,
       },
       select: { id: true },
     });

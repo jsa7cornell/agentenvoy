@@ -2437,7 +2437,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               )}
             </div>
           )}
-          {hasCelebrated && !isHost && !confirmed && bilateralByDay && (() => {
+          {!isHost && !confirmed && bilateralByDay && (() => {
             // Find the first day with a "both free" chip to anchor the headline.
             const days = Object.keys(bilateralByDay).sort();
             const firstMatchDay = days.find((d) =>
@@ -2453,6 +2453,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   day: "numeric",
                 })
               : undefined;
+            if (matchCount === 0) return null;
             return <CelebrationBanner matchCount={matchCount} firstMatchDayLabel={dayLabel} />;
           })()}
           <MatchPulse
