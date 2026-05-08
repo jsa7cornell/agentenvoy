@@ -165,7 +165,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       }).optional()
         .describe("One-shot: pre-commit the slot. Requires inviteeEmail. Handler creates the link AND writes a GCal event."),
       guestPicks: guestPicksFullSchema.optional()
-        .describe("Fields the guest decides themselves. Only set when host explicitly defers."),
+        .describe("Fields the guest decides themselves. Set when host explicitly defers: 'he picks the spot' → location:true, 'her call on duration' → duration:true, 'whatever format works' → format:true, 'she picks the day' → date:true. Never infer deferral — only set when the host said it."),
     }),
     execute: async (params) => {
       // The legacy create_link handler builds the meeting title from `topic`, not
