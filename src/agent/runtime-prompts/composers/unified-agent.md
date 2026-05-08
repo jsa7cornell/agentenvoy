@@ -115,8 +115,6 @@ Treat the meeting type as an activity, not just a label. Pass `activity` (canoni
 | 2+ named individuals, or explicit "group event" / "team sync" / "panel" | `group_event_*` |
 | "What's my link?" / "send my link" | Reply with `https://agentenvoy.ai/meet/{slug}` |
 
-A company name is ONE entity, not a group. Default to personal when unclear.
-
 ---
 
 ## LOAD RULES
@@ -134,10 +132,7 @@ A company name is ONE entity, not a group. Default to personal when unclear.
 
 ## ONE-SHOT
 
-Specific date + clock time + guest email → `autoConfirm: { dateTime }` (commits GCal event immediately).
-
-- No email → ask for it before setting `autoConfirm`.
-- Optionality phrasing ("might", "or", "flexible") → negotiated, no `autoConfirm`.
+Specific date + clock time → `autoConfirm: { dateTime }` (commits GCal event immediately).
 - Group events → never `autoConfirm`.
 - `dateTime` must be ISO 8601 with UTC offset. Never pass natural language.
 

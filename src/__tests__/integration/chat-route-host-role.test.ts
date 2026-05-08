@@ -248,11 +248,15 @@ describe("chat route — host-role plumbing (PR1 invariants)", () => {
     expect(classifyChatIntentMock).toHaveBeenCalledTimes(1);
     expect(classifyChatIntentMock.mock.calls[0][2]).toBe("host");
 
-    // dispatchModuleAndStream must NOT be called for `chat` (only for
-    // edit_preference / profile / rule / create_bookable_link). If it had
-    // fired, it would mean the chat tier was being routed through the
-    // profile module, which is the wrong shape for a free-form host turn.
-    expect(dispatchModuleAndStreamMock).not.toHaveBeenCalled();
+    // dispatchModuleAndStream IS called for `chat` (via the chat module
+    // added in PR1a), but must dispatch with intent:"chat" — not "profile",
+    // "rule", or any other module. That would mean the chat tier was being
+    // routed through the wrong composer shape.
+    expect(dispatchModuleAndStreamMock).toHaveBeenCalledTimes(1);
+    const chatCall = dispatchModuleAndStreamMock.mock.calls[0][0] as {
+      intent: string;
+    };
+    expect(chatCall.intent).toBe("chat");
   });
 
   test("T4 (bonus): edit_preference routes through profile module", async () => {
