@@ -2153,6 +2153,10 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                       : 0
                   }
                 />
+                <TurnCostOverlay
+                  metadata={msg.metadata}
+                  isAdmin={isAdmin}
+                />
                 <div className="flex justify-end">
                   <ThumbsDownFeedback
                     sessionId={msg.thread.id}
