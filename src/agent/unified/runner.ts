@@ -93,16 +93,14 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         // every turn's static prefix (system + tool definitions) hits the
         // cache. 5-min TTL; cache write on first turn, reads ~10x cheaper.
         //
-        // Extended thinking (Rank 1 from proposal 2026-05-07_unified-agent-
-        // model-selection-research): captures the model's reasoning trace into
-        // metadata so we can see WHY it made each decision (e.g., why it
-        // asked for clarification instead of calling a tool). Anthropic also
-        // reports thinking-mode improves rule adherence on long instruction
-        // stacks — so this doubles as a partial fix.
+        // Extended thinking — adaptive mode (Anthropic's recommended config
+        // on Sonnet 4.6+; the older fixed `budgetTokens` API is deprecated).
+        // Lets the model decide whether and how long to think per turn —
+        // policy-heavy turns get more, simple acks get none. Reasoning trace
+        // is still captured to metadata.unifiedTurn.reasoningTrace
+        // (admin-only diagnostic, not streamed to the client).
         //
-        // Disable in env (UA_THINKING_DISABLED=true) if cost overhead is
-        // prohibitive after the diagnostic period. Default: enabled with
-        // 1024-token budget (~$0.015/turn extra at Sonnet output rates).
+        // Disable via UA_THINKING_DISABLED=true env if needed.
         const thinkingEnabled = process.env.UA_THINKING_DISABLED !== "true";
         const startMs = Date.now();
         // Two cache breakpoints:
@@ -132,7 +130,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           providerOptions: thinkingEnabled
             ? {
                 anthropic: {
-                  thinking: { type: "enabled", budgetTokens: 1024 },
+                  thinking: { type: "adaptive" },
                 },
               }
             : undefined,
