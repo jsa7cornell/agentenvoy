@@ -235,6 +235,7 @@ export interface UserPreferences {
     videoProvider?: "google-meet" | "zoom";
     zoomLink?: string;
     defaultDuration?: number;
+    format?: "video" | "phone" | "in-person";
     /** Per-event protection overrides set by the host from the availability view. */
     eventProtectionOverrides?: EventProtectionOverride[];
     /** Display name for the host's default /meet/{slug} link in the "My links"

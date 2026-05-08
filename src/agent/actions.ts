@@ -1659,12 +1659,14 @@ async function handleUpdateMeetingSettings(
   const videoProvider = params.videoProvider as "google-meet" | "zoom" | undefined;
   const zoomLink = params.zoomLink as string | undefined;
   const defaultDuration = params.defaultDuration as number | undefined;
+  const defaultFormat = params.defaultFormat as "video" | "phone" | "in-person" | undefined;
 
   if (
     phone === undefined &&
     videoProvider === undefined &&
     zoomLink === undefined &&
-    defaultDuration === undefined
+    defaultDuration === undefined &&
+    defaultFormat === undefined
   ) {
     return { success: false, message: "No meeting settings to update" };
   }
@@ -1696,6 +1698,10 @@ async function handleUpdateMeetingSettings(
   if (defaultDuration !== undefined) {
     prefs = writeProfileField(prefs, "defaultDuration", defaultDuration || 30);
     changed.push(`default duration: ${defaultDuration} min`);
+  }
+  if (defaultFormat !== undefined) {
+    prefs = writeProfileField(prefs, "format", defaultFormat);
+    changed.push(`default format: ${defaultFormat}`);
   }
 
   await prisma.user.update({

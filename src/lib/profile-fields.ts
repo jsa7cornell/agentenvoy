@@ -33,6 +33,7 @@ export type ProfileFieldKey =
   | "videoProvider"
   | "zoomLink"
   | "defaultDuration"
+  | "format"
   | "timezone"
   | "themeMode";
 
