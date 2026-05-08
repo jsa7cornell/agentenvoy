@@ -256,7 +256,21 @@ async function handleGetMyAvailabilityTool(
     };
   });
 
-  return ok({ timezone: displayTz, slots: wireSlots });
+  const dateFmtHost = new Intl.DateTimeFormat("en-CA", {
+    timeZone: hostTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const slotsThrough =
+    slots.length > 0
+      ? slots.reduce((latest, s) => {
+          const d = dateFmtHost.format(new Date(s.start));
+          return d > latest ? d : latest;
+        }, "0000-00-00")
+      : null;
+
+  return ok({ timezone: displayTz, slots: wireSlots, slotsThrough });
 }
 
 // ---------------------------------------------------------------------------

@@ -312,6 +312,12 @@ export const getAvailabilityOutput = z.discriminatedUnion("ok", [
        * (or older clients) keep working. Town agent feedback #4 fold.
        */
       rules: rulesPassthroughSchema.optional(),
+      /**
+       * Present when slots is empty. Tells the agent what to do next rather
+       * than leaving it at a dead end — typically instructs it to contact the
+       * host directly via post_message.
+       */
+      hint: z.string().optional(),
     })
     .strict(),
   refusal(authRefusalReasonSchema),
@@ -741,7 +747,8 @@ export const MCP_TOOLS = {
   get_availability: {
     input: getAvailabilityInput,
     output: getAvailabilityOutput,
-    description: "Read the host's scored, filtered slot list.",
+    description:
+      "Read the host's scored, filtered slot list. Pass busyWindows (UTC start/end pairs from your own calendar) to get back only mutually open times. Response includes slotsThrough (furthest date the host offered time) — if slots is empty, the host didn't offer time in this window; use post_message to contact them directly.",
   },
   get_session_status: {
     input: getSessionStatusInput,

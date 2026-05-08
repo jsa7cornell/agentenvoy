@@ -187,6 +187,11 @@ export const getMyAvailabilityOutput = z.discriminatedUnion("ok", [
       ok: z.literal(true),
       timezone: z.string(),
       slots: z.array(availabilitySlotSchema),
+      /**
+       * The latest date offered, YYYY-MM-DD in host timezone.
+       * "Host didn't offer time after this date." Null when no slots returned.
+       */
+      slotsThrough: z.iso.date().nullable().optional(),
     })
     .strict(),
   z

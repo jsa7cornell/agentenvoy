@@ -257,7 +257,7 @@ export async function handleGetAvailability(
   // Load the host's preferences for tz + structuredRules (office hours).
   const host = await prisma.user.findUnique({
     where: { id: link.userId },
-    select: { preferences: true },
+    select: { preferences: true, name: true },
   });
   const prefs = (host?.preferences ?? {}) as Record<string, unknown>;
   const timezone = getUserTimezone(prefs);
@@ -289,8 +289,9 @@ export async function handleGetAvailability(
 
   // Pull the host's scored schedule, using link-level posture for variance links.
   const schedule = await getOrComputeSchedule(link.userId, { link });
+  const hostName = host?.name ?? "the host";
   if (!schedule.connected) {
-    return asCallResult({ ok: true, timezone, slots: [], parameters, rules: rulesPassthrough });
+    return asCallResult({ ok: true, timezone, slots: [], slotsThrough: null, parameters, rules: rulesPassthrough, hint: `No times are currently available. Use post_message to contact ${hostName} directly and request a time.` });
   }
 
   // Event-level overrides from link rules (dateRange, preferredDays, etc).
@@ -485,6 +486,9 @@ export async function handleGetAvailability(
     slotsThrough,
     parameters,
     rules: rulesPassthrough,
+    ...(wireSlots.length === 0
+      ? { hint: `${hostName} didn't offer any times in this window. Use post_message to contact them directly and request a time.` }
+      : {}),
   });
 }
 
