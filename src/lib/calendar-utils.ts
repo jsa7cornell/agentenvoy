@@ -118,6 +118,13 @@ export function layoutEvents<T extends { start: string; end: string }>(
     }
   }
 
-  const totalCols = columns.length;
-  return result.map((e) => ({ ...e, totalCols }));
+  // Per-event totalCols: each event only shares width with the events it
+  // actually overlaps, so non-overlapping events render full-width.
+  return result.map((ev) => {
+    const peers = result.filter(
+      (other) => other.startMin < ev.endMin && other.endMin > ev.startMin
+    );
+    const localCols = Math.max(...peers.map((p) => p.col)) + 1;
+    return { ...ev, totalCols: localCols };
+  });
 }
