@@ -264,6 +264,20 @@ export const getAvailabilityInput = z
      * broken by earliest start). Stabilization-package §3 Group C; recon #5.
      */
     limit: z.number().int().min(1).max(200).optional().default(20),
+    /**
+     * Guest agent's own busy windows. UTC ISO datetime pairs. Slots that
+     * overlap any window are excluded from the returned set so the caller
+     * gets a pre-filtered list without a local subtract step.
+     * Max 500 entries — a full day of 30-min blocks on a 90-day horizon.
+     */
+    busyWindows: z
+      .array(
+        z
+          .object({ start: z.iso.datetime(), end: z.iso.datetime() })
+          .strict()
+      )
+      .max(500)
+      .optional(),
   })
   .strict();
 
@@ -273,6 +287,13 @@ export const getAvailabilityOutput = z.discriminatedUnion("ok", [
       ok: z.literal(true),
       timezone: z.string(),
       slots: z.array(availabilitySlotSchema),
+      /**
+       * The latest date John offered time through, in YYYY-MM-DD format
+       * (host timezone). Tells agents "John didn't offer time after this
+       * date" — the distinction between offered and available is intentional.
+       * Null when the slot set is empty (nothing was offered at all).
+       */
+      slotsThrough: z.iso.date().nullable().optional(),
       /**
        * Resolved parameter envelope (format / duration / location / topic /
        * timezone) — same shape get_meeting_parameters returns at top level.

@@ -399,6 +399,36 @@ export async function handleGetAvailability(
     });
   }
 
+  // Guest-supplied busy windows — subtract before sort/limit so the
+  // caller gets a pre-filtered list without a local subtract step.
+  if (args.busyWindows?.length) {
+    const busy = args.busyWindows.map((w) => ({
+      start: new Date(w.start).getTime(),
+      end: new Date(w.end).getTime(),
+    }));
+    slots = slots.filter((s) => {
+      const sStart = new Date(s.start).getTime();
+      const sEnd = new Date(s.end).getTime();
+      return !busy.some((w) => sStart < w.end && sEnd > w.start);
+    });
+  }
+
+  // Compute slotsThrough before the limit truncation — it reflects the
+  // furthest date offered, not just the furthest slot returned.
+  const dateFmtHost = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const slotsThrough =
+    slots.length > 0
+      ? slots.reduce((latest, s) => {
+          const d = dateFmtHost.format(new Date(s.start));
+          return d > latest ? d : latest;
+        }, "0000-00-00")
+      : null;
+
   // Sort best-first (lowest score, ties broken by earliest start) BEFORE
   // applying limit, so the truncated set is the most-preferred slots not
   // an arbitrary chronological prefix.
@@ -452,6 +482,7 @@ export async function handleGetAvailability(
     ok: true,
     timezone: args.timezone ?? timezone,
     slots: wireSlots,
+    slotsThrough,
     parameters,
     rules: rulesPassthrough,
   });

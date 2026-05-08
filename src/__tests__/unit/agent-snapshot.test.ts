@@ -192,6 +192,7 @@ describe("AgentSnapshot type — TS contract", () => {
       parameters: {} as never,
       rules: {},
       slots: [],
+      slotsThrough: null,
       booking: {
         endpoint: "https://test/api/mcp",
         method: "POST",

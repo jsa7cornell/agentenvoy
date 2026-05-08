@@ -73,6 +73,12 @@ export type AgentSnapshot = {
   /** Same shape as get_availability.slots. Best-first, capped at limit. */
   slots: WireSlot[];
   /**
+   * The latest date offered, YYYY-MM-DD in host timezone.
+   * "John didn't offer time after this date" — distinct from actual
+   * calendar availability. Null when no slots are offered at all.
+   */
+  slotsThrough: string | null;
+  /**
    * Reserved for bilateral availability (when a guest agent provides
    * its principal's busy times). Omitted in v1; populated when the
    * separate bilateral proposal lands. Per N4 review fold — reserving
@@ -194,7 +200,7 @@ export async function buildAgentSnapshot(
 
   const recurrence = readRecurrence(link.recurrence);
 
-  const baseSnapshot: Omit<AgentSnapshot, "slots"> = {
+  const baseSnapshot: Omit<AgentSnapshot, "slots" | "slotsThrough"> = {
     schemaVersion: "2026-04-30",
     meetingUrl,
     host: { name: hostUser.name, timezone },
@@ -207,7 +213,7 @@ export async function buildAgentSnapshot(
   // Pull the host's global scored schedule.
   const schedule = await getOrComputeSchedule(link.userId);
   if (!schedule.connected) {
-    return { ...baseSnapshot, slots: [] };
+    return { ...baseSnapshot, slots: [], slotsThrough: null };
   }
 
   // The slot pipeline mirrors `tools.ts handleGetAvailability`. Per the
@@ -313,6 +319,22 @@ export async function buildAgentSnapshot(
     });
   }
 
+  // Compute slotsThrough before the limit truncation — reflects the
+  // furthest date offered, not just the furthest slot returned.
+  const dateFmtHost = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const slotsThrough =
+    slots.length > 0
+      ? slots.reduce((latest, s) => {
+          const d = dateFmtHost.format(new Date(s.start));
+          return d > latest ? d : latest;
+        }, "0000-00-00")
+      : null;
+
   // Sort best-first, then cap.
   slots.sort((a, b) => {
     if (a.score !== b.score) return a.score - b.score;
@@ -355,5 +377,5 @@ export async function buildAgentSnapshot(
     };
   });
 
-  return { ...baseSnapshot, slots: wireSlots };
+  return { ...baseSnapshot, slots: wireSlots, slotsThrough };
 }
