@@ -2621,6 +2621,171 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       </div>
     ) : null;
 
+  // ── New-card picker + confirm slots (2026-05-10) ──────────────────────────
+  // The legacy renderPickerBubble wraps the AvailabilityCalendar in a
+  // chat-style bubble (max-w-[85%], bg-surface-secondary) meant for the
+  // legacy chat column. Inside the new MeetingCardProposalView's centered
+  // max-w-[540px] frame that wrapper made the picker (a) cramped/off-center,
+  // and — more critically — left the confirm-card form (name/email/phone
+  // needed to actually book) unrendered because it lives separately in the
+  // legacy render tree below. These two slots render the SAME picker +
+  // confirm primitives in a wrapper-free shape suitable for the new card.
+  const newCardPickerNode: React.ReactNode =
+    !confirmed && !isHost && slotsByDay && Object.keys(slotsByDay).length > 0 ? (
+      <div className="bg-white">
+        <AvailabilityCalendar
+          view="week"
+          schedulingMode={schedulingMode}
+          slotsByDay={slotsByDay}
+          timezone={slotTimezone}
+          currentLocation={slotLocation}
+          duration={slotDuration}
+          minDuration={slotMinDuration}
+          onSelectSlot={schedulingMode === "time" ? (_msg, slot) => {
+            if (slot) proposeFromSlot(slot);
+          } : undefined}
+          onSelectDate={schedulingMode === "date" ? handleSelectDate : undefined}
+          onTimezoneClick={() => {
+            setInput("I’m actually in a different timezone — ");
+            document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+          }}
+          bilateralByDay={bilateralByDay}
+          bilateralPayload={bilateralPayload}
+          hostFirstName={hostName ? resolveHostFirstName({ name: hostName }) : undefined}
+          eventTitle={(() => {
+            const hostFirst = hostName ? hostName.split(" ")[0] : "";
+            const inviteeFirst = inviteeName ? inviteeName.split(" ")[0] : "";
+            if (linkActivity && inviteeFirst) return `${linkActivity} with ${inviteeFirst}`;
+            if (linkActivity && hostFirst) return `${linkActivity} with ${hostFirst}`;
+            if (linkActivity) return linkActivity;
+            return getEventTitle();
+          })()}
+        />
+      </div>
+    ) : null;
+
+  // Confirm-card slot — renders the name/email/phone form so the guest can
+  // actually book the slot they just picked. Mirrors the legacy render at
+  // line ~3111 but without the chat-bubble (max-w-[85%], dark theme) wrapper.
+  // Shown only when there's something to confirm and we're a guest.
+  const newCardConfirmNode: React.ReactNode = (() => {
+    if (confirmed || isHost || !latestProposal) return null;
+    if (dealRoomMode === "offer" && !confirmFormExpanded) return null;
+    const effective = latestProposal;
+    const dt = new Date(effective.dateTime);
+    const inPast = dt.getTime() <= Date.now();
+    const nameOk = formGuestName.trim().length > 0;
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formGuestEmail.trim());
+    const canSubmit = !inPast && nameOk && emailOk;
+    const clickConfirmButton = () => {
+      if (!canSubmit) return;
+      handleConfirm(
+        { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effective.location },
+        { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), guestNote: [formGuestPhone.trim() ? `Phone: ${formGuestPhone.trim()}` : null, formGuestNote.trim() || null].filter(Boolean).join("\n") || undefined }
+      );
+    };
+    const metaParts = [
+      `\u{1F4C5} ${dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: slotTimezone })}`,
+      `\u{1F550} ${dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: slotTimezone })} · ${formatDuration(effective.duration)}`,
+      `${getMeetingEmoji(effective.format, null) || "\u{1F550}"} ${effective.format.charAt(0).toUpperCase() + effective.format.slice(1)}`,
+      ...(effective.location ? [`\u{1F4CD} ${effective.location}`] : []),
+    ];
+    return (
+      <div className={`rounded-2xl border border-emerald-300 bg-emerald-50 px-4 pt-3 pb-4 space-y-2 ${pendingProposal ? "pick-pulse-once" : ""}`}>
+        <div className="flex items-baseline gap-1.5 flex-wrap">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 shrink-0">
+            {pendingProposal ? "Your Pick:" : "Proposed Meeting:"}
+          </span>
+          <span className="text-xs text-zinc-600">{metaParts.join("  ·  ")}</span>
+        </div>
+        {inPast && (
+          <p className="text-xs text-amber-700">This time is in the past. Pick another from the calendar.</p>
+        )}
+        <div className="pt-2 border-t border-emerald-200 space-y-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">Name</label>
+              <input
+                type="text"
+                value={formGuestName}
+                onChange={(e) => setFormGuestName(e.target.value)}
+                autoComplete="name"
+                className="w-full px-2.5 py-1.5 bg-white border border-emerald-200 rounded-md text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500"
+                placeholder="Jane Doe"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">Email</label>
+              <input
+                type="email"
+                value={formGuestEmail}
+                onChange={(e) => setFormGuestEmail(e.target.value)}
+                autoComplete="email"
+                className="w-full px-2.5 py-1.5 bg-white border border-emerald-200 rounded-md text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500"
+                placeholder="jane@example.com"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">
+              Phone <span className="text-zinc-500 font-normal normal-case tracking-normal">(optional)</span>
+            </label>
+            <input
+              type="tel"
+              value={formGuestPhone}
+              onChange={(e) => setFormGuestPhone(e.target.value)}
+              autoComplete="tel"
+              className="w-full px-2.5 py-1.5 bg-white border border-emerald-200 rounded-md text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500"
+              placeholder="+1 (555) 000-0000"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">
+              Anything else? <span className="text-zinc-500 font-normal normal-case tracking-normal">(optional)</span>
+            </label>
+            <textarea
+              value={formGuestNote}
+              onChange={(e) => setFormGuestNote(e.target.value)}
+              rows={2}
+              maxLength={500}
+              className="w-full px-2.5 py-1.5 bg-white border border-emerald-200 rounded-md text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500 resize-none"
+              placeholder="Agenda notes, anything the other person should know…"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-3 mt-1">
+          <button
+            onClick={clickConfirmButton}
+            disabled={isConfirming || inPast || !canSubmit}
+            className="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition"
+          >
+            {isConfirming ? "Confirming..." : "Confirm"}
+          </button>
+          <button
+            onClick={() => {
+              if (pendingProposal) {
+                setPendingProposal(null);
+                setConfirmFormExpanded(false);
+              } else {
+                setInput("That’s close, but could we ");
+                document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+              }
+            }}
+            className="text-xs text-zinc-500 hover:text-zinc-700 transition whitespace-nowrap"
+          >
+            {pendingProposal ? "Pick a different time" : "Suggest a change"}
+          </button>
+        </div>
+        {confirmError && (
+          <p className="text-xs text-red-500">{confirmError}</p>
+        )}
+        {emailWarning && (
+          <p className="text-xs text-amber-600">{emailWarning}</p>
+        )}
+      </div>
+    );
+  })();
+
   // Find the first administrator message so the inline picker can follow it.
   const firstAdminIdx = messages.findIndex((m) => m.role === "administrator");
 
@@ -3442,7 +3607,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 onSendMessage={(text) => {
                   setInput(text);
                 }}
-                pickerSlot={renderPickerBubble("new-card-picker")}
+                // 2026-05-10: stripped-down calendar (no chat-bubble wrapper)
+                // so it fits the new card surface. Confirm form rendered as
+                // a sibling slot — without it, picking a slot would do
+                // nothing because the legacy confirm card lives in a
+                // different render tree we never reach.
+                pickerSlot={newCardPickerNode}
+                confirmSlot={newCardConfirmNode}
               />
             </MeetingCardErrorBoundary>
           ) : (

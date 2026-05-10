@@ -27,11 +27,18 @@ interface Props {
   onCollapseThread: () => void;
   onSendMessage: (text: string) => void;
   /**
-   * The rendered AvailabilityCalendar from renderPickerBubble in deal-room.tsx.
+   * The rendered AvailabilityCalendar (stripped of chat-bubble chrome).
    * Passed as a ReactNode so all picker props (slotsByDay, schedulingMode, etc.)
    * stay in deal-room — no prop drilling.
    */
   pickerSlot?: React.ReactNode;
+  /**
+   * The rendered confirm card (name/email/phone form + Confirm button) —
+   * shown below the picker when a slot is picked or Envoy proposes a time.
+   * Without this slot wired, picking a slot does nothing because the legacy
+   * confirm card lives in a sibling render tree this view never reaches.
+   */
+  confirmSlot?: React.ReactNode;
 }
 
 export function MeetingCardProposalView({
@@ -42,6 +49,7 @@ export function MeetingCardProposalView({
   onCollapseThread,
   onSendMessage,
   pickerSlot,
+  confirmSlot,
 }: Props) {
   // Stub out action handlers that don't apply pre-confirmation.
   // The MeetingCard component may render action slots — we silence any that
@@ -75,14 +83,24 @@ export function MeetingCardProposalView({
       </div>
 
       {/* Picker slot — AvailabilityCalendar rendered from deal-room.tsx.
-          Shown below the card; skipped when null (e.g. confirming state). */}
+          Shown below the card; skipped when null (e.g. confirming state).
+          Background dropped here — the picker brings its own canvas. */}
       {pickerSlot && (
         <div className="px-4 pb-4 lg:px-8">
           <div className="max-w-[540px] mx-auto">
-            <div className="rounded-2xl overflow-hidden border border-[#e7e2d5] bg-[#faf8f3]">
+            <div className="rounded-2xl overflow-hidden border border-[#e7e2d5] bg-white">
               {pickerSlot}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Confirm slot — name/email/phone form + Confirm button. Renders
+          when a slot is picked (pendingProposal) or Envoy proposes a time.
+          Without it, picking a slot can't actually book the meeting. */}
+      {confirmSlot && (
+        <div className="px-4 pb-4 lg:px-8">
+          <div className="max-w-[540px] mx-auto">{confirmSlot}</div>
         </div>
       )}
 
