@@ -3294,11 +3294,25 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Chat column — event card + messages */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* PR2a NEW PATH: confirmed non-group event renders MeetingCard + EnvoyDock.
-              Wrapped in error boundary (2026-05-10 hotfix) so any client-side crash
-              in the new card surface flips meetingCardCrashed → next render falls
-              through to the legacy path below. Prevents blank-page "Application error". */}
-          {confirmed && meetingCardProps && !isGroupEvent && !meetingCardCrashed ? (
+          {/* 2026-05-10: skeleton loader during initial session load. Prevents
+              the brief flash of the legacy event card that used to happen
+              between first paint (no data → fallback) and data-resolved
+              re-paint (new MeetingCard). Skip both branches while loading. */}
+          {isLoading ? (
+            <div className="flex-1 min-h-0 flex flex-col items-center justify-start bg-[#f6f3ec] pt-12 px-4">
+              <div className="w-full max-w-[540px] animate-pulse">
+                {/* Hero skeleton */}
+                <div className="h-[140px] rounded-2xl bg-emerald-100/40 mb-4" />
+                {/* Card body skeleton */}
+                <div className="rounded-2xl bg-white border border-[#e7e2d5] p-5 space-y-3">
+                  <div className="h-4 w-1/3 bg-zinc-100 rounded" />
+                  <div className="h-5 w-2/3 bg-zinc-100 rounded" />
+                  <div className="h-4 w-full bg-zinc-100 rounded" />
+                  <div className="h-4 w-1/2 bg-zinc-100 rounded" />
+                </div>
+              </div>
+            </div>
+          ) : confirmed && meetingCardProps && !isGroupEvent && !meetingCardCrashed ? (
             <MeetingCardErrorBoundary onError={() => setMeetingCardCrashed(true)}>
               <MeetingCardConfirmedView
                 sessionId={sessionId}
