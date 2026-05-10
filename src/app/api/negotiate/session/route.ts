@@ -13,6 +13,7 @@ import { compileBookableLinks, type AvailabilityRule } from "@/lib/availability-
 import { applyBookableWindow } from "@/lib/bookable-links";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
+import { googleCalendarEventUrl } from "@/lib/google-calendar-url";
 import {
   getInviteeDisplay,
   getWaitingLabel,
@@ -279,6 +280,9 @@ export async function POST(req: NextRequest) {
             agreedFormat: existingSession.agreedFormat,
             duration: existingSession.duration,
             meetLink: existingSession.meetLink,
+            // 2026-05-10: deep-link to the GCal event for the new MeetingCard's
+            // "Open in Google Calendar" action. Constructed deterministically.
+            eventLink: googleCalendarEventUrl(existingSession.calendarEventId),
             messages: existingSession.messages.map((m) => ({
               id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),
@@ -360,6 +364,9 @@ export async function POST(req: NextRequest) {
             agreedFormat: existingSession.agreedFormat,
             duration: existingSession.duration,
             meetLink: existingSession.meetLink,
+            // 2026-05-10: deep-link to the GCal event for the new MeetingCard's
+            // "Open in Google Calendar" action. Constructed deterministically.
+            eventLink: googleCalendarEventUrl(existingSession.calendarEventId),
             messages: existingSession.messages.map((m) => ({
               id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),

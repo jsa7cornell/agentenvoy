@@ -1217,6 +1217,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             duration: data.duration || 30,
             format: data.agreedFormat || "phone",
             meetLink: data.meetLink,
+            // 2026-05-10: GCal event deep-link from session-load endpoint
+            // (constructed via googleCalendarEventUrl on the server). Drives
+            // the new MeetingCard "Open in Google Calendar" action immediately
+            // on page load, no async fetch required.
+            eventLink: data.eventLink,
           });
           setConfirmed(true);
           // Load message history so chat is visible below the event card
