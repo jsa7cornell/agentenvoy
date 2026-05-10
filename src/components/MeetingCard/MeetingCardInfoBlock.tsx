@@ -213,25 +213,25 @@ export function MeetingCardInfoBlock(props: MeetingCardProps) {
   const seriesForRow = series;
 
   return (
-    <div>
+    <div data-testid="meeting-card-info">
       <div className="px-[22px] pt-[18px] pb-3">
         {/* Who row */}
-        <div className="flex items-center gap-[10px] mb-2">
+        <div className="flex items-center gap-[10px] mb-2" data-testid="meeting-participants">
           <div className="flex items-center">
             <Avatar participant={host} role="host" />
             <Avatar participant={guest} role="guest" overlap />
           </div>
           <div className="text-[12px] text-zinc-400 font-medium">
-            <b className="text-zinc-600 font-semibold">{hostFullName}</b>
+            <b className="text-zinc-600 font-semibold" data-meeting-host>{hostFullName}</b>
             {" & "}
-            <b className="text-zinc-600 font-semibold">{guestFullName}</b>
+            <b className="text-zinc-600 font-semibold" data-meeting-guest>{guestFullName}</b>
           </div>
         </div>
 
-        {/* Title */}
-        <div className="text-[18px] font-semibold text-zinc-900 tracking-[-0.008em] leading-[1.3] mb-2">
+        {/* Title — semantic h3 so screen readers + agents identify the meeting subject */}
+        <h3 className="text-[18px] font-semibold text-zinc-900 tracking-[-0.008em] leading-[1.3] mb-2 m-0" data-meeting-title>
           {title}
-        </div>
+        </h3>
 
         {/* Channel line */}
         <ChannelLine
