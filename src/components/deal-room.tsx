@@ -3308,6 +3308,31 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   // For PR2a, best-effort: set the textarea value.
                   setInput(text);
                 }}
+                // ── Real action handlers (2026-05-10 PR2c-lite) ──────────
+                onOpenCancelModal={() => setShowCancelModal(true)}
+                onAddToCalendar={() => {
+                  // googleCalUrl is the Google Calendar template URL — opens
+                  // the create-event prefill in a new tab. Falls back to .ics
+                  // download when GCal URL isn't constructible.
+                  if (googleCalUrl) {
+                    window.open(googleCalUrl, "_blank", "noopener");
+                  } else {
+                    downloadIcs();
+                  }
+                }}
+                onRequestReschedule={() => {
+                  // Open chat thread + prefill text. Guest types "can we
+                  // move this?" and Envoy negotiates a new time.
+                  setConfirmedThreadExpanded(true);
+                  setInput("Can we reschedule this meeting?");
+                }}
+                onRequestEdit={() => {
+                  setConfirmedThreadExpanded(true);
+                  setInput("I'd like to change the meeting — ");
+                }}
+                dealRoomUrl={typeof window !== "undefined"
+                  ? `${window.location.origin}/meet/${slug}${code ? `/${code}` : ""}`
+                  : undefined}
               />
             </MeetingCardErrorBoundary>
           ) : (

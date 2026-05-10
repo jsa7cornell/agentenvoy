@@ -37,6 +37,19 @@ interface Props {
   onExpandThread: () => void;
   onCollapseThread: () => void;
   onSendMessage: (text: string) => void;
+  // ── Real action handlers wired from deal-room.tsx (2026-05-10 PR2c-lite) ──
+  /** Open the existing cancel-confirmation modal. Wired from deal-room.tsx. */
+  onOpenCancelModal?: () => void;
+  /** Add to calendar — opens Google Calendar template URL in a new tab. */
+  onAddToCalendar?: () => void;
+  /** Reschedule — focuses the chat input + prefills text. */
+  onRequestReschedule?: () => void;
+  /** Edit meeting — focuses the chat input + prefills text. */
+  onRequestEdit?: () => void;
+  /** Share — copy link to clipboard or native share sheet. */
+  onShareLink?: () => void;
+  /** Deal-room URL for share fallback. */
+  dealRoomUrl?: string;
 }
 
 export function MeetingCardConfirmedView({
@@ -48,6 +61,12 @@ export function MeetingCardConfirmedView({
   onExpandThread,
   onCollapseThread,
   onSendMessage,
+  onOpenCancelModal,
+  onAddToCalendar: parentOnAddToCalendar,
+  onRequestReschedule,
+  onRequestEdit,
+  onShareLink,
+  dealRoomUrl,
 }: Props) {
   // ── GCal RSVP status fetch (PR2b) ────────────────────────────────────────
   // Per spec § 6.1 + AP5c: GUEST-UI ONLY, server-derived from host's stored
@@ -75,10 +94,6 @@ export function MeetingCardConfirmedView({
     };
   }, [sessionId]);
 
-  // PR2a action stubs — real handlers wired in PR2c.
-  const stubAction = (label: string) => () =>
-    console.log(`PR2c: wire ${label} handler`);
-
   // PR2 SEED: host pencil edit — PATCH Link.parameters.tip.
   // Only wired for host viewers (cardProps.viewerRole === "host") with a known linkId.
   const handleEditTip = linkId && cardProps.viewerRole === "host"
@@ -94,26 +109,52 @@ export function MeetingCardConfirmedView({
       }
     : undefined;
 
+  // ── Real action handlers (2026-05-10 PR2c-lite wire-up) ────────────────────
+  // Falls back to a no-op + console warning when parent didn't provide a handler.
+  const noop = (label: string) => () => {
+    console.warn(`[MeetingCardConfirmedView] no handler wired for: ${label}`);
+  };
+
+  // Default share — copy deal-room URL via clipboard with native-share fallback.
+  const defaultShare = () => {
+    if (!dealRoomUrl) return;
+    const nav = typeof navigator !== "undefined" ? navigator : null;
+    if (nav && typeof nav.share === "function") {
+      nav.share({ url: dealRoomUrl }).catch(() => {
+        // User cancelled or share failed — fall back to clipboard
+        nav.clipboard?.writeText(dealRoomUrl).catch(() => {});
+      });
+    } else if (nav?.clipboard) {
+      nav.clipboard.writeText(dealRoomUrl).catch(() => {});
+    }
+  };
+
+  const effectiveGCal = gcalStatus ?? cardProps.googleCalendar;
+  const gcalEventUrl = effectiveGCal?.eventUrl;
+  const openGcal = gcalEventUrl
+    ? () => window.open(gcalEventUrl, "_blank", "noopener")
+    : noop("openGoogleCalendar");
+
   const cardPropsWithStubs: MeetingCardProps = {
     ...cardProps,
-    googleCalendar: gcalStatus ?? cardProps.googleCalendar ?? undefined,
-    onReschedule: stubAction("reschedule"),
-    onSkip: stubAction("skip"),
-    onSkipThis: stubAction("skipThis"),
-    onCancel: stubAction("cancel"),
-    onShare: stubAction("share"),
-    onEditMeeting: stubAction("editMeeting"),
-    onAddToCalendar: stubAction("addToCalendar"),
-    onAcceptInGoogleCalendar: (gcalStatus ?? cardProps.googleCalendar)?.eventUrl
-      ? () => window.open((gcalStatus ?? cardProps.googleCalendar)!.eventUrl, "_blank", "noopener")
-      : stubAction("acceptInGoogleCalendar"),
-    onOpenInGoogleCalendar: (gcalStatus ?? cardProps.googleCalendar)?.eventUrl
-      ? () => window.open((gcalStatus ?? cardProps.googleCalendar)!.eventUrl, "_blank", "noopener")
-      : stubAction("openInGoogleCalendar"),
-    onViewInGoogleCalendar: (gcalStatus ?? cardProps.googleCalendar)?.eventUrl
-      ? () => window.open((gcalStatus ?? cardProps.googleCalendar)!.eventUrl, "_blank", "noopener")
-      : stubAction("viewInGoogleCalendar"),
-    onNudgeOther: stubAction("nudgeOther"),
+    googleCalendar: effectiveGCal ?? undefined,
+    // Schedule actions
+    onReschedule: onRequestReschedule ?? noop("reschedule"),
+    onSkip: noop("skip"),
+    onSkipThis: noop("skipThis"),
+    // Destructive
+    onCancel: onOpenCancelModal ?? noop("cancel"),
+    // Share
+    onShare: onShareLink ?? defaultShare,
+    // Edit (opens chat)
+    onEditMeeting: onRequestEdit ?? noop("editMeeting"),
+    // Add to calendar — Google template URL via parent
+    onAddToCalendar: parentOnAddToCalendar ?? noop("addToCalendar"),
+    // GCal links — same handler (open the event URL in a new tab)
+    onAcceptInGoogleCalendar: openGcal,
+    onOpenInGoogleCalendar: openGcal,
+    onViewInGoogleCalendar: openGcal,
+    onNudgeOther: noop("nudgeOther"),
     onEditTip: handleEditTip,
   };
 
