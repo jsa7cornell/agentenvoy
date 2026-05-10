@@ -11,6 +11,8 @@ import {
   dealRoomToMeetingCardProps,
   type DealRoomConfirmedSnapshot,
 } from "@/components/deal-room/dealRoomToMeetingCardProps";
+import { renderTip } from "@/lib/meeting-tip/render";
+import { buildTipInput } from "@/lib/meeting-tip/build-input";
 
 // ── Shared base snapshot ──────────────────────────────────────────────────────
 
@@ -28,7 +30,6 @@ const BASE_SNAPSHOT: DealRoomConfirmedSnapshot = {
   linkLocation: null,
   sessionTimezone: "America/Los_Angeles",
   slotTimezone: "America/New_York",
-  greetingText: null,
 };
 
 // ── Null-return guards ────────────────────────────────────────────────────────
@@ -173,29 +174,43 @@ describe("dealRoomToMeetingCardProps — channel discrimination", () => {
 // ── Tip derivation ────────────────────────────────────────────────────────────
 
 describe("dealRoomToMeetingCardProps — tip derivation", () => {
-  it("tip is undefined when greetingText is null", () => {
+  it("tip is set from generative-fallback when linkActivity is present", () => {
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
-      greetingText: null,
-    });
-    expect(result?.tip).toBeUndefined();
-  });
-
-  it("tip is set when greetingText is present", () => {
-    const result = dealRoomToMeetingCardProps({
-      ...BASE_SNAPSHOT,
-      greetingText: "👋 Sarah! Looking forward to connecting with you.",
+      linkActivity: "Coffee",
     });
     expect(result?.tip).toBeDefined();
-    expect(result?.tip?.text).toContain("Looking forward to connecting");
+    expect(result?.tip?.text).toContain("Coffee");
+    expect(result?.tip?.text).toContain("John");
+    expect(result?.tip?.source).toBe("Generated for you");
   });
 
-  it("tip is undefined when greetingText is whitespace-only", () => {
+  it("tip uses generative-fallback without activity when linkActivity is null", () => {
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
-      greetingText: "   ",
+      linkActivity: null,
     });
-    expect(result?.tip).toBeUndefined();
+    expect(result?.tip).toBeDefined();
+    expect(result?.tip?.text).toContain("John");
+    expect(result?.tip?.source).toBe("Generated for you");
+  });
+
+  it("tip is null when isAnonymousLink with no authored/derived data", () => {
+    // Note: PR1 always passes isAnonymousLink: false to dealRoomToMeetingCardProps,
+    // so generative-fallback always fires there. This test documents the null
+    // path via direct renderTip call with anonymous=true.
+    const result = renderTip(
+      buildTipInput({
+        hostName: "John Anderson",
+        inviteeName: "Sarah Chen",
+        linkFormat: "video",
+        linkActivity: null,
+        linkLocation: null,
+        isAnonymousLink: true,
+      }),
+      "guest",
+    );
+    expect(result).toBeNull();
   });
 });
 

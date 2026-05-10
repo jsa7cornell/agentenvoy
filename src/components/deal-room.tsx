@@ -1511,7 +1511,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // is clear and the existing render path is completely unchanged.
   const meetingCardProps = useMemo(() => {
     if (!confirmed) return null;
-    const greetingMsg = messages.find((m) => m.role === "administrator");
     return dealRoomToMeetingCardProps({
       isHost,
       hostName,
@@ -1521,7 +1520,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       linkLocation,
       sessionTimezone,
       slotTimezone,
-      greetingText: greetingMsg?.content ?? null,
     });
   }, [
     confirmed,
@@ -1533,7 +1531,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     linkLocation,
     sessionTimezone,
     slotTimezone,
-    messages,
   ]);
 
   // PR2a — map deal-room messages to EnvoyDock ChatMessage shape.

@@ -1,5 +1,6 @@
 import type { MeetingCardProps, ChannelInfo, ViewerRole, Tip } from "@/components/MeetingCard/types";
-import { tipFromGreeting } from "@/lib/meeting-tip/from-greeting-shim";
+import { renderTip } from "@/lib/meeting-tip/render";
+import { buildTipInput } from "@/lib/meeting-tip/build-input";
 
 /**
  * Minimum fields PR2a needs from deal-room state to build MeetingCardProps.
@@ -21,11 +22,6 @@ export interface DealRoomConfirmedSnapshot {
   sessionTimezone: string | null;
   /** slotTimezone from deal-room line 312 — fallback when sessionTimezone absent. */
   slotTimezone: string;
-  /**
-   * Greeting text for tip derivation — messages[0]?.content when the first
-   * message is an administrator message, else null.
-   */
-  greetingText: string | null;
 }
 
 /**
@@ -58,6 +54,8 @@ export function dealRoomToMeetingCardProps(
     typeof cd.meetLink === "string" ? cd.meetLink : null;
   const tz = snapshot.sessionTimezone || snapshot.slotTimezone;
 
+  const viewerRole: ViewerRole = snapshot.isHost ? "host" : "guest";
+
   // Channel discrimination — Design X (role-agnostic signals, renderer composes copy)
   let channel: ChannelInfo;
   if (format === "video") {
@@ -74,12 +72,21 @@ export function dealRoomToMeetingCardProps(
     channel = { kind: "in-person", location: location ?? "TBD" };
   }
 
-  // Tip from existing greeting (Phase 1 shim — no source label)
-  let tip: Tip | undefined;
-  if (snapshot.greetingText) {
-    const shimResult = tipFromGreeting(snapshot.greetingText);
-    if (shimResult) tip = shimResult;
-  }
+  // Tip from real generator (Phase 2 — source-labeled tips)
+  const rendered = renderTip(
+    buildTipInput({
+      hostName: snapshot.hostName,
+      inviteeName: snapshot.inviteeName,
+      linkFormat: format,
+      linkActivity: snapshot.linkActivity,
+      linkLocation: snapshot.linkLocation,
+      isAnonymousLink: false,
+    }),
+    viewerRole,
+  );
+  const tip: Tip | undefined = rendered
+    ? { text: rendered.text, source: rendered.source }
+    : undefined;
 
   // Title — fall back to "Meeting" if linkActivity not set
   const inviteeFirst = snapshot.inviteeName
@@ -99,8 +106,6 @@ export function dealRoomToMeetingCardProps(
   };
   const host = splitName(snapshot.hostName);
   const guest = splitName(snapshot.inviteeName);
-
-  const viewerRole: ViewerRole = snapshot.isHost ? "host" : "guest";
 
   return {
     viewerRole,
