@@ -33,6 +33,7 @@ const BASE_SNAPSHOT: DealRoomConfirmedSnapshot = {
   slotTimezone: "America/New_York",
   linkParameters: null,
   userPrimaryTip: null,
+  gcalEventUrl: null,
 };
 
 // ── Null-return guards ────────────────────────────────────────────────────────

@@ -53,7 +53,7 @@ export function MeetingCardConfirmedView({
   // Per spec § 6.1 + AP5c: GUEST-UI ONLY, server-derived from host's stored
   // GCal credentials. 401 = anonymous (silently suppress row); 403 = not
   // a participant; null = no event yet.
-  const [gcalStatus, setGcalStatus] = useState<GoogleCalendarStatus | null>(null);
+  const [gcalStatus, setGcalStatus] = useState<GoogleCalendarStatus | null>(cardProps.googleCalendar ?? null);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -96,7 +96,7 @@ export function MeetingCardConfirmedView({
 
   const cardPropsWithStubs: MeetingCardProps = {
     ...cardProps,
-    googleCalendar: gcalStatus ?? undefined,
+    googleCalendar: gcalStatus ?? cardProps.googleCalendar ?? undefined,
     onReschedule: stubAction("reschedule"),
     onSkip: stubAction("skip"),
     onSkipThis: stubAction("skipThis"),
@@ -104,46 +104,42 @@ export function MeetingCardConfirmedView({
     onShare: stubAction("share"),
     onEditMeeting: stubAction("editMeeting"),
     onAddToCalendar: stubAction("addToCalendar"),
-    onAcceptInGoogleCalendar: gcalStatus?.eventUrl
-      ? () => window.open(gcalStatus.eventUrl, "_blank", "noopener")
+    onAcceptInGoogleCalendar: (gcalStatus ?? cardProps.googleCalendar)?.eventUrl
+      ? () => window.open((gcalStatus ?? cardProps.googleCalendar)!.eventUrl, "_blank", "noopener")
       : stubAction("acceptInGoogleCalendar"),
-    onOpenInGoogleCalendar: gcalStatus?.eventUrl
-      ? () => window.open(gcalStatus.eventUrl, "_blank", "noopener")
+    onOpenInGoogleCalendar: (gcalStatus ?? cardProps.googleCalendar)?.eventUrl
+      ? () => window.open((gcalStatus ?? cardProps.googleCalendar)!.eventUrl, "_blank", "noopener")
       : stubAction("openInGoogleCalendar"),
-    onViewInGoogleCalendar: gcalStatus?.eventUrl
-      ? () => window.open(gcalStatus.eventUrl, "_blank", "noopener")
+    onViewInGoogleCalendar: (gcalStatus ?? cardProps.googleCalendar)?.eventUrl
+      ? () => window.open((gcalStatus ?? cardProps.googleCalendar)!.eventUrl, "_blank", "noopener")
       : stubAction("viewInGoogleCalendar"),
     onNudgeOther: stubAction("nudgeOther"),
     onEditTip: handleEditTip,
   };
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-[#f6f3ec] relative overflow-hidden lg:grid lg:[grid-template-areas:'agent_card'] lg:[grid-template-columns:1fr_1.2fr] lg:overflow-hidden">
-      {/* PR3 desktop split: chat-LEFT (1fr) / card-RIGHT (1.2fr) at lg+.
-          Mobile: single column with EnvoyDock absolute-positioned at bottom. */}
-
-      {/* Card area — RIGHT on desktop, full-width scrollable on mobile */}
-      <div
-        className="flex-1 overflow-y-auto px-4 py-4 pb-[120px] lg:pb-10 lg:[grid-area:card]"
-      >
-        <div className="max-w-[420px] mx-auto lg:max-w-[540px] lg:py-8">
+    <div className="flex-1 min-h-0 overflow-y-auto bg-[#f6f3ec]">
+      {/* Card section — centered with max-width on both mobile + desktop */}
+      <div className="px-4 py-4 lg:px-8 lg:py-8">
+        <div className="max-w-[540px] mx-auto">
           <MeetingCard {...cardPropsWithStubs} />
         </div>
       </div>
 
-      {/* Agent dock — LEFT on desktop (full-height persistent), bottom-anchored on mobile.
-          The component's internal absolute-positioning is overridden at lg+ via the
-          static-position class so it lays into the grid cell. */}
-      <div className="lg:[grid-area:agent] lg:relative lg:flex lg:flex-col lg:bg-white lg:border-r lg:border-zinc-200 lg:overflow-hidden">
-        <EnvoyDock
-          state={threadExpanded ? "thread" : "resting"}
-          cardState="confirmed"
-          contextHostFirstName={cardProps.host.firstName}
-          messages={threadMessages}
-          onExpand={onExpandThread}
-          onCollapse={onCollapseThread}
-          onSendMessage={onSendMessage}
-        />
+      {/* Agent dock / chat thread — sits BELOW the card in normal document flow.
+          No absolute positioning. Same layout on mobile + desktop. */}
+      <div className="px-4 pb-6 lg:px-8 lg:pb-12">
+        <div className="max-w-[540px] mx-auto">
+          <EnvoyDock
+            state={threadExpanded ? "thread" : "resting"}
+            cardState="confirmed"
+            contextHostFirstName={cardProps.host.firstName}
+            messages={threadMessages}
+            onExpand={onExpandThread}
+            onCollapse={onCollapseThread}
+            onSendMessage={onSendMessage}
+          />
+        </div>
       </div>
     </div>
   );

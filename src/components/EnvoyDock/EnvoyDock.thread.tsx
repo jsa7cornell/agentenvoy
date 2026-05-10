@@ -40,7 +40,7 @@ export function EnvoyDockThread({
 
   return (
     <div
-      className="absolute bottom-0 left-0 right-0 z-10 flex flex-col border-t border-[#dbd5c4] bg-white rounded-t-[18px] overflow-hidden h-[340px] lg:static lg:rounded-none lg:border-t-0 lg:flex-1 lg:h-auto"
+      className="relative rounded-2xl border border-[#dbd5c4] bg-white flex flex-col overflow-hidden h-[400px]"
     >
       {/* Thread header */}
       <div

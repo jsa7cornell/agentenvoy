@@ -1542,6 +1542,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       sessionTimezone,
       slotTimezone,
       linkParameters,
+      gcalEventUrl: typeof confirmData?.htmlLink === "string" ? confirmData.htmlLink : null,
     });
   }, [
     confirmed,

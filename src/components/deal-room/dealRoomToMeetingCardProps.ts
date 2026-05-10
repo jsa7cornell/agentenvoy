@@ -34,6 +34,14 @@ export interface DealRoomConfirmedSnapshot {
    * available (renderTip falls back to DEFAULT_TIP).
    */
   userPrimaryTip?: string | null;
+  /**
+   * GCal event URL (htmlLink) from the confirm response. Plumbed through so
+   * MeetingCardActions can show "Open in Google Calendar" immediately at
+   * paint, before the async /api/negotiate/gcal-rsvp-status fetch lands.
+   * The async fetch upgrades to a fuller GoogleCalendarStatus (with viewerStatus)
+   * when it returns; this provides a baseline so the link is never missing.
+   */
+  gcalEventUrl: string | null;
 }
 
 /**
@@ -67,6 +75,18 @@ export function dealRoomToMeetingCardProps(
   const tz = snapshot.sessionTimezone || snapshot.slotTimezone;
 
   const viewerRole: ViewerRole = snapshot.isHost ? "host" : "guest";
+
+  // Baseline GCal status — available immediately at paint from confirmData.htmlLink.
+  // The async /api/negotiate/gcal-rsvp-status fetch in MeetingCardConfirmedView
+  // upgrades this to a fuller status (with viewerStatus) when it lands.
+  const baselineGCal: import("@/components/MeetingCard/types").GoogleCalendarStatus | undefined =
+    snapshot.gcalEventUrl
+      ? {
+          eventUrl: snapshot.gcalEventUrl,
+          viewerStatus: null,
+          connectPromptEligible: false,
+        }
+      : undefined;
 
   // Channel discrimination — Design X (role-agnostic signals, renderer composes copy)
   let channel: ChannelInfo;
@@ -146,6 +166,6 @@ export function dealRoomToMeetingCardProps(
     },
     channel,
     tip,
-    // googleCalendar: undefined — PR2b adds the real server-side fetch
+    googleCalendar: baselineGCal,
   };
 }

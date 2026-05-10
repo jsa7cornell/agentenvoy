@@ -86,7 +86,7 @@ export function EnvoyDock({
       `}</style>
 
       <div
-        className="ae-dock-throb absolute bottom-0 left-0 right-0 z-10 rounded-t-[18px] border-t border-[#dbd5c4] bg-white flex flex-col p-[14px] cursor-pointer lg:static lg:rounded-none lg:border-t-0 lg:flex-1 lg:[box-shadow:none] lg:animate-none"
+        className="ae-dock-throb relative rounded-2xl border border-[#dbd5c4] bg-white flex flex-col p-[14px] cursor-pointer"
         onClick={onExpand}
         role="button"
         aria-label="Open AgentEnvoy chat"
