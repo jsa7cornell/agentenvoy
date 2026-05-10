@@ -42,6 +42,10 @@ import {
   computeExternalAgentSender,
 } from "./deal-room-role-dispatch";
 import { ThumbsDownFeedback } from "./thumbs-down-feedback";
+// PR2a — confirmed-state MeetingCard + EnvoyDock wire-in
+import { MeetingCardConfirmedView } from "./deal-room/MeetingCardConfirmedView";
+import { dealRoomToMeetingCardProps } from "./deal-room/dealRoomToMeetingCardProps";
+import type { Message as ChatMessage } from "@/components/MeetingCard/types";
 
 interface DelegateSpeaker {
   kind: "human_assistant" | "ai_agent" | "unknown";
@@ -262,6 +266,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [archivedData, setArchivedData] = useState<{ hostEmail: string | null; hostName: string | null; hostMeetSlug: string | null } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
+  // PR2a — track whether the EnvoyDock thread is expanded in confirmed view
+  const [confirmedThreadExpanded, setConfirmedThreadExpanded] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [emailWarning, setEmailWarning] = useState<string | null>(null);
@@ -1499,6 +1505,51 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     guestRequestedMoreOptions,
     linkIntentSteering,
   ]);
+
+  // PR2a — derive MeetingCardProps from deal-room confirmed state.
+  // Only computed when confirmed === true; null otherwise so the guard below
+  // is clear and the existing render path is completely unchanged.
+  const meetingCardProps = useMemo(() => {
+    if (!confirmed) return null;
+    const greetingMsg = messages.find((m) => m.role === "administrator");
+    return dealRoomToMeetingCardProps({
+      isHost,
+      hostName,
+      inviteeName,
+      confirmData,
+      linkActivity,
+      linkLocation,
+      sessionTimezone,
+      slotTimezone,
+      greetingText: greetingMsg?.content ?? null,
+    });
+  }, [
+    confirmed,
+    isHost,
+    hostName,
+    inviteeName,
+    confirmData,
+    linkActivity,
+    linkLocation,
+    sessionTimezone,
+    slotTimezone,
+    messages,
+  ]);
+
+  // PR2a — map deal-room messages to EnvoyDock ChatMessage shape.
+  // PR2c will properly map all chat messages; this PR just surfaces
+  // the greeting + any user replies in the dock thread.
+  const confirmedThreadMessages: ChatMessage[] = useMemo(() => {
+    if (!confirmed) return [];
+    return messages
+      .filter((m) => m.role === "administrator" || m.role === "user")
+      .map((m) => ({
+        id: m.id,
+        role: m.role === "user" ? ("guest" as const) : ("agent" as const),
+        text: m.content,
+        timestamp: m.createdAt ?? new Date().toISOString(),
+      }));
+  }, [confirmed, messages]);
 
   // Stage 3 V2 — first-occurrence map: for each external_agent identity
   // (delegateSpeaker.name or "unknown-agent"), the earliest index in the
@@ -3208,7 +3259,24 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Chat column — event card + messages */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Desktop centered wrapper for left-side content */}
+          {/* PR2a NEW PATH: confirmed non-group event renders MeetingCard + EnvoyDock */}
+          {confirmed && meetingCardProps && !isGroupEvent ? (
+            <MeetingCardConfirmedView
+              sessionId={sessionId}
+              cardProps={meetingCardProps}
+              threadMessages={confirmedThreadMessages}
+              threadExpanded={confirmedThreadExpanded}
+              onExpandThread={() => setConfirmedThreadExpanded(true)}
+              onCollapseThread={() => setConfirmedThreadExpanded(false)}
+              onSendMessage={(text) => {
+                // PR2c will wire this to the real send handler.
+                // For PR2a, best-effort: set the textarea value.
+                setInput(text);
+              }}
+            />
+          ) : (
+          /* EXISTING PATH (unchanged): old event card + chat column */
+          /* Desktop centered wrapper for left-side content */
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col md:max-w-[640px] lg:max-w-[760px] xl:max-w-[880px] md:mx-auto md:w-full">
             {/* Event card — sticky inside chat column */}
             {eventCard}
@@ -3353,6 +3421,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               )
             )}
           </div>
+          )} {/* end PR2a existing-path ternary */}
         </div>
 
       </div>
