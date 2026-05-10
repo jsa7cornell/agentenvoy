@@ -46,15 +46,23 @@ describe("text rendering", () => {
     expect(r?.text).toContain("12");
   });
 
-  it("generative-fallback includes activity when set", () => {
+  it("generative-fallback ignores activity (locked 2026-05-10: no card-fact duplication)", () => {
     const r = renderTip({ ...base, linkActivity: "coffee" }, "guest");
-    expect(r?.text).toContain("coffee");
-    expect(r?.text).toContain("John");
+    // Activity is in the card title/channel row already; tip should NOT repeat it.
+    expect(r?.text).not.toContain("coffee");
+    expect(r?.text).toBe("Looking forward to it — pick whatever time works.");
   });
 
-  it("generative-fallback works without activity", () => {
+  it("generative-fallback ignores host name (locked 2026-05-10: universal default)", () => {
     const r = renderTip(base, "guest");
-    expect(r?.text).toContain("John");
+    // Host name is in the avatar/who row already; tip should NOT repeat it.
+    expect(r?.text).not.toContain("John");
+    expect(r?.text).toBe("Looking forward to it — pick whatever time works.");
+  });
+
+  it("generative-fallback source label substitutes {host}", () => {
+    const r = renderTip(base, "guest");
+    expect(r?.source).toBe("From John");
   });
 });
 

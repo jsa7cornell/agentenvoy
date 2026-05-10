@@ -28,6 +28,12 @@ export interface DealRoomConfirmedSnapshot {
    * TODO(PR2-seed): populate from link state once the store path lands.
    */
   linkParameters: Record<string, unknown> | null;
+  /**
+   * Host's tip from user.preferences.explicit.tip — for primary links where
+   * linkParameters is absent. Populated server-side; pass null when not
+   * available (renderTip falls back to DEFAULT_TIP).
+   */
+  userPrimaryTip?: string | null;
 }
 
 /**
@@ -79,9 +85,12 @@ export function dealRoomToMeetingCardProps(
   }
 
   // Tip from real generator (Phase 2 — source-labeled tips)
-  // linkAuthoredTip: pull from Link.parameters.tip if available (PR2 SEED pivot).
+  // linkAuthoredTip: pull from Link.parameters.tip (variance) or
+  // userPrimaryTip (primary link). Falls back to DEFAULT_TIP via renderTip.
   const linkAuthoredTip =
-    (snapshot.linkParameters?.tip as string | undefined) ?? null;
+    (snapshot.linkParameters?.tip as string | undefined) ??
+    snapshot.userPrimaryTip ??
+    null;
   const rendered = renderTip(
     buildTipInput({
       hostName: snapshot.hostName,

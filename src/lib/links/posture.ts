@@ -82,6 +82,17 @@ export interface ResolvedPosture {
   defaultLocation?: string;
   /** ISO date strings the host is unavailable. */
   blackoutDays: string[];
+  /**
+   * Host-authored tip — surfaced verbatim in the deal-room MeetingCard tip slot
+   * and (post PR3) in the EnvoyDock thread as the first agent message.
+   *
+   * Storage:
+   *  - Variance links: link.parameters.tip
+   *  - Primary links:  user.preferences.explicit.tip
+   *
+   * Falls back to DEFAULT_TIP at render time (renderTip()) when null/empty.
+   */
+  tip?: string | null;
 }
 
 /** Liberal shape accepted on the `link` arg — anything that has
@@ -236,6 +247,7 @@ function resolveFromVariance(link: LinkContext): ResolvedPosture {
       ambiguities: params.compiled?.ambiguities ?? [],
     } as unknown as CompiledRules,
     blackoutDays: [],
+    tip: typeof params.tip === "string" ? params.tip : null,
     // defaultLocation intentionally omitted on variance reads — host-private
   };
 }
@@ -294,5 +306,8 @@ function resolveFromUser(
     compiled,
     defaultLocation: explicit.defaultLocation,
     blackoutDays: explicit.blackoutDays ?? [],
+    tip: typeof (explicit as { tip?: unknown }).tip === "string"
+      ? (explicit as { tip: string }).tip
+      : null,
   };
 }

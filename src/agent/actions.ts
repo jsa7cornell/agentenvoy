@@ -32,6 +32,7 @@ import {
 } from "@/lib/mcp/parameter-resolver";
 import { isGenericTopic, findActivity, defaultDurationForActivity } from "@/lib/activity-vocab";
 import { MATERIAL_FIELDS, type MaterialField } from "@/lib/material-fields";
+import { DEFAULT_TIP } from "@/lib/meeting-tip/default-tip";
 
 // --- Helpers ---
 //
@@ -1364,6 +1365,11 @@ export async function handleCreateLink(
   const linkRules = normalizeLinkParameters({
     ...linkRulesPreIntent,
     intent: { steering: validatedSteering },
+    // Seed DEFAULT_TIP so the host sees it pre-populated in the link-edit-modal
+    // and deal-room renders a non-null tip without requiring an explicit edit.
+    // Primary links do NOT get seeded here — their tip lives on
+    // user.preferences.explicit.tip and is handled by the renderTip fallback.
+    tip: DEFAULT_TIP,
   });
   // Silence unused-import warnings for constants referenced only in playbooks.
   void TIME_OF_DAY_WINDOWS;

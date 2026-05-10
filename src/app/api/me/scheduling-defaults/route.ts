@@ -311,6 +311,17 @@ export async function POST(req: NextRequest) {
       ? body.timezone.trim()
       : undefined;
 
+  // Tip — max 280 chars; empty string clears (stored as null).
+  let tip: string | null | undefined = undefined;
+  if ("tip" in body) {
+    if (typeof body.tip === "string") {
+      const trimmed = body.tip.trim();
+      tip = trimmed.length > 0 && trimmed.length <= 280 ? trimmed : null;
+    } else {
+      tip = null;
+    }
+  }
+
   if (
     bhs === undefined &&
     bhe === undefined &&
@@ -319,7 +330,8 @@ export async function POST(req: NextRequest) {
     dur === undefined &&
     buf === undefined &&
     fmt === undefined &&
-    tz === undefined
+    tz === undefined &&
+    tip === undefined
   ) {
     return NextResponse.json(
       { error: "No recognized fields in payload" },
@@ -350,6 +362,7 @@ export async function POST(req: NextRequest) {
     ...(dur !== undefined ? { defaultDuration: dur } : {}),
     ...(buf !== undefined ? { bufferMinutes: buf } : {}),
     ...(fmt !== undefined ? { defaultFormat: fmt } : {}),
+    ...(tip !== undefined ? { tip } : {}),
   };
   const nextPrefs: UserPreferences = { ...prefs, explicit: nextExplicit };
 

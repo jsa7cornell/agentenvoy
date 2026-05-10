@@ -163,10 +163,53 @@ export async function PATCH(
     updates.eveningsPosture = body.eveningsPosture as PostureUpdate["eveningsPosture"];
   }
 
-  if (Object.keys(updates).length === 0) {
+  // Tip — handled outside PostureUpdate / applyPostureToScope (link-local, not fan-out).
+  // Empty string clears the tip.
+  let tipUpdate: string | null | undefined = undefined;
+  if ("tip" in body) {
+    if (typeof body.tip === "string") {
+      const trimmed = body.tip.trim();
+      if (trimmed.length > 280) {
+        return NextResponse.json(
+          { error: "tip must be 280 characters or fewer", field: "tip" },
+          { status: 400 }
+        );
+      }
+      tipUpdate = trimmed.length > 0 ? trimmed : null;
+    } else {
+      tipUpdate = null;
+    }
+  }
+
+  if (Object.keys(updates).length === 0 && tipUpdate === undefined) {
     return NextResponse.json({ error: "No recognized fields in payload" }, { status: 400 });
   }
 
-  const result = await applyPostureToScope(updates, [resolvedId], session.user.id);
-  return NextResponse.json({ ok: true, varianceWrites: result.varianceWrites });
+  let varianceWrites = 0;
+
+  if (Object.keys(updates).length > 0) {
+    const result = await applyPostureToScope(updates, [resolvedId], session.user.id);
+    varianceWrites = result.varianceWrites;
+  }
+
+  // Write tip directly to link.parameters (not fanned out — link-local).
+  if (tipUpdate !== undefined) {
+    const { parseLinkParameters } = await import("@/lib/link-parameters");
+    const existing = await prisma.negotiationLink.findUnique({
+      where: { id: resolvedId },
+      select: { parameters: true },
+    });
+    if (existing) {
+      const params = parseLinkParameters(existing.parameters);
+      const next = { ...params, ...(tipUpdate !== null ? { tip: tipUpdate } : {}) };
+      if (tipUpdate === null) delete (next as Record<string, unknown>).tip;
+      await prisma.negotiationLink.update({
+        where: { id: resolvedId },
+        data: { parameters: next as object },
+      });
+      if (Object.keys(updates).length === 0) varianceWrites = 1;
+    }
+  }
+
+  return NextResponse.json({ ok: true, varianceWrites });
 }

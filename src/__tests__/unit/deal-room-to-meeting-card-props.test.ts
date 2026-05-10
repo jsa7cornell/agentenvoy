@@ -13,6 +13,7 @@ import {
 } from "@/components/deal-room/dealRoomToMeetingCardProps";
 import { renderTip } from "@/lib/meeting-tip/render";
 import { buildTipInput } from "@/lib/meeting-tip/build-input";
+import { DEFAULT_TIP } from "@/lib/meeting-tip/default-tip";
 
 // ── Shared base snapshot ──────────────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ const BASE_SNAPSHOT: DealRoomConfirmedSnapshot = {
   sessionTimezone: "America/Los_Angeles",
   slotTimezone: "America/New_York",
   linkParameters: null,
+  userPrimaryTip: null,
 };
 
 // ── Null-return guards ────────────────────────────────────────────────────────
@@ -212,6 +214,49 @@ describe("dealRoomToMeetingCardProps — tip derivation", () => {
       "guest",
     );
     expect(result).toBeNull();
+  });
+
+  it("linkParameters.tip flows through as linkAuthoredTip", () => {
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      linkParameters: { tip: "See you at the coffee shop!" },
+    });
+    expect(result?.tip?.text).toBe("See you at the coffee shop!");
+  });
+
+  it("userPrimaryTip is used when linkParameters.tip is absent", () => {
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      linkParameters: null,
+      userPrimaryTip: "Really looking forward to this one.",
+    });
+    expect(result?.tip?.text).toBe("Really looking forward to this one.");
+  });
+
+  it("linkParameters.tip takes precedence over userPrimaryTip", () => {
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      linkParameters: { tip: "From the link" },
+      userPrimaryTip: "From primary",
+    });
+    expect(result?.tip?.text).toBe("From the link");
+  });
+
+  it("generative-fallback fires when both linkParameters.tip and userPrimaryTip are null", () => {
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      linkParameters: null,
+      userPrimaryTip: null,
+      linkActivity: "Coffee",
+    });
+    // generative-fallback composes a sentence using activity + host name
+    expect(result?.tip?.text).toContain("Coffee");
+    expect(result?.tip?.text).toContain("John");
+  });
+
+  it("DEFAULT_TIP constant is a non-empty string", () => {
+    expect(typeof DEFAULT_TIP).toBe("string");
+    expect(DEFAULT_TIP.length).toBeGreaterThan(0);
   });
 });
 

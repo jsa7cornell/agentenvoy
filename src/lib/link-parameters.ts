@@ -294,6 +294,11 @@ export const linkParametersSchema = z
     bufferMinutes: z.number().int().min(0).optional(),
     eveningsPosture: eveningsPostureSchema.optional(),
     compiled: compiledRulesSchema.optional(),
+
+    // 2026-05-10 — PR4 host-authored tip (link-edit-modal). Surfaced verbatim
+    // in the MeetingCard tip slot and (post PR3) in the EnvoyDock thread.
+    // Max 280 chars matches the textarea cap in link-edit-modal.
+    tip: z.string().max(280).optional(),
   })
   .passthrough();
 

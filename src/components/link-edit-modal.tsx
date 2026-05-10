@@ -20,6 +20,7 @@ import { useState, useEffect, useCallback } from "react";
 import { X, Check, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import type { AvailabilityWindow } from "@/lib/link-parameters";
 import type { ResolvedPosture } from "@/lib/links/posture";
+import { DEFAULT_TIP } from "@/lib/meeting-tip/default-tip";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -139,6 +140,7 @@ export function LinkEditModal({
   const [duration, setDuration] = useState(30);
   const [bufferMinutes, setBufferMinutes] = useState(0);
   const [format, setFormat] = useState<FormatValue>("video");
+  const [tip, setTip] = useState<string>(DEFAULT_TIP);
 
   // ---- Seed form from initial prop or API ----
   const seedForm = useCallback((posture: Partial<ResolvedPosture>) => {
@@ -157,6 +159,8 @@ export function LinkEditModal({
     if (typeof posture.defaultDuration === "number") setDuration(posture.defaultDuration);
     if (typeof posture.bufferMinutes === "number") setBufferMinutes(posture.bufferMinutes);
     if (posture.format) setFormat(posture.format);
+    // Tip: use host-authored value if present, otherwise fall back to DEFAULT_TIP.
+    setTip(typeof posture.tip === "string" && posture.tip.length > 0 ? posture.tip : DEFAULT_TIP);
     setIsDirty(false);
   }, []);
 
@@ -201,6 +205,7 @@ export function LinkEditModal({
   function changeDuration(v: number) { setDuration(v); setIsDirty(true); }
   function changeBuffer(v: number) { setBufferMinutes(v); setIsDirty(true); }
   function changeFormat(v: FormatValue) { setFormat(v); setIsDirty(true); }
+  function changeTip(v: string) { setTip(v); setIsDirty(true); }
 
   // ---- Advanced JSON sync ----
   function handleAdvancedJsonChange(val: string) {
@@ -268,6 +273,7 @@ export function LinkEditModal({
             defaultDuration: duration,
             bufferMinutes,
             defaultFormat: format,
+            tip: tip.trim() || null,
           }),
         });
         if (!res.ok) {
@@ -280,7 +286,7 @@ export function LinkEditModal({
         const res = await fetch(`/api/me/links/${linkId}/posture`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ availability, duration, bufferMinutes, format }),
+          body: JSON.stringify({ availability, duration, bufferMinutes, format, tip: tip.trim() || null }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({})) as { error?: string };
@@ -490,6 +496,33 @@ export function LinkEditModal({
                     {label}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* ---- Welcome message / Tip ---- */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-primary uppercase tracking-wide">
+                Welcome message
+              </label>
+              <textarea
+                rows={3}
+                value={tip}
+                onChange={(e) => changeTip(e.target.value)}
+                maxLength={280}
+                placeholder={DEFAULT_TIP}
+                className="w-full bg-surface border border-DEFAULT rounded-lg px-3 py-2 text-sm text-primary focus:outline-none focus:border-indigo-500 transition resize-y"
+              />
+              <div className="flex justify-between items-center">
+                <p className="text-[10px] text-muted">
+                  A short sentence guests see when they land on the page. Edit anytime.
+                </p>
+                <span
+                  className={`text-[10px] tabular-nums ${
+                    tip.length > 250 ? "text-amber-400" : "text-muted"
+                  }`}
+                >
+                  {tip.length}/280
+                </span>
               </div>
             </div>
 
