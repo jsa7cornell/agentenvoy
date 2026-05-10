@@ -47,6 +47,9 @@ import { MeetingCardConfirmedView } from "./deal-room/MeetingCardConfirmedView";
 import { MeetingCardErrorBoundary } from "./deal-room/MeetingCardErrorBoundary";
 import { dealRoomToMeetingCardProps } from "./deal-room/dealRoomToMeetingCardProps";
 import type { Message as ChatMessage } from "@/components/MeetingCard/types";
+// PR2c — proposal/matched/skipped states + reschedule overlay
+import { MeetingCardProposalView } from "./deal-room/MeetingCardProposalView";
+import { RescheduleOverlay } from "./deal-room/RescheduleOverlay";
 
 interface DelegateSpeaker {
   kind: "human_assistant" | "ai_agent" | "unknown";
@@ -273,6 +276,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
   // PR2a — track whether the EnvoyDock thread is expanded in confirmed view
   const [confirmedThreadExpanded, setConfirmedThreadExpanded] = useState(false);
+  // PR2c — when true, renders the reschedule picker below the confirmed card
+  const [reschedulingFromConfirmed, setReschedulingFromConfirmed] = useState(false);
   /**
    * PR2a safety: when the new MeetingCardConfirmedView render path crashes
    * client-side, the error boundary flips this flag and we fall through to
@@ -864,6 +869,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     });
     setConfirmFormExpanded(true);
     setConfirmError(null);
+    // PR2c — picking a slot from reschedule mode closes the picker
+    setReschedulingFromConfirmed(false);
     // Seed form inputs from whatever we know already.
     if (!formGuestName && (guestUser?.name || inviteeName)) {
       setFormGuestName(guestUser?.name || inviteeName);
@@ -1532,11 +1539,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     linkIntentSteering,
   ]);
 
-  // PR2a — derive MeetingCardProps from deal-room confirmed state.
-  // Only computed when confirmed === true; null otherwise so the guard below
-  // is clear and the existing render path is completely unchanged.
+  // PR2a/PR2c — derive MeetingCardProps from deal-room state.
+  // PR2a: confirmed only. PR2c: extended to proposal/matched/skipped/confirming.
+  // Returns null when guest+host names are both empty (safe fallback to legacy).
   const meetingCardProps = useMemo(() => {
-    if (!confirmed) return null;
+    // Compute hasBilateralMatch for matched-state detection
+    const hasBilateralMatch = !!(bilateralByDay && Object.values(bilateralByDay).some((chips) =>
+      chips.some((c) => c.color === "both"),
+    ));
     return dealRoomToMeetingCardProps({
       isHost,
       hostName,
@@ -1556,9 +1566,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         (typeof confirmData?.htmlLink === "string" ? confirmData.htmlLink : null) ??
         gcalStatus?.htmlLink ??
         null,
+      // PR2c — non-confirmed state fields
+      sessionStatus,
+      isConfirming,
+      hasBilateralMatch,
+      linkFormat,
     });
   }, [
-    confirmed,
     isHost,
     hostName,
     inviteeName,
@@ -1569,13 +1583,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     slotTimezone,
     linkParameters,
     gcalStatus,
+    sessionStatus,
+    isConfirming,
+    bilateralByDay,
+    linkFormat,
   ]);
 
-  // PR2a — map deal-room messages to EnvoyDock ChatMessage shape.
-  // PR2c will properly map all chat messages; this PR just surfaces
-  // the greeting + any user replies in the dock thread.
+  // PR2a/PR2c — map deal-room messages to EnvoyDock ChatMessage shape.
+  // Used by both MeetingCardConfirmedView (confirmed) and MeetingCardProposalView
+  // (proposal/matched/skipped). Filter includes administrator + user roles.
   const confirmedThreadMessages: ChatMessage[] = useMemo(() => {
-    if (!confirmed) return [];
     return messages
       .filter((m) => m.role === "administrator" || m.role === "user")
       .map((m) => ({
@@ -1584,7 +1601,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         text: m.content,
         timestamp: m.createdAt ?? new Date().toISOString(),
       }));
-  }, [confirmed, messages]);
+  }, [messages]);
 
   // Stage 3 V2 — first-occurrence map: for each external_agent identity
   // (delegateSpeaker.name or "unknown-agent"), the earliest index in the
@@ -2562,6 +2579,48 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     );
   };
 
+  // PR2c — Reschedule picker node: renders the AvailabilityCalendar when
+  // reschedulingFromConfirmed is true. Bypasses renderPickerBubble's
+  // `if (confirmed) return null` guards since this is an intentional re-open
+  // of scheduling from the confirmed state.
+  // Only rendered when slotsByDay has data; if slots aren't loaded, the
+  // user can still type in the EnvoyDock thread.
+  const reschedulePickerNode: React.ReactNode =
+    reschedulingFromConfirmed && slotsByDay && Object.keys(slotsByDay).length > 0 ? (
+      <AvailabilityCalendar
+        view="week"
+        schedulingMode={schedulingMode}
+        slotsByDay={slotsByDay}
+        timezone={slotTimezone}
+        currentLocation={slotLocation}
+        duration={slotDuration}
+        minDuration={slotMinDuration}
+        onSelectSlot={schedulingMode === "time" ? (_msg, slot) => {
+          if (slot) proposeFromSlot(slot);
+        } : undefined}
+        onSelectDate={schedulingMode === "date" ? handleSelectDate : undefined}
+        onTimezoneClick={() => {
+          setInput("I’m actually in a different timezone — ");
+        }}
+        bilateralByDay={bilateralByDay}
+        bilateralPayload={bilateralPayload}
+        hostFirstName={hostName ? resolveHostFirstName({ name: hostName }) : undefined}
+        eventTitle={(() => {
+          const hostFirst = hostName ? hostName.split(" ")[0] : "";
+          const inviteeFirst = inviteeName ? inviteeName.split(" ")[0] : "";
+          if (linkActivity && inviteeFirst) return `${linkActivity} with ${inviteeFirst}`;
+          if (linkActivity && hostFirst) return `${linkActivity} with ${hostFirst}`;
+          if (linkActivity) return linkActivity;
+          return getEventTitle();
+        })()}
+      />
+    ) : reschedulingFromConfirmed ? (
+      // No slots loaded — show a brief prompt directing to the chat thread
+      <div className="p-4 text-sm text-[#9b9480] text-center">
+        No availability loaded — use the chat below to find a new time.
+      </div>
+    ) : null;
+
   // Find the first administrator message so the inline picker can follow it.
   const firstAdminIdx = messages.findIndex((m) => m.role === "administrator");
 
@@ -3312,46 +3371,82 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 </div>
               </div>
             </div>
-          ) : confirmed && meetingCardProps && !isGroupEvent && !meetingCardCrashed ? (
+          ) : !meetingCardCrashed && !isGroupEvent && !isHost && confirmed && meetingCardProps ? (
+            /* PR2a/PR2c — confirmed non-group non-host session */
             <MeetingCardErrorBoundary onError={() => setMeetingCardCrashed(true)}>
-              <MeetingCardConfirmedView
-                sessionId={sessionId}
-                linkId={linkDbId}
+              <div className="flex-1 min-h-0 overflow-y-auto bg-[#f6f3ec] flex flex-col">
+                <MeetingCardConfirmedView
+                  sessionId={sessionId}
+                  linkId={linkDbId}
+                  cardProps={meetingCardProps}
+                  threadMessages={confirmedThreadMessages}
+                  threadExpanded={confirmedThreadExpanded}
+                  onExpandThread={() => setConfirmedThreadExpanded(true)}
+                  onCollapseThread={() => setConfirmedThreadExpanded(false)}
+                  onSendMessage={(text) => {
+                    setInput(text);
+                  }}
+                  // ── Real action handlers (2026-05-10 PR2c-lite) ──────────
+                  onOpenCancelModal={() => setShowCancelModal(true)}
+                  onAddToCalendar={() => {
+                    // googleCalUrl is the Google Calendar template URL — opens
+                    // the create-event prefill in a new tab. Falls back to .ics
+                    // download when GCal URL isn't constructible.
+                    if (googleCalUrl) {
+                      window.open(googleCalUrl, "_blank", "noopener");
+                    } else {
+                      downloadIcs();
+                    }
+                  }}
+                  onRequestReschedule={() => {
+                    // PR2c — switch confirmed view into reschedule mode.
+                    // Picker renders below the card; agent message injected.
+                    setReschedulingFromConfirmed(true);
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id: `reschedule-prompt-${Date.now()}`,
+                        role: "administrator",
+                        content:
+                          "Find an available slot below, or tell me how I can help you find another time.",
+                        createdAt: new Date().toISOString(),
+                        metadata: null,
+                      },
+                    ]);
+                    setConfirmedThreadExpanded(true);
+                  }}
+                  onRequestEdit={() => {
+                    setConfirmedThreadExpanded(true);
+                    setInput("I'd like to change the meeting — ");
+                  }}
+                  dealRoomUrl={typeof window !== "undefined"
+                    ? `${window.location.origin}/meet/${slug}${code ? `/${code}` : ""}`
+                    : undefined}
+                />
+                {/* PR2c — Reschedule picker: renders below confirmed card.
+                    Uses reschedulePickerNode (not renderPickerBubble) to bypass
+                    the confirmed-state guards inside renderPickerBubble. */}
+                {reschedulingFromConfirmed && (
+                  <RescheduleOverlay
+                    onCancel={() => setReschedulingFromConfirmed(false)}
+                    pickerSlot={reschedulePickerNode}
+                  />
+                )}
+              </div>
+            </MeetingCardErrorBoundary>
+          ) : !meetingCardCrashed && !isGroupEvent && !isHost && !confirmed && meetingCardProps ? (
+            /* PR2c — proposal/matched/skipped/confirming non-group non-host session */
+            <MeetingCardErrorBoundary onError={() => setMeetingCardCrashed(true)}>
+              <MeetingCardProposalView
                 cardProps={meetingCardProps}
                 threadMessages={confirmedThreadMessages}
                 threadExpanded={confirmedThreadExpanded}
                 onExpandThread={() => setConfirmedThreadExpanded(true)}
                 onCollapseThread={() => setConfirmedThreadExpanded(false)}
                 onSendMessage={(text) => {
-                  // PR2c will wire this to the real send handler.
-                  // For PR2a, best-effort: set the textarea value.
                   setInput(text);
                 }}
-                // ── Real action handlers (2026-05-10 PR2c-lite) ──────────
-                onOpenCancelModal={() => setShowCancelModal(true)}
-                onAddToCalendar={() => {
-                  // googleCalUrl is the Google Calendar template URL — opens
-                  // the create-event prefill in a new tab. Falls back to .ics
-                  // download when GCal URL isn't constructible.
-                  if (googleCalUrl) {
-                    window.open(googleCalUrl, "_blank", "noopener");
-                  } else {
-                    downloadIcs();
-                  }
-                }}
-                onRequestReschedule={() => {
-                  // Open chat thread + prefill text. Guest types "can we
-                  // move this?" and Envoy negotiates a new time.
-                  setConfirmedThreadExpanded(true);
-                  setInput("Can we reschedule this meeting?");
-                }}
-                onRequestEdit={() => {
-                  setConfirmedThreadExpanded(true);
-                  setInput("I'd like to change the meeting — ");
-                }}
-                dealRoomUrl={typeof window !== "undefined"
-                  ? `${window.location.origin}/meet/${slug}${code ? `/${code}` : ""}`
-                  : undefined}
+                pickerSlot={renderPickerBubble("new-card-picker")}
               />
             </MeetingCardErrorBoundary>
           ) : (

@@ -42,22 +42,149 @@ export interface DealRoomConfirmedSnapshot {
    * when it returns; this provides a baseline so the link is never missing.
    */
   gcalEventUrl: string | null;
+  /**
+   * PR2c — current session status for non-confirmed states.
+   * Used to determine card state (proposal / matched / skipped / confirming).
+   * "active" (default) → "proposal" card state.
+   * "agreed" → handled by confirmed=true branch (caller should not pass this here).
+   * "skipped" → "skipped" card state with amber treatment.
+   */
+  sessionStatus?: string;
+  /**
+   * PR2c — whether a confirming transition is in progress (1.2s state).
+   * When true and !confirmData, render as confirming state.
+   */
+  isConfirming?: boolean;
+  /**
+   * PR2c — bilateral by-day availability data. When present and has "both"
+   * chips, card renders in "matched" state (overlap found).
+   */
+  hasBilateralMatch?: boolean;
+  /**
+   * PR2c — link format for channel display in proposal state.
+   * Derived from linkFormat in deal-room state.
+   */
+  linkFormat?: string;
+}
+
+// ── Proposal-state MeetingCardProps builder (PR2c) ────────────────────────────
+/**
+ * Builds a minimal MeetingCardProps for proposal/matched/skipped/confirming
+ * states where confirmData is not yet available.
+ *
+ * Returns null when neither hostName nor inviteeName exists — the component
+ * can't render without participant names.
+ */
+function buildProposalMeetingCardProps(
+  snapshot: DealRoomConfirmedSnapshot,
+): MeetingCardProps | null {
+  // Need at least a host name to render the card safely.
+  if (!snapshot.hostName && !snapshot.inviteeName) return null;
+
+  const viewerRole: ViewerRole = snapshot.isHost ? "host" : "guest";
+  const tz = snapshot.sessionTimezone || snapshot.slotTimezone;
+
+  const splitName = (full: string | null | undefined, fallbackInitial: string) => {
+    const trimmed = (full ?? "").trim();
+    if (!trimmed) return { firstName: fallbackInitial, lastName: undefined };
+    const parts = trimmed.split(/\s+/);
+    const first = parts[0];
+    return {
+      firstName: first && first.length > 0 ? first : fallbackInitial,
+      lastName: parts.slice(1).join(" ") || undefined,
+    };
+  };
+  const host = splitName(snapshot.hostName, "H");
+  const guest = splitName(snapshot.inviteeName, "G");
+
+  const inviteeFirst = guest.firstName !== "G" ? guest.firstName : "";
+  const title = snapshot.linkActivity
+    ? `${snapshot.linkActivity}${inviteeFirst ? " with " + inviteeFirst : ""}`
+    : "Meeting";
+
+  // Determine card state
+  let cardState: MeetingCardProps["state"];
+  if (snapshot.isConfirming) {
+    cardState = "confirming";
+  } else if (snapshot.sessionStatus === "skipped") {
+    cardState = "skipped";
+  } else if (snapshot.hasBilateralMatch) {
+    cardState = "matched";
+  } else {
+    cardState = "proposal";
+  }
+
+  // Channel — best-effort from link format; picker is the primary action
+  const format = snapshot.linkFormat || "video";
+  let channel: ChannelInfo;
+  if (format === "video") {
+    channel = { kind: "video", platform: "Google Meet" };
+  } else if (format === "phone") {
+    channel = { kind: "phone", phoneNumber: "", hostCallsGuest: true };
+  } else {
+    channel = { kind: "in-person", location: snapshot.linkLocation ?? "TBD" };
+  }
+
+  // Tip — same logic as confirmed path; renderTip falls back to DEFAULT_TIP
+  const linkAuthoredTip =
+    (snapshot.linkParameters?.tip as string | undefined) ??
+    snapshot.userPrimaryTip ??
+    null;
+  const rendered = renderTip(
+    buildTipInput({
+      hostName: snapshot.hostName,
+      inviteeName: snapshot.inviteeName,
+      linkFormat: format,
+      linkActivity: snapshot.linkActivity,
+      linkLocation: snapshot.linkLocation,
+      isAnonymousLink: false,
+      linkAuthoredTip,
+    }),
+    viewerRole,
+  );
+  const tip: Tip | undefined = rendered
+    ? { text: rendered.text, source: rendered.source }
+    : undefined;
+
+  // For proposal state, `when` is a placeholder — the Hero component in
+  // proposal/matched states shows an accent stripe rather than a prominent
+  // time block, so a placeholder Date is safe here.
+  return {
+    viewerRole,
+    state: cardState,
+    host,
+    guest,
+    title,
+    when: {
+      // Placeholder date — not displayed prominently in proposal/matched Hero
+      time: new Date(),
+      tz,
+      durationMin: 30,
+    },
+    channel,
+    tip,
+  };
 }
 
 /**
- * Maps the deal-room confirmed snapshot into MeetingCardProps for PR2a.
+ * Maps the deal-room snapshot into MeetingCardProps.
+ *
+ * PR2a: confirmed path only (returned null for non-confirmed states).
+ * PR2c: extended to cover proposal/matched/skipped/confirming states.
  *
  * Returns null when:
- *  - confirmData is null (not yet confirmed)
- *  - confirmData.dateTime is missing or not a valid date string
+ *  - confirmed: confirmData is null or dateTime is invalid
+ *  - not confirmed: hostName and inviteeName are both empty
  *
- * Action callbacks are NOT passed — they are stubbed in MeetingCardConfirmedView
- * for PR2a. Real handlers wired in PR2c.
+ * Action callbacks are NOT passed — stubbed in the View wrappers.
  */
 export function dealRoomToMeetingCardProps(
   snapshot: DealRoomConfirmedSnapshot,
 ): MeetingCardProps | null {
-  if (!snapshot.confirmData) return null;
+  // Not-confirmed path — PR2c
+  if (!snapshot.confirmData) {
+    return buildProposalMeetingCardProps(snapshot);
+  }
 
   const cd = snapshot.confirmData;
   const dateTime =
