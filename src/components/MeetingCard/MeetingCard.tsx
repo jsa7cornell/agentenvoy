@@ -50,6 +50,22 @@ export function MeetingCard(props: MeetingCardProps) {
       <MeetingCardSeriesBlock {...props} />
       <MeetingCardPickerHost {...props} />
       <MeetingCardActions {...props} />
+      {/* MCP discoverability footer — parity with the legacy event-card
+          "🤖 Bookable by agents →" chip. AGENT-PLATFORM Rule 13: the
+          public MCP entry point must remain visible on every event page.
+          Anchors to /agents (docs) — same target as legacy. */}
+      <div className="flex justify-end px-[18px] pb-3 pt-1">
+        <a
+          href="/agents"
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="bookable-by-agents"
+          className="text-[11px] text-zinc-400 hover:text-indigo-500 transition font-medium"
+          title="Bookable by AI agents via MCP — agentenvoy.ai/api/mcp (docs at /agents)"
+        >
+          🤖 Bookable by agents →
+        </a>
+      </div>
     </article>
   );
 }
