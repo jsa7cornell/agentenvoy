@@ -50,6 +50,12 @@ interface Props {
   onShareLink?: () => void;
   /** Deal-room URL for share fallback. */
   dealRoomUrl?: string;
+  /**
+   * Optional render slot inserted BETWEEN the card and the agent dock.
+   * Used in reschedule mode to render the picker overlay so the agent
+   * appears below the picker, matching user instruction 2026-05-10.
+   */
+  belowCardSlot?: React.ReactNode;
 }
 
 export function MeetingCardConfirmedView({
@@ -67,6 +73,7 @@ export function MeetingCardConfirmedView({
   onRequestEdit,
   onShareLink,
   dealRoomUrl,
+  belowCardSlot,
 }: Props) {
   // ── GCal RSVP status fetch (PR2b) ────────────────────────────────────────
   // Per spec § 6.1 + AP5c: GUEST-UI ONLY, server-derived from host's stored
@@ -167,8 +174,17 @@ export function MeetingCardConfirmedView({
         </div>
       </div>
 
-      {/* Agent dock / chat thread — sits BELOW the card in normal document flow.
-          No absolute positioning. Same layout on mobile + desktop. */}
+      {/* Optional slot between card and dock — used in reschedule mode to
+          render the picker so the agent dock appears BELOW the picker
+          (per user instruction 2026-05-10). */}
+      {belowCardSlot && (
+        <div className="px-4 pb-2 lg:px-8">
+          <div className="max-w-[540px] mx-auto">{belowCardSlot}</div>
+        </div>
+      )}
+
+      {/* Agent dock / chat thread — sits BELOW the card AND any belowCardSlot
+          (e.g. picker in reschedule mode). No absolute positioning. */}
       <div className="px-4 pb-6 lg:px-8 lg:pb-12">
         <div className="max-w-[540px] mx-auto">
           <EnvoyDock

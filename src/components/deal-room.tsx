@@ -3371,71 +3371,67 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 </div>
               </div>
             </div>
-          ) : !meetingCardCrashed && !isGroupEvent && !isHost && confirmed && meetingCardProps ? (
-            /* PR2a/PR2c — confirmed non-group non-host session */
+          ) : !meetingCardCrashed && !isGroupEvent && confirmed && meetingCardProps ? (
+            /* PR2a/PR2c — confirmed non-group session (HOST + GUEST both
+               render the new card per user 2026-05-10; isHost fallthrough
+               removed). RescheduleOverlay passed as belowCardSlot so the
+               picker sits BETWEEN card and dock — agent appears below picker. */
             <MeetingCardErrorBoundary onError={() => setMeetingCardCrashed(true)}>
-              <div className="flex-1 min-h-0 overflow-y-auto bg-[#f6f3ec] flex flex-col">
-                <MeetingCardConfirmedView
-                  sessionId={sessionId}
-                  linkId={linkDbId}
-                  cardProps={meetingCardProps}
-                  threadMessages={confirmedThreadMessages}
-                  threadExpanded={confirmedThreadExpanded}
-                  onExpandThread={() => setConfirmedThreadExpanded(true)}
-                  onCollapseThread={() => setConfirmedThreadExpanded(false)}
-                  onSendMessage={(text) => {
-                    setInput(text);
-                  }}
-                  // ── Real action handlers (2026-05-10 PR2c-lite) ──────────
-                  onOpenCancelModal={() => setShowCancelModal(true)}
-                  onAddToCalendar={() => {
-                    // googleCalUrl is the Google Calendar template URL — opens
-                    // the create-event prefill in a new tab. Falls back to .ics
-                    // download when GCal URL isn't constructible.
-                    if (googleCalUrl) {
-                      window.open(googleCalUrl, "_blank", "noopener");
-                    } else {
-                      downloadIcs();
-                    }
-                  }}
-                  onRequestReschedule={() => {
-                    // PR2c — switch confirmed view into reschedule mode.
-                    // Picker renders below the card; agent message injected.
-                    setReschedulingFromConfirmed(true);
-                    setMessages((prev) => [
-                      ...prev,
-                      {
-                        id: `reschedule-prompt-${Date.now()}`,
-                        role: "administrator",
-                        content:
-                          "Find an available slot below, or tell me how I can help you find another time.",
-                        createdAt: new Date().toISOString(),
-                        metadata: null,
-                      },
-                    ]);
-                    setConfirmedThreadExpanded(true);
-                  }}
-                  onRequestEdit={() => {
-                    setConfirmedThreadExpanded(true);
-                    setInput("I'd like to change the meeting — ");
-                  }}
-                  dealRoomUrl={typeof window !== "undefined"
-                    ? `${window.location.origin}/meet/${slug}${code ? `/${code}` : ""}`
-                    : undefined}
-                />
-                {/* PR2c — Reschedule picker: renders below confirmed card.
-                    Uses reschedulePickerNode (not renderPickerBubble) to bypass
-                    the confirmed-state guards inside renderPickerBubble. */}
-                {reschedulingFromConfirmed && (
-                  <RescheduleOverlay
-                    onCancel={() => setReschedulingFromConfirmed(false)}
-                    pickerSlot={reschedulePickerNode}
-                  />
-                )}
-              </div>
+              <MeetingCardConfirmedView
+                sessionId={sessionId}
+                linkId={linkDbId}
+                cardProps={meetingCardProps}
+                threadMessages={confirmedThreadMessages}
+                threadExpanded={confirmedThreadExpanded}
+                onExpandThread={() => setConfirmedThreadExpanded(true)}
+                onCollapseThread={() => setConfirmedThreadExpanded(false)}
+                onSendMessage={(text) => {
+                  setInput(text);
+                }}
+                // ── Real action handlers (2026-05-10 PR2c-lite) ──────────
+                onOpenCancelModal={() => setShowCancelModal(true)}
+                onAddToCalendar={() => {
+                  if (googleCalUrl) {
+                    window.open(googleCalUrl, "_blank", "noopener");
+                  } else {
+                    downloadIcs();
+                  }
+                }}
+                onRequestReschedule={() => {
+                  setReschedulingFromConfirmed(true);
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: `reschedule-prompt-${Date.now()}`,
+                      role: "administrator",
+                      content:
+                        "Find an available slot below, or tell me how I can help you find another time.",
+                      createdAt: new Date().toISOString(),
+                      metadata: null,
+                    },
+                  ]);
+                  setConfirmedThreadExpanded(true);
+                }}
+                onRequestEdit={() => {
+                  setConfirmedThreadExpanded(true);
+                  setInput("I'd like to change the meeting — ");
+                }}
+                dealRoomUrl={typeof window !== "undefined"
+                  ? `${window.location.origin}/meet/${slug}${code ? `/${code}` : ""}`
+                  : undefined}
+                belowCardSlot={
+                  reschedulingFromConfirmed ? (
+                    <RescheduleOverlay
+                      onCancel={() => setReschedulingFromConfirmed(false)}
+                      pickerSlot={reschedulePickerNode}
+                    />
+                  ) : null
+                }
+              />
             </MeetingCardErrorBoundary>
-          ) : !meetingCardCrashed && !isGroupEvent && !isHost && !confirmed && meetingCardProps ? (
-            /* PR2c — proposal/matched/skipped/confirming non-group non-host session */
+          ) : !meetingCardCrashed && !isGroupEvent && !confirmed && meetingCardProps ? (
+            /* PR2c — proposal/matched/skipped/confirming non-group session
+               (HOST + GUEST both — isHost fallthrough removed 2026-05-10) */
             <MeetingCardErrorBoundary onError={() => setMeetingCardCrashed(true)}>
               <MeetingCardProposalView
                 cardProps={meetingCardProps}
