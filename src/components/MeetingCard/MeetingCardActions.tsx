@@ -78,11 +78,14 @@ function deriveCalendarAction(
   onOpenInGoogleCalendar?: () => void,
   onAddToCalendar?: () => void,
 ): ActionLink | null {
-  if (!googleCalendar) {
-    // Anonymous viewer — "Add to calendar" (no GCal URL bound)
+  // No event URL = no calendar event yet (or unknown). "Add to calendar"
+  // template is the only useful action.
+  if (!googleCalendar?.eventUrl) {
     return { icon: "📅", label: "Add to calendar", onClick: onAddToCalendar };
   }
 
+  // We have a real GCal event URL. Host always sees plain "Open" (they're the
+  // organizer, no RSVP semantics).
   if (viewerRole === "host") {
     return {
       icon: "📅",
@@ -92,6 +95,7 @@ function deriveCalendarAction(
     };
   }
 
+  // Guest with known RSVP status — surface the relevant action.
   switch (googleCalendar.viewerStatus) {
     case "needsAction":
       return {
@@ -115,20 +119,20 @@ function deriveCalendarAction(
         targetUrl: googleCalendar.eventUrl,
       };
     case "accepted":
+    case null:
+    default:
+      // 2026-05-10: when we have an eventUrl but no RSVP status (the async
+      // /api/negotiate/gcal-rsvp-status fetch hasn't landed yet, OR returned
+      // null because the guest hasn't connected GCal, OR the viewer is the
+      // host viewing as guest), surface "Open in Google Calendar" rather
+      // than the Add-to-calendar template — the user already has the invite,
+      // re-adding from a template is wrong.
       return {
         icon: "📅",
         label: "Open in Google Calendar",
         onClick: onOpenInGoogleCalendar,
         targetUrl: googleCalendar.eventUrl,
       };
-    case null:
-      // Registered but no GCal connected (connectPromptEligible) or no status
-      if (googleCalendar.connectPromptEligible) {
-        return { icon: "📅", label: "Add to calendar", onClick: onAddToCalendar };
-      }
-      return { icon: "📅", label: "Add to calendar", onClick: onAddToCalendar };
-    default:
-      return null;
   }
 }
 

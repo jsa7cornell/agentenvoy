@@ -1549,27 +1549,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       linkParameters,
       // Confirm endpoint returns the GCal event URL as `eventLink`. The legacy
       // host-only `/api/negotiate/gcal-status` fetch returns it as `htmlLink`.
-      // Prefer confirmData.eventLink (immediate at confirm) and fall back to
-      // gcalStatus.htmlLink (post-load fetch for existing confirmed sessions).
-      gcalEventUrl: (() => {
-        const fromEventLink = typeof confirmData?.eventLink === "string" ? confirmData.eventLink : null;
-        const fromHtmlLink = typeof confirmData?.htmlLink === "string" ? confirmData.htmlLink : null;
-        const fromGcalStatus = gcalStatus?.htmlLink ?? null;
-        const resolved = fromEventLink ?? fromHtmlLink ?? fromGcalStatus ?? null;
-        // 2026-05-10 debug: trace why "Open in Google Calendar" isn't appearing
-        // for John's confirmed session. Remove once root cause is identified.
-        if (typeof window !== "undefined" && confirmed) {
-          console.log("[gcalEventUrl debug]", {
-            confirmDataKeys: confirmData ? Object.keys(confirmData) : null,
-            eventLink: confirmData?.eventLink,
-            htmlLink: confirmData?.htmlLink,
-            gcalStatusHtmlLink: gcalStatus?.htmlLink,
-            gcalStatusEventExists: gcalStatus?.eventExists,
-            resolved,
-          });
-        }
-        return resolved;
-      })(),
+      // Prefer confirmData.eventLink (immediate at confirm + on session-load)
+      // and fall back to gcalStatus.htmlLink (defensive — older code paths).
+      gcalEventUrl:
+        (typeof confirmData?.eventLink === "string" ? confirmData.eventLink : null) ??
+        (typeof confirmData?.htmlLink === "string" ? confirmData.htmlLink : null) ??
+        gcalStatus?.htmlLink ??
+        null,
     });
   }, [
     confirmed,
