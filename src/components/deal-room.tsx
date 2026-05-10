@@ -216,6 +216,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     }
   }, [setTheme]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  /** NegotiationLink DB id — used by MeetingCardConfirmedView to PATCH tip. */
+  const [linkDbId, setLinkDbId] = useState<string | null>(null);
+  /** Raw link.parameters JSON — used for authored tip read path (PR2 SEED pivot). */
+  const [linkParameters, setLinkParameters] = useState<Record<string, unknown> | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -1175,6 +1179,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (data.participants) setParticipants(data.participants);
         if (data.groupCoordination) setGroupCoordination(data.groupCoordination as { candidateDays: string[] | null; responses: Array<{ person: string; dayVotes?: Record<string, boolean> }> });
 
+        // PR2 SEED: store link DB id + parameters for authored-tip read/write path.
+        if (typeof data.link?.id === "string" && data.link.id) {
+          setLinkDbId(data.link.id);
+        }
+        if (data.link?.parameters && typeof data.link.parameters === "object") {
+          setLinkParameters(data.link.parameters as Record<string, unknown>);
+        }
+
         // B3: store child NegotiationLink.code for feedback auth.
         // feedbackCode is the child NegotiationLink.code (e.g. "hf5uex");
         // code (from URL) is the bookable rule's linkCode (e.g. "q89wdvt4").
@@ -1520,6 +1532,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       linkLocation,
       sessionTimezone,
       slotTimezone,
+      linkParameters,
     });
   }, [
     confirmed,
@@ -1531,6 +1544,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     linkLocation,
     sessionTimezone,
     slotTimezone,
+    linkParameters,
   ]);
 
   // PR2a — map deal-room messages to EnvoyDock ChatMessage shape.
@@ -3260,6 +3274,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           {confirmed && meetingCardProps && !isGroupEvent ? (
             <MeetingCardConfirmedView
               sessionId={sessionId}
+              linkId={linkDbId}
               cardProps={meetingCardProps}
               threadMessages={confirmedThreadMessages}
               threadExpanded={confirmedThreadExpanded}

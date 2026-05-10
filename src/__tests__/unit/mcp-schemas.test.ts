@@ -14,7 +14,7 @@ import { MCP_RATE_LIMITS } from "@/lib/mcp/auth";
 import { HOST_MCP_TOOLS } from "@/lib/mcp/host-schemas";
 
 describe("MCP tool registry", () => {
-  it("lists all 9 tools (parent proposal §2.7's 8 + lock_activity_location MCP parity)", () => {
+  it("lists all 11 tools (parent proposal §2.7's 8 + lock_activity_location + PR2 get_tip + get_event_summary)", () => {
     expect(new Set(MCP_TOOL_NAMES)).toEqual(
       new Set([
         "get_meeting_parameters",
@@ -26,6 +26,8 @@ describe("MCP tool registry", () => {
         "cancel_meeting",
         "reschedule_meeting",
         "lock_activity_location",
+        "get_tip",
+        "get_event_summary",
       ])
     );
   });
@@ -67,6 +69,8 @@ describe("input schemas — happy case + strict() rejection", () => {
       meetingUrl: "/meet/abc",
       activity: "coffee",
     },
+    get_tip: { meetingUrl: "/meet/abc" },
+    get_event_summary: { meetingUrl: "/meet/abc" },
   };
 
   it.each(MCP_TOOL_NAMES)("%s accepts its happy case", (name) => {

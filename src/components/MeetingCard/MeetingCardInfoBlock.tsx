@@ -11,10 +11,13 @@
  *  - Series row: Google-style indigo text link + sub-line "Next session is..."
  *  - MeetingCardCalendarRow renders below channel/series rows.
  *
+ * PR2 SEED: host pencil-edit affordance on tip block. See onEditTip in types.ts.
+ *
  * Design X: phone copy composed from role-agnostic signals.
  * Visual spec: previews/event-card-FINAL-portfolio.html
  */
 
+import { useState } from "react";
 import type {
   MeetingCardProps,
   ChannelInfo,
@@ -181,11 +184,149 @@ function SeriesRow({ series }: { series: SeriesInfo }) {
 
 // ── Tip / agenda (R5: italic left-rule, no green box) ────────────────────────
 
-function AgendaTip({ text }: { text: string }) {
+/**
+ * AgendaTip — renders the tip text with an optional host-edit pencil affordance.
+ *
+ * PR2 SEED: when viewerRole === "host" AND onEditTip is provided, a pencil
+ * icon renders at right edge. Clicking enters edit mode (textarea + Save/Cancel).
+ * When tip is absent and onEditTip is provided, shows an "Add a tip…" affordance.
+ *
+ * AP5b: data-testid="meeting-card-tip-edit" for E2E discoverability.
+ */
+function AgendaTip({
+  text,
+  viewerRole,
+  onEditTip,
+}: {
+  text?: string;
+  viewerRole: ViewerRole;
+  onEditTip?: (newText: string) => Promise<void> | void;
+}) {
+  type EditState = "read" | "edit" | "saving";
+  const [editState, setEditState] = useState<EditState>("read");
+  const [draftText, setDraftText] = useState(text ?? "");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  const isHost = viewerRole === "host";
+  const showEdit = isHost && !!onEditTip;
+
+  // If nothing to show and not a host with edit permissions, render nothing
+  if (!text && !showEdit) return null;
+
+  const handleSave = async () => {
+    if (!onEditTip) return;
+    setEditState("saving");
+    setErrorMsg(null);
+    try {
+      await onEditTip(draftText);
+      setEditState("read");
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 2000);
+    } catch {
+      setEditState("edit");
+      setErrorMsg("Couldn't save — try again.");
+    }
+  };
+
+  const handleCancel = () => {
+    setDraftText(text ?? "");
+    setEditState("read");
+    setErrorMsg(null);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      void handleSave();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      handleCancel();
+    }
+  };
+
+  if (editState === "edit" || editState === "saving") {
+    return (
+      <div
+        className="pl-3 border-l-2 border-indigo-300 mt-3"
+        data-testid="meeting-card-tip-edit"
+      >
+        <textarea
+          className="w-full text-[12.5px] text-zinc-600 italic resize-none border border-zinc-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-400 leading-[1.55] bg-white"
+          rows={3}
+          maxLength={1000}
+          value={draftText}
+          disabled={editState === "saving"}
+          onChange={(e) => setDraftText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          autoFocus
+          placeholder="Add a tip for your guest…"
+        />
+        <div className="flex items-center gap-2 mt-1">
+          <button
+            className="text-[11px] font-medium text-white bg-indigo-500 hover:bg-indigo-600 px-2.5 py-0.5 rounded disabled:opacity-50"
+            onClick={void handleSave}
+            disabled={editState === "saving"}
+          >
+            {editState === "saving" ? "Saving…" : "Save"}
+          </button>
+          <button
+            className="text-[11px] font-medium text-zinc-500 hover:text-zinc-700"
+            onClick={handleCancel}
+            disabled={editState === "saving"}
+          >
+            Cancel
+          </button>
+          <span className="text-[10.5px] text-zinc-400 ml-1">⌘+Enter to save · Esc to cancel</span>
+        </div>
+        {errorMsg && (
+          <p className="text-[11px] text-red-500 mt-1">{errorMsg}</p>
+        )}
+      </div>
+    );
+  }
+
+  // Read mode
+  if (!text) {
+    // Host with no tip yet — "Add a tip…" affordance
+    return (
+      <div
+        className="pl-3 border-l-2 border-stone-200 mt-3 cursor-pointer"
+        data-testid="meeting-card-tip-edit"
+        onClick={() => {
+          setDraftText("");
+          setEditState("edit");
+        }}
+      >
+        <span className="text-[12.5px] text-zinc-400 italic">Add a tip for your guest…</span>
+      </div>
+    );
+  }
+
   return (
-    <p className="pl-3 border-l-2 border-stone-200 italic text-[12.5px] text-zinc-500 leading-[1.55] mt-3 mb-0">
-      {text}
-    </p>
+    <div
+      className="pl-3 border-l-2 border-stone-200 mt-3 group relative"
+      data-testid={showEdit ? "meeting-card-tip-edit" : undefined}
+    >
+      <p className="italic text-[12.5px] text-zinc-500 leading-[1.55] mb-0 m-0 pr-6">
+        {text}
+        {savedFlash && <span className="ml-1.5 text-emerald-500 not-italic">✓</span>}
+      </p>
+      {showEdit && (
+        <button
+          className="absolute right-0 top-0 opacity-60 group-hover:opacity-100 transition-opacity cursor-pointer text-indigo-500 text-[14px]"
+          title="Edit tip"
+          onClick={() => {
+            setDraftText(text);
+            setEditState("edit");
+          }}
+          aria-label="Edit tip"
+        >
+          ✏️
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -203,6 +344,7 @@ export function MeetingCardInfoBlock(props: MeetingCardProps) {
     series,
     googleCalendar,
     onNudgeOther,
+    onEditTip,
   } = props;
 
   const hostFullName = [host.firstName, host.lastName].filter(Boolean).join(" ");
@@ -255,7 +397,14 @@ export function MeetingCardInfoBlock(props: MeetingCardProps) {
         />
 
         {/* Agenda / tip — italic left-rule per R5 (no green box) */}
-        {tip && tip.text && <AgendaTip text={tip.text} />}
+        {/* PR2 SEED: host sees pencil affordance; guest sees read-only or nothing */}
+        {(tip?.text || (viewerRole === "host" && onEditTip)) && (
+          <AgendaTip
+            text={tip?.text}
+            viewerRole={viewerRole}
+            onEditTip={onEditTip}
+          />
+        )}
       </div>
     </div>
   );

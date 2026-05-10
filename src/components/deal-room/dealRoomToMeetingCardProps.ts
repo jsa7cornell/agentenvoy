@@ -22,6 +22,12 @@ export interface DealRoomConfirmedSnapshot {
   sessionTimezone: string | null;
   /** slotTimezone from deal-room line 312 — fallback when sessionTimezone absent. */
   slotTimezone: string;
+  /**
+   * Raw link.parameters JSON — used to extract Link.parameters.tip (the
+   * host-authored tip). Null when not available in current deal-room state.
+   * TODO(PR2-seed): populate from link state once the store path lands.
+   */
+  linkParameters: Record<string, unknown> | null;
 }
 
 /**
@@ -73,6 +79,9 @@ export function dealRoomToMeetingCardProps(
   }
 
   // Tip from real generator (Phase 2 — source-labeled tips)
+  // linkAuthoredTip: pull from Link.parameters.tip if available (PR2 SEED pivot).
+  const linkAuthoredTip =
+    (snapshot.linkParameters?.tip as string | undefined) ?? null;
   const rendered = renderTip(
     buildTipInput({
       hostName: snapshot.hostName,
@@ -81,6 +90,7 @@ export function dealRoomToMeetingCardProps(
       linkActivity: snapshot.linkActivity,
       linkLocation: snapshot.linkLocation,
       isAnonymousLink: false,
+      linkAuthoredTip,
     }),
     viewerRole,
   );

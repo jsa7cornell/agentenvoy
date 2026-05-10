@@ -30,6 +30,7 @@ const BASE_SNAPSHOT: DealRoomConfirmedSnapshot = {
   linkLocation: null,
   sessionTimezone: "America/Los_Angeles",
   slotTimezone: "America/New_York",
+  linkParameters: null,
 };
 
 // ── Null-return guards ────────────────────────────────────────────────────────

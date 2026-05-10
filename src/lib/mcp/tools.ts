@@ -66,7 +66,11 @@ import {
   cancelMeetingInput,
   rescheduleMeetingInput,
   lockActivityLocationInput,
+  getTipInputSchema,
+  getEventSummaryInputSchema,
 } from "@/lib/mcp/schemas";
+import { renderTip } from "@/lib/meeting-tip/render";
+import { buildTipInput } from "@/lib/meeting-tip/build-input";
 import type { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -1414,6 +1418,212 @@ export async function handleLockActivityLocation(
 }
 
 // ---------------------------------------------------------------------------
+// Handler: get_tip
+// ---------------------------------------------------------------------------
+
+export async function handleGetTip(
+  args: z.infer<typeof getTipInputSchema>
+): Promise<CallToolResult> {
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "get_tip",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+  const parameters = (link.parameters ?? {}) as Record<string, unknown>;
+  const linkAuthoredTip = typeof parameters.tip === "string" ? parameters.tip : null;
+
+  // Resolve host name for source-label substitution
+  const host = await prisma.user.findUnique({
+    where: { id: link.userId },
+    select: { name: true },
+  });
+  const hostName = host?.name ?? "Host";
+
+  // activity/location live in link.parameters (not dedicated columns)
+  const linkActivity = typeof parameters.activity === "string" ? parameters.activity : null;
+  const linkLocation = typeof parameters.location === "string" ? parameters.location : null;
+
+  // AP5b: same renderTip call as deal-room renderer — role-invariant templateId/sourceKind
+  const rendered = renderTip(
+    buildTipInput({
+      hostName,
+      inviteeName: link.inviteeName ?? "",
+      linkFormat: (parameters.format as string | undefined) ?? "video",
+      linkActivity,
+      linkLocation,
+      linkAuthoredTip,
+    }),
+    "guest", // external agent = guest perspective for AP5b role-invariance
+  );
+
+  return asCallResult({
+    ok: true,
+    tip: rendered
+      ? {
+          text: rendered.text,
+          source: rendered.source,
+          sourceKind: rendered.sourceKind,
+          templateId: rendered.templateId,
+          generatedAt: rendered.generatedAt,
+        }
+      : null,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Handler: get_event_summary
+// ---------------------------------------------------------------------------
+
+export async function handleGetEventSummary(
+  args: z.infer<typeof getEventSummaryInputSchema>
+): Promise<CallToolResult> {
+  const auth = await authorizeMcpCall({
+    meetingUrl: args.meetingUrl,
+    tool: "get_event_summary",
+  });
+  if (!auth.ok) {
+    const refusal = authErrorToRefusal(auth);
+    return asCallResult({ ok: false, ...refusal });
+  }
+
+  const { link } = auth;
+
+  // Actual NegotiationSession fields (see prisma/schema.prisma model NegotiationSession).
+  // Note: eventUrl, phoneNumber, isRecurring, recurringPosition, recurringTotal do NOT
+  // exist as columns — we derive them from calendarEventId, negotiatedFormat, and
+  // the link's recurrence JSON.
+  const sessionSelect = {
+    id: true,
+    status: true,
+    agreedTime: true,
+    agreedFormat: true,
+    meetLink: true,
+    negotiatedLocation: true,
+    duration: true,
+    guestName: true,
+    calendarEventId: true,
+    negotiatedFormat: true,
+    format: true,
+  } as const;
+
+  let session: Prisma.NegotiationSessionGetPayload<{ select: typeof sessionSelect }> | null = null;
+
+  if (args.sessionId) {
+    session = await prisma.negotiationSession.findUnique({
+      where: { id: args.sessionId },
+      select: sessionSelect,
+    });
+  }
+
+  if (!session) {
+    session = await prisma.negotiationSession.findFirst({
+      where: { linkId: link.id },
+      orderBy: { createdAt: "desc" },
+      select: sessionSelect,
+    });
+  }
+
+  if (!session) {
+    return asCallResult({
+      ok: false,
+      reason: "session_not_found",
+      message: "No session found for this meeting URL.",
+    });
+  }
+
+  // Map session status to summary status
+  const statusMap: Record<string, "proposed" | "matched" | "agreed" | "cancelled"> = {
+    active: "proposed",
+    proposed: "proposed",
+    retime_proposed: "proposed",
+    escalated: "proposed",
+    agreed: "agreed",
+    cancelled: "cancelled",
+    rescheduled: "agreed",
+    expired: "cancelled",
+  };
+  const summaryStatus = statusMap[session.status ?? "active"] ?? "proposed";
+
+  // Effective format: negotiated > agreedFormat > session.format
+  const effectiveFormat =
+    session.negotiatedFormat ?? session.agreedFormat ?? session.format ?? null;
+
+  // Channel discrimination (Design X signals, not pre-rendered copy)
+  const linkParams = (link.parameters ?? {}) as Record<string, unknown>;
+  let channel: unknown = null;
+  if (summaryStatus === "agreed" && effectiveFormat) {
+    if (effectiveFormat === "video") {
+      channel = {
+        kind: "video",
+        platform: session.meetLink?.includes("zoom.us") ? "Zoom" : "Google Meet",
+        joinUrl: session.meetLink ?? null,
+      };
+    } else if (effectiveFormat === "phone") {
+      channel = {
+        kind: "phone",
+        phoneNumber: "(contact host)", // phone# not stored on session in v1
+        hostCallsGuest: true as const,
+      };
+    } else {
+      channel = {
+        kind: "in-person",
+        location:
+          session.negotiatedLocation ??
+          (linkParams.location as string | undefined) ??
+          "TBD",
+      };
+    }
+  }
+
+  // GCal event URL — calendarEventId is the GCal event id, not a URL.
+  // The htmlLink pattern is: https://calendar.google.com/calendar/event?eid=<base64(id)>
+  // We surface calendarEventId as a hint; a full htmlLink isn't stored on the session.
+  // eventUrl in output schema is nullable — return null when we don't have an htmlLink.
+  const eventUrl: string | null = null; // TODO: store htmlLink at confirm time (follow-up)
+
+  // Host name for participants
+  const hostUser = await prisma.user.findUnique({
+    where: { id: link.userId },
+    select: { name: true },
+  });
+  const hostFirstName = (hostUser?.name ?? "Host").split(" ")[0];
+  const guestFirstName = (session.guestName ?? link.inviteeName ?? "Guest").split(" ")[0];
+
+  // Series — derived from link.recurrence (Json field); no per-session position stored yet.
+  // Return null for non-recurring links; stub position for recurring (follow-up: per-occurrence rows).
+  const recurrence = link.recurrence as Record<string, unknown> | null;
+  const series = recurrence
+    ? {
+        cadence: (recurrence.cadence as string | undefined) ?? "Recurring",
+        position: 1, // TODO: derive from LinkOccurrence when position tracking lands
+        total: (recurrence.total as number | undefined) ?? 0,
+        nextSessionUrl: null,
+      }
+    : null;
+
+  return asCallResult({
+    ok: true,
+    summary: {
+      status: summaryStatus,
+      agreedTime: session.agreedTime?.toISOString() ?? null,
+      agreedFormat: (effectiveFormat as "video" | "phone" | "in-person" | null) ?? null,
+      eventUrl,
+      channel: channel ?? null,
+      participants: {
+        hostFirstName,
+        guestFirstName,
+      },
+      series,
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Registration entry point
 // ---------------------------------------------------------------------------
 
@@ -1514,6 +1724,10 @@ export function registerMcpTools(server: McpServer): void {
         handleLockActivityLocation(
           args as z.infer<typeof lockActivityLocationInput>
         ),
+      get_tip: (args) =>
+        handleGetTip(args as z.infer<typeof getTipInputSchema>),
+      get_event_summary: (args) =>
+        handleGetEventSummary(args as z.infer<typeof getEventSummaryInputSchema>),
     };
 
   for (const name of Object.keys(MCP_TOOLS) as McpToolName[]) {

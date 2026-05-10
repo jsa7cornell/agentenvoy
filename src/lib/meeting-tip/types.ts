@@ -24,6 +24,8 @@ export interface TipInput {
   recurringPosition?: number;
   recurringTotal?: number;
   bothCalendarsConnected?: boolean;
+  /** Host's authored tip from Link.parameters.tip — highest priority. */
+  linkAuthoredTip?: string;
 }
 
 export interface RenderedTip {

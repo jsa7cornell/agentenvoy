@@ -15,6 +15,7 @@ export interface BuildTipInputArgs {
   isAnonymousLink?: boolean;
   hasPriorSessions?: boolean;
   bothCalendarsConnected?: boolean;
+  linkAuthoredTip?: string | null;
 }
 
 export function buildTipInput(args: BuildTipInputArgs): TipInput {
@@ -33,5 +34,6 @@ export function buildTipInput(args: BuildTipInputArgs): TipInput {
     recurringPosition: args.recurringPosition,
     recurringTotal: args.recurringTotal,
     bothCalendarsConnected: args.bothCalendarsConnected,
+    linkAuthoredTip: args.linkAuthoredTip ?? undefined,
   };
 }

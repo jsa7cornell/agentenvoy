@@ -139,6 +139,9 @@ export const MCP_RATE_LIMITS: Record<
   cancel_meeting:         { limit: 5,  windowSec: 60, failMode: "closed" },
   reschedule_meeting:     { limit: 5,  windowSec: 60, failMode: "closed" },
   lock_activity_location: { limit: 20, windowSec: 60, failMode: "closed" },
+  // Read-only — fail-open
+  get_tip:           { limit: 60, windowSec: 60, failMode: "open" },
+  get_event_summary: { limit: 60, windowSec: 60, failMode: "open" },
 };
 
 export type RateLimitGateResult =

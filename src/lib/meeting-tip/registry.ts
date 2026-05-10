@@ -1,4 +1,5 @@
 import type { TipInput, TipTemplate } from "./types";
+import { authoredLinkTip } from "./templates/authored-link-tip";
 import { authoredDayOf } from "./templates/authored-day-of";
 import { authoredTravel } from "./templates/authored-travel";
 import { authoredFormat } from "./templates/authored-format";
@@ -8,6 +9,7 @@ import { derivedSeriesProgress } from "./templates/derived-series-progress";
 import { generativeFallback } from "./templates/generative-fallback";
 
 const TEMPLATES: TipTemplate[] = [
+  authoredLinkTip,
   authoredDayOf,
   authoredTravel,
   authoredFormat,

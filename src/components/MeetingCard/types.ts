@@ -363,6 +363,13 @@ export interface MeetingCardProps {
   tip?: Tip;
 
   /**
+   * Called when host taps the pencil icon next to the tip and saves a new
+   * value. Wired in MeetingCardConfirmedView to PATCH Link.parameters.tip.
+   * Guest never sees the pencil; this callback only fires for host viewers.
+   */
+  onEditTip?: (newTipText: string) => Promise<void> | void;
+
+  /**
    * Recurring series metadata.
    * Optional — present only for recurring meeting sessions.
    * Phase 1: data flows in but MeetingCardSeriesBlock renders a stub.

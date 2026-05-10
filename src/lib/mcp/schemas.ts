@@ -733,6 +733,97 @@ export const lockActivityLocationOutput = z.discriminatedUnion("ok", [
 ]);
 
 // ---------------------------------------------------------------------------
+// 9. get_tip
+// ---------------------------------------------------------------------------
+
+export const getTipInputSchema = z
+  .object({
+    meetingUrl: meetingUrlSchema,
+    sessionId: z.string().optional(),
+  })
+  .strict();
+
+export const getTipOutputSchema = z.discriminatedUnion("ok", [
+  z
+    .object({
+      ok: z.literal(true),
+      tip: z
+        .object({
+          text: z.string(),
+          source: z.string(),
+          sourceKind: z.enum([
+            "authored-day-of",
+            "authored-travel",
+            "authored-format",
+            "derived-calendar-overlap",
+            "derived-relationship-history",
+            "derived-series-progress",
+            "generative-fallback",
+          ]),
+          templateId: z.string(),
+          generatedAt: z.string().datetime(),
+        })
+        .nullable(),
+    })
+    .strict(),
+  refusal(authRefusalReasonSchema),
+]);
+
+// ---------------------------------------------------------------------------
+// 10. get_event_summary
+// ---------------------------------------------------------------------------
+
+export const getEventSummaryInputSchema = z
+  .object({
+    meetingUrl: meetingUrlSchema,
+    sessionId: z.string().optional(),
+  })
+  .strict();
+
+export const getEventSummaryOutputSchema = z.discriminatedUnion("ok", [
+  z
+    .object({
+      ok: z.literal(true),
+      summary: z.object({
+        status: z.enum(["proposed", "matched", "agreed", "cancelled"]),
+        agreedTime: z.string().datetime().nullable(),
+        agreedFormat: z.enum(["video", "phone", "in-person"]).nullable(),
+        eventUrl: z.string().nullable(), // GCal htmlLink
+        channel: z
+          .discriminatedUnion("kind", [
+            z.object({ kind: z.literal("in-person"), location: z.string() }),
+            z.object({
+              kind: z.literal("video"),
+              platform: z.string(),
+              joinUrl: z.string().nullable(),
+            }),
+            z.object({
+              kind: z.literal("phone"),
+              phoneNumber: z.string(),
+              hostCallsGuest: z.literal(true),
+            }),
+          ])
+          .nullable(),
+        participants: z.object({
+          hostFirstName: z.string(),
+          guestFirstName: z.string(),
+          hostCallsGuest: z.boolean().optional(),
+        }),
+        series: z
+          .object({
+            cadence: z.string(),
+            position: z.number(),
+            total: z.number(),
+            nextSessionUrl: z.string().nullable(),
+          })
+          .nullable(),
+      }),
+    })
+    .strict(),
+  refusal(authRefusalReasonSchema),
+]);
+
+// ---------------------------------------------------------------------------
 // Tool registry — one table that downstream code (route dispatcher,
 // `.well-known/mcp.json` generator, completeness tests) reads.
 // ---------------------------------------------------------------------------
@@ -791,6 +882,18 @@ export const MCP_TOOLS = {
     output: lockActivityLocationOutput,
     description:
       "Lock the activity and/or location of a coordinating session on behalf of the guest. Mirrors the host-Envoy dialog action; server-side handler is shared. Format may be derived from the activity (e.g. coffee → in-person) and is validated against the host's downgrade ladder unless the activity is one of the host's pre-approved options.",
+  },
+  get_tip: {
+    input: getTipInputSchema,
+    output: getTipOutputSchema,
+    description:
+      "Read the contextual tip for a meeting link. Returns the highest-priority authored or derived tip that applies to this meeting, or null when no tip is available. AP5b: templateId and sourceKind are role-invariant.",
+  },
+  get_event_summary: {
+    input: getEventSummaryInputSchema,
+    output: getEventSummaryOutputSchema,
+    description:
+      "Read a consolidated summary of the event: lifecycle status, agreed time/format, channel details (Design X signals — renderer composes copy), participants, series metadata, and GCal event URL.",
   },
 } as const;
 

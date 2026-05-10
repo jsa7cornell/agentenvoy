@@ -24,6 +24,11 @@ import type { Message as ChatMessage } from "@/components/MeetingCard/types";
 interface Props {
   /** NegotiationSession ID — used to fetch GCal RSVP status (PR2b). */
   sessionId: string | null;
+  /**
+   * NegotiationLink DB id — used to PATCH Link.parameters.tip when the host
+   * edits the tip via the pencil affordance. Null for guests or when unknown.
+   */
+  linkId: string | null;
   cardProps: MeetingCardProps;
   /** Chat thread messages for EnvoyDock — derived from deal-room messages. */
   threadMessages: ChatMessage[];
@@ -36,6 +41,7 @@ interface Props {
 
 export function MeetingCardConfirmedView({
   sessionId,
+  linkId,
   cardProps,
   threadMessages,
   threadExpanded,
@@ -73,6 +79,21 @@ export function MeetingCardConfirmedView({
   const stubAction = (label: string) => () =>
     console.log(`PR2c: wire ${label} handler`);
 
+  // PR2 SEED: host pencil edit — PATCH Link.parameters.tip.
+  // Only wired for host viewers (cardProps.viewerRole === "host") with a known linkId.
+  const handleEditTip = linkId && cardProps.viewerRole === "host"
+    ? async (newText: string) => {
+        const res = await fetch(`/api/me/links/${encodeURIComponent(linkId)}/tip`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tip: newText }),
+        });
+        if (!res.ok) {
+          throw new Error(`Failed to save tip (${res.status})`);
+        }
+      }
+    : undefined;
+
   const cardPropsWithStubs: MeetingCardProps = {
     ...cardProps,
     googleCalendar: gcalStatus ?? undefined,
@@ -93,6 +114,7 @@ export function MeetingCardConfirmedView({
       ? () => window.open(gcalStatus.eventUrl, "_blank", "noopener")
       : stubAction("viewInGoogleCalendar"),
     onNudgeOther: stubAction("nudgeOther"),
+    onEditTip: handleEditTip,
   };
 
   return (
