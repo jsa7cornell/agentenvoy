@@ -1542,7 +1542,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       sessionTimezone,
       slotTimezone,
       linkParameters,
-      gcalEventUrl: typeof confirmData?.htmlLink === "string" ? confirmData.htmlLink : null,
+      // Confirm endpoint returns the GCal event URL as `eventLink`. The legacy
+      // host-only `/api/negotiate/gcal-status` fetch returns it as `htmlLink`.
+      // Prefer confirmData.eventLink (immediate at confirm) and fall back to
+      // gcalStatus.htmlLink (post-load fetch for existing confirmed sessions).
+      gcalEventUrl:
+        (typeof confirmData?.eventLink === "string" ? confirmData.eventLink : null) ??
+        (typeof confirmData?.htmlLink === "string" ? confirmData.htmlLink : null) ??
+        gcalStatus?.htmlLink ??
+        null,
     });
   }, [
     confirmed,
@@ -1555,6 +1563,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     sessionTimezone,
     slotTimezone,
     linkParameters,
+    gcalStatus,
   ]);
 
   // PR2a — map deal-room messages to EnvoyDock ChatMessage shape.

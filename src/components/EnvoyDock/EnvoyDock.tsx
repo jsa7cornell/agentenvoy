@@ -27,6 +27,7 @@
  * PR2: onSendMessage wired. PR3: this becomes the left-rail persistent panel.
  */
 
+import { PanelBottom } from "lucide-react";
 import type { EnvoyDockProps } from "@/components/MeetingCard/types";
 import { EnvoyDockThread } from "./EnvoyDock.thread";
 
@@ -122,9 +123,13 @@ export function EnvoyDock({
             </div>
           </div>
 
-          {/* Up-arrow chip */}
-          <div className="w-[30px] h-[30px] rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center text-[14px] font-semibold flex-shrink-0">
-            ↑
+          {/* Expand-panel chip — vertical sibling of Claude's PanelLeft.
+              Signals "open chat panel below" via the standard panel-bottom icon. */}
+          <div
+            className="w-[30px] h-[30px] rounded-lg bg-indigo-50 text-indigo-500 flex items-center justify-center flex-shrink-0"
+            aria-hidden="true"
+          >
+            <PanelBottom size={16} strokeWidth={2} />
           </div>
         </div>
 
