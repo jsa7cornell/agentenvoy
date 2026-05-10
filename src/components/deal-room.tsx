@@ -44,6 +44,7 @@ import {
 import { ThumbsDownFeedback } from "./thumbs-down-feedback";
 // PR2a — confirmed-state MeetingCard + EnvoyDock wire-in
 import { MeetingCardConfirmedView } from "./deal-room/MeetingCardConfirmedView";
+import { MeetingCardErrorBoundary } from "./deal-room/MeetingCardErrorBoundary";
 import { dealRoomToMeetingCardProps } from "./deal-room/dealRoomToMeetingCardProps";
 import type { Message as ChatMessage } from "@/components/MeetingCard/types";
 
@@ -272,6 +273,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
   // PR2a — track whether the EnvoyDock thread is expanded in confirmed view
   const [confirmedThreadExpanded, setConfirmedThreadExpanded] = useState(false);
+  /**
+   * PR2a safety: when the new MeetingCardConfirmedView render path crashes
+   * client-side, the error boundary flips this flag and we fall through to
+   * the legacy event-card render on the next render. Prevents the blank-
+   * page "Application error" experience from stranding users mid-confirm.
+   * 2026-05-10 hotfix.
+   */
+  const [meetingCardCrashed, setMeetingCardCrashed] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [emailWarning, setEmailWarning] = useState<string | null>(null);
@@ -3270,22 +3279,27 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Chat column — event card + messages */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* PR2a NEW PATH: confirmed non-group event renders MeetingCard + EnvoyDock */}
-          {confirmed && meetingCardProps && !isGroupEvent ? (
-            <MeetingCardConfirmedView
-              sessionId={sessionId}
-              linkId={linkDbId}
-              cardProps={meetingCardProps}
-              threadMessages={confirmedThreadMessages}
-              threadExpanded={confirmedThreadExpanded}
-              onExpandThread={() => setConfirmedThreadExpanded(true)}
-              onCollapseThread={() => setConfirmedThreadExpanded(false)}
-              onSendMessage={(text) => {
-                // PR2c will wire this to the real send handler.
-                // For PR2a, best-effort: set the textarea value.
-                setInput(text);
-              }}
-            />
+          {/* PR2a NEW PATH: confirmed non-group event renders MeetingCard + EnvoyDock.
+              Wrapped in error boundary (2026-05-10 hotfix) so any client-side crash
+              in the new card surface flips meetingCardCrashed → next render falls
+              through to the legacy path below. Prevents blank-page "Application error". */}
+          {confirmed && meetingCardProps && !isGroupEvent && !meetingCardCrashed ? (
+            <MeetingCardErrorBoundary onError={() => setMeetingCardCrashed(true)}>
+              <MeetingCardConfirmedView
+                sessionId={sessionId}
+                linkId={linkDbId}
+                cardProps={meetingCardProps}
+                threadMessages={confirmedThreadMessages}
+                threadExpanded={confirmedThreadExpanded}
+                onExpandThread={() => setConfirmedThreadExpanded(true)}
+                onCollapseThread={() => setConfirmedThreadExpanded(false)}
+                onSendMessage={(text) => {
+                  // PR2c will wire this to the real send handler.
+                  // For PR2a, best-effort: set the textarea value.
+                  setInput(text);
+                }}
+              />
+            </MeetingCardErrorBoundary>
           ) : (
           /* EXISTING PATH (unchanged): old event card + chat column */
           /* Desktop centered wrapper for left-side content */

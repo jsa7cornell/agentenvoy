@@ -24,28 +24,48 @@ import type { MeetingCardProps, MeetingCardState } from "./types";
  * Format date as "Tue, May 13 · 9:30 AM" — no TZ (appended separately in parens).
  */
 function formatTimeParts(date: Date, tz: string): { datePart: string; timePart: string } {
-  const datePart = date.toLocaleString("en-US", {
-    timeZone: tz,
+  // 2026-05-10 hotfix: try/catch for invalid TZ — Intl.DateTimeFormat throws
+  // RangeError on empty string or unrecognized IANA zone. Better to render
+  // browser-local than crash the whole card.
+  const opts = (timeZone: string | undefined): Intl.DateTimeFormatOptions => ({
+    timeZone: timeZone || undefined,
     weekday: "short",
     month: "short",
     day: "numeric",
   });
-  const timePart = date.toLocaleString("en-US", {
-    timeZone: tz,
+  const tOpts = (timeZone: string | undefined): Intl.DateTimeFormatOptions => ({
+    timeZone: timeZone || undefined,
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
-  return { datePart, timePart };
+  try {
+    return {
+      datePart: date.toLocaleString("en-US", opts(tz)),
+      timePart: date.toLocaleString("en-US", tOpts(tz)),
+    };
+  } catch {
+    return {
+      datePart: date.toLocaleString("en-US", opts(undefined)),
+      timePart: date.toLocaleString("en-US", tOpts(undefined)),
+    };
+  }
 }
 
 function tzAbbr(tz: string): string {
-  const date = new Date();
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    timeZoneName: "short",
-  }).formatToParts(date);
-  return parts.find((p) => p.type === "timeZoneName")?.value ?? tz;
+  // 2026-05-10 hotfix: try/catch for invalid TZ — Intl.DateTimeFormat throws
+  // RangeError on empty string. Return the raw input as last-resort label.
+  if (!tz) return "";
+  try {
+    const date = new Date();
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      timeZoneName: "short",
+    }).formatToParts(date);
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? tz;
+  } catch {
+    return tz;
+  }
 }
 
 // ── Accent stripe (proposal / matched / confirming) ───────────────────────────
@@ -124,7 +144,8 @@ function FullHero(props: MeetingCardProps) {
 
   // The "other party" from the viewer's perspective
   const otherParty = viewerRole === "guest" ? host : guest;
-  const otherInitial = otherParty.firstName[0].toUpperCase();
+  // 2026-05-10 hotfix: defensive against empty firstName.
+  const otherInitial = (otherParty.firstName?.[0] ?? "?").toUpperCase();
 
   return (
     <div

@@ -115,16 +115,23 @@ export function dealRoomToMeetingCardProps(
     ? `${snapshot.linkActivity}${inviteeFirst ? " with " + inviteeFirst : ""}`
     : "Meeting";
 
-  // Participants — split name into first/last
-  const splitName = (full: string) => {
-    const parts = full.trim().split(/\s+/);
+  // Participants — split name into first/last.
+  // 2026-05-10 hotfix: NEVER return an empty firstName. Avatar / Hero do
+  // `firstName[0].toUpperCase()` which throws TypeError on empty string.
+  // When the underlying snapshot has no name (anonymous guest, host record
+  // without name set, etc.) fall back to a single-letter placeholder.
+  const splitName = (full: string | null | undefined, fallbackInitial: string) => {
+    const trimmed = (full ?? "").trim();
+    if (!trimmed) return { firstName: fallbackInitial, lastName: undefined };
+    const parts = trimmed.split(/\s+/);
+    const first = parts[0];
     return {
-      firstName: parts[0] ?? "",
+      firstName: first && first.length > 0 ? first : fallbackInitial,
       lastName: parts.slice(1).join(" ") || undefined,
     };
   };
-  const host = splitName(snapshot.hostName);
-  const guest = splitName(snapshot.inviteeName);
+  const host = splitName(snapshot.hostName, "H");
+  const guest = splitName(snapshot.inviteeName, "G");
 
   return {
     viewerRole,

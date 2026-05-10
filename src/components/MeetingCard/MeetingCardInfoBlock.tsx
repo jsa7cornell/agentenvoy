@@ -38,7 +38,9 @@ function Avatar({
   role: "host" | "guest";
   overlap?: boolean;
 }) {
-  const initial = participant.firstName[0].toUpperCase();
+  // 2026-05-10 hotfix: defensive against empty firstName — Avatar previously
+  // crashed with TypeError when participant data was missing a name.
+  const initial = (participant.firstName?.[0] ?? "?").toUpperCase();
   const gradient =
     role === "host"
       ? "linear-gradient(135deg, #a78bfa, #6366f1)"
