@@ -31,12 +31,25 @@ import type { MeetingCardProps } from "./types";
 
 export function MeetingCardPickerHost({
   state,
+  viewerRole,
   calendar,
   onConnectCalendar,
   children,
 }: MeetingCardProps & { children?: React.ReactNode }) {
   // Only render in proposal/matched states
   if (state !== "proposal" && state !== "matched") return null;
+
+  // 2026-05-10 fix: host is the meeting organizer — they don't need a
+  // "Connect your calendar" prompt (they're already the owner of the event).
+  // And the picker for proposal/matched is rendered BELOW the card via
+  // MeetingCardProposalView's pickerSlot, not as a child of this component.
+  // So for hosts: render nothing here.
+  if (viewerRole === "host") return null;
+
+  // 2026-05-10 fix: when no children are passed (the picker lives elsewhere
+  // in the parent layout), don't render the stale "Picker renders here in PR2"
+  // placeholder — render only the calendar-connect bar.
+  const hasChildren = !!children;
 
   const connected = calendar?.connected ?? false;
   const email = connected && calendar?.connected ? (calendar as { connected: true; email: string }).email : undefined;
@@ -83,14 +96,10 @@ export function MeetingCardPickerHost({
         </button>
       )}
 
-      {/* Picker host slot — PR2 fills this */}
-      {children ? (
-        <div>{children}</div>
-      ) : (
-        <div className="p-3 text-[12px] text-[#9b9480]">
-          Picker renders here in PR2
-        </div>
-      )}
+      {/* Picker host slot — only rendered when a child is provided.
+          When picker is hosted elsewhere (e.g. MeetingCardProposalView's
+          pickerSlot, below the card), we omit this slot entirely. */}
+      {hasChildren && <div>{children}</div>}
     </div>
   );
 }

@@ -95,11 +95,25 @@ function buildProposalMeetingCardProps(
     };
   };
   const host = splitName(snapshot.hostName, "H");
-  const guest = splitName(snapshot.inviteeName, "G");
+  // 2026-05-10 fix: when no specific guest yet (primary-link-seeded session),
+  // omit the guest entirely instead of showing a "G" placeholder. The
+  // who-row and avatar will detect the empty firstName and skip rendering.
+  const hasGuest = !!(snapshot.inviteeName ?? "").trim();
+  const guest = hasGuest
+    ? splitName(snapshot.inviteeName, "G")
+    : { firstName: "", lastName: undefined };
 
-  const inviteeFirst = guest.firstName !== "G" ? guest.firstName : "";
+  // 2026-05-10 fix: title falls back to "Meeting with {host full name}" when
+  // there's no specific invitee (primary-link case) — e.g. "Meeting with John
+  // Anderson" rather than the bare "Meeting" generic.
+  const hostFullName = [host.firstName, host.lastName].filter(Boolean).join(" ");
+  const inviteeFirst = hasGuest && guest.firstName !== "G" ? guest.firstName : "";
   const title = snapshot.linkActivity
     ? `${snapshot.linkActivity}${inviteeFirst ? " with " + inviteeFirst : ""}`
+    : hasGuest
+    ? "Meeting"
+    : hostFullName
+    ? `Meeting with ${hostFullName}`
     : "Meeting";
 
   // Determine card state

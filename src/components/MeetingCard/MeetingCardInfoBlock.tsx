@@ -150,6 +150,52 @@ function ChannelLine({
   );
 }
 
+// ── When row (proposal/matched/confirming — confirmed state shows it in Hero) ─
+
+function WhenRow({
+  when,
+  state,
+}: {
+  when: { time: Date; tz: string; durationMin: number };
+  state: "proposal" | "matched" | "confirming";
+}) {
+  // Proposal: no slot picked yet → "TBD"
+  // Matched: best-fit slot found → format the time
+  // Confirming: same as matched (locked but in flight)
+  let primary: string;
+  if (state === "proposal") {
+    primary = "TBD — pick a time below";
+  } else {
+    try {
+      primary = when.time.toLocaleString("en-US", {
+        timeZone: when.tz || undefined,
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } catch {
+      primary = "TBD";
+    }
+  }
+
+  return (
+    <div className="flex items-start gap-[9px] text-[13px] text-zinc-600 pt-2">
+      <span className="text-[14px] w-5 text-center flex-shrink-0 text-zinc-400 leading-[1.45]">
+        🕐
+      </span>
+      <div className="flex-1 min-w-0 leading-[1.45]">
+        <b className="text-zinc-700 font-semibold">{primary}</b>
+        {state !== "proposal" && (
+          <span className="text-zinc-400"> · {when.durationMin} min</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Series row (R5: Google-style text link + sub-line) ────────────────────────
 
 function SeriesRow({ series }: { series: SeriesInfo }) {
@@ -347,10 +393,19 @@ export function MeetingCardInfoBlock(props: MeetingCardProps) {
     googleCalendar,
     onNudgeOther,
     onEditTip,
+    state,
+    when,
   } = props;
+  // Confirmed/skipped states show time prominently in the gradient hero.
+  // Proposal/matched/confirming show it as a row inside the info block,
+  // with proposal collapsing to "TBD" because no slot is picked yet.
+  const showWhenRow = state === "proposal" || state === "matched" || state === "confirming";
 
   const hostFullName = [host.firstName, host.lastName].filter(Boolean).join(" ");
   const guestFullName = [guest.firstName, guest.lastName].filter(Boolean).join(" ");
+  // 2026-05-10: when guest is unknown (primary-link-seeded proposal), guest.firstName
+  // is intentionally empty. Skip rendering the guest avatar + "& {guest}" suffix.
+  const hasGuest = !!guest.firstName?.trim();
 
   // SeriesInfo now includes optional nextSessionDate + seriesUrl (added for R5 series row).
   // Both fields are optional — existing fixtures without them render gracefully.
@@ -363,12 +418,16 @@ export function MeetingCardInfoBlock(props: MeetingCardProps) {
         <div className="flex items-center gap-[10px] mb-2" data-testid="meeting-participants">
           <div className="flex items-center">
             <Avatar participant={host} role="host" />
-            <Avatar participant={guest} role="guest" overlap />
+            {hasGuest && <Avatar participant={guest} role="guest" overlap />}
           </div>
           <div className="text-[12px] text-zinc-400 font-medium">
             <b className="text-zinc-600 font-semibold" data-meeting-host>{hostFullName}</b>
-            {" & "}
-            <b className="text-zinc-600 font-semibold" data-meeting-guest>{guestFullName}</b>
+            {hasGuest && (
+              <>
+                {" & "}
+                <b className="text-zinc-600 font-semibold" data-meeting-guest>{guestFullName}</b>
+              </>
+            )}
           </div>
         </div>
 
@@ -376,6 +435,15 @@ export function MeetingCardInfoBlock(props: MeetingCardProps) {
         <h3 className="text-[18px] font-semibold text-zinc-900 tracking-[-0.008em] leading-[1.3] mb-2 m-0" data-meeting-title>
           {title}
         </h3>
+
+        {/* When row — only for non-confirmed states (confirmed/skipped show
+            time in the gradient hero). Proposal collapses to "TBD". */}
+        {showWhenRow && (
+          <WhenRow
+            when={when}
+            state={state as "proposal" | "matched" | "confirming"}
+          />
+        )}
 
         {/* Channel line */}
         <ChannelLine
