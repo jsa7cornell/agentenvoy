@@ -238,8 +238,10 @@ export function DragSlotPicker({
           </span>
         </div>
       )}
-      {/* Ruler */}
-      <div className="relative pb-6">
+      {/* Ruler — horizontal padding (px-6) reserves room for future ‹ ›
+          scroll affordances in the gutters and gives the labels breathing
+          room from the card edges. */}
+      <div className="relative pb-6 px-6">
         <div
           ref={rulerRef}
           className="relative h-12 rounded-lg overflow-hidden"
@@ -301,9 +303,10 @@ export function DragSlotPicker({
           </div>
         </div>
 
-        {/* Hour labels — label every other hour to keep density readable */}
-        <div className="absolute left-0 right-0 bottom-0 pointer-events-none h-4">
-          {hourTicks.filter(h => (h - workingHourStart) % 2 === 0).map(h => {
+        {/* Hour labels — every hour. Aligned to the same px-6 gutter as
+            the ruler so labels sit under their tick lines. */}
+        <div className="absolute left-6 right-6 bottom-0 pointer-events-none h-4">
+          {hourTicks.map(h => {
             const pct = (h - workingHourStart) / (workingHourEnd - workingHourStart) * 100;
             const label = h === 12 ? "12p" : h > 12 ? `${h - 12}p` : `${h}a`;
             return (
