@@ -13,7 +13,13 @@ import {
   validateIntent,
   type Steering,
 } from "@/lib/intent";
-import { createTentativeHoldEvent, deleteCalendarEvent } from "@/lib/calendar";
+import {
+  assertAgentEnvoyOwnedEvent,
+  createTentativeHoldEvent,
+  deleteCalendarEvent,
+  GcalOwnershipError,
+  updateCalendarEvent,
+} from "@/lib/calendar";
 import { cancelSession } from "@/lib/cancel-pipeline";
 import { parseTimeOfDay, TIME_OF_DAY_WINDOWS } from "@/lib/time-of-day";
 import { sanitizeHostFlavor, sanitizeSuggestionList } from "@/lib/host-flavor-sanitizer";
@@ -574,34 +580,133 @@ async function handleCancel(
  * channel message instead of writing directly. The host sees a GcalUpdateCard
  * in the feed and must click Confirm before we touch GCal.
  */
-async function postGcalUpdateProposal(
-  session: { id: string; hostId: string; calendarEventId: string | null },
+/**
+ * Apply an in-chat update to a confirmed session by patching the GCal event
+ * directly, mirroring to `link.parameters` for personalized links, and
+ * posting a system message to the deal-room thread.
+ *
+ * Replaces the `postGcalUpdateProposal` dashboard-approval flow for
+ * deal-room-originated edits (decided 2026-05-11 by John): when the user
+ * is typing the change in the chat, their statement is the authorization —
+ * no second click in the host feed required.
+ *
+ * Caller must have already authorized userId against session.hostId. Mirrors
+ * the safety invariants of `/api/negotiate/update-gcal/route.ts`:
+ *   - Ownership gate via assertAgentEnvoyOwnedEvent.
+ *   - DB updateMany WHERE status="agreed" + !archived for TOCTOU safety.
+ *   - GCal call outside any prisma transaction.
+ */
+async function applyConfirmedSessionPatch(
+  session: {
+    id: string;
+    hostId: string;
+    calendarEventId: string | null;
+    archived: boolean;
+    link: { id: string; type: string; parameters: unknown };
+  },
   userId: string,
-  proposed: Record<string, unknown>,
+  changes: {
+    location?: string;
+    format?: string;
+    startTime?: Date;
+    endTime?: Date;
+    duration?: number;
+  },
+  summary: string,
+  systemMessageField: string,
 ): Promise<ActionResult> {
-  // Upsert the host's channel (mirrors confirm/route.ts pattern)
-  let channel = await prisma.channel.findUnique({ where: { userId } });
-  if (!channel) channel = await prisma.channel.create({ data: { userId } });
+  if (!session.calendarEventId) {
+    return { success: false, message: "Session has no calendar event" };
+  }
 
-  await prisma.channelMessage.create({
+  // Ownership gate — event must carry this session's agentenvoy tag.
+  try {
+    await assertAgentEnvoyOwnedEvent(userId, session.calendarEventId, session.id);
+  } catch (err) {
+    if (err instanceof GcalOwnershipError) {
+      return { success: false, message: err.message };
+    }
+    throw err;
+  }
+
+  // Patch GCal. notifyAttendees=false — chat-initiated edits are silent;
+  // the host can resend the invite if they want a fresh notification.
+  const gcalChanges: Parameters<typeof updateCalendarEvent>[3] = {};
+  if (changes.location !== undefined) gcalChanges.location = changes.location;
+  if (changes.startTime !== undefined) gcalChanges.startTime = changes.startTime;
+  if (changes.endTime !== undefined) {
+    gcalChanges.endTime = changes.endTime;
+  } else if (changes.startTime && changes.duration !== undefined) {
+    gcalChanges.endTime = new Date(
+      changes.startTime.getTime() + changes.duration * 60 * 1000,
+    );
+  }
+
+  let gcalResult: { eventId: string | null; htmlLink: string | null };
+  try {
+    gcalResult = await updateCalendarEvent(
+      userId,
+      session.calendarEventId,
+      session.id,
+      gcalChanges,
+      { notifyAttendees: false },
+    );
+  } catch (err) {
+    return {
+      success: false,
+      message: `Calendar update failed: ${err instanceof Error ? err.message : "unknown"}`,
+    };
+  }
+
+  // Mirror to DB. updateMany WHERE guard (TOCTOU) — only patch if still agreed.
+  const dbUpdates: Record<string, unknown> = {};
+  if (changes.location !== undefined) {
+    dbUpdates.statusLabel = `Location updated to ${changes.location}`;
+  }
+  if (changes.startTime !== undefined) {
+    dbUpdates.confirmedAt = changes.startTime;
+    dbUpdates.agreedTime = changes.startTime;
+  }
+  if (changes.duration !== undefined) {
+    dbUpdates.duration = changes.duration;
+  }
+  if (changes.format !== undefined) {
+    dbUpdates.format = changes.format;
+    dbUpdates.agreedFormat = changes.format;
+  }
+  if (gcalResult.htmlLink) {
+    dbUpdates.gcalHtmlLink = gcalResult.htmlLink;
+  }
+  if (Object.keys(dbUpdates).length > 0) {
+    await prisma.negotiationSession.updateMany({
+      where: { id: session.id, status: "agreed", archived: false },
+      data: dbUpdates as Parameters<typeof prisma.negotiationSession.updateMany>[0]["data"],
+    });
+  }
+
+  // Mirror personalized-link parameters so deal-room reads stay consistent.
+  const linkMirror: Record<string, unknown> = {};
+  if (changes.location !== undefined) linkMirror.location = changes.location;
+  if (changes.format !== undefined) linkMirror.format = changes.format;
+  if (changes.duration !== undefined) linkMirror.duration = changes.duration;
+  if (Object.keys(linkMirror).length > 0) {
+    await patchLinkRulesForContextual(session.link, linkMirror);
+  }
+
+  // Thread-visible system message.
+  await prisma.message.create({
     data: {
-      channelId: channel.id,
+      sessionId: session.id,
       role: "system",
-      content: "Envoy is proposing an update to the confirmed meeting.",
-      threadId: session.id,
-      metadata: {
-        kind: "gcal_update_proposal",
-        sessionId: session.id,
-        eventId: session.calendarEventId,
-        proposed: proposed as Record<string, string | number | boolean | null>,
-      },
+      content: summary,
+      metadata: { kind: "host_update", field: systemMessageField },
     },
   });
 
   return {
     success: true,
-    message: "Proposal posted — host must confirm in the feed before GCal is updated.",
-    data: { sessionId: session.id, pendingGcalUpdate: true },
+    message: summary,
+    data: { sessionId: session.id, ...changes },
   };
 }
 
@@ -620,10 +725,16 @@ async function handleUpdateFormat(
     return { success: false, message: `Invalid format: ${format}. Use "phone", "video", or "in-person".` };
   }
 
-  // For confirmed meetings already on GCal, propose the update via UI card
-  // instead of writing directly — the user must confirm before we patch GCal.
+  // For confirmed meetings already on GCal: in-chat edits patch directly
+  // (decision 2026-05-11). The user's chat message IS the authorization.
   if (session.calendarEventId && session.status === "agreed" && !session.archived) {
-    return await postGcalUpdateProposal(session, userId, { format });
+    return await applyConfirmedSessionPatch(
+      session,
+      userId,
+      { format },
+      `Format updated to ${format}`,
+      "format",
+    );
   }
 
   // Dual-write: session.format for parity with the existing session row,
@@ -682,16 +793,63 @@ async function handleUpdateTime(
     return { success: false, message: `Invalid dateTime: ${dateTime}` };
   }
 
-  // For confirmed meetings already on GCal, propose via UI card.
+  // For confirmed meetings already on GCal: in-chat edits patch directly
+  // (decision 2026-05-11). Duration-only edits need an explicit endTime —
+  // derive from the session's existing agreedTime when startTime is absent.
   if (session.calendarEventId && session.status === "agreed" && !session.archived) {
-    const endTime = parsed && duration !== undefined
-      ? new Date(parsed.getTime() + duration * 60 * 1000)
-      : undefined;
-    return await postGcalUpdateProposal(session, userId, {
-      ...(parsed ? { startTime: parsed.toISOString() } : {}),
-      ...(endTime ? { endTime: endTime.toISOString() } : {}),
-      ...(duration !== undefined ? { duration } : {}),
-    });
+    let startTime: Date | undefined = parsed ?? undefined;
+    let endTime: Date | undefined;
+
+    if (startTime && duration !== undefined) {
+      endTime = new Date(startTime.getTime() + duration * 60 * 1000);
+    } else if (!startTime && duration !== undefined) {
+      // Duration-only retime: keep current start, push end out by new duration.
+      const existing = await prisma.negotiationSession.findUnique({
+        where: { id: session.id },
+        select: { agreedTime: true },
+      });
+      if (!existing?.agreedTime) {
+        return {
+          success: false,
+          message: "Can't apply duration-only change — no existing agreed time on this session.",
+        };
+      }
+      startTime = existing.agreedTime;
+      endTime = new Date(startTime.getTime() + duration * 60 * 1000);
+    }
+
+    const tzForLabel = getUserTimezone(
+      (
+        await prisma.user.findUnique({
+          where: { id: userId },
+          select: { preferences: true },
+        })
+      )?.preferences as Record<string, unknown> | null,
+    );
+    const timeStr = startTime
+      ? startTime.toLocaleString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          timeZone: tzForLabel,
+        })
+      : "";
+    const durStr = duration !== undefined ? ` (${formatDuration(duration)})` : "";
+    const summary = `Time updated: ${timeStr}${durStr}`.trim();
+
+    return await applyConfirmedSessionPatch(
+      session,
+      userId,
+      {
+        ...(startTime ? { startTime } : {}),
+        ...(endTime ? { endTime } : {}),
+        ...(duration !== undefined ? { duration } : {}),
+      },
+      summary,
+      "time",
+    );
   }
 
   // Duration-only edit on a non-confirmed session: no re-propose, just mirror
@@ -841,9 +999,16 @@ async function handleUpdateLocation(
     return { success: false, message: "Missing location parameter" };
   }
 
-  // For confirmed meetings already on GCal, propose via UI card.
+  // For confirmed meetings already on GCal: in-chat edits patch directly
+  // (decision 2026-05-11). The user's chat message IS the authorization.
   if (session.calendarEventId && session.status === "agreed" && !session.archived) {
-    return await postGcalUpdateProposal(session, userId, { location });
+    return await applyConfirmedSessionPatch(
+      session,
+      userId,
+      { location },
+      `Location updated: ${location}`,
+      "location",
+    );
   }
 
   // Dual-write: statusLabel for the host-facing dashboard and a system

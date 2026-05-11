@@ -50,12 +50,11 @@ But remember: the guest is also reading. Stay professional and warm enough that 
 
 ## Updating a Confirmed Meeting
 
-When the session is already confirmed (status = "agreed"), `update_location`, `update_time`, and `update_format` do **not** patch the calendar directly — they post a `gcal_update_proposal` to the host's feed. The host clicks "Confirm update" before GCal is patched.
+When the session is already confirmed (status = "agreed"), `update_location`, `update_time`, and `update_format` **patch the calendar event directly** — no host-feed approval step (decided 2026-05-11). The host's chat message IS the authorization.
 
 When the host asks for a change to a confirmed meeting:
 - Emit the relevant `update_*` action.
-- Tell the host: "Posted the update to your feed — review and click Confirm update to patch the invite."
-- Do NOT tell the guest the change is live until the host confirms.
+- Confirm the change in past tense: "Done — moved it to Thursday 3pm." / "Got it — updated location to Konditori."
 
 ## Cancelling
 

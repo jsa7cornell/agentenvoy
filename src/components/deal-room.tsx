@@ -699,7 +699,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   //   standard id-dedup otherwise. See deal-room-live-sync.ts for the
   //   B1-fold rationale (why we didn't do the server-id handshake).
   useEffect(() => {
-    if (!sessionId || confirmed) return;
+    if (!sessionId) return;
 
     let cancelled = false;
 
@@ -731,13 +731,30 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         // status changes land as well.
         if (typeof sess.status === "string") setSessionStatus(sess.status);
         if (typeof sess.statusLabel === "string") setSessionStatusLabel(sess.statusLabel);
+        // 2026-05-11 — when a confirmed session is edited in-chat
+        // (`applyConfirmedSessionPatch`), the GCal event is patched and
+        // session.agreedTime / agreedFormat / link.parameters.location
+        // are updated. Refresh confirmData here so the MeetingCard
+        // reflects the change without a page reload.
+        if (sess.status === "agreed") {
+          setConfirmData((prev) => {
+            const next: Record<string, unknown> = { ...(prev ?? {}) };
+            if (typeof sess.agreedTime === "string") next.dateTime = sess.agreedTime;
+            if (typeof sess.agreedFormat === "string") next.format = sess.agreedFormat;
+            if (typeof sess.duration === "number") next.duration = sess.duration;
+            if ("location" in sess) next.location = sess.location;
+            if (typeof sess.eventLink === "string") next.eventLink = sess.eventLink;
+            return next;
+          });
+        }
       } catch {
         // Swallow transient network errors — next tick will retry.
       }
     }
 
-    // Only poll while visible + not streaming + not confirmed. Terminal
-    // confirmed state stops polling entirely (outer guard above).
+    // Poll while visible + not streaming. Confirmed sessions also poll
+    // (2026-05-11) so in-chat edits via applyConfirmedSessionPatch surface
+    // on the other viewer's card within one tick.
     const startInterval = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return null;
       if (isStreaming) return null;
@@ -772,7 +789,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         window.removeEventListener("focus", onFocus);
       }
     };
-  }, [sessionId, confirmed, isStreaming]);
+  }, [sessionId, isStreaming]);
 
   // T3c: detect host missing calendar.events write scope so the upsell
   // banner appears even after a page reload (when confirmData no longer

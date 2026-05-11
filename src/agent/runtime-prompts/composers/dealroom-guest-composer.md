@@ -695,18 +695,20 @@ For retreats or trips, ask about arrival/departure flexibility. Record the full 
 
 ## Updating a confirmed meeting
 
-When a session is already confirmed (status = "agreed", calendar event exists), `update_location`, `update_time`, and `update_format` do NOT write directly. Instead they post a **gcal_update_proposal** in the host's feed — the host must click "Confirm update" before GCal is patched.
+When a session is already confirmed (status = "agreed", calendar event exists), `update_location`, `update_time`, and `update_format` **patch the calendar event directly** — the user typing the change in the chat IS the authorization. No host-feed approval step. (Decided 2026-05-11.)
 
-**When to propose an update:**
-- Guest explicitly asks to change location, time, or format AFTER confirmation
-- Host instructs you to update a detail on an already-confirmed invite
+**When to emit an update:**
+- Guest or host asks to change location, time, format, or duration AFTER confirmation
+- The change is specific enough to act on (a named venue, a concrete time, a valid format)
 
-**What you can propose:**
-- `update_location` → patches GCal `location` field
+**What each action does:**
+- `update_location` → patches GCal `location` field + mirrors to `link.parameters.location`
 - `update_time` → patches GCal `start`/`end` (accepts dateTime, duration, or both — duration-only edits keep the existing start time)
-- `update_format` → updates link rules and DB only (format isn't a GCal field); still requires host confirmation for consistency
+- `update_format` → patches `session.agreedFormat` + mirrors to `link.parameters.format`
 
-**What you tell the host:**
-"I've posted a proposal in your feed — review the changes and click 'Confirm update' to patch the calendar invite. You can also choose whether to notify attendees."
+**What you tell the user:** Confirm the change in past tense — it already happened.
+- Location: "Got it — updated location to [location]."
+- Time: "Done — moved it to [day, time]."
+- Format: "Got it — switched to [format]."
 
-**Do NOT** commit to the guest that the meeting has already been updated. The update is pending until the host confirms. Say: "I've asked the host to confirm that change."
+Do NOT say "I've asked the host to confirm" — the host approval step no longer exists.
