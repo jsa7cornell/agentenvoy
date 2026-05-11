@@ -3,7 +3,7 @@
 /**
  * Applies the server-persisted themeMode to next-themes on every page load
  * and keeps "auto" mode in sync with wall-clock time in the user's timezone
- * (light 05:00–20:00, dark otherwise).
+ * (light 05:00–19:59, dark 20:00–04:59).
  *
  * Source of truth is `preferences.explicit.themeMode` — stored server-side
  * so the preference follows the user across devices. localStorage remains
@@ -17,6 +17,24 @@
  * `preferences.explicit.seenThemeModeExplainer`.
  *
  * Mounted once inside Providers. No-op when the user isn't authenticated.
+ *
+ * --- STABLE setTheme PATTERN (2026-05-10) ---
+ * next-themes 0.4.x: setTheme() is NOT a stable reference. Its useCallback
+ * dep is [currentTheme], so every time the theme changes, setTheme gets a
+ * new function reference. Including it in useEffect deps caused both effects
+ * to re-run on every theme change — triggering a spurious re-fetch that
+ * could race the tick's dark application and revert it.
+ *
+ * Fix: capture setTheme in a ref (setThemeRef). Effects read from the ref
+ * instead of closing over the unstable value, and setTheme is excluded from
+ * their dep arrays.
+ *
+ * --- CROSS-COMPONENT SYNC (2026-05-10) ---
+ * ThemeToggle saves a new mode to the server but doesn't update modeRef here.
+ * Without cross-component sync, the tick() would still fire at 8pm even if
+ * the user had just switched to "light" — because modeRef.current was stale.
+ * Fix: ThemeToggle dispatches "ae:theme-mode-change" when it saves; this
+ * component listens and updates modeRef immediately.
  */
 
 import { useSession } from "next-auth/react";
@@ -26,6 +44,12 @@ import { useEffect, useRef, useState } from "react";
 import { HelpBubble } from "@/components/bubbles/help-bubble";
 
 export type ThemeMode = "light" | "dark" | "auto";
+
+/** Custom event dispatched by ThemeToggle when the user saves a new mode.
+ *  ThemePreferenceSync listens to this to keep modeRef in sync without a
+ *  re-fetch. */
+export const AE_THEME_MODE_CHANGE = "ae:theme-mode-change";
+export type AeThemeModeChangeEvent = CustomEvent<{ mode: ThemeMode }>;
 
 /** Compute the effective theme for "auto" mode given a wall-clock hour in
  *  the user's timezone. Light 05:00–19:59, dark 20:00–04:59. */
@@ -72,16 +96,25 @@ export function ThemePreferenceSync() {
   const seenExplainerRef = useRef<boolean>(true); // default true — don't show on SSR
   const [showExplainer, setShowExplainer] = useState<"light" | "dark" | null>(null);
 
+  // Stable ref for setTheme — next-themes 0.4.x recreates setTheme on every
+  // theme change (its useCallback dep is [currentTheme]). Capturing it in a
+  // ref lets effects call the latest version without being in their dep arrays,
+  // preventing spurious effect re-runs that would race and revert theme changes.
+  const setThemeRef = useRef(setTheme);
+  useEffect(() => {
+    setThemeRef.current = setTheme;
+  }); // no deps — always sync to latest
+
   // Skip on guest-facing surfaces. /meet/* is the deal-room — a guest-
-  // facing brand surface where <GuestLightTheme> owns the theme
-  // unconditionally (always light). If we let ThemePreferenceSync run
-  // here it'll race with GuestLightTheme: GuestLightTheme sets light on
-  // mount, then this fetch resolves and overrides with the user's stored
-  // mode (default "dark"), producing the "page goes dark right after
-  // OAuth" jank. See guest-light-theme.tsx for rationale.
+  // facing brand surface where <GuestLightTheme> owns the theme. If we let
+  // ThemePreferenceSync run here it'll race with GuestLightTheme: GuestLightTheme
+  // sets the time-of-day theme on mount, then this fetch resolves and overrides
+  // with the user's stored mode, producing "page goes dark right after OAuth" jank.
+  // See guest-light-theme.tsx for full rationale.
   const isGuestSurface = pathname?.startsWith("/meet/") ?? false;
 
-  // Fetch preference once per authenticated session.
+  // Fetch preference once per authenticated session. Uses setThemeRef (not
+  // setTheme) to avoid re-running when setTheme's reference changes.
   useEffect(() => {
     if (status !== "authenticated") return;
     if (isGuestSurface) return;
@@ -101,23 +134,35 @@ export function ThemePreferenceSync() {
           const cached = readCachedTheme();
           const next = computeAutoTheme(currentHourInTimezone(tz));
           lastAppliedRef.current = next;
-          setTheme(next);
+          setThemeRef.current(next);
           // First-flip explainer: show iff auto just changed the theme vs
           // what was cached, and the user hasn't seen the explainer yet.
           if (!seenExplainerRef.current && cached && cached !== next) {
             setShowExplainer(next);
           }
         } else {
-          setTheme(mode);
+          setThemeRef.current(mode);
           lastAppliedRef.current = mode;
         }
+
+        // Enable smooth mid-session theme transitions. Deferred to after the
+        // initial server preference is applied so the page-load hydration flip
+        // (light default → user's stored dark) stays instant. Only mid-session
+        // switches (8pm auto-flip, user toggle) will have the CSS transition.
+        // Uses requestAnimationFrame to ensure the current frame has painted
+        // before transitions are enabled.
+        requestAnimationFrame(() => {
+          document.documentElement.dataset.themeReady = "true";
+        });
       })
       .catch(() => {});
 
     return () => {
       cancelled = true;
     };
-  }, [status, setTheme, isGuestSurface]);
+    // Intentionally excludes setTheme — using setThemeRef.current() instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, isGuestSurface]);
 
   // Keep "auto" in sync with the wall clock. Recompute every minute and
   // on tab visibility changes (handles laptop-wake and long-idle tabs).
@@ -131,7 +176,7 @@ export function ThemePreferenceSync() {
       if (lastAppliedRef.current !== next) {
         const prev = lastAppliedRef.current;
         lastAppliedRef.current = next;
-        setTheme(next);
+        setThemeRef.current(next);
         // Mid-session flip (e.g. user leaves tab open through 8pm): surface
         // the explainer on the flip moment too, if not yet seen.
         if (!seenExplainerRef.current && prev !== null) {
@@ -145,11 +190,28 @@ export function ThemePreferenceSync() {
     };
     document.addEventListener("visibilitychange", onVisibility);
 
+    // Cross-component sync: ThemeToggle dispatches this event when it saves
+    // a new mode. Update modeRef immediately so tick() respects the change
+    // without waiting for a page reload.
+    const onModeChange = (e: Event) => {
+      const { mode } = (e as AeThemeModeChangeEvent).detail;
+      modeRef.current = mode;
+      if (mode !== "auto") {
+        // User pinned a non-auto mode — sync lastApplied so tick() won't
+        // flip back on the next minute boundary.
+        lastAppliedRef.current = mode;
+      }
+    };
+    window.addEventListener(AE_THEME_MODE_CHANGE, onModeChange);
+
     return () => {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener(AE_THEME_MODE_CHANGE, onModeChange);
     };
-  }, [status, setTheme, isGuestSurface]);
+    // Intentionally excludes setTheme — using setThemeRef.current() instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, isGuestSurface]);
 
   const dismissExplainer = async () => {
     setShowExplainer(null);

@@ -10,8 +10,10 @@
  *  - Same EnvoyDock at the bottom
  *
  * PR2c — 2026-05-10
+ * 2026-05-11: `showDashboardLink` prop — same pattern as MeetingCardConfirmedView.
  */
 
+import { useRouter } from "next/navigation";
 import { MeetingCard } from "@/components/MeetingCard/MeetingCard";
 import { EnvoyDock } from "@/components/EnvoyDock/EnvoyDock";
 import type { MeetingCardProps } from "@/components/MeetingCard/types";
@@ -46,6 +48,12 @@ interface Props {
    * Optional: affordance renders even without it (visual-only mode).
    */
   onFocusChat?: (prefill: string) => void;
+  /**
+   * When true, renders a subtle ✕ button at top-right of the card section
+   * that navigates the logged-in user back to /dashboard. Anonymous viewers
+   * have no dashboard, so the button is never rendered for them.
+   */
+  showDashboardLink?: boolean;
 }
 
 export function MeetingCardProposalView({
@@ -58,7 +66,9 @@ export function MeetingCardProposalView({
   pickerSlot,
   confirmSlot,
   onFocusChat,
+  showDashboardLink,
 }: Props) {
+  const router = useRouter();
   // Stub out action handlers that don't apply pre-confirmation.
   // The MeetingCard component may render action slots — we silence any that
   // would be misleading in a proposal state.
@@ -87,7 +97,19 @@ export function MeetingCardProposalView({
     <div className="flex-1 min-h-0 overflow-y-auto bg-[#f6f3ec]">
       {/* Card section — centered with max-width on both mobile + desktop */}
       <div className="px-4 py-4 lg:px-8 lg:py-8">
-        <div className="max-w-[540px] mx-auto">
+        <div className="max-w-[540px] mx-auto relative">
+          {/* Dashboard back-button — logged-in users only (Bug 1 fix 2026-05-11).
+              Same pattern and styling as MeetingCardConfirmedView. */}
+          {showDashboardLink && (
+            <button
+              type="button"
+              onClick={() => router.push("/dashboard")}
+              aria-label="Back to dashboard"
+              className="absolute top-0 right-0 z-10 w-8 h-8 flex items-center justify-center rounded-full text-[#9b9480] hover:text-[#1a1a2e] hover:bg-black/5 transition-colors"
+            >
+              <span aria-hidden className="text-[18px] leading-none">✕</span>
+            </button>
+          )}
           <MeetingCard {...cardPropsWithStubs} />
         </div>
       </div>

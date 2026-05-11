@@ -3726,6 +3726,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 dealRoomUrl={typeof window !== "undefined"
                   ? `${window.location.origin}/meet/${slug}${code ? `/${code}` : ""}`
                   : undefined}
+                showDashboardLink={isHost || isGuest}
                 belowCardSlot={
                   reschedulingFromConfirmed ? (
                     <RescheduleOverlay
@@ -3776,6 +3777,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 // different render tree we never reach.
                 pickerSlot={newCardPickerNode}
                 confirmSlot={newCardConfirmNode}
+                showDashboardLink={isHost || isGuest}
               />
             </MeetingCardErrorBoundary>
           ) : (

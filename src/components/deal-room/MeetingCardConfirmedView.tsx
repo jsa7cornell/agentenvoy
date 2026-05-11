@@ -13,9 +13,14 @@
  * responses gracefully suppress the calendar row.
  *
  * Action handlers stubbed for PR2a — wired in PR2c.
+ *
+ * 2026-05-11: `showDashboardLink` prop — renders a subtle ✕ at top-right
+ * of the card section for logged-in users (isHost || isGuest). Navigates
+ * to /dashboard. Anonymous viewers never see it (no dashboard to go to).
  */
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { MeetingCard } from "@/components/MeetingCard/MeetingCard";
 import { EnvoyDock } from "@/components/EnvoyDock/EnvoyDock";
 import type { MeetingCardProps, GoogleCalendarStatus } from "@/components/MeetingCard/types";
@@ -56,6 +61,13 @@ interface Props {
    * appears below the picker, matching user instruction 2026-05-10.
    */
   belowCardSlot?: React.ReactNode;
+  /**
+   * When true, renders a subtle ✕ button at the top-right of the card
+   * section that navigates the user back to /dashboard. Set only when the
+   * viewer is logged in (isHost || isGuest). Anonymous viewers have no
+   * dashboard, so we never render the button for them.
+   */
+  showDashboardLink?: boolean;
 }
 
 export function MeetingCardConfirmedView({
@@ -74,7 +86,9 @@ export function MeetingCardConfirmedView({
   onShareLink,
   dealRoomUrl,
   belowCardSlot,
+  showDashboardLink,
 }: Props) {
+  const router = useRouter();
   // ── GCal RSVP status fetch (PR2b) ────────────────────────────────────────
   // Per spec § 6.1 + AP5c: GUEST-UI ONLY, server-derived from host's stored
   // GCal credentials. 401 = anonymous (silently suppress row); 403 = not
@@ -169,7 +183,21 @@ export function MeetingCardConfirmedView({
     <div className="flex-1 min-h-0 overflow-y-auto bg-[#f6f3ec]">
       {/* Card section — centered with max-width on both mobile + desktop */}
       <div className="px-4 py-4 lg:px-8 lg:py-8">
-        <div className="max-w-[540px] mx-auto">
+        <div className="max-w-[540px] mx-auto relative">
+          {/* Dashboard back-button — logged-in users only (Bug 1 fix 2026-05-11).
+              Positioned absolute top-right so it doesn't crowd the card's own
+              ⋯ menu (which lives inside the MeetingCard article). Uses the same
+              visual weight as the ⋯ button — small, circular hover target. */}
+          {showDashboardLink && (
+            <button
+              type="button"
+              onClick={() => router.push("/dashboard")}
+              aria-label="Back to dashboard"
+              className="absolute top-0 right-0 z-10 w-8 h-8 flex items-center justify-center rounded-full text-[#9b9480] hover:text-[#1a1a2e] hover:bg-black/5 transition-colors"
+            >
+              <span aria-hidden className="text-[18px] leading-none">✕</span>
+            </button>
+          )}
           <MeetingCard {...cardPropsWithStubs} />
         </div>
       </div>
