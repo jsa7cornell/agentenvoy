@@ -86,11 +86,11 @@ export function EnvoyDockThread({
 
   return (
     <div
-      className="relative rounded-2xl border border-[#dbd5c4] bg-white flex flex-col overflow-hidden min-h-[260px] max-h-[55vh]"
+      className="relative rounded-2xl border border-[#dbd5c4] bg-white flex flex-col overflow-hidden min-h-[200px] max-h-[50vh]"
     >
       {/* Thread header */}
       <div
-        className="flex items-center gap-[10px] px-4 py-3 border-b border-[#e7e2d5] flex-shrink-0"
+        className="flex items-center gap-[10px] px-4 py-2 border-b border-[#e7e2d5] flex-shrink-0"
         style={{ background: "linear-gradient(180deg,#eef2ff 0%,#ffffff 100%)" }}
       >
         {/* Smaller 30px avatar, no animation */}
@@ -124,7 +124,7 @@ export function EnvoyDockThread({
       </div>
 
       {/* Message list */}
-      <div className="flex-1 overflow-y-auto px-4 py-[14px] flex flex-col gap-[10px]">
+      <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-[8px]">
         {messages.length === 0 ? (
           <div className="text-[12px] text-[#9b9480] text-center mt-4">
             No messages yet.
@@ -140,7 +140,7 @@ export function EnvoyDockThread({
 
       {/* Input row — real <textarea> wired to onSendMessage (Bug 3 fix 2026-05-11).
           Previously a styled <div> placeholder that was never interactive. */}
-      <div className="flex-shrink-0 border-t border-[#e7e2d5] px-[14px] py-[10px] pb-3 flex items-end gap-2">
+      <div className="flex-shrink-0 border-t border-[#e7e2d5] px-[14px] py-2 flex items-end gap-2">
         <textarea
           ref={inputRef}
           value={draft}

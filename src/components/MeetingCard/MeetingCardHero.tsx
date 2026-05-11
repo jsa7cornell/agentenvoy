@@ -149,7 +149,7 @@ function FullHero(props: MeetingCardProps) {
 
   return (
     <div
-      className="text-white px-[22px] pt-[22px] pb-5 relative overflow-hidden"
+      className="text-white px-[22px] pt-[14px] pb-3 relative overflow-hidden"
       style={{ background: gradientStyle }}
     >
       {/* Radial highlight overlay */}
@@ -200,7 +200,7 @@ function FullHero(props: MeetingCardProps) {
 
       {/* When block — TZ in parens per R5 Rule 3 */}
       <div
-        className="mt-[14px] pt-[14px] relative z-10"
+        className="mt-[10px] pt-[10px] relative z-10"
         style={{ borderTop: "1px solid rgba(255,255,255,.18)" }}
       >
         {/* Primary line: "Tue, May 13 · 9:30 AM (PDT)" */}

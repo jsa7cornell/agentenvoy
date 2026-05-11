@@ -197,9 +197,10 @@ export function MeetingCardConfirmedView({
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-[#f6f3ec]">
       {/* Card section — centered with max-width on both mobile + desktop.
-          Bottom padding tightened when a belowCardSlot (reschedule picker)
-          is rendered so the picker doesn't float in a sea of whitespace. */}
-      <div className={`px-4 lg:px-8 ${belowCardSlot ? "pt-3 pb-2 lg:pt-5 lg:pb-2" : "py-4 lg:py-8"}`}>
+          2026-05-11: tightened so the card + chat fit on a normal-sized
+          desktop viewport. Bottom padding further trimmed when a
+          belowCardSlot (reschedule picker) is rendered. */}
+      <div className={`px-4 lg:px-8 ${belowCardSlot ? "pt-2 pb-2 lg:pt-3 lg:pb-2" : "py-2 lg:py-4"}`}>
         <div className="max-w-[540px] mx-auto relative">
           {/* Dashboard back-button — logged-in users only (Bug 1 fix 2026-05-11).
               Positioned absolute top-right so it doesn't crowd the card's own
@@ -231,7 +232,7 @@ export function MeetingCardConfirmedView({
       {/* Agent dock / chat thread — sits BELOW the card in page flow.
           Never overlaps the card; grows vertically with internal scroll
           inside the thread (EnvoyDockThread carries its own max-h). */}
-      <div className="px-4 pb-6 lg:px-8 lg:pb-12">
+      <div className="px-4 pb-3 lg:px-8 lg:pb-4">
         <div className="max-w-[540px] mx-auto">
           <EnvoyDock
             state={threadExpanded ? "thread" : "resting"}

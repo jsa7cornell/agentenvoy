@@ -305,7 +305,7 @@ export function MeetingCardActions(props: MeetingCardProps) {
   }
 
   return (
-    <div className="border-t pt-2 mx-5 mb-3.5 relative">
+    <div className="border-t pt-1.5 mx-5 mb-2 relative">
       <div className="flex flex-col">
         {actions.map((action, i) => (
           <TextLink key={i} {...action} />

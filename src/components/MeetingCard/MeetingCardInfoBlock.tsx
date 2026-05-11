@@ -508,7 +508,7 @@ export function MeetingCardInfoBlock(props: MeetingCardProps) {
 
   return (
     <div data-testid="meeting-card-info">
-      <div className="px-[22px] pt-[18px] pb-3">
+      <div className="px-[22px] pt-3 pb-2">
         {/* Who row */}
         <div className="flex items-center gap-[10px] mb-2" data-testid="meeting-participants">
           <div className="flex items-center">
