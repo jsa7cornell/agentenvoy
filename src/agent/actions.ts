@@ -33,6 +33,7 @@ import {
 import { isGenericTopic, findActivity, defaultDurationForActivity } from "@/lib/activity-vocab";
 import { MATERIAL_FIELDS, type MaterialField } from "@/lib/material-fields";
 import { DEFAULT_TIP } from "@/lib/meeting-tip/default-tip";
+import { validateTip } from "@/lib/meeting-tip/validate-tip";
 
 // --- Helpers ---
 //
@@ -1365,11 +1366,24 @@ export async function handleCreateLink(
   const linkRules = normalizeLinkParameters({
     ...linkRulesPreIntent,
     intent: { steering: validatedSteering },
-    // Seed DEFAULT_TIP so the host sees it pre-populated in the link-edit-modal
-    // and deal-room renders a non-null tip without requiring an explicit edit.
-    // Primary links do NOT get seeded here — their tip lives on
-    // user.preferences.explicit.tip and is handled by the renderTip fallback.
-    tip: DEFAULT_TIP,
+    // Tip: validate the LLM-emitted tip (Phase 2 PR4). If present and valid,
+    // use it; otherwise fall back to DEFAULT_TIP. Primary links do NOT get
+    // seeded here — their tip lives on user.preferences.explicit.tip and is
+    // handled by the renderTip fallback.
+    // See proposal 2026-05-11_llm-tip-seed-at-create-link.md §8.1 v2.
+    tip: (() => {
+      const rawTip = typeof params.tip === "string" ? params.tip : undefined;
+      const locationParam = typeof location === "string" ? location : null;
+      const tipValidation = validateTip(rawTip, locationParam);
+      if (rawTip && !tipValidation.valid) {
+        console.warn("[tip-seed] LLM tip rejected", {
+          linkCode: code,
+          reasons: tipValidation.reasons,
+          text: rawTip,
+        });
+      }
+      return tipValidation.valid ? rawTip! : DEFAULT_TIP;
+    })(),
   });
   // Silence unused-import warnings for constants referenced only in playbooks.
   void TIME_OF_DAY_WINDOWS;

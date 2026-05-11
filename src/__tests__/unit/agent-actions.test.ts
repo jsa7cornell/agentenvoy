@@ -1381,6 +1381,71 @@ describe("executeActions", () => {
         });
       });
     });
+
+    // tip — LLM-emitted tip seed (Phase 2 PR4, proposal 2026-05-11_llm-tip-seed-at-create-link.md §8.1 v2)
+    describe("tip field (LLM seed)", () => {
+      const DEFAULT_TIP = "Looking forward to it — pick whatever time works.";
+
+      const setupMocks = () => {
+        mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john" });
+        mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
+        mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
+      };
+
+      it("(g) valid tip is written to link.parameters.tip", async () => {
+        setupMocks();
+        await executeActions(
+          [{ action: "create_link", params: { inviteeName: "Larry", tip: "Looking forward to catching up, Larry." } }],
+          HOST_USER_ID,
+        );
+        const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+        const parameters = call.data.parameters as Record<string, unknown>;
+        expect(parameters.tip).toBe("Looking forward to catching up, Larry.");
+      });
+
+      it("(h) invalid tip falls back to DEFAULT_TIP and fires console.warn", async () => {
+        setupMocks();
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await executeActions(
+          [{ action: "create_link", params: { inviteeName: "Maria", tip: "Looking forward to our Zoom on Tuesday at 3pm!" } }],
+          HOST_USER_ID,
+        );
+        const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+        const parameters = call.data.parameters as Record<string, unknown>;
+        expect(parameters.tip).toBe(DEFAULT_TIP);
+        expect(warnSpy).toHaveBeenCalledWith(
+          "[tip-seed] LLM tip rejected",
+          expect.objectContaining({ reasons: expect.arrayContaining(["forbidden_pattern:format"]) }),
+        );
+        warnSpy.mockRestore();
+      });
+
+      it("(i) absent tip falls back to DEFAULT_TIP without warning", async () => {
+        setupMocks();
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        await executeActions(
+          [{ action: "create_link", params: { inviteeName: "Larry" } }],
+          HOST_USER_ID,
+        );
+        const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+        const parameters = call.data.parameters as Record<string, unknown>;
+        expect(parameters.tip).toBe(DEFAULT_TIP);
+        const tipWarnCalls = warnSpy.mock.calls.filter((c) => String(c[0]).includes("tip-seed"));
+        expect(tipWarnCalls).toHaveLength(0);
+        warnSpy.mockRestore();
+      });
+
+      it("(j) tip containing literal location string falls back to DEFAULT_TIP", async () => {
+        setupMocks();
+        await executeActions(
+          [{ action: "create_link", params: { inviteeName: "Leo", location: "Coupa Cafe", tip: "See you at Coupa Cafe — great spot!" } }],
+          HOST_USER_ID,
+        );
+        const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+        const parameters = call.data.parameters as Record<string, unknown>;
+        expect(parameters.tip).toBe(DEFAULT_TIP);
+      });
+    });
   });
 
   // --- Expand Link ---
