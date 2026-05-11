@@ -16,6 +16,17 @@ interface DragSlotPickerProps {
   dateStr: string;
   workingHourStart?: number; // default 8
   workingHourEnd?: number;   // default 18
+  /**
+   * When true, the picker is being used to apply an in-place change to an
+   * already-confirmed meeting (e.g. reschedule from the confirmed-card
+   * overlay), NOT to stage a pendingProposal that a downstream Confirm
+   * card finishes. The badge text changes from "Picked — confirm below"
+   * (which points at a confirm form that doesn't exist in this surface)
+   * to "✓ Rescheduled", and the picked state auto-resets after a short
+   * delay so the user can immediately pick a different time.
+   * 2026-05-11 — added because the host's reschedule pick looked frozen.
+   */
+  inPlaceApplyMode?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -65,6 +76,7 @@ export function DragSlotPicker({
   dateStr,
   workingHourStart = 8,
   workingHourEnd = 18,
+  inPlaceApplyMode = false,
 }: DragSlotPickerProps) {
   const rulerRef = useRef<HTMLDivElement>(null);
   // Tracks whether the user has clicked the picker button. Renamed from
@@ -227,14 +239,17 @@ export function DragSlotPicker({
       {/* Picked badge — surfaces the staged-proposal state above the picker.
           Renamed 2026-05-01 (F11): was "Confirmed" but the click doesn't
           actually confirm — it stages a pendingProposal that the host's
-          name/email Confirm card finishes. The "Confirmed" copy lied. */}
+          name/email Confirm card finishes. The "Confirmed" copy lied.
+          2026-05-11: badge text branches on inPlaceApplyMode — when the
+          picker is patching an already-confirmed meeting, there is no
+          "below" to confirm against, so we say "Rescheduled" instead. */}
       {picked && (
         <div className="flex justify-end mb-1.5">
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
             </svg>
-            Picked — confirm below ↓
+            {inPlaceApplyMode ? "Rescheduled" : "Picked — confirm below ↓"}
           </span>
         </div>
       )}
@@ -346,6 +361,13 @@ export function DragSlotPicker({
                   end: isoFromMins(endMins, dateStr, timezone),
                 },
               );
+              // 2026-05-11: in-place apply (reschedule) — auto-reset so
+              // the user can immediately pick a different time. The
+              // legacy stage-then-confirm flow doesn't auto-reset because
+              // the downstream Confirm card owns the next interaction.
+              if (inPlaceApplyMode) {
+                setTimeout(() => setPicked(false), 1400);
+              }
             }}
             disabled={picked}
             className={`absolute right-0 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition disabled:opacity-100
@@ -353,7 +375,9 @@ export function DragSlotPicker({
                 ? "bg-emerald-600"
                 : "bg-accent hover:bg-accent-hover"}`}
           >
-            {picked ? "✓ Picked" : "Pick this time"}
+            {picked
+              ? (inPlaceApplyMode ? "✓ Rescheduled" : "✓ Picked")
+              : "Pick this time"}
           </button>
         )}
       </div>

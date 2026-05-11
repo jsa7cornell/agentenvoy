@@ -2803,6 +2803,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         currentLocation={slotLocation}
         duration={slotDuration}
         minDuration={slotMinDuration}
+        inPlaceApplyMode
         onSelectSlot={schedulingMode === "time" ? (_msg, slot) => {
           if (slot) proposeFromSlot(slot);
         } : undefined}

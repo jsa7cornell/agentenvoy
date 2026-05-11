@@ -59,6 +59,13 @@ export interface AvailabilityCalendarProps {
   guestInitialSource?: string;
   /** Event title shown in the match banner: "We matched these options for your {eventTitle}" */
   eventTitle?: string;
+  /**
+   * Pass-through to DragSlotPicker: when true, the drag picker switches
+   * its badge text to "Rescheduled" and auto-resets after each pick. Used
+   * by the confirmed-card reschedule overlay where each pick patches GCal
+   * in place (no downstream confirm form to stage against).
+   */
+  inPlaceApplyMode?: boolean;
 }
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
@@ -531,6 +538,7 @@ function WindowCards({
   hostImage, guestImage, hostSource, guestSource,
   durationMinutes,
   slotsForDay,
+  inPlaceApplyMode,
 }: {
   windows: WindowCard[];
   chipsForDay: BilateralChip[] | undefined;
@@ -545,6 +553,7 @@ function WindowCards({
   guestSource: string;
   durationMinutes: number;
   slotsForDay: Slot[];
+  inPlaceApplyMode?: boolean;
 }) {
   const [revealMore, setRevealMore] = useState(false);
 
@@ -575,6 +584,7 @@ function WindowCards({
         timezone={timezone}
         onSelectSlot={onSelectSlot}
         dateStr={dateStr}
+        inPlaceApplyMode={inPlaceApplyMode}
       />
     );
   }
@@ -1120,6 +1130,7 @@ export function WeekView({
   hostInitialSource,
   guestInitialSource,
   eventTitle,
+  inPlaceApplyMode,
 }: Omit<AvailabilityCalendarProps, "view">) {
   // F1: bin in the same tz we render in.
   assertBinningTz(timezone, timezone);
@@ -1376,6 +1387,7 @@ export function WeekView({
                     guestSource={guestInitialSource || "Guest"}
                     durationMinutes={durationMinutes}
                     slotsForDay={slotsByDay[selectedDay] || []}
+                    inPlaceApplyMode={inPlaceApplyMode}
                   />
                 }
                 detailed={
@@ -1405,6 +1417,7 @@ export function WeekView({
                 guestSource={guestInitialSource || "Guest"}
                 durationMinutes={durationMinutes}
                 slotsForDay={slotsByDay[selectedDay] || []}
+                inPlaceApplyMode={inPlaceApplyMode}
               />
             )}
           </div>
