@@ -61,6 +61,11 @@ export interface CalendarCreateEventEffect {
   userId: string; // host whose calendar we write to
   summary: string;
   description?: string;
+  /** GCal `location` field — surfaces as the chip in week/day view and in
+   *  the event detail UI. Distinct from the venue line in description body;
+   *  surface this when in-person so the UI doesn't read "No location".
+   *  2026-05-11 — added per round-2 MCP feedback. */
+  location?: string;
   startTime: Date;
   endTime: Date;
   attendeeEmails: string[];

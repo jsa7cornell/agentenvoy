@@ -635,6 +635,18 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   // belt-and-suspenders against double-confirm races.
   const sessionIdsToUpdate = isGroupEvent ? allParticipantSessions : [sessionId];
   const confirmSummaryPlaceholder = `${meetingFormat} meeting${effectiveLocation ? ` — ${effectiveLocation}` : ""}`;
+  // Guest-picks-location persistence: when the host deferred venue to the
+  // guest (link.parameters.guestPicks.location: true) and the confirm body
+  // carries a non-empty location, that string IS the guest's pick — lock it
+  // onto session.negotiatedLocation so downstream reads (calendar event title,
+  // host dashboard) see the agreed venue rather than falling back to link.
+  const linkGuestPicksLocation =
+    (linkRulesObj.guestPicks as { location?: boolean } | undefined)?.location === true;
+  const trimmedBodyLocation = typeof location === "string" ? location.trim() : "";
+  const writeNegotiatedLocation =
+    linkGuestPicksLocation && !negotiatedLocation && trimmedBodyLocation.length > 0
+      ? trimmedBodyLocation
+      : null;
   const casResult = await prisma.negotiationSession.updateMany({
     where: { id: { in: sessionIdsToUpdate }, status: { not: "agreed" } },
     data: {
@@ -646,6 +658,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       ...(bodyGuestNameStr ? { guestName: bodyGuestNameStr } : {}),
       ...(bodyGuestEmailStr ? { guestEmail: bodyGuestEmailStr } : {}),
       ...(typeof bodyWantsReminder === "boolean" ? { wantsReminder: bodyWantsReminder } : {}),
+      ...(writeNegotiatedLocation ? { negotiatedLocation: writeNegotiatedLocation } : {}),
     },
   });
 
@@ -761,6 +774,14 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     const result = await createCalendarEvent(session.hostId, {
       summary: eventSummary,
       description: descriptionLines.join("\n"),
+      // GCal location field — surfaces the venue as the chip in week/day
+      // view. Only set for in-person; for video/phone the field stays
+      // empty so the UI doesn't render a misleading chip.
+      // 2026-05-11 — added per round-2 MCP feedback (custom location was
+      // landing in description body only; calendar chip read "No location").
+      ...(meetingFormat === "in-person" && effectiveLocation
+        ? { location: effectiveLocation }
+        : {}),
       startTime,
       endTime,
       attendeeEmails,

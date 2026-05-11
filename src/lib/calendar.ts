@@ -1245,6 +1245,10 @@ export async function createCalendarEvent(
   params: {
     summary: string;
     description?: string;
+    /** GCal `location` field — drives the chip in week/day view. Distinct
+     *  from the "Location: ..." line we ALSO put in description; surface
+     *  on the event resource so the UI reads it natively. */
+    location?: string;
     startTime: Date;
     endTime: Date;
     attendeeEmails: string[];
@@ -1275,6 +1279,7 @@ export async function createCalendarEvent(
     userId,
     summary: params.summary,
     description: params.description,
+    ...(params.location ? { location: params.location } : {}),
     startTime: params.startTime,
     endTime: params.endTime,
     attendeeEmails: params.attendeeEmails,

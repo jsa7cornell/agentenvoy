@@ -87,6 +87,7 @@ export async function handleCalendarCreateEvent(
     const event = {
       summary: effect.summary,
       description: effect.description,
+      ...(effect.location ? { location: effect.location } : {}),
       start: { dateTime: effect.startTime.toISOString() },
       end: { dateTime: effect.endTime.toISOString() },
       attendees: effect.attendeeEmails.map((email) => ({ email })),
