@@ -31,7 +31,7 @@
  *    This means draft survives incoming message polls (Bug 4 / (B) defensive fix).
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Message } from "@/components/MeetingCard/types";
 
 export interface EnvoyDockThreadProps {
@@ -54,6 +54,14 @@ export function EnvoyDockThread({
   const subLine = contextHostFirstName
     ? `Online · scheduling for ${contextHostFirstName}`
     : "Online";
+
+  // Bug 4 fix (2026-05-11): scroll to the latest message whenever the messages
+  // array changes (new message arrives on poll, or after the user sends).
+  // Uses "auto" behavior so there's no animation lag; "smooth" can fight iOS's
+  // own scroll inertia and look jittery on a fast poll cycle.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
+  }, [messages]);
 
   function handleSend() {
     const text = draft.trim();
