@@ -1332,11 +1332,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- router is stable, slug/code are the real triggers
   }, [slug, code]);
 
-  async function handleSend(e: React.FormEvent) {
+  /**
+   * handleSend — legacy form submit path. The `textOverride` parameter
+   * supports EnvoyDock's real composer (Bug 3 fix 2026-05-11): the dock's
+   * onSendMessage prop calls handleSend(syntheticEvent, composerText) so the
+   * message posts through the full streaming pipeline without touching the
+   * legacy input state.
+   */
+  async function handleSend(e: React.FormEvent, textOverride?: string) {
     e.preventDefault();
-    if (!input.trim() || isSending || !sessionId) return;
-
-    const text = input.trim();
+    const text = textOverride ?? input.trim();
+    if (!text || isSending || !sessionId) return;
 
     // Host directive: :: prefix (host only)
     if (isHost && text.startsWith("::")) {
@@ -3692,8 +3698,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 threadExpanded={confirmedThreadExpanded}
                 onExpandThread={() => setConfirmedThreadExpanded(true)}
                 onCollapseThread={() => setConfirmedThreadExpanded(false)}
+                // Bug 3 fix (2026-05-11): EnvoyDock composer is now a real
+                // <textarea> wired to onSendMessage. Call handleSend with a
+                // textOverride so the full streaming pipeline runs without
+                // touching the legacy input state.
                 onSendMessage={(text) => {
-                  setInput(text);
+                  handleSend({ preventDefault: () => {} } as React.FormEvent, text);
                 }}
                 // ── Real action handlers (2026-05-10 PR2c-lite) ──────────
                 onOpenCancelModal={() => setShowCancelModal(true)}
@@ -3760,8 +3770,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 threadExpanded={confirmedThreadExpanded}
                 onExpandThread={() => setConfirmedThreadExpanded(true)}
                 onCollapseThread={() => setConfirmedThreadExpanded(false)}
+                // Bug 3 fix (2026-05-11): same as confirmed path — route
+                // through handleSend with textOverride.
                 onSendMessage={(text) => {
-                  setInput(text);
+                  handleSend({ preventDefault: () => {} } as React.FormEvent, text);
                 }}
                 // Guest-picks affordance: expand dock + prefill the chat input
                 // so the guest can reply with their preferred venue or format.
