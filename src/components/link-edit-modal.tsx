@@ -185,6 +185,10 @@ export function LinkEditModal({
             defaultDuration: data.defaultDuration,
             bufferMinutes: data.bufferMinutes,
             format: data.defaultFormat,
+            // 2026-05-10 punch-list #16: GET now returns tip; pass it through
+            // so the modal pre-populates the host's saved tip rather than
+            // always showing DEFAULT_TIP.
+            tip: typeof data.tip === "string" ? data.tip : undefined,
           });
         })
       : linkId

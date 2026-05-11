@@ -238,6 +238,11 @@ export async function GET() {
     defaultDuration: e.defaultDuration ?? 30,
     bufferMinutes: e.bufferMinutes ?? 0,
     defaultFormat: (e as { defaultFormat?: string }).defaultFormat ?? "video",
+    // 2026-05-10 punch-list #16 fix: tip was written by POST but never echoed
+    // by GET, so the link-edit-modal always re-seeded with DEFAULT_TIP even
+    // when the host had saved a custom tip. Now surfaced here so seedForm can
+    // populate the textarea correctly.
+    tip: (e as { tip?: string | null }).tip ?? null,
     meetSlug: user.meetSlug ?? null,
     // Counts surface on the scheduling status chip.
     linkCount,
