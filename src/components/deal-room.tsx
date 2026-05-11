@@ -1536,7 +1536,39 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           // poll's read — without it, the first post-stream poll can
           // fire before the server row exists and miss the content-match
           // dedup path.
-          setTimeout(() => setIsStreaming(false), 500);
+          //
+          // 2026-05-11 — also force an immediate session refresh so any
+          // in-chat post-confirm edits (applyConfirmedSessionPatch:
+          // location/format/time/duration) surface on the card without
+          // waiting up to ~10s for the next poll tick. Same merge shape
+          // as the polling effect above.
+          setTimeout(() => {
+            setIsStreaming(false);
+            if (sessionId) {
+              fetch(`/api/negotiate/session?id=${sessionId}`)
+                .then((r) => (r.ok ? r.json() : null))
+                .then((body) => {
+                  const sess = body?.session;
+                  if (!sess) return;
+                  if (typeof sess.status === "string") setSessionStatus(sess.status);
+                  if (typeof sess.statusLabel === "string") setSessionStatusLabel(sess.statusLabel);
+                  if (sess.status === "agreed") {
+                    setConfirmData((prev) => {
+                      const next: Record<string, unknown> = { ...(prev ?? {}) };
+                      if (typeof sess.agreedTime === "string") next.dateTime = sess.agreedTime;
+                      if (typeof sess.agreedFormat === "string") next.format = sess.agreedFormat;
+                      if (typeof sess.duration === "number") next.duration = sess.duration;
+                      if ("location" in sess) next.location = sess.location;
+                      if (typeof sess.eventLink === "string") next.eventLink = sess.eventLink;
+                      return next;
+                    });
+                  }
+                })
+                .catch(() => {
+                  // Polling tick will retry — non-blocking.
+                });
+            }
+          }, 500);
           break;
         }
 
