@@ -165,6 +165,18 @@ interface WeeklyCalendarProps {
   primaryCalendar?: string;
   onSlotClick?: (label: string) => void;
   onEventClick?: (event: TunerEvent) => void;
+  /**
+   * Click-to-protect: when set, clicking an open slot opens a small
+   * chooser anchored at the slot with Protect / Block buttons. The
+   * handler persists a one-time block rule scoped to the clicked 30m.
+   * Resolve only after the new schedule is committed; the popover stays
+   * open with a saving state until then.
+   */
+  onCreateSlotProtection?: (params: {
+    start: string;
+    end: string;
+    level: "protect" | "block";
+  }) => Promise<void> | void;
   /** Number of consecutive days to render starting from weekStart.
    *  Defaults to 7 (full week). When < 7, the grid still anchors to
    *  weekStart so the week-nav still aligns; the panel caller can
@@ -196,6 +208,7 @@ export function WeeklyCalendar({
   primaryCalendar,
   onSlotClick,
   onEventClick,
+  onCreateSlotProtection,
   daysToShow = 7,
   hideToolbar = false,
   headerGutterSlot,
@@ -238,6 +251,19 @@ export function WeeklyCalendar({
     x: number;
     y: number;
   } | null>(null);
+
+  // Protect/Block chooser state — opened by clicking an open (score 0)
+  // slot when onCreateSlotProtection is provided. Same coords convention
+  // as openBlockInfo so the popover positioning helper can flip near edges.
+  const [openProtectChooser, setOpenProtectChooser] = useState<{
+    day: string;
+    row: number;
+    x: number;
+    y: number;
+    slotStart: string;
+    slotEnd: string;
+  } | null>(null);
+  const [protectSaving, setProtectSaving] = useState(false);
 
   // Hover tooltip state — tracks the slot being hovered + viewport position
   // so we can render via a portal at `position: fixed`, escaping the
@@ -504,8 +530,24 @@ export function WeeklyCalendar({
                       onMouseLeave={() => {
                         hoverTimeout.current = setTimeout(() => setHoverTooltip(null), 80);
                       }}
-                      onClick={() => {
+                      onClick={(e) => {
                         setHoverTooltip(null);
+                        // Open slots → protect-chooser popover, if the
+                        // caller wired the handler. The "?" icon on
+                        // scored slots has its own click + stopPropagation,
+                        // so this branch only fires for unprotected time.
+                        if (slot && slot.score === 0 && onCreateSlotProtection) {
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setOpenProtectChooser({
+                            day,
+                            row,
+                            x: r.right,
+                            y: r.bottom,
+                            slotStart: slot.start,
+                            slotEnd: slot.end,
+                          });
+                          return;
+                        }
                         if (onSlotClick && slot) {
                           const dayLabel = formatDayHeader(day);
                           const timeLabel = formatTimeLabel(slot.start, timezone);
@@ -726,6 +768,91 @@ export function WeeklyCalendar({
               );
             })()}
           </div>,
+          document.body,
+        );
+      })()}
+
+      {/* Click-to-protect chooser — open slots only. Mirrors the
+           block-info popover above: same portal, same flip-on-overflow
+           positioning, same border treatment. Two buttons + dismiss; a
+           click on the body backdrop closes it without committing. */}
+      {openProtectChooser && (() => {
+        if (typeof document === "undefined") return null;
+        const popW = 224;
+        const popH = 140;
+        const flipLeft = openProtectChooser.x + popW > window.innerWidth - 8;
+        const flipUp = openProtectChooser.y + popH > window.innerHeight - 8;
+        const dayLabel = formatDayHeader(openProtectChooser.day);
+        const timeLabel = formatTimeLabel(openProtectChooser.slotStart, timezone);
+        const close = () => {
+          if (!protectSaving) setOpenProtectChooser(null);
+        };
+        const commit = async (level: "protect" | "block") => {
+          if (!onCreateSlotProtection || protectSaving) return;
+          setProtectSaving(true);
+          try {
+            await onCreateSlotProtection({
+              start: openProtectChooser.slotStart,
+              end: openProtectChooser.slotEnd,
+              level,
+            });
+            setOpenProtectChooser(null);
+          } catch (err) {
+            console.error("[protect-chooser] save failed:", err);
+          } finally {
+            setProtectSaving(false);
+          }
+        };
+        return createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[9998]"
+              onClick={close}
+              onPointerDown={close}
+            />
+            <div
+              className="fixed z-[9999] w-56 rounded-md bg-surface border-2 border-DEFAULT shadow-2xl p-2.5 text-[11px] text-primary"
+              style={{
+                left: flipLeft ? openProtectChooser.x - popW : openProtectChooser.x,
+                top: flipUp ? openProtectChooser.y - popH - 4 : openProtectChooser.y + 4,
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="font-semibold mb-1 text-primary">
+                {dayLabel} at {timeLabel}
+              </div>
+              <div className="text-secondary leading-relaxed mb-2.5">
+                {protectSaving ? "Saving…" : "How should this 30 minutes be held?"}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={protectSaving}
+                  onClick={() => commit("protect")}
+                  className="px-2 py-2 rounded-lg text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-amber-300 dark:hover:border-amber-800 hover:text-amber-600 dark:hover:text-amber-300 transition disabled:opacity-50"
+                >
+                  Protect
+                </button>
+                <button
+                  type="button"
+                  disabled={protectSaving}
+                  onClick={() => commit("block")}
+                  className="px-2 py-2 rounded-lg text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-red-300 dark:hover:border-red-800 hover:text-red-600 dark:hover:text-red-300 transition disabled:opacity-50"
+                >
+                  Block
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={protectSaving}
+                onClick={close}
+                className="mt-2 w-full text-[10px] text-muted hover:text-secondary transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </>,
           document.body,
         );
       })()}

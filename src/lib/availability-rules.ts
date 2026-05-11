@@ -36,6 +36,13 @@ export interface AvailabilityRule {
   bufferMinutesBefore?: number;
   bufferMinutesAfter?: number;
   bufferAppliesTo?: string;
+  /**
+   * Block-strength tag (block action only). "weak" → score-2 protected band
+   * (VIP-stretch), "strong" → score-4 blocked band (off-limits). Unset =
+   * legacy default ("strong" via BlockedWindow.firmness default). Set by the
+   * dashboard click-to-protect chooser to distinguish Protect vs Block.
+   */
+  firmness?: "weak" | "strong";
   locationLabel?: string; // for action: "location" — e.g. "Baja", "NYC"
   /**
    * Bookable link scoping — only present when action === "bookable".
@@ -264,6 +271,7 @@ export function compileStructuredRules(
               label: rule.originalText,
               date: rule.effectiveDate!,
             };
+            if (rule.firmness) bw.firmness = rule.firmness;
             blockedWindows.push(bw);
           }
           break;
@@ -287,6 +295,7 @@ export function compileStructuredRules(
               days: rule.daysOfWeek.map(d => DAY_NAMES[d]),
             };
             if (rule.expiryDate) bw.expires = rule.expiryDate;
+            if (rule.firmness) bw.firmness = rule.firmness;
             blockedWindows.push(bw);
           }
         } else {
@@ -304,6 +313,8 @@ export function compileStructuredRules(
           if (rule.expiryDate) {
             bw.expires = rule.expiryDate;
           }
+
+          if (rule.firmness) bw.firmness = rule.firmness;
 
           blockedWindows.push(bw);
         }

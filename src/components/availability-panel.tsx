@@ -19,6 +19,8 @@ import { AvailabilityRules } from "@/components/availability-rules";
 import { TIMEZONE_TABLE, shortTimezoneLabel, getTimezoneEntry } from "@/lib/timezone";
 import { getSunday } from "@/lib/week-boundaries";
 import { googleCalendarEventUrl } from "@/lib/google-calendar-url";
+import { toDayStr } from "@/lib/calendar-utils";
+import type { AvailabilityRule } from "@/lib/availability-rules";
 
 type SessionSummary = {
   id: string;
@@ -391,6 +393,59 @@ export function AvailabilityPanel({
     } finally {
       setProtectionSaving(false);
     }
+  }
+
+  // Click-to-protect: append a one-time block rule scoped to the clicked
+  // 30m. GET prefs (full structuredRules array), append, PUT back. PUT
+  // invalidates the schedule, then we refetch. Two round trips — fine for
+  // a single-click UX; race with concurrent rule edits is tolerable for
+  // MVP (last write wins, same as the rules panel itself).
+  async function handleCreateSlotProtection(params: {
+    start: string;
+    end: string;
+    level: "protect" | "block";
+  }) {
+    const tz = timezone;
+    const effectiveDate = toDayStr(params.start, tz);
+    const fmt = (iso: string) =>
+      new Intl.DateTimeFormat("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: tz,
+      }).format(new Date(iso));
+    const timeStart = fmt(params.start);
+    const timeEnd = fmt(params.end);
+    const verb = params.level === "block" ? "Block" : "Protect";
+    const newRule: AvailabilityRule = {
+      id:
+        crypto.randomUUID?.() ??
+        Math.random().toString(36).slice(2) + Date.now().toString(36),
+      originalText: `${verb} ${effectiveDate} ${timeStart}–${timeEnd}`,
+      type: "one-time",
+      action: "block",
+      timeStart,
+      timeEnd,
+      effectiveDate,
+      firmness: params.level === "block" ? "strong" : "weak",
+      status: "active",
+      priority: 3,
+      createdAt: new Date().toISOString(),
+    };
+
+    const getRes = await fetch("/api/tuner/preferences");
+    if (!getRes.ok) throw new Error(`prefs fetch failed (${getRes.status})`);
+    const prefs = await getRes.json();
+    const existing = (prefs.structuredRules as AvailabilityRule[] | undefined) ?? [];
+
+    const putRes = await fetch("/api/tuner/preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ structuredRules: [...existing, newRule] }),
+    });
+    if (!putRes.ok) throw new Error(`prefs save failed (${putRes.status})`);
+
+    await fetchSchedule();
   }
 
   async function handleSessionArchive(sessionId: string) {
@@ -977,6 +1032,7 @@ export function AvailabilityPanel({
               legendSlot={legendChips}
               primaryCalendar={calendars[0]}
               onEventClick={handleEventClick}
+              onCreateSlotProtection={handleCreateSlotProtection}
               selectedLinkName={selectedLinkName}
             />
           ) : mobileView === "workweek" ? (
@@ -994,6 +1050,7 @@ export function AvailabilityPanel({
               legendSlot={legendChips}
               primaryCalendar={calendars[0]}
               onEventClick={handleEventClick}
+              onCreateSlotProtection={handleCreateSlotProtection}
               selectedLinkName={selectedLinkName}
             />
           ) : (
@@ -1020,6 +1077,7 @@ export function AvailabilityPanel({
             headerGutterSlot={tzChip}
             primaryCalendar={calendars[0]}
             onEventClick={handleEventClick}
+            onCreateSlotProtection={handleCreateSlotProtection}
             selectedLinkName={selectedLinkName}
           />
         )}
