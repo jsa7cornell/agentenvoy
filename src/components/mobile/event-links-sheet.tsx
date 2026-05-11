@@ -39,7 +39,6 @@ import {
   type SessionLike,
 } from "@/lib/event-links-buckets";
 import { EventLinksCard, type ReusableLinkRow } from "./event-links-card";
-import { EventLinksEditDialog } from "./event-links-edit-dialog";
 import { LinkEditModal } from "@/components/link-edit-modal";
 import { CreateLinkPickerMobile } from "@/components/desktop/create-link-picker";
 
@@ -154,8 +153,9 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
   const [linkFilter, setLinkFilter] = useState<"active" | "paused">("active");
   const [togglingStatus, setTogglingStatus] = useState<string | null>(null);
 
-  // Route Edit on Primary to PrimaryEditDialog (V1 Stage 2); other
-  // variance rows continue to use EventLinksEditDialog.
+  // Route Edit by row shape: Primary opens LinkEditModal primary-mode;
+  // bookable rule-backed rows open LinkEditModal bookable-rule-mode.
+  // (Legacy EventLinksEditDialog retired 2026-05-10.)
   function handleEditClick(row: ReusableLinkRow) {
     if (row.kind === "primary") {
       setEditingPrimary(true);
@@ -656,18 +656,9 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
         </Link>
       </div>
 
-      {/* Edit dialogs — anchored to the sheet so they overlay both groups.
-          Primary uses the V1 Stage 2 posture editor (writes to
-          User.preferences + Apply-to-all flow); Office Hours uses the
-          existing rule-edit dialog. */}
-      <EventLinksEditDialog
-        row={editing}
-        onSaved={() => {
-          setReusableLoaded(false);
-          refetchReusable();
-        }}
-        onDismiss={() => setEditing(null)}
-      />
+      {/* Edit modals — single unified LinkEditModal handles both Primary
+          and bookable-rule rows. Legacy EventLinksEditDialog retired
+          2026-05-10 in favor of bookable-rule mode. */}
       <LinkEditModal
         isOpen={editingPrimary}
         mode="primary"
@@ -676,6 +667,36 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
           refetchReusable();
         }}
         onClose={() => setEditingPrimary(false)}
+      />
+      <LinkEditModal
+        isOpen={!!editing && !!editing.ruleId && !!editing.recurringWindowConfig}
+        mode="bookable-rule"
+        ruleId={editing?.ruleId}
+        bookableInitial={
+          editing?.recurringWindowConfig
+            ? {
+                originalText: editing.recurringWindowConfig.originalText,
+                title:
+                  editing.recurringWindowConfig.name ??
+                  editing.recurringWindowConfig.title,
+                format: editing.recurringWindowConfig.format,
+                durationMinutes: editing.recurringWindowConfig.durationMinutes,
+                daysOfWeek: [...editing.recurringWindowConfig.daysOfWeek],
+                timeStart: editing.recurringWindowConfig.timeStart,
+                timeEnd: editing.recurringWindowConfig.timeEnd,
+                effectiveDate: editing.recurringWindowConfig.effectiveDate,
+                expiryDate: editing.recurringWindowConfig.expiryDate,
+                ...(editing.recurringWindowConfig.guestPicks
+                  ? { guestPicks: editing.recurringWindowConfig.guestPicks }
+                  : {}),
+              }
+            : undefined
+        }
+        onSaved={() => {
+          setReusableLoaded(false);
+          refetchReusable();
+        }}
+        onClose={() => setEditing(null)}
       />
     </div>
   );

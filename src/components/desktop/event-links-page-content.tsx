@@ -45,7 +45,6 @@ import {
   type SessionLike,
 } from "@/lib/event-links-buckets";
 import { type ReusableLinkRow } from "@/components/mobile/event-links-card";
-import { EventLinksEditDialog } from "@/components/mobile/event-links-edit-dialog";
 import { LinkEditModal } from "@/components/link-edit-modal";
 import { CreateLinkPicker, CreateLinkPickerMobile } from "@/components/desktop/create-link-picker";
 
@@ -373,21 +372,23 @@ export function EventLinksPageContent() {
     }
   }
 
-  // Route the Edit click on a Primary card to LinkEditModal (primary mode).
-  // Bookable/recurring rows are backed by structuredRules and must use
-  // EventLinksEditDialog — their config lives on the rule, not on
-  // NegotiationLink.parameters, so the posture modal would show defaults
-  // and saves would not update the session schedule.
-  // LinkEditModal link-mode is reserved for future parameter-first links
-  // (no ruleId) once the create flow populates NegotiationLink.parameters.
+  // Route the Edit click by row shape:
+  //  - Primary card → LinkEditModal in `primary` mode (writes posture).
+  //  - Non-primary rows with a `ruleId` (bookable rules in structuredRules) →
+  //    LinkEditModal in `bookable-rule` mode (writes via /api/availability-rules/edit).
+  //  - Non-primary rows with only a `linkCode` (parameter-first NegotiationLinks) →
+  //    LinkEditModal in `link` mode (writes posture on NegotiationLink.parameters).
+  // The unified modal handles all three; the legacy EventLinksEditDialog was
+  // retired 2026-05-10 in favor of this routing.
   function handleEditClick(row: ReusableLinkRow) {
     if (row.kind === "primary") {
       setEditingPrimary(true);
-    } else if (!row.ruleId && row.linkCode) {
-      // Parameter-first link (future — no structured rule backing it).
-      setEditingLinkCode(row.linkCode);
-    } else {
+    } else if (row.ruleId) {
+      // Bookable rule — config lives in User.preferences.explicit.structuredRules.
       setEditing(row);
+    } else if (row.linkCode) {
+      // Parameter-first NegotiationLink (no rule backing it).
+      setEditingLinkCode(row.linkCode);
     }
   }
 
@@ -1056,17 +1057,9 @@ export function EventLinksPageContent() {
         </section>
       </div>
 
-      {/* Edit dialogs — Primary uses the new posture editor (writes to
-          User.preferences + Apply-to-all flow); Office Hours uses the
-          existing rule-edit dialog. */}
-      <EventLinksEditDialog
-        row={editing}
-        onSaved={() => {
-          setReusableLoaded(false);
-          refetchReusable();
-        }}
-        onDismiss={() => setEditing(null)}
-      />
+      {/* Edit modals — single unified LinkEditModal handles all three shapes.
+          Mode-specific routing keys the save backend (scheduling-defaults,
+          availability-rules/edit, or /api/me/links/[id]/posture). */}
       <LinkEditModal
         isOpen={editingPrimary}
         mode="primary"
@@ -1075,6 +1068,36 @@ export function EventLinksPageContent() {
           refetchReusable();
         }}
         onClose={() => setEditingPrimary(false)}
+      />
+      <LinkEditModal
+        isOpen={!!editing && !!editing.ruleId && !!editing.recurringWindowConfig}
+        mode="bookable-rule"
+        ruleId={editing?.ruleId}
+        bookableInitial={
+          editing?.recurringWindowConfig
+            ? {
+                originalText: editing.recurringWindowConfig.originalText,
+                title:
+                  editing.recurringWindowConfig.name ??
+                  editing.recurringWindowConfig.title,
+                format: editing.recurringWindowConfig.format,
+                durationMinutes: editing.recurringWindowConfig.durationMinutes,
+                daysOfWeek: [...editing.recurringWindowConfig.daysOfWeek],
+                timeStart: editing.recurringWindowConfig.timeStart,
+                timeEnd: editing.recurringWindowConfig.timeEnd,
+                effectiveDate: editing.recurringWindowConfig.effectiveDate,
+                expiryDate: editing.recurringWindowConfig.expiryDate,
+                ...(editing.recurringWindowConfig.guestPicks
+                  ? { guestPicks: editing.recurringWindowConfig.guestPicks }
+                  : {}),
+              }
+            : undefined
+        }
+        onSaved={() => {
+          setReusableLoaded(false);
+          refetchReusable();
+        }}
+        onClose={() => setEditing(null)}
       />
       <LinkEditModal
         isOpen={!!editingLinkCode}

@@ -2,14 +2,23 @@
 
 /**
  * Unified link-edit modal — PR-D of proposal
- * 2026-05-06_link-config-canonical-model-and-unified-edit.
+ * 2026-05-06_link-config-canonical-model-and-unified-edit, extended
+ * 2026-05-10 with bookable-rule mode (Option C — the deferred-migration
+ * follow-up at proposal 2026-05-10_bookable-links-migrate-to-negotiationlink-table
+ * is the long-term consolidation; this is the visible-fix UI adapter).
  *
- * Handles editing posture fields for:
+ * Handles editing for:
  *  - Primary link (`mode: "primary"`) — writes via POST /api/me/scheduling-defaults
  *  - Bookable/personalized links (`mode: "link"`) — writes via
- *    PATCH /api/me/links/[id]/posture
+ *    PATCH /api/me/links/[id]/posture (NegotiationLink.parameters)
+ *  - Bookable rule (`mode: "bookable-rule"`) — writes via
+ *    POST /api/availability-rules/edit. Bookable links today are stored as
+ *    rules in `User.preferences.explicit.structuredRules[]`, not on
+ *    NegotiationLink.parameters; this mode reuses `<RuleFormFields>` to
+ *    keep the form identical to the legacy dialog while sharing chrome
+ *    with the rest of the modal so the user sees one consistent edit UX.
  *
- * Availability section has two modes:
+ * Availability section (primary/link only) has two modes:
  *  - Simple (default): one window shared across chosen days
  *  - Advanced (toggle): raw AvailabilityWindow[] JSON textarea
  *
@@ -21,22 +30,33 @@ import { X, Check, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import type { AvailabilityWindow } from "@/lib/link-parameters";
 import type { ResolvedPosture } from "@/lib/links/posture";
 import { DEFAULT_TIP } from "@/lib/meeting-tip/default-tip";
+import { RuleFormFields, type BookableLinkProposal } from "@/components/onboarding/rule-form-fields";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type LinkEditMode = "primary" | "link";
+export type LinkEditMode = "primary" | "link" | "bookable-rule";
 
 export interface LinkEditModalProps {
   isOpen: boolean;
   onClose: () => void;
-  /** "primary" to edit the primary link; "link" to edit a variance link. */
+  /** "primary" to edit the primary link;
+   *  "link" to edit a posture-backed variance link;
+   *  "bookable-rule" to edit a rule-backed bookable (Office Hours / etc.). */
   mode: LinkEditMode;
   /** Required when mode === "link". The NegotiationLink row ID. */
   linkId?: string;
-  /** Pre-populate fields. When absent the modal fetches from the API. */
+  /** Required when mode === "bookable-rule". The structuredRules entry id (`rule_*`). */
+  ruleId?: string;
+  /** Pre-populate fields. When absent the modal fetches from the API.
+   *  Only used in primary/link modes. */
   initial?: Partial<ResolvedPosture>;
+  /** Pre-populate fields for bookable-rule mode. Required when
+   *  mode === "bookable-rule"; matches the shape of
+   *  ReusableLinkRow.recurringWindowConfig (plus an originalText for the
+   *  rule's audit trail). */
+  bookableInitial?: BookableLinkProposal;
   /** Called after a successful save, before the modal closes. */
   onSaved?: () => void;
 }
@@ -117,16 +137,21 @@ export function LinkEditModal({
   onClose,
   mode,
   linkId,
+  ruleId,
   initial,
+  bookableInitial,
   onSaved,
 }: LinkEditModalProps) {
   // ---- Loading state ----
-  const [isLoading, setIsLoading] = useState(!initial);
+  // bookable-rule mode never fetches (parent passes bookableInitial) — start non-loading.
+  const [isLoading, setIsLoading] = useState(
+    mode === "bookable-rule" ? false : !initial,
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
 
-  // ---- Form fields ----
+  // ---- Form fields (primary / link modes) ----
   // Simple availability mode
   const [simpleDays, setSimpleDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [simpleStart, setSimpleStart] = useState(540);
@@ -141,6 +166,11 @@ export function LinkEditModal({
   const [bufferMinutes, setBufferMinutes] = useState(0);
   const [format, setFormat] = useState<FormatValue>("video");
   const [tip, setTip] = useState<string>(DEFAULT_TIP);
+
+  // ---- Form fields (bookable-rule mode) ----
+  // Single mutable proposal object; RuleFormFields renders and edits it.
+  // Seeded from `bookableInitial` on open; isDirty flips on any change.
+  const [ruleProposal, setRuleProposal] = useState<BookableLinkProposal | null>(null);
 
   // ---- Seed form from initial prop or API ----
   const seedForm = useCallback((posture: Partial<ResolvedPosture>) => {
@@ -166,6 +196,24 @@ export function LinkEditModal({
 
   useEffect(() => {
     if (!isOpen) return;
+
+    // Bookable-rule mode: hydrate from caller-supplied proposal; no fetch.
+    if (mode === "bookable-rule") {
+      if (bookableInitial) {
+        // Clone so RuleFormFields's onChange doesn't mutate the parent's row.
+        const seeded: BookableLinkProposal = {
+          ...bookableInitial,
+          daysOfWeek: [...bookableInitial.daysOfWeek],
+          ...(bookableInitial.guestPicks ? { guestPicks: { ...bookableInitial.guestPicks } } : {}),
+        };
+        setRuleProposal(seeded);
+        setIsDirty(false);
+        setSaveError(null);
+      }
+      setIsLoading(false);
+      return;
+    }
+
     if (initial) {
       seedForm(initial);
       setIsLoading(false);
@@ -200,7 +248,7 @@ export function LinkEditModal({
         : Promise.resolve();
 
     fetchPromise.catch(() => {}).finally(() => setIsLoading(false));
-  }, [isOpen, mode, linkId, initial, seedForm]);
+  }, [isOpen, mode, linkId, initial, bookableInitial, seedForm]);
 
   // ---- Dirty-aware change wrappers ----
   function changeDays(next: number[]) { setSimpleDays(next); setIsDirty(true); }
@@ -241,13 +289,79 @@ export function LinkEditModal({
 
   // ---- Validation ----
   const simpleError = !advancedMode ? validateSimple(simpleDays, simpleStart, simpleEnd) : null;
-  const canSave = !isSaving && isDirty && (advancedMode ? !advancedJsonError : !simpleError);
+
+  // Rule-mode validation: title non-empty AND at least one day selected.
+  // Matches the legacy dialog's `canSave` gate at event-links-edit-dialog.tsx:120.
+  const ruleError =
+    mode === "bookable-rule" && ruleProposal
+      ? ruleProposal.title.trim().length === 0
+        ? "Title is required."
+        : ruleProposal.daysOfWeek.length === 0
+          ? "Choose at least one day."
+          : null
+      : null;
+
+  const canSave =
+    !isSaving &&
+    isDirty &&
+    (mode === "bookable-rule"
+      ? !ruleError && ruleProposal != null
+      : advancedMode
+        ? !advancedJsonError
+        : !simpleError);
+
+  // ---- Rule-mode change wrapper ----
+  function changeRuleProposal(next: BookableLinkProposal) {
+    setRuleProposal(next);
+    setIsDirty(true);
+  }
 
   // ---- Save ----
   async function handleSave() {
     if (!canSave) return;
     setSaveError(null);
     setIsSaving(true);
+
+    // Bookable-rule branch — route to the rule-edit endpoint that
+    // EventLinksEditDialog used. Same payload shape; same backend.
+    if (mode === "bookable-rule") {
+      if (!ruleId || !ruleProposal) {
+        setSaveError("Missing rule id.");
+        setIsSaving(false);
+        return;
+      }
+      try {
+        const res = await fetch("/api/availability-rules/edit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ruleId,
+            proposal: {
+              title: ruleProposal.title,
+              format: ruleProposal.format,
+              durationMinutes: ruleProposal.durationMinutes,
+              daysOfWeek: ruleProposal.daysOfWeek,
+              timeStart: ruleProposal.timeStart,
+              timeEnd: ruleProposal.timeEnd,
+              effectiveDate: ruleProposal.effectiveDate,
+              expiryDate: ruleProposal.expiryDate,
+              ...(ruleProposal.guestPicks ? { guestPicks: ruleProposal.guestPicks } : {}),
+            },
+          }),
+        });
+        if (!res.ok) {
+          const err = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(err.error ?? "Save failed");
+        }
+        onSaved?.();
+        onClose();
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : "Save failed");
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
 
     let availability: AvailabilityWindow[];
     if (advancedMode) {
@@ -321,7 +435,11 @@ export function LinkEditModal({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-DEFAULT">
           <h3 className="text-sm font-semibold text-primary">
-            {mode === "primary" ? "Edit Primary Link" : "Edit Link"}
+            {mode === "primary"
+              ? "Edit Primary Link"
+              : mode === "bookable-rule"
+                ? "Edit Bookable Link"
+                : "Edit Link"}
           </h3>
           <button onClick={onClose} className="text-muted hover:text-secondary transition">
             <X className="w-4 h-4" />
@@ -332,6 +450,50 @@ export function LinkEditModal({
           <div className="flex items-center justify-center h-32 text-muted text-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" />
             Loading…
+          </div>
+        ) : mode === "bookable-rule" ? (
+          /* Bookable-rule body — reuses RuleFormFields so the editable fields
+             are identical to what EventLinksEditDialog rendered (title, format,
+             duration, days, time, effective/expiry dates, guestPicks). Save
+             routes to POST /api/availability-rules/edit. */
+          <div className="p-4 space-y-5">
+            {ruleProposal ? (
+              <RuleFormFields
+                value={ruleProposal}
+                onChange={changeRuleProposal}
+                disabled={isSaving}
+              />
+            ) : (
+              <p className="text-xs text-muted">No rule data provided.</p>
+            )}
+
+            {ruleError && (
+              <p className="text-xs text-amber-400">{ruleError}</p>
+            )}
+            {saveError && (
+              <p className="text-xs text-red-400">{saveError}</p>
+            )}
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={handleSave}
+                disabled={!canSave}
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isSaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4" />
+                )}
+                Save
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-muted hover:text-secondary border border-DEFAULT rounded-lg transition"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         ) : (
           <div className="p-4 space-y-5">
