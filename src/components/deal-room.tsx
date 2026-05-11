@@ -1260,13 +1260,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               createdAt: m.createdAt,
             }))
           );
-        } else {
+        } else if (data.greeting) {
           // Use a temp id (numeric ms-since-epoch) so the first poll's
           // content-match pass in mergePollResult swaps this local row in
           // place with the server-persisted greeting. A non-numeric id
           // like "greeting" fails isTempId, falls through to id-dedup,
           // and the server's CUID row appends — rendering the greeting
           // twice (one DB row, two bubbles).
+          //
+          // Phase 2 PR3b: new sessions return the tip text as `greeting`
+          // (not a full elaborated greeting template). This seeds the
+          // EnvoyDock thread with the tip content. For group events,
+          // `greeting` is the LLM-generated group welcome. When `greeting`
+          // is empty or null (possible in future), the thread starts empty.
           setMessages([
             {
               id: Date.now().toString(),
@@ -1275,6 +1281,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               createdAt: new Date().toISOString(),
             },
           ]);
+        } else {
+          // No greeting — new surface sessions start with an empty thread.
+          // The tip is shown on the MeetingCard instead.
+          setMessages([]);
         }
       } catch {
         setError("Failed to connect. Please try again.");

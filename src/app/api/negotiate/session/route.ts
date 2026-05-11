@@ -23,8 +23,19 @@ import {
   resolveSeedGuestTimezoneForCreate,
   resolveEffectiveGuestTimezone,
 } from "@/lib/guest-timezone-seed";
-import { selectGreeting } from "@/agent/greetings/registry";
-import { buildGreetingInput } from "@/lib/greeting/build-input";
+// Phase 2 PR3b: selectGreeting retired — registry archived to
+// app/src/agent/greetings/_archive/registry.ts. Runtime path now uses
+// getLinkPosture(link, user).tip → renderTip().
+//
+// DEPRECATED: import { selectGreeting } from "@/agent/greetings/registry";
+// DEPRECATED: import { buildGreetingInput } from "@/lib/greeting/build-input";
+//   (buildGreetingInput is still imported by _archive/registry.ts reference
+//    but has no production caller in this route — retained in build-input.ts
+//    for the pre-engagement greeting regen path §11.D that's still deferred)
+import { renderTip } from "@/lib/meeting-tip/render";
+import { buildTipInput } from "@/lib/meeting-tip/build-input";
+import { getLinkPosture } from "@/lib/links/posture";
+import { DEFAULT_TIP } from "@/lib/meeting-tip/default-tip";
 // formatAvailabilitySlotList / formatAvailabilityProse / formatStretchDays /
 // buildOpenWindowGreeting removed 2026-04-23 when the bulleted schedule body
 // and guestPicks open-window template were folded into the unified greeting
@@ -728,13 +739,19 @@ export async function POST(req: NextRequest) {
     (hostExplicit.format as string | undefined) ||
     session.format ||
     undefined;
-  const effectiveDuration =
+  // Phase 2 PR3b: effectiveDuration + effectiveMinDuration were previously
+  // passed to buildGreetingInput() for slot-aware greeting rendering. That
+  // path retired when selectGreeting() was replaced with renderTip().
+  // Retained as underscore-prefixed vars to minimize diff noise; will be
+  // cleaned up once all greeting-input references are removed.
+  const _effectiveDuration =
     (linkRules.duration as number | undefined) ||
     (hostExplicit.duration as number | undefined) ||
     session.duration ||
     undefined;
-  const effectiveMinDuration =
+  const _effectiveMinDuration =
     (linkRules.minDuration as number | undefined) || undefined;
+  void _effectiveDuration; void _effectiveMinDuration; // Phase 2 PR3b — unused
   // Apply link-level filters (availability, dateRange, blockedRanges, lastResort)
   // BEFORE formatting so the greeting shows the same set of times the LLM will
   // see in `formatOfferableSlots` on follow-up turns. Without this, the greeting
@@ -815,9 +832,8 @@ export async function POST(req: NextRequest) {
 
   // V2 bullet-list pre-computation removed 2026-04-23 — the bulleted body
   // branch was deleted when the greeting framework unified around calendar-
-  // widget deferral. `effectiveDuration` + `effectiveMinDuration` still
-  // flow into the widget via scoring; nothing in the greeting renderer
-  // needs a flat slot list anymore.
+  // widget deferral. Slot filtering still happens before the greeting block
+  // to ensure the client sees the same set of slots as the LLM sees later.
 
   let greeting: string;
 
@@ -835,23 +851,37 @@ export async function POST(req: NextRequest) {
       conversationHistory: [{ role: "user", content: greetingPrompt }],
     });
   } else {
-    // Deterministic template greeting — no LLM, no hallucination risk.
-    // Input bundle assembly extracted to `@/lib/greeting/build-input` so the
-    // pre-engagement re-render path (handleExpandLink) can re-derive without
-    // duplicating the logic. See [GREETINGS.md §11.D].
-    const greetingInput = buildGreetingInput({
-      link,
-      linkRules,
-      user,
-      session,
-      filteredSlots,
-      hostTimezone,
-      effectiveFormat,
-      effectiveDuration,
-      effectiveMinDuration,
-      isGuest,
-    });
-    greeting = selectGreeting(greetingInput).render(greetingInput);
+    // Phase 2 PR3b: runtime template selection (selectGreeting) retired.
+    // The elaborate deterministic greeting templates (6-template registry)
+    // are archived at app/src/agent/greetings/_archive/registry.ts and used
+    // only as reference material for the LLM seed-generator prompt (PR3d).
+    //
+    // The greeting field is now the host-authored tip (from Link.parameters.tip
+    // via getLinkPosture → renderTip). This is the same content the MeetingCard
+    // tip slot shows — so the EnvoyDock thread and the card are consistent.
+    //
+    // For new sessions (USE_LEGACY_GREETING_ROW = false), this value is NOT
+    // written to a Message row; it's returned to the frontend only to seed
+    // the deal-room's initial display while the tip appears on the MeetingCard.
+    // For resumed sessions, this value is only used as a fallback when no
+    // administrator Message exists (which is the new normal for PR3a sessions).
+    let tipText: string;
+    try {
+      const posture = getLinkPosture(link, { preferences: user.preferences as import("@/lib/scoring").UserPreferences });
+      const tipInput = buildTipInput({
+        hostName: user.name ?? "",
+        inviteeName: link.inviteeName ?? "",
+        linkFormat: effectiveFormat ?? "video",
+        linkActivity: (parseLinkParameters(link.parameters).activity as string | null) ?? null,
+        linkLocation: (parseLinkParameters(link.parameters).location as string | null) ?? null,
+        isAnonymousLink: link.type === "primary" || !!link.recurringWindowId,
+        linkAuthoredTip: posture.tip ?? null,
+      });
+      tipText = renderTip(tipInput, "guest")?.text ?? DEFAULT_TIP;
+    } catch {
+      tipText = DEFAULT_TIP;
+    }
+    greeting = tipText;
   }
 
   // PHASE 2 PR3a — greeting Message-row gate.

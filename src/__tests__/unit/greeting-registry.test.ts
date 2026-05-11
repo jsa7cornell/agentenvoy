@@ -1,6 +1,13 @@
 /**
  * Unit tests for the greeting registry — `src/agent/greetings/registry.ts`.
  *
+ * PHASE 2 PR3b: selectGreeting() is deprecated for runtime use (retired from
+ * session/route.ts). These tests are RETAINED as archive-validation coverage:
+ * the 6 template implementations serve as reference material for the LLM
+ * seed-generator prompt (Phase 2 PR3d, EVENTPAGE punch-list #8). Keeping
+ * these tests green ensures the archived template text is accurate when
+ * assembled into the LLM prompt context.
+ *
  * Two layers of coverage:
  *
  *   1. **Resolver coverage (`selectGreeting`)** — for each of the four

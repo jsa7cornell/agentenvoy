@@ -1,23 +1,13 @@
+/** ARCHIVED 2026-05-11 — runtime template selection retired in Phase 2 PR3b.
+ * Kept as reference material for the LLM seed-generator prompt (PR4 / EVENTPAGE
+ * punch-list #8). Do NOT import at runtime. The live code path is now:
+ *   getLinkPosture(link, user) → ResolvedPosture.tip → renderTip()
+ * See app/src/lib/meeting-tip/ for the current tip rendering module.
+ */
+
 /**
  * Greeting registry — deterministic 1:1 / 1:many first-message templates.
  *
- * PHASE 2 PR3b STATUS: Runtime selection via selectGreeting() is DEPRECATED.
- * The canonical runtime path is now:
- *   getLinkPosture(link, user) → ResolvedPosture.tip → renderTip()
- * See app/src/lib/meeting-tip/ for the live tip rendering module.
- *
- * This file is RETAINED (not deleted) because:
- *   1. `formatDeferralFieldsList` + `DeferralFieldNoun` are still consumed
- *      by deal-room.tsx and feed.tsx for the deferral-fields pill rendering.
- *   2. `GreetingInput` type is still used by lib/greeting/build-input.ts.
- *   3. The template implementations serve as reference material for the
- *      LLM seed-generator prompt (Phase 2 PR3d, EVENTPAGE punch-list #8).
- *      An archived copy also lives at _archive/registry.ts.
- *
- * Do NOT call selectGreeting() from new code. It now fires only in unit tests
- * (which preserve coverage of the archived template implementations).
- *
- * ───────────────────────────────────────────────────────────────────────────
  * Each entry is a `GreetingTemplate` keyed by string. `selectGreeting(input)`
  * returns the matching template; `template.render(input)` returns the final
  * greeting string. Route handlers stay thin — build the input once, dispatch
@@ -88,7 +78,7 @@ import {
   buildSuggestAltClause,
   type GuestGuidanceConfig,
   type GuestPicksConfig,
-} from "./clauses";
+} from "../clauses";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
