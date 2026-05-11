@@ -115,6 +115,13 @@ function buildEventSub(s: UpcomingEventRow): string {
   return "";
 }
 
+function getDealRoomUrl(s: UpcomingEventRow): string | null {
+  if (!s.link?.slug) return null;
+  return s.link.code
+    ? `/meet/${s.link.slug}/${s.link.code}`
+    : `/meet/${s.link.slug}`;
+}
+
 function statusPillColor(bucket: string): { bg: string; text: string } {
   // Updated 2026-05-02 V1 redesign: needs_you retired, past split into
   // complete/cancelled. See `event-links-buckets.ts` for the canonical
@@ -504,6 +511,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                 "Guest";
               const title = s.title || s.link?.topic || `Meeting with ${guestLabel}`;
               const sub = buildEventSub(s);
+              const dealUrl = getDealRoomUrl(s);
               // Cancellable: only live sessions (coordinating / confirmed).
               // Complete + cancelled rows are terminal — no cancel action.
               const isCancellable = bucket === "coordinating" || bucket === "confirmed";
@@ -551,12 +559,29 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                   }`}
                   data-testid={`mobile-event-links-row-${bucket}${s.archived ? "-archived" : ""}`}
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-semibold text-primary truncate">{title}</div>
-                    {sub && (
-                      <div className="text-[10.5px] text-muted truncate leading-snug">{sub}</div>
-                    )}
-                  </div>
+                  {/* Bug 2 fix (2026-05-11): wrap title in a real <Link> so
+                      mobile tap events reliably navigate to the deal-room.
+                      Previously this was a plain <div> — onClick-only elements
+                      are unreliable on iOS Safari (touch-action, pointer-events). */}
+                  {dealUrl ? (
+                    <Link
+                      href={dealUrl}
+                      onClick={onClose}
+                      className="flex-1 min-w-0 block"
+                    >
+                      <div className="text-xs font-semibold text-primary truncate">{title}</div>
+                      {sub && (
+                        <div className="text-[10.5px] text-muted truncate leading-snug">{sub}</div>
+                      )}
+                    </Link>
+                  ) : (
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold text-primary truncate">{title}</div>
+                      {sub && (
+                        <div className="text-[10.5px] text-muted truncate leading-snug">{sub}</div>
+                      )}
+                    </div>
+                  )}
                   <span
                     className={`flex-shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide ${pill.bg} ${pill.text}`}
                   >
