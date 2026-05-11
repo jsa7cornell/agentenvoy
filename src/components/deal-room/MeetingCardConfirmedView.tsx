@@ -196,8 +196,10 @@ export function MeetingCardConfirmedView({
   // get pushed too far below the fold on long threads.
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-[#f6f3ec]">
-      {/* Card section — centered with max-width on both mobile + desktop */}
-      <div className="px-4 py-4 lg:px-8 lg:py-8">
+      {/* Card section — centered with max-width on both mobile + desktop.
+          Bottom padding tightened when a belowCardSlot (reschedule picker)
+          is rendered so the picker doesn't float in a sea of whitespace. */}
+      <div className={`px-4 lg:px-8 ${belowCardSlot ? "pt-3 pb-2 lg:pt-5 lg:pb-2" : "py-4 lg:py-8"}`}>
         <div className="max-w-[540px] mx-auto relative">
           {/* Dashboard back-button — logged-in users only (Bug 1 fix 2026-05-11).
               Positioned absolute top-right so it doesn't crowd the card's own
@@ -221,7 +223,7 @@ export function MeetingCardConfirmedView({
           render the picker so the agent dock appears BELOW the picker
           (per user instruction 2026-05-10). */}
       {belowCardSlot && (
-        <div className="px-4 pb-2 lg:px-8">
+        <div className="px-4 pb-3 lg:px-8 lg:pb-4">
           <div className="max-w-[540px] mx-auto">{belowCardSlot}</div>
         </div>
       )}

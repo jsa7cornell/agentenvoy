@@ -50,41 +50,22 @@ function KeepCurrentTimeButton({ onCancel }: { onCancel: () => void }) {
 }
 
 export function RescheduleOverlay({ pickerSlot, onCancel }: RescheduleOverlayProps) {
+  // Parent (MeetingCardConfirmedView belowCardSlot wrapper) provides the
+  // outer px/pb + max-w-[540px] mx-auto; this component only handles its
+  // own internal strips. 2026-05-11 — dropped the duplicate footer "Keep
+  // current time" and tightened spacing per John's feedback.
   return (
-    <div className="px-4 pb-6 lg:px-8 lg:pb-12">
-      <div className="max-w-[540px] mx-auto">
-        {/* Header strip */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: "10px",
-          }}
-        >
-          <span style={{ fontSize: "13px", color: "#6b6458" }}>
-            Pick a new time, or
-          </span>
-          <KeepCurrentTimeButton onCancel={onCancel} />
-        </div>
-
-        {/* Picker — rendered from deal-room renderPickerBubble */}
-        <div className="rounded-2xl overflow-hidden border border-[#e7e2d5] bg-[#faf8f3]">
-          {pickerSlot}
-        </div>
-
-        {/* Footer strip — repeated so it's visible without scrolling back up */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            marginTop: "10px",
-          }}
-        >
-          <KeepCurrentTimeButton onCancel={onCancel} />
-        </div>
+    <>
+      {/* Header strip — "Pick a new time, or  Keep current time" */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[13px] text-[#6b6458]">Pick a new time, or</span>
+        <KeepCurrentTimeButton onCancel={onCancel} />
       </div>
-    </div>
+
+      {/* Picker — stronger border so it doesn't blend into the page bg. */}
+      <div className="rounded-2xl overflow-hidden border border-[#dbd5c4] bg-[#faf8f3]">
+        {pickerSlot}
+      </div>
+    </>
   );
 }
