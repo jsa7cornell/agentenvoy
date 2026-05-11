@@ -83,18 +83,18 @@ export default function ThreadCard({
   lastActivity,
   linkSlug,
   linkCode,
-  canArchive,
-  onArchive,
   selected,
   onClick,
   isGroupEvent,
   participants,
   isVip = false,
   activityIcon,
-  guestTimezoneLabel,
   inviteeCount,
   recurrence,
 }: ThreadCardProps) {
+  // canArchive / onArchive / guestTimezoneLabel intentionally not destructured:
+  // archive button and timezone chip were removed from this card 2026-05-11.
+  // Props remain on the interface so callers don't need to change.
   const style = STATUS_STYLES[statusColor] || STATUS_STYLES.gray;
   const [linkCopied, setLinkCopied] = useState(false);
   const [shareSupported, setShareSupported] = useState(false);
@@ -130,11 +130,6 @@ export default function ThreadCard({
     if (!meetPath) return;
     const fullUrl = `${window.location.origin}${meetPath}`;
     void shareInvite({ url: fullUrl, topic: title });
-  }
-
-  function handleArchive(e: React.MouseEvent) {
-    e.stopPropagation();
-    onArchive?.();
   }
 
   return (
@@ -227,24 +222,15 @@ export default function ThreadCard({
         </div>
       )}
 
-      {/* Meta */}
-      <div className="flex gap-3 px-4 pb-2 text-xs text-muted items-center">
-        {!isGroupEvent && inviteeEmail && <span>{inviteeEmail}</span>}
-        {messageCount !== undefined && messageCount > 0 && (
-          <span>{messageCount} messages</span>
-        )}
-        {guestTimezoneLabel && (
-          <span
-            className="inline-flex items-center gap-1 text-[11px]"
-            title={`Guest opened this deal room from ${guestTimezoneLabel}`}
-          >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 0v20m-10-10h20" />
-            </svg>
-            {guestTimezoneLabel}
-          </span>
-        )}
-      </div>
+      {/* Meta — guest email only. The "{N} messages" indicator and the
+          timezone chip were removed 2026-05-11 (John feedback: card view
+          felt busy; both signals were low-information at a glance). The
+          props remain on the interface for callers that still pass them. */}
+      {!isGroupEvent && inviteeEmail && (
+        <div className="flex gap-3 px-4 pb-2 text-xs text-muted items-center">
+          <span>{inviteeEmail}</span>
+        </div>
+      )}
 
       {/* Invite link */}
       {meetPath && (
@@ -295,17 +281,11 @@ export default function ThreadCard({
               {statusLabel}
             </span>
           )}
-          {canArchive && onArchive && (
-            <button
-              onClick={handleArchive}
-              className="p-1 rounded-lg text-muted hover:text-secondary hover:bg-surface-secondary/60 transition"
-              title="Archive"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-              </svg>
-            </button>
-          )}
+          {/* Archive icon removed from the card footer 2026-05-11 (John
+              feedback). Archive lives on the event-detail page now;
+              keeping it off the card removes a destructive action from
+              an easy mis-click target. `canArchive` / `onArchive` props
+              remain on the interface so callers don't need to change. */}
         </div>
         <span className="text-xs text-purple-400 font-medium">
           View conversation &rarr;

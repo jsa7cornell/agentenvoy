@@ -6,10 +6,11 @@
  * Per spec § 3.14. Peer to channel row and series row in the meeting info zone.
  * Renders in confirmed states only, for registered viewers.
  *
- * Three rendering modes:
+ * Rendering modes:
  *  1. Connect-prompt: registered guest, no GCal connected → "Calendar not connected · Connect →"
  *  2. Guest viewer: GCal connected → "Google Calendar · {status pill}" + sub-line
- *  3. Host viewer: inverted → "{Guest}'s RSVP · {status pill}" + sub-line
+ *  3. Host viewer: suppressed (2026-05-11) — the "{Guest}'s RSVP · Awaiting RSVP"
+ *     line read as redundant context for hosts; row returns null for viewerRole === "host".
  *
  * Anonymous viewer (googleCalendar === undefined): returns null.
  * Anti-pattern guard: this row renders the status display only.
@@ -78,72 +79,13 @@ function guestSubLine(status: RsvpStatus): string | null {
   }
 }
 
-// ── Hours since date ──────────────────────────────────────────────────────────
-
-/**
- * 2026-05-11 hotfix: accept Date OR string OR number. The googleCalendar
- * field comes from JSON-fetch responses (e.g. /api/negotiate/gcal-rsvp-status),
- * where Date values become strings after JSON.parse — even though the
- * TypeScript type says `Date`. Calling .getTime() on a string crashes the
- * card and trips MeetingCardErrorBoundary, which silently falls back to the
- * legacy view (the "host visits booked event → flips to legacy" bug, found
- * via [GATE_TRACE] + [BOUNDARY_TRIP] diagnostics 2026-05-11).
- *
- * Returns NaN-safe `0` if coercion fails — caller uses the result for a
- * "stale (>24h)" check, where 0 means "fresh, don't nudge."
- */
-function hoursSince(date: Date | string | number): number {
-  const d = date instanceof Date ? date : new Date(date);
-  const ms = d.getTime();
-  if (isNaN(ms)) return 0;
-  return Math.floor((Date.now() - ms) / (1000 * 60 * 60));
-}
-
 // ── Host mode ─────────────────────────────────────────────────────────────────
-
-function HostRow({
-  status,
-  guest,
-  onNudgeOther,
-  inviteSentAt,
-}: {
-  status: RsvpStatus;
-  guest: Participant;
-  onNudgeOther?: () => void;
-  inviteSentAt?: Date;
-}) {
-  const isStale = status === "needsAction" && inviteSentAt && hoursSince(inviteSentAt) > 24;
-  const hoursAgo = inviteSentAt ? hoursSince(inviteSentAt) : null;
-
-  return (
-    <div className="flex items-start gap-[9px] text-[13px] text-zinc-600 pt-2">
-      <span className="text-[14px] w-5 text-center flex-shrink-0 text-zinc-400 leading-[1.45]">
-        📅
-      </span>
-      <div className="flex-1 min-w-0 leading-[1.45]">
-        <div className="flex items-center gap-[7px] flex-wrap">
-          <span className="font-semibold text-zinc-700">
-            {guest.firstName}&apos;s RSVP
-          </span>
-          <StatusPill status={status} />
-        </div>
-        {status === "needsAction" && hoursAgo !== null && (
-          <div className="text-[11.5px] text-zinc-400 mt-[2px]">
-            Invite sent {hoursAgo === 0 ? "just now" : `${hoursAgo}h ago`}
-          </div>
-        )}
-        {isStale && onNudgeOther && (
-          <button
-            onClick={onNudgeOther}
-            className="mt-[4px] text-[12px] font-medium text-indigo-600 hover:text-indigo-800 hover:underline bg-transparent border-none p-0 cursor-pointer"
-          >
-            Nudge {guest.firstName}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+// Removed 2026-05-11: HostRow rendered "{Guest}'s RSVP · Awaiting RSVP" but
+// felt confusing alongside the rest of the event-page context. The export
+// below short-circuits host viewers to null. If we reintroduce a host-side
+// calendar signal, do it in a fresh shape rather than reviving this.
+// `hoursSince` helper was removed with HostRow (was only used for the
+// "Invite sent Nh ago" / stale-nudge sub-line).
 
 // ── Guest mode ────────────────────────────────────────────────────────────────
 
@@ -191,6 +133,10 @@ function ConnectPromptRow() {
 export interface MeetingCardCalendarRowProps {
   googleCalendar: GoogleCalendarStatus | undefined;
   viewerRole: ViewerRole;
+  /** Retained for API compatibility — callers still pass these. They were
+   *  consumed by HostRow (removed 2026-05-11); leaving them on the props
+   *  keeps call sites working and lets us reintroduce a host-side row
+   *  without churning every caller. */
   guest: Participant;
   onNudgeOther?: () => void;
 }
@@ -198,23 +144,15 @@ export interface MeetingCardCalendarRowProps {
 export function MeetingCardCalendarRow({
   googleCalendar,
   viewerRole,
-  guest,
-  onNudgeOther,
 }: MeetingCardCalendarRowProps) {
   // Anonymous viewer — no signal to show
   if (!googleCalendar) return null;
 
+  // Host viewer: the "{Guest}'s RSVP — Awaiting RSVP" line was confusing
+  // (John feedback 2026-05-11). The guest's calendar status is implicit in
+  // the broader card state, so we suppress the row for hosts entirely.
   if (viewerRole === "host") {
-    const status = googleCalendar.otherPartyStatus;
-    if (!status) return null;
-    return (
-      <HostRow
-        status={status}
-        guest={guest}
-        onNudgeOther={onNudgeOther}
-        inviteSentAt={googleCalendar.inviteSentAt}
-      />
-    );
+    return null;
   }
 
   // Guest viewer
