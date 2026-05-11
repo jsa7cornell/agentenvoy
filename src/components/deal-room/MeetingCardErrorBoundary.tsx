@@ -41,14 +41,16 @@ export class MeetingCardErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: { componentStack?: string }) {
-    // Log to browser console for diagnosis. The structured log makes it
-    // easy to see the actual error message + component stack in devtools.
+    // BOUNDARY_TRIP — grep for this marker in browser devtools or feedback
+    // bundles. Timestamp lets you correlate with network logs.
+    // 2026-05-10 punch-list #13: enriched from generic console.error.
     console.error(
-      "[MeetingCardErrorBoundary] crash in new card surface — falling back to legacy render",
+      `[MeetingCardErrorBoundary] BOUNDARY_TRIP at ${Date.now()} — crash in new card surface, falling back to legacy render`,
       {
         error: error.message,
         stack: error.stack,
         componentStack: errorInfo.componentStack,
+        ts: new Date().toISOString(),
       }
     );
     this.props.onError?.(error);
