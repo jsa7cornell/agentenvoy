@@ -3744,6 +3744,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   ? `${window.location.origin}/meet/${slug}${code ? `/${code}` : ""}`
                   : undefined}
                 showDashboardLink={isHost || isGuest}
+                feedbackLinkCode={feedbackCode ?? code}
                 belowCardSlot={
                   reschedulingFromConfirmed ? (
                     <RescheduleOverlay

@@ -23,6 +23,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MeetingCard } from "@/components/MeetingCard/MeetingCard";
 import { EnvoyDock } from "@/components/EnvoyDock/EnvoyDock";
+import { SendFeedbackLink } from "@/components/send-feedback";
 import type { MeetingCardProps, GoogleCalendarStatus } from "@/components/MeetingCard/types";
 import type { Message as ChatMessage } from "@/components/MeetingCard/types";
 
@@ -68,6 +69,14 @@ interface Props {
    * dashboard, so we never render the button for them.
    */
   showDashboardLink?: boolean;
+  /**
+   * NegotiationLink.code used to file a feedback report for this deal-room.
+   * Should be `feedbackCode ?? code` from deal-room.tsx — for non-bookable
+   * visits, the URL code IS the child code; for bookable visits feedbackCode
+   * is the minted child. Missing in the legacy → new card cutover (2026-05-11
+   * regression) meant guests couldn't file feedback from the new surface.
+   */
+  feedbackLinkCode?: string;
 }
 
 export function MeetingCardConfirmedView({
@@ -87,6 +96,7 @@ export function MeetingCardConfirmedView({
   dealRoomUrl,
   belowCardSlot,
   showDashboardLink,
+  feedbackLinkCode,
 }: Props) {
   const router = useRouter();
   // ── GCal RSVP status fetch (PR2b) ────────────────────────────────────────
@@ -233,6 +243,19 @@ export function MeetingCardConfirmedView({
             onCollapse={onCollapseThread}
             onSendMessage={onSendMessage}
           />
+          {/* Send-feedback affordance — restored to the new card surface
+              (2026-05-11). Anchored under the dock so it's reachable
+              regardless of whether the thread is expanded. */}
+          {feedbackLinkCode && (
+            <div className="mt-2 flex justify-end">
+              <SendFeedbackLink
+                mode={cardProps.viewerRole === "host" ? "host-deal-room" : "guest-deal-room"}
+                linkCode={feedbackLinkCode}
+                sessionId={sessionId ?? undefined}
+                className="text-[10px]"
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
