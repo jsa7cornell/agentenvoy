@@ -286,6 +286,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
    * 2026-05-10 hotfix.
    */
   const [meetingCardCrashed, setMeetingCardCrashed] = useState(false);
+  // Dismissible banner shown above legacy fallback when the error boundary trips.
+  // No localStorage — resets on refresh. 2026-05-10 punch-list #13.
+  const [meetingCardCrashedBannerDismissed, setMeetingCardCrashedBannerDismissed] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [emailWarning, setEmailWarning] = useState<string | null>(null);
@@ -3523,16 +3526,95 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               between first paint (no data → fallback) and data-resolved
               re-paint (new MeetingCard). Skip both branches while loading. */}
           {isLoading ? (
-            <div className="flex-1 min-h-0 flex flex-col items-center justify-start bg-[#f6f3ec] pt-12 px-4">
-              <div className="w-full max-w-[540px] animate-pulse">
-                {/* Hero skeleton */}
-                <div className="h-[140px] rounded-2xl bg-emerald-100/40 mb-4" />
-                {/* Card body skeleton */}
-                <div className="rounded-2xl bg-white border border-[#e7e2d5] p-5 space-y-3">
-                  <div className="h-4 w-1/3 bg-zinc-100 rounded" />
-                  <div className="h-5 w-2/3 bg-zinc-100 rounded" />
-                  <div className="h-4 w-full bg-zinc-100 rounded" />
-                  <div className="h-4 w-1/2 bg-zinc-100 rounded" />
+            /* Skeleton — silhouette-matched to the real MeetingCard so the
+               swap on data-load is invisible. Mirrors:
+               - MeetingCardConfirmedView outer bg + padding + max-width
+               - MeetingCard article (rounded-[18px], border, shadow)
+               - MeetingCardHero (gradient hero, icon circle, date/time lines)
+               - MeetingCardInfoBlock (avatar pair, title bar, rows, tip)
+               - MeetingCardActions (three text-link rows)
+               - EnvoyDock resting state (avatar + nudge chip)
+               2026-05-10 punch-list #12 */
+            <div className="flex-1 min-h-0 overflow-y-auto bg-[#f6f3ec]">
+              <div className="px-4 py-4 lg:px-8 lg:py-8">
+                <div className="w-full max-w-[540px] mx-auto animate-pulse">
+                  {/* MeetingCard article shell */}
+                  <article
+                    className="rounded-[18px] overflow-hidden bg-white"
+                    style={{
+                      border: "1px solid #e7e2d5",
+                      boxShadow: "0 4px 24px rgba(24,24,27,.07), 0 1px 4px rgba(24,24,27,.04)",
+                    }}
+                  >
+                    {/* ── Faux MeetingCardHero (confirmed-state gradient) ── */}
+                    <div
+                      className="px-[22px] pt-[22px] pb-5"
+                      style={{ background: "linear-gradient(135deg, #059669 0%, #10b981 60%, #34d399 100%)" }}
+                    >
+                      {/* Icon circle + eyebrow + optional headline */}
+                      <div className="flex items-center gap-[14px]">
+                        <div className="w-[42px] h-[42px] rounded-full bg-white/30 flex-shrink-0" />
+                        <div className="flex-1 space-y-1.5">
+                          <div className="h-2.5 w-20 rounded bg-white/30" />
+                          <div className="h-4 w-32 rounded bg-white/20" />
+                        </div>
+                      </div>
+                      {/* When block */}
+                      <div className="mt-[14px] pt-[14px]" style={{ borderTop: "1px solid rgba(255,255,255,.18)" }}>
+                        <div className="h-5 w-48 rounded bg-white/25 mb-2" />
+                        <div className="h-3 w-36 rounded bg-white/18" />
+                      </div>
+                    </div>
+
+                    {/* ── Faux MeetingCardInfoBlock ── */}
+                    <div className="px-[22px] pt-[18px] pb-3">
+                      {/* Who row: overlapping avatar circles + name bar */}
+                      <div className="flex items-center gap-[10px] mb-2">
+                        <div className="flex items-center">
+                          <div className="w-[26px] h-[26px] rounded-full bg-zinc-200 border-2 border-white" />
+                          <div className="w-[26px] h-[26px] rounded-full bg-zinc-200 border-2 border-white -ml-[9px]" />
+                        </div>
+                        <div className="h-3 w-40 rounded bg-zinc-200" />
+                      </div>
+                      {/* Title bar */}
+                      <div className="h-5 w-3/4 rounded bg-zinc-200 mb-3" />
+                      {/* Channel line */}
+                      <div className="flex items-center gap-[9px] pt-2">
+                        <div className="w-5 h-4 rounded bg-zinc-100 flex-shrink-0" />
+                        <div className="h-3.5 w-2/3 rounded bg-zinc-200" />
+                      </div>
+                      {/* Tip / agenda block */}
+                      <div className="pl-3 border-l-2 border-zinc-200 mt-3">
+                        <div className="h-3 w-full rounded bg-zinc-100 mb-1.5" />
+                        <div className="h-3 w-4/5 rounded bg-zinc-100" />
+                      </div>
+                    </div>
+
+                    {/* ── Faux MeetingCardActions (three text-link rows) ── */}
+                    <div className="px-[22px] pb-4 pt-1 space-y-1">
+                      {[80, 64, 72].map((w, i) => (
+                        <div key={i} className="flex items-center gap-[9px] py-[7px]">
+                          <div className="w-4 h-4 rounded bg-indigo-100 flex-shrink-0" />
+                          <div className={`h-3.5 rounded bg-indigo-100`} style={{ width: `${w}px` }} />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* ── Faux footer chip ── */}
+                    <div className="flex justify-end px-[18px] pb-3 pt-1">
+                      <div className="h-3 w-32 rounded bg-zinc-100" />
+                    </div>
+                  </article>
+
+                  {/* ── Faux EnvoyDock (resting state) ── */}
+                  <div className="mt-3 px-3 py-3 rounded-2xl bg-white border border-[#e7e2d5] flex items-center gap-3">
+                    <div className="w-[42px] h-[42px] rounded-full bg-indigo-100 flex-shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3 w-1/2 rounded bg-zinc-200" />
+                      <div className="h-2.5 w-1/3 rounded bg-zinc-100" />
+                    </div>
+                    <div className="w-[30px] h-[30px] rounded-lg bg-indigo-50" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -3587,7 +3669,20 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 belowCardSlot={
                   reschedulingFromConfirmed ? (
                     <RescheduleOverlay
-                      onCancel={() => setReschedulingFromConfirmed(false)}
+                      onCancel={() => {
+                        setReschedulingFromConfirmed(false);
+                        setMessages((prev) => [
+                          ...prev,
+                          {
+                            id: `reschedule-kept-${Date.now()}`,
+                            role: "administrator",
+                            content:
+                              "Kept your existing time. Let me know if anything else needs to change.",
+                            createdAt: new Date().toISOString(),
+                            metadata: null,
+                          },
+                        ]);
+                      }}
                       pickerSlot={reschedulePickerNode}
                     />
                   ) : null
@@ -3620,6 +3715,30 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           /* EXISTING PATH (unchanged): old event card + chat column */
           /* Desktop centered wrapper for left-side content */
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col md:max-w-[640px] lg:max-w-[760px] xl:max-w-[880px] md:mx-auto md:w-full">
+            {/* Error-boundary fallback banner — shown when MeetingCardErrorBoundary
+                tripped and we fell back to legacy. Small, amber, dismissible.
+                Grep "BOUNDARY_TRIP" in the browser console for the full error.
+                No localStorage — dismiss resets on refresh. 2026-05-10 punch-list #13. */}
+            {meetingCardCrashed && !meetingCardCrashedBannerDismissed && (
+              <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[11.5px] text-amber-800 flex-shrink-0">
+                <span>
+                  Heads up: the new event view hit an error and we fell back to the classic view.{" "}
+                  <button
+                    className="underline font-medium"
+                    onClick={() => window.location.reload()}
+                  >
+                    Refresh to try again.
+                  </button>
+                </span>
+                <button
+                  aria-label="Dismiss"
+                  className="ml-2 text-amber-600 hover:text-amber-900 font-medium leading-none flex-shrink-0"
+                  onClick={() => setMeetingCardCrashedBannerDismissed(true)}
+                >
+                  ×
+                </button>
+              </div>
+            )}
             {/* Event card — sticky inside chat column */}
             {eventCard}
 
