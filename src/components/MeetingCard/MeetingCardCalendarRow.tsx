@@ -80,8 +80,23 @@ function guestSubLine(status: RsvpStatus): string | null {
 
 // ── Hours since date ──────────────────────────────────────────────────────────
 
-function hoursSince(date: Date): number {
-  return Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60));
+/**
+ * 2026-05-11 hotfix: accept Date OR string OR number. The googleCalendar
+ * field comes from JSON-fetch responses (e.g. /api/negotiate/gcal-rsvp-status),
+ * where Date values become strings after JSON.parse — even though the
+ * TypeScript type says `Date`. Calling .getTime() on a string crashes the
+ * card and trips MeetingCardErrorBoundary, which silently falls back to the
+ * legacy view (the "host visits booked event → flips to legacy" bug, found
+ * via [GATE_TRACE] + [BOUNDARY_TRIP] diagnostics 2026-05-11).
+ *
+ * Returns NaN-safe `0` if coercion fails — caller uses the result for a
+ * "stale (>24h)" check, where 0 means "fresh, don't nudge."
+ */
+function hoursSince(date: Date | string | number): number {
+  const d = date instanceof Date ? date : new Date(date);
+  const ms = d.getTime();
+  if (isNaN(ms)) return 0;
+  return Math.floor((Date.now() - ms) / (1000 * 60 * 60));
 }
 
 // ── Host mode ─────────────────────────────────────────────────────────────────

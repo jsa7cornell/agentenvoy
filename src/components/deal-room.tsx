@@ -1634,24 +1634,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       // Guest-picks deferrals from link.parameters.guestPicks
       linkGuestPicks,
     });
-    // GATE_TRACE 2026-05-11 — diagnostic instrumentation for the
-    // host-flips-to-legacy bug. Logs the gate-relevant inputs whenever
-    // meetingCardProps recomputes. Greppable in browser console + feedback
-    // bundles. Remove once the root cause is found.
-    if (typeof window !== "undefined") {
-      console.log("[GATE_TRACE]", {
-        ts: Date.now(),
-        propsNull: props === null,
-        confirmed,
-        confirmDataPresent: !!confirmData,
-        confirmDataDateTime: confirmData?.dateTime ?? null,
-        isGroupEvent,
-        isHost,
-        hasHostName: !!hostName,
-        hasInviteeName: !!inviteeName,
-        sessionStatus,
-      });
-    }
     return props;
   }, [
     isHost,
@@ -1668,11 +1650,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     isConfirming,
     bilateralByDay,
     linkFormat,
-    // GATE_TRACE deps — added 2026-05-11 so the trace re-fires when these
-    // gate-relevant inputs flip. They don't otherwise change props, but
-    // we want the trace line to land on every gate transition.
-    confirmed,
-    isGroupEvent,
   ]);
 
   // PR2a/PR2c — map deal-room messages to EnvoyDock ChatMessage shape.
