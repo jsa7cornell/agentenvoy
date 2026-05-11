@@ -1560,6 +1560,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     const hasBilateralMatch = !!(bilateralByDay && Object.values(bilateralByDay).some((chips) =>
       chips.some((c) => c.color === "both"),
     ));
+    // Extract guestPicks from linkParameters for the new card surface.
+    // Only location + format are in scope; duration/window/date are out of scope.
+    const gp = (linkParameters?.guestPicks) as Record<string, unknown> | null | undefined;
+    const linkGuestPicks = gp
+      ? {
+          location: gp.location === true,
+          format: (gp.format === true || Array.isArray(gp.format))
+            ? gp.format as boolean | string[]
+            : undefined,
+        }
+      : null;
+
     return dealRoomToMeetingCardProps({
       isHost,
       hostName,
@@ -1584,6 +1596,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       isConfirming,
       hasBilateralMatch,
       linkFormat,
+      // Guest-picks deferrals from link.parameters.guestPicks
+      linkGuestPicks,
     });
   }, [
     isHost,
@@ -3711,6 +3725,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 onCollapseThread={() => setConfirmedThreadExpanded(false)}
                 onSendMessage={(text) => {
                   setInput(text);
+                }}
+                // Guest-picks affordance: expand dock + prefill the chat input
+                // so the guest can reply with their preferred venue or format.
+                // Same pattern as onRequestEdit in MeetingCardConfirmedView.
+                onFocusChat={(prefill) => {
+                  setInput(prefill);
+                  setConfirmedThreadExpanded(true);
                 }}
                 // 2026-05-10: stripped-down calendar (no chat-bubble wrapper)
                 // so it fits the new card surface. Confirm form rendered as

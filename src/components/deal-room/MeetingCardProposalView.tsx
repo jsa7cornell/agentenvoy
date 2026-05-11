@@ -39,6 +39,13 @@ interface Props {
    * confirm card lives in a sibling render tree this view never reaches.
    */
   confirmSlot?: React.ReactNode;
+  /**
+   * Called when a guest-picks affordance (venue or format deferral) is tapped.
+   * Expands the EnvoyDock thread and prefills the chat input with `prefill`.
+   * Wired from deal-room.tsx — same pattern as onRequestEdit in ConfirmedView.
+   * Optional: affordance renders even without it (visual-only mode).
+   */
+  onFocusChat?: (prefill: string) => void;
 }
 
 export function MeetingCardProposalView({
@@ -50,6 +57,7 @@ export function MeetingCardProposalView({
   onSendMessage,
   pickerSlot,
   confirmSlot,
+  onFocusChat,
 }: Props) {
   // Stub out action handlers that don't apply pre-confirmation.
   // The MeetingCard component may render action slots — we silence any that
@@ -71,6 +79,8 @@ export function MeetingCardProposalView({
     onViewInGoogleCalendar: noop,
     onNudgeOther: noop,
     onEditTip: undefined,
+    // Guest-picks affordances: focus EnvoyDock + prefill when tapped
+    onFocusChat: onFocusChat,
   };
 
   return (

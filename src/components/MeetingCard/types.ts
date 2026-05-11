@@ -51,10 +51,17 @@ export type MeetingCardState =
 /**
  * In-person channel — physical location meeting.
  * `location` is a human-readable address or venue name.
+ *
+ * `guestPicks`: when true, the host deferred venue selection to the guest.
+ * Renderer must surface it as an explicit affordance — NOT default to "TBD".
+ * `location` will be an empty string in this case; the renderer should ignore
+ * it and show the deferral copy instead.
  */
 export interface InPersonChannel {
   kind: "in-person";
   location: string;
+  /** When true, the host deferred venue selection to the guest. */
+  guestPicks?: boolean;
 }
 
 /**
@@ -368,6 +375,31 @@ export interface MeetingCardProps {
    * Guest never sees the pencil; this callback only fires for host viewers.
    */
   onEditTip?: (newTipText: string) => Promise<void> | void;
+
+  /**
+   * Called when a guest-picks affordance is tapped — expands the EnvoyDock
+   * thread and prefills the chat input with the given text so the guest can
+   * reply with their preferred venue or format.
+   *
+   * Optional — affordance renders even when absent (visual only, no prefill).
+   * Wire up from deal-room.tsx (same pattern as onRequestEdit in ConfirmedView).
+   */
+  onFocusChat?: (prefill: string) => void;
+
+  /**
+   * Format deferral — the host left the meeting format up to the guest.
+   *
+   * When true, the host deferred format entirely (any format the guest prefers).
+   * When string[], the host constrained to that subset (e.g. ["video", "phone"]).
+   *
+   * When set, renderer must surface an explicit affordance — NOT default to
+   * "Google Meet" or any other format. `channel` on the props may carry a
+   * best-effort sentinel value; the renderer should override it with the
+   * deferral copy when this prop is present.
+   *
+   * Undefined (absent) means the format is locked and `channel` is authoritative.
+   */
+  formatGuestPicks?: boolean | string[];
 
   /**
    * Recurring series metadata.

@@ -65,6 +65,23 @@ export interface DealRoomConfirmedSnapshot {
    * Derived from linkFormat in deal-room state.
    */
   linkFormat?: string;
+  /**
+   * Guest-picks deferrals from link.parameters.guestPicks.
+   * Only location and format are in scope for this PR; duration/window/date
+   * are out of scope and should be ignored here.
+   *
+   * When linkGuestPicks.location === true AND the meeting is in-person, the
+   * channel carries guestPicks: true and location: "" — renderer shows affordance.
+   *
+   * When linkGuestPicks.format is truthy (boolean or string[]), formatGuestPicks
+   * is set on the returned props — renderer shows a format-pick affordance.
+   *
+   * Confirmed state: guestPicks signals are NOT surfaced (the picked values win).
+   */
+  linkGuestPicks?: {
+    location?: boolean;
+    format?: boolean | string[];
+  } | null;
 }
 
 // ── Proposal-state MeetingCardProps builder (PR2c) ────────────────────────────
@@ -128,13 +145,27 @@ function buildProposalMeetingCardProps(
     cardState = "proposal";
   }
 
-  // Channel — best-effort from link format; picker is the primary action
-  const format = snapshot.linkFormat || "video";
+  // Guest-picks deferrals — only location + format are in scope here.
+  const guestPicksLocation = snapshot.linkGuestPicks?.location === true;
+  const guestPicksFormat = snapshot.linkGuestPicks?.format;
+  const hasFormatGuestPicks = guestPicksFormat === true || Array.isArray(guestPicksFormat);
+
+  // Channel — best-effort from link format; picker is the primary action.
+  // When format is wholly deferred, default to in-person (most generic sentinel)
+  // so the renderer's guestPicks affordance path handles it.
+  const format = snapshot.linkFormat || (hasFormatGuestPicks ? "in-person" : "video");
   let channel: ChannelInfo;
-  if (format === "video") {
+  if (hasFormatGuestPicks) {
+    // Format is deferred — use a sentinel in-person channel with empty location.
+    // The renderer detects formatGuestPicks on the props and overrides this row.
+    channel = { kind: "in-person", location: "" };
+  } else if (format === "video") {
     channel = { kind: "video", platform: "Google Meet" };
   } else if (format === "phone") {
     channel = { kind: "phone", phoneNumber: "", hostCallsGuest: true };
+  } else if (guestPicksLocation) {
+    // In-person with deferred venue — empty location, guestPicks flag set.
+    channel = { kind: "in-person", location: "", guestPicks: true };
   } else {
     channel = { kind: "in-person", location: snapshot.linkLocation ?? "TBD" };
   }
@@ -177,6 +208,11 @@ function buildProposalMeetingCardProps(
     },
     channel,
     tip,
+    // Format deferral — only set when format is genuinely deferred (boolean or subset).
+    // Absent means format is locked and channel is authoritative.
+    ...(hasFormatGuestPicks
+      ? { formatGuestPicks: guestPicksFormat as boolean | string[] }
+      : {}),
   };
 }
 

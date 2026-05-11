@@ -68,13 +68,47 @@ function ChannelLine({
   viewerRole,
   host,
   guest,
+  onFocusChat,
 }: {
   channel: ChannelInfo;
   viewerRole: ViewerRole;
   host: Participant;
   guest: Participant;
+  onFocusChat?: (prefill: string) => void;
 }) {
   if (channel.kind === "in-person") {
+    // Guest-picks venue deferral — host explicitly asked guest to choose.
+    if (channel.guestPicks) {
+      const guestCopy = "📍 You pick the venue — share it when you reply";
+      const hostCopy = "📍 Guest will pick the venue";
+      const copy = viewerRole === "guest" ? guestCopy : hostCopy;
+      const isClickable = viewerRole === "guest";
+
+      return (
+        <div
+          className="flex items-start gap-[9px] text-[13px] pt-2"
+          data-guest-picks-location="true"
+        >
+          <div className="flex-1 min-w-0 leading-[1.45]">
+            {isClickable ? (
+              <button
+                className="text-left font-medium underline-offset-2 hover:underline focus:outline-none"
+                style={{ color: "#4f46e5" }}
+                onClick={() => onFocusChat?.("Let's meet at ")}
+                aria-label="Share your preferred venue"
+              >
+                {copy}
+              </button>
+            ) : (
+              <span className="font-medium" style={{ color: "#4f46e5" }}>
+                {copy}
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     const parts = channel.location.split("·");
     const name = parts[0].trim();
     const address = parts.slice(1).join("·").trim();
@@ -144,6 +178,65 @@ function ChannelLine({
         )}
         {!channel.joinUrl && (
           <span className="text-zinc-400"> — link in your calendar invite</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Format guest-picks row ────────────────────────────────────────────────────
+
+/**
+ * Rendered when the host deferred format selection to the guest.
+ * Shows above the channel line so it's the first channel-related signal seen.
+ *
+ * `formatGuestPicks`: true = any format; string[] = constrained subset.
+ * `viewerRole`: host sees informational copy; guest sees the action prompt.
+ * `onFocusChat`: optional — expands EnvoyDock + prefills the input.
+ *
+ * AP5b: data-guest-picks-format for agent DOM discoverability.
+ */
+function FormatGuestPicksRow({
+  formatGuestPicks,
+  viewerRole,
+  onFocusChat,
+}: {
+  formatGuestPicks: boolean | string[];
+  viewerRole: ViewerRole;
+  onFocusChat?: (prefill: string) => void;
+}) {
+  // Build the options label
+  let optionsList: string;
+  if (Array.isArray(formatGuestPicks) && formatGuestPicks.length > 0) {
+    optionsList = formatGuestPicks.join(", ");
+  } else {
+    optionsList = "video, phone, or in-person";
+  }
+
+  const guestCopy = `🎥 Format: you choose (${optionsList})`;
+  const hostCopy = `🎥 Guest picks the format (${optionsList})`;
+  const copy = viewerRole === "guest" ? guestCopy : hostCopy;
+  const isClickable = viewerRole === "guest";
+
+  return (
+    <div
+      className="flex items-start gap-[9px] text-[13px] pt-2"
+      data-guest-picks-format="true"
+    >
+      <div className="flex-1 min-w-0 leading-[1.45]">
+        {isClickable ? (
+          <button
+            className="text-left font-medium underline-offset-2 hover:underline focus:outline-none"
+            style={{ color: "#4f46e5" }}
+            onClick={() => onFocusChat?.("I'd prefer to meet by ")}
+            aria-label="Tell us your preferred meeting format"
+          >
+            {copy}
+          </button>
+        ) : (
+          <span className="font-medium" style={{ color: "#4f46e5" }}>
+            {copy}
+          </span>
         )}
       </div>
     </div>
@@ -393,8 +486,10 @@ export function MeetingCardInfoBlock(props: MeetingCardProps) {
     googleCalendar,
     onNudgeOther,
     onEditTip,
+    onFocusChat,
     state,
     when,
+    formatGuestPicks,
   } = props;
   // Confirmed/skipped states show time prominently in the gradient hero.
   // Proposal/matched/confirming show it as a row inside the info block,
@@ -445,13 +540,25 @@ export function MeetingCardInfoBlock(props: MeetingCardProps) {
           />
         )}
 
-        {/* Channel line */}
-        <ChannelLine
-          channel={channel}
-          viewerRole={viewerRole}
-          host={host}
-          guest={guest}
-        />
+        {/* Format guest-picks row — shown above channel line when host deferred format */}
+        {formatGuestPicks != null && (
+          <FormatGuestPicksRow
+            formatGuestPicks={formatGuestPicks}
+            viewerRole={viewerRole}
+            onFocusChat={onFocusChat}
+          />
+        )}
+
+        {/* Channel line — suppressed when format is fully deferred (FormatGuestPicksRow owns the row) */}
+        {!formatGuestPicks && (
+          <ChannelLine
+            channel={channel}
+            viewerRole={viewerRole}
+            host={host}
+            guest={guest}
+            onFocusChat={onFocusChat}
+          />
+        )}
 
         {/* Series row — recurring only */}
         {seriesForRow && (
