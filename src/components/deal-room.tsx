@@ -958,6 +958,31 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           return;
         }
         if (data.error === "Session already confirmed") {
+          // 2026-05-11: previously set confirmed=true here without confirmData,
+          // which left meetingCardProps null → fall-through to legacy view.
+          // Re-fetch the session so confirmData has the agreed slot's fields
+          // (dateTime/format/duration/eventLink) before flipping confirmed.
+          if (sessionId) {
+            try {
+              const sessionRes = await fetch(`/api/negotiate/session?id=${sessionId}`);
+              if (sessionRes.ok) {
+                const { session: sess } = await sessionRes.json();
+                if (sess?.status === "agreed") {
+                  setConfirmData({
+                    dateTime: sess.agreedTime,
+                    duration: sess.duration || 30,
+                    format: sess.agreedFormat || "phone",
+                    meetLink: sess.meetLink,
+                    eventLink: sess.eventLink,
+                  });
+                }
+              }
+            } catch {
+              // Fall through — confirmed flips below; meetingCardProps will
+              // build proposal-shape props from the snapshot, which is
+              // visually wrong but doesn't crash and won't fall to legacy.
+            }
+          }
           setConfirmed(true);
           setSessionStatus("agreed");
           setSessionStatusLabel("");
@@ -996,6 +1021,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           if (sessionRes.ok) {
             const { session: sess } = await sessionRes.json();
             if (sess?.status === "agreed") {
+              // 2026-05-11: also populate confirmData from the heal fetch —
+              // previously omitted, which left the new MeetingCard surface
+              // with confirmed=true but null confirmData → legacy fall-through.
+              setConfirmData({
+                dateTime: sess.agreedTime,
+                duration: sess.duration || 30,
+                format: sess.agreedFormat || "phone",
+                meetLink: sess.meetLink,
+                eventLink: sess.eventLink,
+              });
               setConfirmed(true);
               setSessionStatus("agreed");
               setSessionStatusLabel("");
@@ -1572,7 +1607,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         }
       : null;
 
-    return dealRoomToMeetingCardProps({
+    const props = dealRoomToMeetingCardProps({
       isHost,
       hostName,
       inviteeName,
@@ -1599,6 +1634,25 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       // Guest-picks deferrals from link.parameters.guestPicks
       linkGuestPicks,
     });
+    // GATE_TRACE 2026-05-11 — diagnostic instrumentation for the
+    // host-flips-to-legacy bug. Logs the gate-relevant inputs whenever
+    // meetingCardProps recomputes. Greppable in browser console + feedback
+    // bundles. Remove once the root cause is found.
+    if (typeof window !== "undefined") {
+      console.log("[GATE_TRACE]", {
+        ts: Date.now(),
+        propsNull: props === null,
+        confirmed,
+        confirmDataPresent: !!confirmData,
+        confirmDataDateTime: confirmData?.dateTime ?? null,
+        isGroupEvent,
+        isHost,
+        hasHostName: !!hostName,
+        hasInviteeName: !!inviteeName,
+        sessionStatus,
+      });
+    }
+    return props;
   }, [
     isHost,
     hostName,
@@ -1614,6 +1668,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     isConfirming,
     bilateralByDay,
     linkFormat,
+    // GATE_TRACE deps — added 2026-05-11 so the trace re-fires when these
+    // gate-relevant inputs flip. They don't otherwise change props, but
+    // we want the trace line to land on every gate transition.
+    confirmed,
+    isGroupEvent,
   ]);
 
   // PR2a/PR2c — map deal-room messages to EnvoyDock ChatMessage shape.
