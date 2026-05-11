@@ -49,18 +49,21 @@ export function EnvoyDockThread({
 }: EnvoyDockThreadProps) {
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
 
   const subLine = contextHostFirstName
     ? `Online · scheduling for ${contextHostFirstName}`
     : "Online";
 
-  // Bug 4 fix (2026-05-11): scroll to the latest message whenever the messages
-  // array changes (new message arrives on poll, or after the user sends).
-  // Uses "auto" behavior so there's no animation lag; "smooth" can fight iOS's
-  // own scroll inertia and look jittery on a fast poll cycle.
+  // 2026-05-11 — keep the auto-scroll-to-latest CONTAINED to the inner
+  // message list. The previous `scrollIntoView` walked every ancestor
+  // scrollable, so every poll tick yanked the whole deal-room page to
+  // the bottom (reported as "constantly snaps and jumps to bottom").
+  // Setting scrollTop directly on the list element scrolls only that
+  // element; the page stays where the user left it.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "auto" });
+    const list = messageListRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
   }, [messages]);
 
   function handleSend() {
@@ -124,7 +127,7 @@ export function EnvoyDockThread({
       </div>
 
       {/* Message list */}
-      <div className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-[8px]">
+      <div ref={messageListRef} className="flex-1 overflow-y-auto px-4 py-2 flex flex-col gap-[8px]">
         {messages.length === 0 ? (
           <div className="text-[12px] text-[#9b9480] text-center mt-4">
             No messages yet.
@@ -134,8 +137,6 @@ export function EnvoyDockThread({
             <MessageBubble key={msg.id} msg={msg} />
           ))
         )}
-        {/* Scroll anchor — scrolled into view when new messages arrive */}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Input row — real <textarea> wired to onSendMessage (Bug 3 fix 2026-05-11).

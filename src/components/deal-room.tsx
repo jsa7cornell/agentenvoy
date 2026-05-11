@@ -880,6 +880,91 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     // Prefer host-set meeting duration from link.parameters (slotDuration); fall
     // back to the chip's own range if the link didn't specify one.
     const duration = slotDuration && slotDuration > 0 ? slotDuration : durationFromRange;
+
+    // RESCHEDULE PATH — slot picked from the confirmed-card overlay.
+    // 2026-05-11 — previously this stuffed pendingProposal and opened the
+    // legacy confirm form (which isn't rendered in the new card surface),
+    // so the pick did nothing visible AND the picker closed itself. Now
+    // we patch the existing GCal event in place via /api/negotiate/update-gcal
+    // and leave the picker mounted so the user can change again.
+    if (reschedulingFromConfirmed && sessionId) {
+      const newStart = new Date(slot.start);
+      const newEnd = new Date(slot.start);
+      newEnd.setTime(newStart.getTime() + duration * 60_000);
+      fetch("/api/negotiate/update-gcal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          proposed: {
+            startTime: newStart.toISOString(),
+            endTime: newEnd.toISOString(),
+            duration,
+          },
+          notifyAttendees: false,
+        }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `reschedule-err-${Date.now()}`,
+                role: "administrator",
+                content: `Couldn't reschedule: ${body.error ?? `HTTP ${res.status}`}. Try again or pick a different slot.`,
+                createdAt: new Date().toISOString(),
+                metadata: null,
+              },
+            ]);
+            return;
+          }
+          // Update confirmData immediately so the card flips to the new
+          // time without waiting for the next poll tick. The poll's
+          // confirmData merge will idempotently confirm it ~10s later.
+          setConfirmData((prev) => ({
+            ...(prev ?? {}),
+            dateTime: newStart.toISOString(),
+            duration,
+          }));
+          // Drop a system message into the thread so there's visible
+          // confirmation that the pick landed. Picker stays mounted.
+          const tzLabel = slotTimezone ? ` (${slotTimezone})` : "";
+          const whenLabel = newStart.toLocaleString("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+          });
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `reschedule-ok-${Date.now()}`,
+              role: "system",
+              content: `Rescheduled to ${whenLabel}${tzLabel}.`,
+              createdAt: new Date().toISOString(),
+              metadata: { kind: "host_update", field: "time" },
+            },
+          ]);
+        })
+        .catch((err) => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `reschedule-err-${Date.now()}`,
+              role: "administrator",
+              content: `Reschedule failed: ${err instanceof Error ? err.message : "network error"}.`,
+              createdAt: new Date().toISOString(),
+              metadata: null,
+            },
+          ]);
+        });
+      return;
+    }
+
+    // FIRST-TIME CONFIRM PATH — pre-confirmation. Opens the confirm form
+    // (name/email/etc.) and waits for the explicit Confirm click.
     const format = linkFormat || "video";
     setPendingProposal({
       dateTime: slot.start,
@@ -889,8 +974,6 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     });
     setConfirmFormExpanded(true);
     setConfirmError(null);
-    // PR2c — picking a slot from reschedule mode closes the picker
-    setReschedulingFromConfirmed(false);
     // Seed form inputs from whatever we know already.
     if (!formGuestName && (guestUser?.name || inviteeName)) {
       setFormGuestName(guestUser?.name || inviteeName);
