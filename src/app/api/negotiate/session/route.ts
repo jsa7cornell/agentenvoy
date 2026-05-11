@@ -51,12 +51,21 @@ import { isGenericTopic } from "@/lib/activity-vocab";
  * or "host_note" rows that got inserted before the guest ever arrived; those
  * must NOT be surfaced as the greeting — that was Bug 3b in the 2026-04-20
  * dashboard-channel-grounding proposal.
+ *
+ * Phase 2 PR3a: new sessions no longer write a greeting Message row for
+ * non-group events (USE_LEGACY_GREETING_ROW = false). When no administrator
+ * row exists, returns "" — callers that previously relied on the greeting
+ * message for the new MeetingCard surface should use the `tip` from
+ * `Link.parameters.tip` (via renderTip()) instead.
  */
 function pickGreeting(messages: Array<{ role: string; content: string }>): string {
   const administratorMsg = messages.find((m) => m.role === "administrator");
   if (administratorMsg) return administratorMsg.content;
-  // Defensive fallback — preserves prior behavior for legacy rows.
-  return messages[0]?.content ?? "";
+  // Phase 2 PR3a: new sessions have no greeting Message row — return empty
+  // string. Legacy resumed sessions (pre-PR3a) still have the row and take
+  // the branch above. The empty string is correct for the new surface because
+  // the tip is rendered on the MeetingCard, not in the chat thread.
+  return "";
 }
 
 function buildSessionTitle(
@@ -845,14 +854,35 @@ export async function POST(req: NextRequest) {
     greeting = selectGreeting(greetingInput).render(greetingInput);
   }
 
-  // Save the greeting message
-  await prisma.message.create({
-    data: {
-      sessionId: session.id,
-      role: "administrator",
-      content: greeting,
-    },
-  });
+  // PHASE 2 PR3a — greeting Message-row gate.
+  //
+  // The new MeetingCard + EnvoyDock surface reads the tip directly from
+  // `Link.parameters.tip` (rendered by `renderTip()` on the card's info
+  // block). Having a greeting Message-row duplicates the content:
+  //   - tip on the MeetingCard  ← the canonical host-personality surface
+  //   - greeting in the chat thread ← now redundant noise in the new surface
+  //
+  // For group events we keep the Message row unconditionally — the LLM-
+  // generated group greeting is the ONLY greeting (no MeetingCard tip
+  // surface), so the chat thread is the sole render surface.
+  //
+  // For non-group events the row is deprecated starting Phase 2 PR3a.
+  // Set USE_LEGACY_GREETING_ROW = true to re-enable for all non-group
+  // sessions (e.g. to test the legacy event-card fall-through path).
+  //
+  // IMPORTANT: resume paths (`pickGreeting`) already handle sessions with
+  // no administrator Message — `pickGreeting` returns "" defensively, and
+  // `hasGreeting` (line ~398) falls through to fresh-greeting generation.
+  const USE_LEGACY_GREETING_ROW = false; // DEPRECATED Phase 2 PR3a
+  if (isGroupEvent || USE_LEGACY_GREETING_ROW) {
+    await prisma.message.create({
+      data: {
+        sessionId: session.id,
+        role: "administrator",
+        content: greeting,
+      },
+    });
+  }
 
   // Suggest-alt follow-up message — fires for anonymous reusable links
   // (primary or Office Hours) where the host has opted into guestPicks.
