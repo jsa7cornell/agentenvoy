@@ -177,17 +177,32 @@ export async function POST(req: NextRequest) {
             ...(ohGuestPicks.duration ? { duration: true as const } : {}),
           }
         : null;
+    // Inherit recurrence + activityIcon from the bookable parent at spawn,
+    // per the contract documented at availability-rules.ts:71-83 ("The child
+    // NegotiationLink inherits `recurrence` from this field at session-spawn
+    // time"). Pre-anchor-commit shape — firstDateLocal / timeLocal are filled
+    // in on the child when the guest picks their first slot (see
+    // lib/recurrence.ts). Drift fix 2026-05-11 — bookable children were
+    // spawning without `recurrence`, rendering as one-off meetings in the
+    // deal-room even when the parent was a weekly/biweekly template.
+    // Prefer `name` over `title` for `topic` — matches the precedence used
+    // by `getBookableLinkDisplayName` and the host's edit modal.
     link = await prisma.negotiationLink.create({
       data: {
         userId: user.id,
         type: "personalized",
         slug: user.meetSlug!,
         code: childCode,
-        topic: oh.title,
+        topic: oh.name ?? oh.title,
+        topicSource: "custom",
         recurringWindowId: officeHoursRule.id,
+        ...(oh.recurrence
+          ? { recurrence: oh.recurrence as unknown as Prisma.InputJsonValue }
+          : {}),
         parameters: {
           format: oh.format,
           duration: oh.durationMinutes,
+          ...(oh.activityIcon ? { activityIcon: oh.activityIcon } : {}),
           ...(ohGuestPicksParam ? { guestPicks: ohGuestPicksParam } : {}),
         } as unknown as Prisma.InputJsonValue,
       },
