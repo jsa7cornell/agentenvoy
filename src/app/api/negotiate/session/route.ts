@@ -281,8 +281,12 @@ export async function POST(req: NextRequest) {
             duration: existingSession.duration,
             meetLink: existingSession.meetLink,
             // 2026-05-10: deep-link to the GCal event for the new MeetingCard's
-            // "Open in Google Calendar" action. Constructed deterministically.
-            eventLink: googleCalendarEventUrl(existingSession.calendarEventId),
+            // "Open in Google Calendar" action. Pass host's email — Google's
+            // eid encoding requires the actual calendar address; the literal
+            // "primary" alias doesn't resolve in URL form ("Could not find
+            // the requested event"). Falls back to "primary" only if email is
+            // unset (which would still 404 but at least is non-crashy).
+            eventLink: googleCalendarEventUrl(existingSession.calendarEventId, user.email ?? "primary"),
             messages: existingSession.messages.map((m) => ({
               id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),
@@ -365,8 +369,12 @@ export async function POST(req: NextRequest) {
             duration: existingSession.duration,
             meetLink: existingSession.meetLink,
             // 2026-05-10: deep-link to the GCal event for the new MeetingCard's
-            // "Open in Google Calendar" action. Constructed deterministically.
-            eventLink: googleCalendarEventUrl(existingSession.calendarEventId),
+            // "Open in Google Calendar" action. Pass host's email — Google's
+            // eid encoding requires the actual calendar address; the literal
+            // "primary" alias doesn't resolve in URL form ("Could not find
+            // the requested event"). Falls back to "primary" only if email is
+            // unset (which would still 404 but at least is non-crashy).
+            eventLink: googleCalendarEventUrl(existingSession.calendarEventId, user.email ?? "primary"),
             messages: existingSession.messages.map((m) => ({
               id: m.id, role: m.role, content: m.content, metadata: m.metadata, createdAt: m.createdAt.toISOString(),
             })),
