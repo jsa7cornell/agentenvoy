@@ -20,9 +20,22 @@
  */
 
 export function stripRendererOnlyBlocks(content: string): string {
-  return content
+  let out = content
     .replace(/\s*\[ACTION\][\s\S]*?\[\/ACTION\]\s*/g, "")
     .replace(/\s*\[STATUS_UPDATE\][\s\S]*?\[\/STATUS_UPDATE\]\s*/g, "")
-    .replace(/\s*\[DELEGATE_SPEAKER\][\s\S]*?\[\/DELEGATE_SPEAKER\]\s*/g, "")
-    .trim();
+    .replace(/\s*\[DELEGATE_SPEAKER\][\s\S]*?\[\/DELEGATE_SPEAKER\]\s*/g, "");
+
+  // Mid-stream partial-block strip (2026-05-11). Streamed chunks arrive
+  // before the closing tag does, so a partial `[ACTION]{"action":...`
+  // would flash as raw JSON in the chat bubble until the closer landed.
+  // After the complete-block strip above, any remaining opening tag must
+  // be a partial — hide everything from it to the end of the buffer.
+  // The next chunk will arrive with the closer and the complete-block
+  // pass on the following render will catch it.
+  out = out.replace(
+    /\s*\[(?:ACTION|STATUS_UPDATE|DELEGATE_SPEAKER)\][\s\S]*$/,
+    "",
+  );
+
+  return out.trim();
 }

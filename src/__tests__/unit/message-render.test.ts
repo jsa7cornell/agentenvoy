@@ -35,13 +35,21 @@ describe("stripRendererOnlyBlocks", () => {
     expect(stripRendererOnlyBlocks(input)).toBe("Hi!Booking.Done.");
   });
 
-  it("leaves a partial (unclosed) tag alone — mid-stream chunk still arriving", () => {
-    // Before the closing tag arrives, nothing to strip yet. Subsequent chunk
-    // appends the closer and then the strip catches it on the next setState.
+  it("hides a partial (unclosed) tag until the closer streams in", () => {
+    // 2026-05-11 — strip mid-stream partial blocks so raw JSON doesn't
+    // flash as a chat bubble before the closing tag arrives. Once the
+    // next chunk delivers `[/TAG]`, the complete-block strip in the
+    // first pass handles it.
     const input = 'Hi! [DELEGATE_SPEAKER]{"kind":"ai_age';
-    expect(stripRendererOnlyBlocks(input)).toBe(
-      'Hi! [DELEGATE_SPEAKER]{"kind":"ai_age',
-    );
+    expect(stripRendererOnlyBlocks(input)).toBe("Hi!");
+  });
+
+  it("hides a trailing partial ACTION block (the JSON-flash repro)", () => {
+    // Production-observed shape (John, 2026-05-11): mid-stream the LLM
+    // has emitted `[ACTION]{"action":"update_location",...` but the
+    // closer hasn't landed yet — the raw JSON flashed as a bubble.
+    const input = 'Got it — updated location to San Jose.\n[ACTION]{"action":"update_location","params":{';
+    expect(stripRendererOnlyBlocks(input)).toBe("Got it — updated location to San Jose.");
   });
 
   it("is a no-op on clean text", () => {
