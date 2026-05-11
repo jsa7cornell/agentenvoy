@@ -2,7 +2,11 @@
 
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useState } from "react";
-import { computeAutoTheme, type ThemeMode } from "@/components/theme-preference-sync";
+import {
+  computeAutoTheme,
+  type ThemeMode,
+  AE_THEME_MODE_CHANGE,
+} from "@/components/theme-preference-sync";
 
 /** Get the current hour in a given IANA timezone. Mirrors the helper in
  *  theme-preference-sync.tsx; duplicated to keep this component a leaf. */
@@ -56,6 +60,12 @@ export function ThemeToggle() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ themeMode: next }),
         });
+        // Notify ThemePreferenceSync so modeRef stays in sync immediately.
+        // Without this, the 60s tick would still fire at 8pm even if the user
+        // just pinned "light" — because modeRef would be stale ("auto").
+        window.dispatchEvent(
+          new CustomEvent(AE_THEME_MODE_CHANGE, { detail: { mode: next } }),
+        );
       } catch {
         // Swallow — localStorage + in-memory state still reflect the change.
       } finally {

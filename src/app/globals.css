@@ -12,6 +12,16 @@ body {
   background: var(--background);
 }
 
+/* Smooth theme transitions for mid-session auto-mode switches (8pm dark flip,
+   5am light flip). The html[data-theme-ready] attribute is set after the
+   initial render settles in ThemePreferenceSync, so page-load hydration flips
+   don't get a transition — only deliberate mid-session switches do.
+   Scoped to background-color and color to avoid interfering with component-
+   level transitions (buttons, hovers, etc.). */
+html[data-theme-ready] {
+  transition: background-color 0.25s ease, color 0.15s ease;
+}
+
 @keyframes shimmer {
   0%, 100% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
