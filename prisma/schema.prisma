@@ -568,6 +568,15 @@ model NegotiationSession {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
+  /// Canonical Google Calendar deep-link returned by the GCal API at
+  /// event-insert (or event-patch) time. Stored so we never need to
+  /// reconstruct the URL ourselves — the constructed fallback requires the
+  /// host's actual calendar address in the eid encoding, and passing the
+  /// literal "primary" alias produces a "Could not find the requested event"
+  /// 404. Null for sessions confirmed before this column shipped (those fall
+  /// back to googleCalendarEventUrl() at read time). Set by confirm-pipeline
+  /// and update-gcal route whenever a GCal write returns htmlLink.
+  gcalHtmlLink String?
   /// Reserved for the reschedule chain pattern (proposal
   /// `2026-04-29_mcp-reschedule-meeting-patch-in-place`). v1 always null.
   /// When the chain pattern lands, this points to the new session that
