@@ -309,11 +309,14 @@ model NegotiationLink {
   /// as a soft-lock: once the session persists a TZ, observed browser TZ does
   /// not override it until the greeting re-render path ships.
   inviteeTimezone String?
-  /// Free-text host framing surfaced verbatim in the guest greeting as
-  /// `💬 {hostFirstName}: {hostNote}`. Sanitized via sanitizeHostFlavor at
-  /// create_link time (injection markers + URLs/emails/phones stripped).
-  /// Display-only — do NOT include in computeInputHash; has no effect on
-  /// scoring/availability.
+  /// DEPRECATED 2026-05-11 — folded into tip. Read via getLinkPosture().tip
+  /// with hostNote fallback chain in posture.ts. Will be dropped after one
+  /// release cycle. Do NOT write new data here; write to link.parameters.tip.
+  ///
+  /// Original usage: free-text host framing surfaced verbatim in the guest
+  /// greeting as `💬 {hostFirstName}: {hostNote}`. Sanitized via
+  /// sanitizeHostFlavor at create_link time. Display-only — do NOT include
+  /// in computeInputHash; has no effect on scoring/availability.
   hostNote        String?   @db.VarChar(280)
   topic           String?
   /// Provenance of `topic` — drives the title-rebuild rule on activity edits.

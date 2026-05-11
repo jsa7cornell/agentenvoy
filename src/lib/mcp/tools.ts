@@ -1435,14 +1435,27 @@ export async function handleGetTip(
 
   const { link } = auth;
   const parameters = (link.parameters ?? {}) as Record<string, unknown>;
-  const linkAuthoredTip = typeof parameters.tip === "string" ? parameters.tip : null;
 
   // Resolve host name for source-label substitution
   const host = await prisma.user.findUnique({
     where: { id: link.userId },
-    select: { name: true },
+    select: { name: true, preferences: true },
   });
   const hostName = host?.name ?? "Host";
+
+  // Phase 2 PR3c — use getLinkPosture for the tip so the hostNote fallback
+  // chain is applied: link.parameters.tip ?? link.hostNote ?? null.
+  // Existing hosts who set a hostNote (deprecated field) continue to have it
+  // surfaced via get_tip until they explicitly edit the tip (which clears it).
+  let linkAuthoredTip: string | null = null;
+  try {
+    const posture = getLinkPosture(link, { preferences: host?.preferences as import("@/lib/scoring").UserPreferences });
+    linkAuthoredTip = posture.tip ?? null;
+  } catch {
+    // getLinkPosture throws for variance links missing required fields.
+    // Fall back to direct read from parameters.
+    linkAuthoredTip = typeof parameters.tip === "string" ? parameters.tip : null;
+  }
 
   // activity/location live in link.parameters (not dedicated columns)
   const linkActivity = typeof parameters.activity === "string" ? parameters.activity : null;

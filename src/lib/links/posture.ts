@@ -97,10 +97,18 @@ export interface ResolvedPosture {
 
 /** Liberal shape accepted on the `link` arg — anything that has
  *  a `type` and `parameters` field is enough. Lets callers pass a
- *  Prisma row, a partial selection, or a synthesized "primary" stand-in. */
+ *  Prisma row, a partial selection, or a synthesized "primary" stand-in.
+ *
+ *  Phase 2 PR3c: `hostNote` added for the hostNote→tip fallback chain.
+ *  Existing callers that omit it are unaffected (field is optional).
+ */
 export interface LinkContext {
   type?: NegotiationLink["type"];
   parameters?: NegotiationLink["parameters"];
+  /** DEPRECATED — hostNote column on NegotiationLink. Folded into tip
+   *  via fallback chain. Pass it here so getLinkPosture can surface it
+   *  via ResolvedPosture.tip until the column is dropped. */
+  hostNote?: string | null;
 }
 
 /**
@@ -247,7 +255,13 @@ function resolveFromVariance(link: LinkContext): ResolvedPosture {
       ambiguities: params.compiled?.ambiguities ?? [],
     } as unknown as CompiledRules,
     blackoutDays: [],
-    tip: typeof params.tip === "string" ? params.tip : null,
+    // Phase 2 PR3c — hostNote fallback chain:
+    // link.parameters.tip ?? link.hostNote (deprecated) ?? null
+    // Existing data on hostNote continues to be served via the tip surface
+    // until the column is dropped after one release cycle.
+    tip: typeof params.tip === "string" ? params.tip
+       : typeof (link as LinkContext).hostNote === "string" ? (link as LinkContext).hostNote as string
+       : null,
     // defaultLocation intentionally omitted on variance reads — host-private
   };
 }

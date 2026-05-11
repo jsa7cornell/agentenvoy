@@ -52,9 +52,24 @@ export async function POST(
     ? { ...params0, tip }
     : Object.fromEntries(Object.entries(params0).filter(([k]) => k !== "tip"));
 
+  // Phase 2 PR3c — when a host edits the tip, also clear hostNote so
+  // legacy data doesn't shadow the new authored tip in the fallback chain
+  // (getLinkPosture: link.parameters.tip ?? link.hostNote ?? null).
+  // hostNote column is DEPRECATED 2026-05-11; will be dropped after one
+  // release cycle. This write prevents stale hostNote from surfacing via
+  // the fallback after the host explicitly edits the tip.
+  //
+  // TODO(link-edit-modal): link-edit-modal.tsx may also write tip via a
+  // separate path. If that path is wired, ensure it also clears hostNote
+  // on write. The parallel agent handling link-edit-modal.tsx should
+  // coordinate with this endpoint. See EVENTPAGE punch-list #9.
   await prisma.negotiationLink.update({
     where: { id },
-    data: { parameters: updated },
+    data: {
+      parameters: updated,
+      // Clear deprecated hostNote on explicit tip save so it doesn't shadow.
+      hostNote: null,
+    },
   });
 
   return NextResponse.json({ ok: true, tip: tip || null });
