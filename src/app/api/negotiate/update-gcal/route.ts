@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import { z } from "zod";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { assertAgentEnvoyOwnedEvent, updateCalendarEvent, GcalOwnershipError } from "@/lib/calendar";
 import { logRouteError } from "@/lib/route-error";
@@ -9,8 +7,16 @@ import { parseLinkParameters } from "@/lib/link-parameters";
 
 // POST /api/negotiate/update-gcal
 //
-// Atomically patches a confirmed GCal event with host-approved changes.
-// Called when the host clicks "Confirm" on a GcalUpdateCard in the feed.
+// Atomically patches a confirmed GCal event with edits from the deal-room.
+// Called from MeetingCardConfirmedView's reschedule picker (and previously
+// from the host-feed GcalUpdateCard, which the 2026-05-11 direct-patch
+// decision retired).
+//
+// Auth: sessionId-only, same trust model as /api/negotiate/reschedule,
+// /confirm, and /message — anyone holding the deal-room URL is trusted
+// to act on the session (Q1 of the 2026-04-20 calendar-popup-ctas
+// proposal). GCal API calls run against the host's stored credentials
+// (session.hostId), not the caller's.
 //
 // Safety invariants:
 //   1. Ownership gate: event must carry agentenvoySessionId == session.id
@@ -35,19 +41,6 @@ const bodySchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    const authSession = await getServerSession(authOptions);
-    if (!authSession?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: authSession.user.email },
-      select: { id: true },
-    });
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
     const raw = await req.json();
     const parsed = bodySchema.safeParse(raw);
     if (!parsed.success) {
@@ -55,7 +48,10 @@ export async function POST(req: NextRequest) {
     }
     const { sessionId, proposed, notifyAttendees } = parsed.data;
 
-    // Load session and verify ownership
+    // Load session — sessionId is the trust boundary (Q1 of the 2026-04-20
+    // calendar-popup-ctas proposal). GCal calls run against session.hostId's
+    // stored credentials regardless of who is calling, since the event lives
+    // in the host's calendar.
     const session = await prisma.negotiationSession.findUnique({
       where: { id: sessionId },
       select: {
@@ -69,9 +65,6 @@ export async function POST(req: NextRequest) {
 
     if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
-    }
-    if (session.hostId !== user.id) {
-      return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
     if (!session.calendarEventId) {
       return NextResponse.json({ error: "Session has no confirmed calendar event" }, { status: 400 });
@@ -88,9 +81,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Ownership check — event must carry this session's tag
+    // Ownership check — event must carry this session's tag. Uses
+    // session.hostId for the GCal client because the event lives in the
+    // host's calendar, not the caller's.
     try {
-      await assertAgentEnvoyOwnedEvent(user.id, session.calendarEventId, session.id);
+      await assertAgentEnvoyOwnedEvent(session.hostId, session.calendarEventId, session.id);
     } catch (err) {
       if (err instanceof GcalOwnershipError) {
         return NextResponse.json({ error: err.message }, { status: 403 });
@@ -110,7 +105,7 @@ export async function POST(req: NextRequest) {
 
     // GCal call OUTSIDE any transaction (B1 — avoids holding pg connection open)
     const gcalResult = await updateCalendarEvent(
-      user.id,
+      session.hostId,
       session.calendarEventId,
       session.id,
       gcalChanges,
@@ -123,7 +118,15 @@ export async function POST(req: NextRequest) {
       dbUpdates.statusLabel = `Location updated to ${proposed.location}`;
     }
     if (proposed.startTime !== undefined) {
+      // Set both: confirmedAt drives the legacy view; agreedTime is the
+      // canonical read for the new MeetingCard (via session-load endpoint
+      // → poll → confirmData.dateTime). Without agreedTime the card stays
+      // on the old time even after a successful patch (reported 2026-05-11).
       dbUpdates.confirmedAt = new Date(proposed.startTime);
+      dbUpdates.agreedTime = new Date(proposed.startTime);
+    }
+    if (proposed.duration !== undefined) {
+      dbUpdates.duration = proposed.duration;
     }
     // Persist the updated htmlLink from GCal so future reads use the canonical
     // URL. Only overwrite when GCal returned a new link (patch may return null
