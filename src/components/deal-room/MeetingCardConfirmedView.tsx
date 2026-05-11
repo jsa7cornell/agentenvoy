@@ -179,41 +179,50 @@ export function MeetingCardConfirmedView({
     onEditTip: handleEditTip,
   };
 
+  // 2026-05-11 chat-fits-in-viewport fix: outer is a flex column. Card +
+  // belowCardSlot live in a flex-1 scroll region; the dock sits in a
+  // flex-shrink-0 region pinned to the bottom of the available viewport.
+  // When the dock expands to thread state, EnvoyDockThread's own
+  // min-h-[260px] max-h-[80vh] kicks in and the card region shrinks
+  // accordingly — composer no longer falls below the fold.
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto bg-[#f6f3ec]">
-      {/* Card section — centered with max-width on both mobile + desktop */}
-      <div className="px-4 py-4 lg:px-8 lg:py-8">
-        <div className="max-w-[540px] mx-auto relative">
-          {/* Dashboard back-button — logged-in users only (Bug 1 fix 2026-05-11).
-              Positioned absolute top-right so it doesn't crowd the card's own
-              ⋯ menu (which lives inside the MeetingCard article). Uses the same
-              visual weight as the ⋯ button — small, circular hover target. */}
-          {showDashboardLink && (
-            <button
-              type="button"
-              onClick={() => router.push("/dashboard")}
-              aria-label="Back to dashboard"
-              className="absolute top-0 right-0 z-10 w-8 h-8 flex items-center justify-center rounded-full text-[#9b9480] hover:text-[#1a1a2e] hover:bg-black/5 transition-colors"
-            >
-              <span aria-hidden className="text-[18px] leading-none">✕</span>
-            </button>
-          )}
-          <MeetingCard {...cardPropsWithStubs} />
+    <div className="flex-1 min-h-0 flex flex-col bg-[#f6f3ec]">
+      {/* Scrollable card region — card + optional belowCardSlot */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="px-4 py-4 lg:px-8 lg:py-8">
+          <div className="max-w-[540px] mx-auto relative">
+            {/* Dashboard back-button — logged-in users only (Bug 1 fix 2026-05-11).
+                Positioned absolute top-right so it doesn't crowd the card's own
+                ⋯ menu (which lives inside the MeetingCard article). Uses the same
+                visual weight as the ⋯ button — small, circular hover target. */}
+            {showDashboardLink && (
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard")}
+                aria-label="Back to dashboard"
+                className="absolute top-0 right-0 z-10 w-8 h-8 flex items-center justify-center rounded-full text-[#9b9480] hover:text-[#1a1a2e] hover:bg-black/5 transition-colors"
+              >
+                <span aria-hidden className="text-[18px] leading-none">✕</span>
+              </button>
+            )}
+            <MeetingCard {...cardPropsWithStubs} />
+          </div>
         </div>
+
+        {/* Optional slot between card and dock — used in reschedule mode to
+            render the picker so the agent dock appears BELOW the picker
+            (per user instruction 2026-05-10). */}
+        {belowCardSlot && (
+          <div className="px-4 pb-2 lg:px-8">
+            <div className="max-w-[540px] mx-auto">{belowCardSlot}</div>
+          </div>
+        )}
       </div>
 
-      {/* Optional slot between card and dock — used in reschedule mode to
-          render the picker so the agent dock appears BELOW the picker
-          (per user instruction 2026-05-10). */}
-      {belowCardSlot && (
-        <div className="px-4 pb-2 lg:px-8">
-          <div className="max-w-[540px] mx-auto">{belowCardSlot}</div>
-        </div>
-      )}
-
-      {/* Agent dock / chat thread — sits BELOW the card AND any belowCardSlot
-          (e.g. picker in reschedule mode). No absolute positioning. */}
-      <div className="px-4 pb-6 lg:px-8 lg:pb-12">
+      {/* Agent dock / chat thread — pinned to bottom of viewport.
+          flex-shrink-0 so the dock keeps its own height; the card region
+          above scrolls independently. */}
+      <div className="flex-shrink-0 px-4 pb-4 lg:px-8 lg:pb-6 pt-2">
         <div className="max-w-[540px] mx-auto">
           <EnvoyDock
             state={threadExpanded ? "thread" : "resting"}

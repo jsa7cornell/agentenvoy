@@ -1660,13 +1660,20 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
   // PR2a/PR2c — map deal-room messages to EnvoyDock ChatMessage shape.
   // Used by both MeetingCardConfirmedView (confirmed) and MeetingCardProposalView
-  // (proposal/matched/skipped). Filter includes administrator + user roles.
+  // (proposal/matched/skipped). Human messages are stored as "guest" or "host"
+  // (see api/negotiate/message/route.ts); both map to the dock's "guest" lane
+  // since the thread is from the viewer's perspective. Envoy is "administrator".
   const confirmedThreadMessages: ChatMessage[] = useMemo(() => {
     return messages
-      .filter((m) => m.role === "administrator" || m.role === "user")
+      .filter(
+        (m) =>
+          m.role === "administrator" ||
+          m.role === "guest" ||
+          m.role === "host",
+      )
       .map((m) => ({
         id: m.id,
-        role: m.role === "user" ? ("guest" as const) : ("agent" as const),
+        role: m.role === "administrator" ? ("agent" as const) : ("guest" as const),
         text: m.content,
         timestamp: m.createdAt ?? new Date().toISOString(),
       }));
