@@ -1264,12 +1264,14 @@ export function WeekView({
     : false;
 
   return (
-    <div>
+    /* px-4 py-3 — gutter so day chips, meeting label, slot pills, and the
+       timezone footer aren't flush against the surrounding card edges. */
+    <div className="px-4 py-3">
       {/* Match banner — shown when bilateral overlap found and eventTitle provided */}
       {hasMatches && eventTitle && <MatchHeader eventTitle={eventTitle} />}
 
       {/* Header slot — e.g., inline CTA chip for calendar connect */}
-      {headerSlot && <div className="mb-3 px-4 pt-3">{headerSlot}</div>}
+      {headerSlot && <div className="mb-3 pt-1">{headerSlot}</div>}
 
       {/* Week navigation header */}
       <div className="flex items-center justify-between mb-2">
