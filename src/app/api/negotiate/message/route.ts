@@ -383,9 +383,34 @@ export async function POST(req: NextRequest) {
         // Parse and execute [ACTION] blocks
         const actions = parseActions(responseText);
         let actionResults: Awaited<ReturnType<typeof executeActions>> = [];
+        // Always log action count for diagnostics — the deal-room route has
+        // no post-stream guards (unlike the module-runner path), so when the
+        // LLM narrates a write effect without emitting an [ACTION] block, the
+        // only signal is in logs. 2026-05-11 — added to investigate report
+        // "Envoy says 'Got it — updated to X' but nothing changes".
         if (actions.length > 0) {
           console.log(`[negotiate/message] actions | session=${sessionId} | ${actions.map(a => a.action).join(",")}`);
           actionResults = await executeActions(actions, session.hostId, { sessionId });
+          const failed = actionResults
+            .map((r, i) => ({ name: actions[i]?.action ?? "?", r }))
+            .filter((x) => !x.r.success);
+          if (failed.length > 0) {
+            console.warn(
+              `[negotiate/message] action failures | session=${sessionId} | ${failed
+                .map((f) => `${f.name}:${f.r.message}`)
+                .join(" | ")}`,
+            );
+          }
+        } else {
+          // No actions parsed. Check whether prose narrated a write effect
+          // anyway — the canned dealroom-guest acknowledgment phrases
+          // ("Got it — updated to X") are the production-observed shape.
+          const NARRATION_WITHOUT_EMIT = /\bgot\s+it\s*[—\-,:]\s*(?:updated|changed|locked|set|switched|moved|rescheduled|cancell?ed)\b/i;
+          if (NARRATION_WITHOUT_EMIT.test(responseText)) {
+            console.warn(
+              `[negotiate/message] narration-without-emit | session=${sessionId} | role=${messageRole} | text="${responseText.slice(0, 200).replace(/\s+/g, " ")}"`,
+            );
+          }
         }
 
         // Strip all structured blocks from the display text
