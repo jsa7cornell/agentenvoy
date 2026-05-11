@@ -885,6 +885,11 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       calendarEventId: confirmedCalendarEventId || null,
       bufferCalendarEventId: bufferCalendarEventId || null,
       summary: confirmSummary,
+      // Persist the canonical GCal htmlLink so we never need to reconstruct it.
+      // The constructed fallback (googleCalendarEventUrl) requires the host's
+      // actual email embedded in the eid encoding; passing "primary" produces
+      // a 404. Only write when the API returned a real link.
+      ...(eventLink ? { gcalHtmlLink: eventLink } : {}),
     },
   });
 

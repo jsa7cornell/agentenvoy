@@ -125,6 +125,13 @@ export async function POST(req: NextRequest) {
     if (proposed.startTime !== undefined) {
       dbUpdates.confirmedAt = new Date(proposed.startTime);
     }
+    // Persist the updated htmlLink from GCal so future reads use the canonical
+    // URL. Only overwrite when GCal returned a new link (patch may return null
+    // for some update types — skip the write in that case to preserve the
+    // previously-stored link).
+    if (gcalResult.htmlLink) {
+      dbUpdates.gcalHtmlLink = gcalResult.htmlLink;
+    }
 
     if (Object.keys(dbUpdates).length > 0) {
       await prisma.negotiationSession.updateMany({
