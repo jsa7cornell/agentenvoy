@@ -54,6 +54,19 @@ interface Props {
    * have no dashboard, so the button is never rendered for them.
    */
   showDashboardLink?: boolean;
+  /**
+   * First initial of the active viewer (host's or guest's). Propagated into
+   * EnvoyDockThread so the viewer's own messages don't get the hard-coded
+   * "S" guest avatar. 2026-05-12 fix.
+   */
+  viewerInitial?: string;
+  /** Admin flag — propagated into EnvoyDockThread for TurnCostOverlay +
+   *  ThumbsDownFeedback under agent bubbles. */
+  isAdmin?: boolean;
+  /** NegotiationSession id — propagated into EnvoyDockThread so the
+   *  ThumbsDownFeedback button under agent bubbles knows which thread to
+   *  file against. */
+  sessionId?: string | null;
 }
 
 export function MeetingCardProposalView({
@@ -67,6 +80,9 @@ export function MeetingCardProposalView({
   confirmSlot,
   onFocusChat,
   showDashboardLink,
+  viewerInitial,
+  isAdmin,
+  sessionId,
 }: Props) {
   const router = useRouter();
   // Stub out action handlers that don't apply pre-confirmation.
@@ -146,6 +162,9 @@ export function MeetingCardProposalView({
             messages={threadMessages}
             onExpand={onExpandThread}
             onCollapse={onCollapseThread}
+            viewerInitial={viewerInitial}
+            isAdmin={isAdmin}
+            sessionId={sessionId}
             onSendMessage={onSendMessage}
           />
         </div>

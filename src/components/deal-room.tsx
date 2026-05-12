@@ -236,6 +236,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [hostName, setHostName] = useState("");
   const [isHost, setIsHost] = useState(false);
+  // Admin flag for the in-dock TurnCostOverlay + ThumbsDownFeedback surfaces
+  // (2026-05-12 — issue #1 of the deal-room post-migration triage). Same
+  // fetch pattern as feed.tsx:1349. Defaults false; flips true only if the
+  // /api/me/ui-prefs response carries isAdmin: true.
+  const [isAdmin, setIsAdmin] = useState(false);
   // Bilateral: logged-in guest (authenticated User, not the host).
   // Anonymous guests leave this false.
   const [isGuest, setIsGuest] = useState(false);
@@ -1813,6 +1818,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // (proposal/matched/skipped). Human messages are stored as "guest" or "host"
   // (see api/negotiate/message/route.ts); both map to the dock's "guest" lane
   // since the thread is from the viewer's perspective. Envoy is "administrator".
+  //
+  // 2026-05-12 — administrator turns now carry their raw `metadata` blob through
+  // so the in-dock TurnCostOverlay can render unifiedTurn telemetry. Human
+  // turns omit metadata to keep the payload small (their metadata is rarely
+  // load-bearing for the dock view).
   const confirmedThreadMessages: ChatMessage[] = useMemo(() => {
     return messages
       .filter(
@@ -1826,8 +1836,29 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         role: m.role === "administrator" ? ("agent" as const) : ("guest" as const),
         text: m.content,
         timestamp: m.createdAt ?? new Date().toISOString(),
+        ...(m.role === "administrator" && m.metadata
+          ? { metadata: m.metadata as Record<string, unknown> }
+          : {}),
       }));
   }, [messages]);
+
+  // Viewer initial for the dock-thread avatar (2026-05-12 issue #4 fix). The
+  // dock's "guest" lane is viewer-perspective; render the viewer's own
+  // initial, not the hard-coded "S" the legacy MessageBubble used.
+  const viewerInitial = useMemo(() => {
+    const source = isHost ? hostName : formGuestName;
+    return source.trim()[0]?.toUpperCase() ?? "·";
+  }, [isHost, hostName, formGuestName]);
+
+  // Fetch admin flag once for in-dock TurnCostOverlay + ThumbsDownFeedback.
+  // Mirrors feed.tsx:1349-1356 exactly. The endpoint returns `{ isAdmin: bool }`;
+  // anything else (anonymous viewers, fetch errors) leaves isAdmin false.
+  useEffect(() => {
+    fetch("/api/me/ui-prefs")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.isAdmin) setIsAdmin(true); })
+      .catch(() => {});
+  }, []);
 
   // Stage 3 V2 — first-occurrence map: for each external_agent identity
   // (delegateSpeaker.name or "unknown-agent"), the earliest index in the
@@ -3946,6 +3977,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   : undefined}
                 showDashboardLink={isHost || isGuest}
                 feedbackLinkCode={feedbackCode ?? code}
+                viewerInitial={viewerInitial}
+                isAdmin={isAdmin}
                 belowCardSlot={
                   reschedulingFromConfirmed ? (
                     <RescheduleOverlay
@@ -3999,6 +4032,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 pickerSlot={newCardPickerNode}
                 confirmSlot={newCardConfirmNode}
                 showDashboardLink={isHost || isGuest}
+                viewerInitial={viewerInitial}
+                isAdmin={isAdmin}
+                sessionId={sessionId}
               />
             </MeetingCardErrorBoundary>
           ) : (
