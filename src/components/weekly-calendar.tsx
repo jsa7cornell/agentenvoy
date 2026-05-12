@@ -255,15 +255,41 @@ export function WeeklyCalendar({
   // Protect/Block chooser state — opened by clicking an open (score 0)
   // slot when onCreateSlotProtection is provided. Same coords convention
   // as openBlockInfo so the popover positioning helper can flip near edges.
+  // startRow/endRow track the spanned range (single 30m when click, N×30m
+  // when drag); used to derive the rule's timeStart/timeEnd and to compute
+  // overlapping events for the in-chooser warning.
   const [openProtectChooser, setOpenProtectChooser] = useState<{
     day: string;
-    row: number;
+    startRow: number;
+    endRow: number;
     x: number;
     y: number;
     slotStart: string;
     slotEnd: string;
   } | null>(null);
   const [protectSaving, setProtectSaving] = useState(false);
+
+  // Drag-select state. Set on pointerdown on an open (score 0) slot when
+  // onCreateSlotProtection is wired. `originRow` is the cell where the
+  // gesture started; `currentRow` tracks where the pointer is now (clamped
+  // to the day column's grid bounds). Pointer capture stays on the origin
+  // cell so fast drags don't lose the gesture across cells. Same-day only —
+  // cross-column drift is clamped to `day` via the day-column bounding rect.
+  const [dragState, setDragState] = useState<{
+    day: string;
+    originRow: number;
+    currentRow: number;
+    startClientY: number;
+  } | null>(null);
+  // Synchronous read for gating hover tooltip + onClick during a drag.
+  // useState bumps render-after; useRef gives the same-tick signal handlers need.
+  const draggingRef = useRef(false);
+  // Set true at the end of pointerup so the synthesized `click` that the
+  // browser fires immediately after gets swallowed (without this, a
+  // zero-movement pointerup → click would open the chooser twice).
+  const pointerHandledRef = useRef(false);
+  // Per-day column DOM refs for pointer-to-row hit-testing during drag.
+  const dayColumnRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Hover tooltip state — tracks the slot being hovered + viewport position
   // so we can render via a portal at `position: fixed`, escaping the
@@ -487,8 +513,19 @@ export function WeeklyCalendar({
               return (
               <div
                 key={day}
+                ref={(el) => {
+                  if (el) dayColumnRefs.current.set(day, el);
+                  else dayColumnRefs.current.delete(day);
+                }}
                 className={`relative border-l border-secondary ${isPast ? "opacity-60" : ""}`}
-                style={{ height: TOTAL_ROWS * ROW_HEIGHT }}
+                style={{
+                  height: TOTAL_ROWS * ROW_HEIGHT,
+                  // Disable native text selection / scroll-vs-drag wobble for
+                  // the active drag column. Cheap to apply globally to all
+                  // columns; the gesture itself is gated by dragState.day.
+                  userSelect: dragState ? "none" : undefined,
+                  touchAction: dragState ? "none" : undefined,
+                }}
               >
                 {/* Slot backgrounds */}
                 {Array.from({ length: TOTAL_ROWS }, (_, row) => {
@@ -516,6 +553,18 @@ export function WeeklyCalendar({
                   const infoOpen =
                     openBlockInfo?.day === day && openBlockInfo?.row === row;
 
+                  // Drag-select gating: only OPEN slots are valid drag starts.
+                  // Drag THROUGH protected/blocked slots is fine (the chooser
+                  // commit is independent of in-range slot scoring), but
+                  // starting on a scored slot defers to its existing UX
+                  // (the "?" icon popover handles it).
+                  const canStartDrag =
+                    !!slot &&
+                    slot.score === 0 &&
+                    !!onCreateSlotProtection;
+                  const isDragOrigin =
+                    dragState?.day === day && dragState?.originRow === row;
+
                   return (
                     <div
                       key={row}
@@ -523,6 +572,9 @@ export function WeeklyCalendar({
                       style={{ top: row * ROW_HEIGHT, height: ROW_HEIGHT }}
                       onMouseEnter={(e) => {
                         if (!slot) return;
+                        // Suppress hover tooltip while a drag is in flight —
+                        // otherwise it flickers per cell the pointer crosses.
+                        if (draggingRef.current) return;
                         if (hoverTimeout.current) clearTimeout(hoverTimeout.current);
                         const r = e.currentTarget.getBoundingClientRect();
                         setHoverTooltip({ slot, x: r.left + r.width / 2, y: r.top });
@@ -530,17 +582,114 @@ export function WeeklyCalendar({
                       onMouseLeave={() => {
                         hoverTimeout.current = setTimeout(() => setHoverTooltip(null), 80);
                       }}
-                      onClick={(e) => {
+                      onPointerDown={(e) => {
+                        if (!canStartDrag || !slot) return;
+                        if (e.button !== undefined && e.button !== 0) return;
+                        // Capture the pointer to this cell so subsequent
+                        // pointermove / pointerup fire here regardless of
+                        // where the pointer drifts. Without this, fast drags
+                        // lose the gesture as the pointer crosses cells.
+                        try {
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                        } catch {
+                          // Older browsers / non-pointer-aware environments
+                          // — fall back to per-cell events. Drag still works
+                          // best-effort but may drop fast gestures.
+                        }
                         setHoverTooltip(null);
-                        // Open slots → protect-chooser popover, if the
-                        // caller wired the handler. The "?" icon on
-                        // scored slots has its own click + stopPropagation,
-                        // so this branch only fires for unprotected time.
-                        if (slot && slot.score === 0 && onCreateSlotProtection) {
+                        setDragState({
+                          day,
+                          originRow: row,
+                          currentRow: row,
+                          startClientY: e.clientY,
+                        });
+                        draggingRef.current = true;
+                      }}
+                      onPointerMove={(e) => {
+                        if (!isDragOrigin) return;
+                        // Hit-test by Y against the start day's column so the
+                        // gesture stays locked to that column even if the
+                        // pointer drifts horizontally into a neighbor.
+                        const col = dayColumnRefs.current.get(day);
+                        if (!col) return;
+                        const colRect = col.getBoundingClientRect();
+                        const offsetY = e.clientY - colRect.top;
+                        const rawRow = Math.floor(offsetY / ROW_HEIGHT);
+                        const newRow = Math.max(
+                          0,
+                          Math.min(TOTAL_ROWS - 1, rawRow),
+                        );
+                        setDragState((s) =>
+                          s && s.currentRow !== newRow
+                            ? { ...s, currentRow: newRow }
+                            : s,
+                        );
+                      }}
+                      onPointerUp={(e) => {
+                        if (!isDragOrigin || !dragState) return;
+                        try {
+                          e.currentTarget.releasePointerCapture(e.pointerId);
+                        } catch {
+                          /* ignore */
+                        }
+                        const startRow = Math.min(
+                          dragState.originRow,
+                          dragState.currentRow,
+                        );
+                        const endRow = Math.max(
+                          dragState.originRow,
+                          dragState.currentRow,
+                        );
+                        const startMins = gridStartMin + startRow * 30;
+                        const endMins = gridStartMin + endRow * 30;
+                        const startSlot = slotIndex[`${day}-${startMins}`];
+                        const endSlot = slotIndex[`${day}-${endMins}`];
+                        setDragState(null);
+                        draggingRef.current = false;
+                        pointerHandledRef.current = true;
+                        if (!startSlot || !endSlot) return;
+                        // Anchor the chooser at the bottom-right of the
+                        // FINAL row of the selection, not the origin row,
+                        // so it never covers the dragged range.
+                        const col = dayColumnRefs.current.get(day);
+                        const colRect = col?.getBoundingClientRect();
+                        const anchorY = colRect
+                          ? colRect.top + (endRow + 1) * ROW_HEIGHT
+                          : e.currentTarget.getBoundingClientRect().bottom;
+                        const anchorX = colRect
+                          ? colRect.right
+                          : e.currentTarget.getBoundingClientRect().right;
+                        setOpenProtectChooser({
+                          day,
+                          startRow,
+                          endRow,
+                          x: anchorX,
+                          y: anchorY,
+                          slotStart: startSlot.start,
+                          slotEnd: endSlot.end,
+                        });
+                      }}
+                      onClick={(e) => {
+                        // The browser fires `click` after `pointerup` on the
+                        // same target — if pointerup already opened the
+                        // chooser, swallow this synthesized click. Cleared
+                        // on the next frame so a subsequent (non-pointer)
+                        // click still works for fallback paths.
+                        if (pointerHandledRef.current) {
+                          pointerHandledRef.current = false;
+                          return;
+                        }
+                        setHoverTooltip(null);
+                        if (!slot) return;
+                        // Fallback path for environments where pointer events
+                        // didn't fire (older browsers, jsdom tests that only
+                        // dispatch click). Same single-slot semantics.
+                        if (slot.score === 0 && onCreateSlotProtection) {
                           const r = e.currentTarget.getBoundingClientRect();
                           setOpenProtectChooser({
                             day,
-                            row,
+                            startRow: row,
+                            endRow: row,
                             x: r.right,
                             y: r.bottom,
                             slotStart: slot.start,
@@ -597,6 +746,30 @@ export function WeeklyCalendar({
                     </div>
                   );
                 })}
+
+                {/* Drag-select overlay — rendered only on the day column
+                    where the gesture started. Shows the spanned range as
+                    a translucent amber rectangle so the user has live
+                    feedback as they drag. Sits below event tiles (z-10)
+                    so existing meetings remain visible through it. */}
+                {dragState && dragState.day === day && (() => {
+                  const startRow = Math.min(
+                    dragState.originRow,
+                    dragState.currentRow,
+                  );
+                  const endRow = Math.max(
+                    dragState.originRow,
+                    dragState.currentRow,
+                  );
+                  const top = startRow * ROW_HEIGHT;
+                  const height = (endRow - startRow + 1) * ROW_HEIGHT;
+                  return (
+                    <div
+                      className="absolute inset-x-0 z-[8] pointer-events-none bg-amber-400/25 border-2 border-amber-500/70 rounded-sm"
+                      style={{ top, height }}
+                    />
+                  );
+                })()}
 
                 {/* Event blocks */}
                 {(layoutByDay[day] || []).map((ev) => {
@@ -778,12 +951,39 @@ export function WeeklyCalendar({
            click on the body backdrop closes it without committing. */}
       {openProtectChooser && (() => {
         if (typeof document === "undefined") return null;
-        const popW = 224;
-        const popH = 140;
+        const popW = 240;
+        const popH = 170;
         const flipLeft = openProtectChooser.x + popW > window.innerWidth - 8;
         const flipUp = openProtectChooser.y + popH > window.innerHeight - 8;
         const dayLabel = formatDayHeader(openProtectChooser.day);
-        const timeLabel = formatTimeLabel(openProtectChooser.slotStart, timezone);
+        const startTimeLabel = formatTimeLabel(openProtectChooser.slotStart, timezone);
+        const endTimeLabel = formatTimeLabel(openProtectChooser.slotEnd, timezone);
+        const totalMinutes =
+          (openProtectChooser.endRow - openProtectChooser.startRow + 1) * 30;
+        const isSpan = totalMinutes > 30;
+        const rangeLabel = isSpan
+          ? `${dayLabel} · ${startTimeLabel}–${endTimeLabel}`
+          : `${dayLabel} at ${startTimeLabel}`;
+        const promptLine = isSpan
+          ? `How should this ${
+              totalMinutes >= 60
+                ? `${Math.floor(totalMinutes / 60)}h${
+                    totalMinutes % 60 ? ` ${totalMinutes % 60}m` : ""
+                  }`
+                : `${totalMinutes} minutes`
+            } be held?`
+          : "How should this 30 minutes be held?";
+        // Events overlapping the chosen range, scoped to the same day. The
+        // chooser surfaces these as a soft warning — protections sit OVER
+        // existing meetings without cancelling them.
+        const rangeStart = new Date(openProtectChooser.slotStart).getTime();
+        const rangeEnd = new Date(openProtectChooser.slotEnd).getTime();
+        const overlappingEvents = events.filter((ev) => {
+          if (ev.isAllDay) return false;
+          const evStart = new Date(ev.start).getTime();
+          const evEnd = new Date(ev.end).getTime();
+          return evStart < rangeEnd && evEnd > rangeStart;
+        });
         const close = () => {
           if (!protectSaving) setOpenProtectChooser(null);
         };
@@ -811,7 +1011,7 @@ export function WeeklyCalendar({
               onPointerDown={close}
             />
             <div
-              className="fixed z-[9999] w-56 rounded-md bg-surface border-2 border-DEFAULT shadow-2xl p-2.5 text-[11px] text-primary"
+              className="fixed z-[9999] w-60 rounded-md bg-surface border-2 border-DEFAULT shadow-2xl p-2.5 text-[11px] text-primary"
               style={{
                 left: flipLeft ? openProtectChooser.x - popW : openProtectChooser.x,
                 top: flipUp ? openProtectChooser.y - popH - 4 : openProtectChooser.y + 4,
@@ -819,12 +1019,17 @@ export function WeeklyCalendar({
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="font-semibold mb-1 text-primary">
-                {dayLabel} at {timeLabel}
-              </div>
+              <div className="font-semibold mb-1 text-primary">{rangeLabel}</div>
               <div className="text-secondary leading-relaxed mb-2.5">
-                {protectSaving ? "Saving…" : "How should this 30 minutes be held?"}
+                {protectSaving ? "Saving…" : promptLine}
               </div>
+              {overlappingEvents.length > 0 && !protectSaving && (
+                <div className="text-[10px] text-muted leading-relaxed mb-2 px-1.5 py-1 rounded bg-surface-secondary/60 border border-DEFAULT/40">
+                  Note: this won&apos;t cancel the {overlappingEvents.length}{" "}
+                  existing meeting{overlappingEvents.length === 1 ? "" : "s"} in
+                  this range.
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
