@@ -1027,6 +1027,13 @@ export async function getOrComputeSchedule(
     forceRefresh?: boolean;
     /** Link context for per-link posture scoring. Pass null or omit for Primary. */
     link?: LinkContext | null;
+    /**
+     * When rescheduling a confirmed meeting, pass the session ID so the
+     * session's own GCal event (and its associated buffer event) are excluded
+     * from blocking. Without this, the current 1 PM meeting blocks 1:30 PM
+     * even though it's the one being moved.
+     */
+    excludeSessionId?: string;
   }
 ): Promise<{
   slots: ScoredSlot[];
@@ -1112,12 +1119,32 @@ export async function getOrComputeSchedule(
     };
   }
 
+  // When rescheduling, strip the session's own confirmed meeting + its buffer
+  // from the event list so they don't block the newly proposed time. Cache is
+  // bypassed for this path since the exclusion is per-request.
+  const excludeSessionId = options?.excludeSessionId;
+  const scoringEvents = excludeSessionId
+    ? (() => {
+        const excludedEventIds = new Set(
+          calCtx.events
+            .filter((e) => e.extendedProperties?.private?.["agentenvoySessionId"] === excludeSessionId)
+            .map((e) => e.id)
+        );
+        return calCtx.events.filter(
+          (e) =>
+            !excludedEventIds.has(e.id) &&
+            !(excludedEventIds.has(e.extendedProperties?.private?.["agentenvoy_buffer_for_event_id"] ?? ""))
+        );
+      })()
+    : calCtx.events;
+
   // Check if recomputation is needed. Variance links always recompute
   // (computedRecord is null), so this check only matters for Primary.
-  const inputHash = computeInputHash(calCtx.events, prefs, user.persistentKnowledge, user.upcomingSchedulePreferences);
+  // Also bypass the cache when excludeSessionId is present.
+  const inputHash = computeInputHash(scoringEvents, prefs, user.persistentKnowledge, user.upcomingSchedulePreferences);
   const existing = computedRecord as { inputHash?: string; slots?: ScoredSlot[] } | null;
 
-  if (existing?.inputHash === inputHash && existing.slots) {
+  if (!excludeSessionId && existing?.inputHash === inputHash && existing.slots) {
     // Schedule is current — return cached
     return {
       slots: existing.slots,
@@ -1131,10 +1158,11 @@ export async function getOrComputeSchedule(
   }
 
   // Recompute
-  const slots = computeSchedule(calCtx.events, prefs, user.persistentKnowledge, user.upcomingSchedulePreferences);
+  const slots = computeSchedule(scoringEvents, prefs, user.persistentKnowledge, user.upcomingSchedulePreferences);
 
-  // Persist to DB cache for Primary links only.
-  if (!isVarianceLink) {
+  // Persist to DB cache for Primary links only — not when excludeSessionId
+  // was active (cache must stay session-neutral).
+  if (!isVarianceLink && !excludeSessionId) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (prisma as any).computedSchedule.upsert({
       where: { userId },

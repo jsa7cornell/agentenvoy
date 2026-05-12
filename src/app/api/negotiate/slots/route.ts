@@ -49,6 +49,10 @@ export async function GET(req: NextRequest) {
   // a longer block; dangling shorter alternatives would confuse the picker).
   // Reusable-link guest-picks proposal, decided 2026-04-28.
   let negotiatedDuration: number | null = null;
+  // Set when the session is already confirmed (status="agreed") — tells
+  // getOrComputeSchedule to exclude that session's GCal event + buffer
+  // so they don't block the new reschedule candidate.
+  let excludeSessionId: string | undefined;
 
   if (selfMode) {
     const authSession = await getServerSession(authOptions);
@@ -75,6 +79,7 @@ export async function GET(req: NextRequest) {
         // and overrides minDuration (the lock collapses the short-window
         // path — see proposal §3.6, decided 2026-04-28).
         negotiatedDuration: true,
+        status: true,
         host: { select: { preferences: true } },
         link: { select: { type: true, parameters: true, recurringWindowId: true } },
       },
@@ -98,6 +103,11 @@ export async function GET(req: NextRequest) {
     }
     partialSessionId = sessionId;
     negotiatedDuration = session.negotiatedDuration ?? null;
+    // When rescheduling a confirmed meeting, exclude the session's own
+    // GCal event + buffer so they don't block the proposed new slot.
+    if (session.status === "agreed") {
+      excludeSessionId = sessionId;
+    }
   } else {
     return NextResponse.json(
       { error: "Missing sessionId or self param" },
@@ -152,7 +162,7 @@ export async function GET(req: NextRequest) {
   let computeFailed = false;
 
   try {
-    const schedule = await getOrComputeSchedule(hostId, { link: scheduleLink });
+    const schedule = await getOrComputeSchedule(hostId, { link: scheduleLink, excludeSessionId });
 
     // Widget display: combine both signals — active location rule + Google workingLocation.
     // The host's private defaultLocation is NEVER surfaced here (guest-facing widget).

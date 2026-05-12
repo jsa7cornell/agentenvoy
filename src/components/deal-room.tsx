@@ -1842,13 +1842,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       }));
   }, [messages]);
 
-  // Viewer initial for the dock-thread avatar (2026-05-12 issue #4 fix). The
-  // dock's "guest" lane is viewer-perspective; render the viewer's own
-  // initial, not the hard-coded "S" the legacy MessageBubble used.
+  // The amber (right-side) lane always represents the guest — from both
+  // the host's and the guest's view. Always use the guest's first initial.
+  // (Previous version: `isHost ? hostName : formGuestName` showed "J" on
+  // Christine's messages when John was viewing — 2026-05-12 feedback.)
   const viewerInitial = useMemo(() => {
-    const source = isHost ? hostName : formGuestName;
-    return source.trim()[0]?.toUpperCase() ?? "·";
-  }, [isHost, hostName, formGuestName]);
+    return formGuestName.trim()[0]?.toUpperCase() ?? "·";
+  }, [formGuestName]);
 
   // Fetch admin flag once for in-dock TurnCostOverlay + ThumbsDownFeedback.
   // Mirrors feed.tsx:1349-1356 exactly. The endpoint returns `{ isAdmin: bool }`;
