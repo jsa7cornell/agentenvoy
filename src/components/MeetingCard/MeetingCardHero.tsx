@@ -124,13 +124,6 @@ function FullHero(props: MeetingCardProps) {
     ? "linear-gradient(140deg, #b45309 0%, #92400e 60%, #78350f 100%)"
     : "linear-gradient(140deg, #10b981 0%, #059669 60%, #047857 100%)";
 
-  // R5: eyebrow only — no "you're all set" / no name.
-  const eyebrow = series
-    ? `${isSkipped ? "Skipped" : "Confirmed"} · session ${series.position} of ${series.total}`
-    : isSkipped
-    ? "Skipped"
-    : "Confirmed";
-
   // `headline` prop for special cases (e.g. "Moved to Thursday") — no default headline per R5.
   const headlineText = headline ?? null;
 
@@ -146,6 +139,17 @@ function FullHero(props: MeetingCardProps) {
   const otherParty = viewerRole === "guest" ? host : guest;
   // 2026-05-10 hotfix: defensive against empty firstName.
   const otherInitial = (otherParty.firstName?.[0] ?? "?").toUpperCase();
+
+  const confirmedLabel = otherParty.firstName
+    ? `Confirmed by ${otherParty.firstName}`
+    : "Confirmed";
+
+  // R5: eyebrow only — no "you're all set" / no name.
+  const eyebrow = series
+    ? `${isSkipped ? "Skipped" : confirmedLabel} · session ${series.position} of ${series.total}`
+    : isSkipped
+    ? "Skipped"
+    : confirmedLabel;
 
   return (
     <div
