@@ -229,6 +229,61 @@ export const GROUNDING_DECLARATIONS: Record<string, GroundingDeclaration> = {
       },
     ],
   },
+
+  // ── Deal-room tools (Phase A.3, 2026-05-11) ──────────────────────────────
+  // session_set_status — strict at the tool level (status changes are session-
+  // state mutations with SPEC §2.3.1 invariant clearing) but no per-field gate.
+  // The tool's z.enum already constrains status to the closed set; no further
+  // grounding signal needed beyond presence.
+  session_set_status: {
+    toolName: "session_set_status",
+    toolSeverity: "strict",
+    fields: [],
+  },
+
+  // session_confirm_slot — STRICT: irreversible. Writes a GCal event + sends
+  // an invite. The dateTime field must have time-shape evidence in the
+  // conversation (a slot was offered or the guest named a time); accept either
+  // direct clock-time language or "yes/that works" agreement following a slot
+  // offer earlier in the conversation. Pattern matches the legacy
+  // session_update_time gate at line 198 of this file.
+  session_confirm_slot: {
+    toolName: "session_confirm_slot",
+    toolSeverity: "strict",
+    fields: [
+      {
+        field: "dateTime",
+        derivable: false,
+        patterns: [
+          /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i,
+          /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i,
+          /\b\d{4}-\d{2}-\d{2}\b/,
+          /\b(?:tomorrow|today|next\s+week|morning|afternoon|evening)\b/i,
+          /\b(?:yes|yep|yeah|sure|sounds\s+good|works|book\s+it|let'?s\s+do)\b/i,
+        ],
+        severity: "strict",
+      },
+    ],
+  },
+
+  // session_request_reschedule — STRICT: deletes the live GCal event +
+  // notifies attendees. Requires either an explicit reschedule verb or a
+  // clear "this isn't going to work" signal in the user message.
+  session_request_reschedule: {
+    toolName: "session_request_reschedule",
+    toolSeverity: "strict",
+    fields: [
+      {
+        field: "reason",
+        derivable: false,
+        patterns: [
+          /\b(?:reschedul|move\s+it|change\s+the\s+time|push\s+(?:it|back)|cancel\s+and\s+rebook|need\s+(?:to\s+)?(?:move|change))\b/i,
+          /\b(?:can'?t\s+make|won'?t\s+work|something\s+came\s+up|conflict)\b/i,
+        ],
+        severity: "strict",
+      },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------

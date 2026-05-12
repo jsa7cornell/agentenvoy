@@ -42,6 +42,13 @@ const CALENDAR_EVENT_ID_NULL_ALLOWLIST = new Set<string>([
   // line ~104, the same shape as cancel-pipeline. Distinct from
   // rescheduleSession() in reschedule-pipeline.ts which patches in place.
   "src/app/api/negotiate/reschedule/route.ts",
+  // session-state.ts:requestSessionReschedule mirrors the reschedule route
+  // exactly — calls deleteCalendarEvent on the prior agreed event before
+  // nulling. Same cancel-pipeline shape, just callable from the unified-agent
+  // tool surface (Phase A.3 of the deal-room migration). Once Phase D retires
+  // the legacy route, this becomes the sole owner; until then, both write
+  // the same way.
+  "src/lib/session-state.ts",
 ]);
 
 // Statuses considered "terminal" — a session in these states is dead and the
