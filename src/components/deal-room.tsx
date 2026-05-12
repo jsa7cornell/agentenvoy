@@ -907,6 +907,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             duration,
           },
           notifyAttendees: false,
+          // 2026-05-11 — route now wraps updateConfirmedMeeting (PR-B); the
+          // helper records actor metadata on the system message. Picker
+          // clicks are direct from the viewer, so no triggeringRole.
+          actor: { invoker: isHost ? "host" : "guest" },
         }),
       })
         .then(async (res) => {
