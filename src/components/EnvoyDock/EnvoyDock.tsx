@@ -27,7 +27,7 @@
  * PR2: onSendMessage wired. PR3: this becomes the left-rail persistent panel.
  */
 
-import { PanelBottom } from "lucide-react";
+import { Bot, PanelBottom } from "lucide-react";
 import type { EnvoyDockProps } from "@/components/MeetingCard/types";
 import { EnvoyDockThread } from "./EnvoyDock.thread";
 
@@ -102,13 +102,13 @@ export function EnvoyDock({
         <div className="flex items-center gap-3">
           {/* Avatar */}
           <div
-            className="ae-mark-pulse w-[42px] h-[42px] rounded-full flex-shrink-0 flex items-center justify-center text-white text-[15px] font-bold"
+            className="ae-mark-pulse w-[42px] h-[42px] rounded-full flex-shrink-0 flex items-center justify-center text-white"
             style={{
               background: "linear-gradient(135deg,#6366f1,#a855f7)",
               boxShadow: "0 4px 12px rgba(99,102,241,.35), 0 0 0 3px rgba(99,102,241,.14)",
             }}
           >
-            A
+            <Bot size={20} strokeWidth={2} />
           </div>
 
           {/* Text block */}

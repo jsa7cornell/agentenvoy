@@ -32,6 +32,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { Bot, User } from "lucide-react";
 import type { Message } from "@/components/MeetingCard/types";
 import { ThumbsDownFeedback } from "@/components/thumbs-down-feedback";
 import { TurnCostOverlay } from "@/components/turn-cost-overlay";
@@ -121,13 +122,13 @@ export function EnvoyDockThread({
       >
         {/* Smaller 30px avatar, no animation */}
         <div
-          className="w-[30px] h-[30px] rounded-full flex items-center justify-center text-white text-[12px] font-bold flex-shrink-0"
+          className="w-[30px] h-[30px] rounded-full flex items-center justify-center text-white flex-shrink-0"
           style={{
             background: "linear-gradient(135deg,#6366f1,#a855f7)",
             boxShadow: "0 2px 6px rgba(99,102,241,.3)",
           }}
         >
-          A
+          <Bot size={15} strokeWidth={2} />
         </div>
 
         {/* Name + status */}
@@ -225,15 +226,21 @@ function MessageBubble({
     ? "bg-[#eef2ff] border border-[#c7d2fe] rounded-[13px] px-[11px] py-[8px] text-[12.5px] leading-[1.45] text-[#1a1a2e] max-w-[260px]"
     : "bg-[#faf8f3] border border-[#e7e2d5] rounded-[13px] px-[11px] py-[8px] text-[12.5px] leading-[1.45] text-[#1a1a2e] max-w-[260px]";
 
-  const avatarLetter = isViewerSide ? viewerInitial : "A";
+  // Avatar content: bot icon for Envoy, person silhouette for unknown guest,
+  // initial letter for a named guest.
+  const avatarContent = !isViewerSide
+    ? <Bot size={11} strokeWidth={2} />
+    : viewerInitial === "·"
+      ? <User size={11} strokeWidth={2} />
+      : <span className="text-[9.5px] font-bold">{viewerInitial}</span>;
 
   return (
     <div className={`flex gap-2 items-start ${isViewerSide ? "flex-row-reverse" : ""}`}>
       <div
-        className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-white text-[9.5px] font-bold flex-shrink-0 mt-[2px]"
+        className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-white flex-shrink-0 mt-[2px]"
         style={avatarStyle}
       >
-        {avatarLetter}
+        {avatarContent}
       </div>
       <div>
         <div className={bubbleClass}>{msg.text}</div>
