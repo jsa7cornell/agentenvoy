@@ -390,7 +390,14 @@ export async function POST(req: NextRequest) {
         // "Envoy says 'Got it — updated to X' but nothing changes".
         if (actions.length > 0) {
           console.log(`[negotiate/message] actions | session=${sessionId} | ${actions.map(a => a.action).join(",")}`);
-          actionResults = await executeActions(actions, session.hostId, { sessionId });
+          actionResults = await executeActions(actions, session.hostId, {
+            sessionId,
+            // Thread the originating chat-message role down to
+            // updateConfirmedMeeting (via handleUpdate*) so the system-message
+            // metadata records `actor: { invoker: "agent", triggeringRole }`.
+            // PR-C of 2026-05-11_update-confirmed-meeting.
+            triggeringRole: messageRole as "host" | "guest",
+          });
           const failed = actionResults
             .map((r, i) => ({ name: actions[i]?.action ?? "?", r }))
             .filter((x) => !x.r.success);

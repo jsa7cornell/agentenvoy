@@ -737,7 +737,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (typeof sess.status === "string") setSessionStatus(sess.status);
         if (typeof sess.statusLabel === "string") setSessionStatusLabel(sess.statusLabel);
         // 2026-05-11 — when a confirmed session is edited in-chat
-        // (`applyConfirmedSessionPatch`), the GCal event is patched and
+        // (`updateConfirmedMeeting`), the GCal event is patched and
         // session.agreedTime / agreedFormat / link.parameters.location
         // are updated. Refresh confirmData here so the MeetingCard
         // reflects the change without a page reload.
@@ -758,7 +758,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     }
 
     // Poll while visible + not streaming. Confirmed sessions also poll
-    // (2026-05-11) so in-chat edits via applyConfirmedSessionPatch surface
+    // (2026-05-11) so in-chat edits via updateConfirmedMeeting surface
     // on the other viewer's card within one tick.
     const startInterval = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return null;
@@ -1556,7 +1556,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           // dedup path.
           //
           // 2026-05-11 — also force an immediate session refresh so any
-          // in-chat post-confirm edits (applyConfirmedSessionPatch:
+          // in-chat post-confirm edits (updateConfirmedMeeting:
           // location/format/time/duration) surface on the card without
           // waiting up to ~10s for the next poll tick. Same merge shape
           // as the polling effect above.

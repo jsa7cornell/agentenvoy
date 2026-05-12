@@ -14,13 +14,11 @@ import {
   type Steering,
 } from "@/lib/intent";
 import {
-  assertAgentEnvoyOwnedEvent,
   createTentativeHoldEvent,
   deleteCalendarEvent,
-  GcalOwnershipError,
-  updateCalendarEvent,
 } from "@/lib/calendar";
 import { cancelSession } from "@/lib/cancel-pipeline";
+import { updateConfirmedMeeting } from "@/lib/update-confirmed-meeting";
 import { parseTimeOfDay, TIME_OF_DAY_WINDOWS } from "@/lib/time-of-day";
 import { sanitizeHostFlavor, sanitizeSuggestionList } from "@/lib/host-flavor-sanitizer";
 import { logCalibrationWrite } from "@/lib/calibration-audit";
@@ -239,7 +237,19 @@ export function stripActionBlocks(text: string): string {
 export async function executeActions(
   actions: ActionRequest[],
   userId: string,
-  context?: { sessionId?: string; meetSlug?: string; onActionStart?: (action: ActionRequest, index: number) => void }
+  context?: {
+    sessionId?: string;
+    meetSlug?: string;
+    /**
+     * Role of the originating chat message ("host" or "guest"). Threaded
+     * down to `updateConfirmedMeeting` so the system-message metadata can
+     * record `actor: { invoker: "agent", triggeringRole }`. Optional —
+     * callers outside the deal-room message route (e.g. dashboard chat
+     * with no session boundary) omit it.
+     */
+    triggeringRole?: "host" | "guest";
+    onActionStart?: (action: ActionRequest, index: number) => void;
+  }
 ): Promise<ActionResult[]> {
   const results: ActionResult[] = [];
   for (let i = 0; i < actions.length; i++) {
@@ -264,7 +274,7 @@ export async function executeActions(
 async function executeAction(
   action: ActionRequest,
   userId: string,
-  context?: { sessionId?: string; meetSlug?: string }
+  context?: { sessionId?: string; meetSlug?: string; triggeringRole?: "host" | "guest" }
 ): Promise<ActionResult> {
   switch (action.action) {
     case "archive":
@@ -276,11 +286,11 @@ async function executeAction(
     case "cancel":
       return handleCancel(action.params, userId);
     case "update_format":
-      return handleUpdateFormat(action.params, userId, context?.sessionId);
+      return handleUpdateFormat(action.params, userId, context?.sessionId, context?.triggeringRole);
     case "update_time":
-      return handleUpdateTime(action.params, userId, context?.sessionId);
+      return handleUpdateTime(action.params, userId, context?.sessionId, context?.triggeringRole);
     case "update_location":
-      return handleUpdateLocation(action.params, userId, context?.sessionId);
+      return handleUpdateLocation(action.params, userId, context?.sessionId, context?.triggeringRole);
     case "create_link":
       return handleCreateLink(action.params, userId, context?.meetSlug);
     case "expand_link":
@@ -575,137 +585,16 @@ async function handleCancel(
   return { success: true, message: `Cancelled "${name}"`, data: { sessionId: session.id } };
 }
 
-/**
- * Apply an in-chat update to a confirmed session: patch GCal, mirror to DB
- * session row + link.parameters, post a thread system message. Used by
- * `handleUpdateLocation` / `handleUpdateTime` / `handleUpdateFormat` for
- * sessions in `status: "agreed"`. The user typing the change in chat IS
- * the authorization — no host-feed approval step.
- *
- * Caller must have already authorized `userId` against `session.hostId`.
- *
- * NOTE — PR-C of the 2026-05-11 update-confirmed-meeting refactor will
- * delete this function in favor of `src/lib/update-confirmed-meeting.ts`'s
- * `updateConfirmedMeeting()`. Same semantics; one source of truth.
- */
-async function applyConfirmedSessionPatch(
-  session: {
-    id: string;
-    hostId: string;
-    calendarEventId: string | null;
-    archived: boolean;
-    link: { id: string; type: string; parameters: unknown };
-  },
-  userId: string,
-  changes: {
-    location?: string;
-    format?: string;
-    startTime?: Date;
-    endTime?: Date;
-    duration?: number;
-  },
-  summary: string,
-  systemMessageField: string,
-): Promise<ActionResult> {
-  if (!session.calendarEventId) {
-    return { success: false, message: "Session has no calendar event" };
-  }
-
-  // Ownership gate — event must carry this session's agentenvoy tag.
-  try {
-    await assertAgentEnvoyOwnedEvent(userId, session.calendarEventId, session.id);
-  } catch (err) {
-    if (err instanceof GcalOwnershipError) {
-      return { success: false, message: err.message };
-    }
-    throw err;
-  }
-
-  // Patch GCal. notifyAttendees=false — chat-initiated edits are silent;
-  // the host can resend the invite if they want a fresh notification.
-  const gcalChanges: Parameters<typeof updateCalendarEvent>[3] = {};
-  if (changes.location !== undefined) gcalChanges.location = changes.location;
-  if (changes.startTime !== undefined) gcalChanges.startTime = changes.startTime;
-  if (changes.endTime !== undefined) {
-    gcalChanges.endTime = changes.endTime;
-  } else if (changes.startTime && changes.duration !== undefined) {
-    gcalChanges.endTime = new Date(
-      changes.startTime.getTime() + changes.duration * 60 * 1000,
-    );
-  }
-
-  let gcalResult: { eventId: string | null; htmlLink: string | null };
-  try {
-    gcalResult = await updateCalendarEvent(
-      userId,
-      session.calendarEventId,
-      session.id,
-      gcalChanges,
-      { notifyAttendees: false },
-    );
-  } catch (err) {
-    return {
-      success: false,
-      message: `Calendar update failed: ${err instanceof Error ? err.message : "unknown"}`,
-    };
-  }
-
-  // Mirror to DB. updateMany WHERE guard (TOCTOU) — only patch if still agreed.
-  const dbUpdates: Record<string, unknown> = {};
-  if (changes.location !== undefined) {
-    dbUpdates.statusLabel = `Location updated to ${changes.location}`;
-  }
-  if (changes.startTime !== undefined) {
-    dbUpdates.confirmedAt = changes.startTime;
-    dbUpdates.agreedTime = changes.startTime;
-  }
-  if (changes.duration !== undefined) {
-    dbUpdates.duration = changes.duration;
-  }
-  if (changes.format !== undefined) {
-    dbUpdates.format = changes.format;
-    dbUpdates.agreedFormat = changes.format;
-  }
-  if (gcalResult.htmlLink) {
-    dbUpdates.gcalHtmlLink = gcalResult.htmlLink;
-  }
-  if (Object.keys(dbUpdates).length > 0) {
-    await prisma.negotiationSession.updateMany({
-      where: { id: session.id, status: "agreed", archived: false },
-      data: dbUpdates as Parameters<typeof prisma.negotiationSession.updateMany>[0]["data"],
-    });
-  }
-
-  // Mirror personalized-link parameters so deal-room reads stay consistent.
-  const linkMirror: Record<string, unknown> = {};
-  if (changes.location !== undefined) linkMirror.location = changes.location;
-  if (changes.format !== undefined) linkMirror.format = changes.format;
-  if (changes.duration !== undefined) linkMirror.duration = changes.duration;
-  if (Object.keys(linkMirror).length > 0) {
-    await patchLinkRulesForContextual(session.link, linkMirror);
-  }
-
-  // Thread-visible system message.
-  await prisma.message.create({
-    data: {
-      sessionId: session.id,
-      role: "system",
-      content: summary,
-      metadata: { kind: "host_update", field: systemMessageField },
-    },
-  });
-
-  return {
-    success: true,
-    message: summary,
-    data: { sessionId: session.id, ...changes },
-  };
-}
+// `applyConfirmedSessionPatch` was deleted in PR-C of the 2026-05-11
+// update-confirmed-meeting refactor. All confirmed-session edits route
+// through `src/lib/update-confirmed-meeting.ts`'s `updateConfirmedMeeting()`.
+// See the three `handleUpdate*` handlers below for the new call sites.
 
 async function handleUpdateFormat(
   params: Record<string, unknown>,
   userId: string,
-  contextSessionId?: string
+  contextSessionId?: string,
+  triggeringRole?: "host" | "guest",
 ): Promise<ActionResult> {
   const sessionId = await resolveSessionId(params, userId, contextSessionId);
   const auth = await getAuthorizedSession(sessionId, userId);
@@ -719,14 +608,22 @@ async function handleUpdateFormat(
 
   // For confirmed meetings already on GCal: in-chat edits patch directly
   // (decision 2026-05-11). The user's chat message IS the authorization.
+  // Routes through `updateConfirmedMeeting` — single source of truth for
+  // confirmed-session edits (proposal 2026-05-11_update-confirmed-meeting).
   if (session.calendarEventId && session.status === "agreed" && !session.archived) {
-    return await applyConfirmedSessionPatch(
-      session,
-      userId,
-      { format },
-      `Format updated to ${format}`,
-      "format",
+    const summary = `Format updated to ${format}`;
+    const result = await updateConfirmedMeeting(
+      session.id,
+      { format: format as "phone" | "video" | "in-person" },
+      {
+        actor: triggeringRole
+          ? { invoker: "agent", triggeringRole }
+          : { invoker: "agent" },
+        systemMessageOverride: summary,
+      },
     );
+    if (!result.ok) return { success: false, message: result.message };
+    return { success: true, message: summary, data: { sessionId: session.id, format } };
   }
 
   // Dual-write: session.format for parity with the existing session row,
@@ -761,7 +658,8 @@ async function handleUpdateFormat(
 async function handleUpdateTime(
   params: Record<string, unknown>,
   userId: string,
-  contextSessionId?: string
+  contextSessionId?: string,
+  triggeringRole?: "host" | "guest",
 ): Promise<ActionResult> {
   const sessionId = await resolveSessionId(params, userId, contextSessionId);
   const auth = await getAuthorizedSession(sessionId, userId);
@@ -831,17 +729,24 @@ async function handleUpdateTime(
     const durStr = duration !== undefined ? ` (${formatDuration(duration)})` : "";
     const summary = `Time updated: ${timeStr}${durStr}`.trim();
 
-    return await applyConfirmedSessionPatch(
-      session,
-      userId,
+    // Routes through `updateConfirmedMeeting` — single source of truth for
+    // confirmed-session edits (proposal 2026-05-11_update-confirmed-meeting).
+    const result = await updateConfirmedMeeting(
+      session.id,
       {
         ...(startTime ? { startTime } : {}),
         ...(endTime ? { endTime } : {}),
         ...(duration !== undefined ? { duration } : {}),
       },
-      summary,
-      "time",
+      {
+        actor: triggeringRole
+          ? { invoker: "agent", triggeringRole }
+          : { invoker: "agent" },
+        systemMessageOverride: summary,
+      },
     );
+    if (!result.ok) return { success: false, message: result.message };
+    return { success: true, message: summary, data: { sessionId: session.id } };
   }
 
   // Duration-only edit on a non-confirmed session: no re-propose, just mirror
@@ -979,7 +884,8 @@ async function handleUpdateTime(
 async function handleUpdateLocation(
   params: Record<string, unknown>,
   userId: string,
-  contextSessionId?: string
+  contextSessionId?: string,
+  triggeringRole?: "host" | "guest",
 ): Promise<ActionResult> {
   const sessionId = await resolveSessionId(params, userId, contextSessionId);
   const auth = await getAuthorizedSession(sessionId, userId);
@@ -993,14 +899,22 @@ async function handleUpdateLocation(
 
   // For confirmed meetings already on GCal: in-chat edits patch directly
   // (decision 2026-05-11). The user's chat message IS the authorization.
+  // Routes through `updateConfirmedMeeting` — single source of truth for
+  // confirmed-session edits (proposal 2026-05-11_update-confirmed-meeting).
   if (session.calendarEventId && session.status === "agreed" && !session.archived) {
-    return await applyConfirmedSessionPatch(
-      session,
-      userId,
+    const summary = `Location updated: ${location}`;
+    const result = await updateConfirmedMeeting(
+      session.id,
       { location },
-      `Location updated: ${location}`,
-      "location",
+      {
+        actor: triggeringRole
+          ? { invoker: "agent", triggeringRole }
+          : { invoker: "agent" },
+        systemMessageOverride: summary,
+      },
     );
+    if (!result.ok) return { success: false, message: result.message };
+    return { success: true, message: summary, data: { sessionId: session.id, location } };
   }
 
   // Dual-write: statusLabel for the host-facing dashboard and a system
