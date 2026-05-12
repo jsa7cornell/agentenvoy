@@ -2,6 +2,9 @@
  * Activity vocabulary — single source of truth.
  *
  * Decided in proposal 2026-04-28_event-edit-handler-and-composer (Q3 fold).
+ * Extended 2026-05-12 (event-data-model-google-aligned-and-meeting-tip
+ * proposal, decided 2026-05-12): 16 → 20 entries, adds `meet`, `call`, `chat`,
+ * `other`; renames `bike ride` → `bike-ride` (kebab-case); coffee 30m → 45m.
  *
  * Replaces five scattered sites that previously duplicated activity-related
  * vocab in slightly different formats:
@@ -30,8 +33,16 @@ export interface ActivityEntry {
    * Default format when activity is named alone. Drives the physical-activity
    * rule in calendar-event-composer.md — "video" silently applying to a bike
    * ride was the bug this primitive prevents.
+   *
+   * 2026-05-12: extended to allow `null` for format-flex activities (meet,
+   * chat, intro, brainstorm, interview, other). When null, format resolves
+   * from link prefs → host prefs → system default per the cascade.
+   *
+   * Field name preserved (not renamed to `formatLock`) — reviewer N2 rejected
+   * the "lock" framing because host-emitted format still overrides
+   * ("remote coffee chat over phone" stays a valid combo).
    */
-  defaultFormat: "in-person" | "video" | "phone";
+  defaultFormat: "in-person" | "video" | "phone" | null;
   /**
    * Natural-window heuristic for the §3.D proactive widening prompt.
    * null = no widening prompt fires (e.g. neutral activities like "intro").
@@ -50,22 +61,33 @@ export interface ActivityEntry {
 }
 
 export const ACTIVITY_VOCAB: readonly ActivityEntry[] = [
-  { name: "coffee",     aliases: ["coffee", "cafe", "café"],                            emoji: "☕",  defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "10:00" }, defaultDuration: 30 },
+  // ── Physical / social activities (format-locked: in-person) ──
+  { name: "coffee",     aliases: ["coffee", "cafe", "café"],                            emoji: "☕",  defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "10:00" }, defaultDuration: 45 },
   { name: "breakfast",  aliases: ["breakfast"],                                         emoji: "🍳", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "09:00" }, defaultDuration: 60 },
-  { name: "lunch",      aliases: ["lunch", "brunch"],                                   emoji: "🍽️", defaultFormat: "in-person", naturalWindow: { start: "11:30", end: "14:00" }, defaultDuration: 60 },
+  { name: "lunch",      aliases: ["lunch", "brunch", "grab a bite"],                    emoji: "🍽️", defaultFormat: "in-person", naturalWindow: { start: "11:30", end: "14:00" }, defaultDuration: 60 },
   { name: "dinner",     aliases: ["dinner"],                                            emoji: "🍽️", defaultFormat: "in-person", naturalWindow: { start: "18:00", end: "21:00" }, defaultDuration: 90 },
   { name: "drinks",     aliases: ["drinks", "cocktails", "happy hour"],                 emoji: "🍻", defaultFormat: "in-person", naturalWindow: { start: "17:00", end: "21:00" }, defaultDuration: 90 },
-  { name: "bike ride",  aliases: ["bike ride", "bike", "biking", "cycling", "cycle"],   emoji: "🚴", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
+  { name: "bike-ride",  aliases: ["bike ride", "bike-ride", "bike", "biking", "cycling", "cycle"], emoji: "🚴", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
   { name: "hike",       aliases: ["hike", "hiking", "trail"],                           emoji: "🥾", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "17:00" }, defaultDuration: 120 },
-  { name: "run",        aliases: ["run", "running", "jog", "jogging", "trail run"],     emoji: "🏃", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
-  { name: "walk",       aliases: ["walk", "walking"],                                   emoji: "🚶", defaultFormat: "in-person", naturalWindow: { start: "11:00", end: "20:00" }, defaultDuration: 60 },
+  { name: "run",        aliases: ["run", "running", "jog", "jogging", "trail run"],     emoji: "🏃", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 45 },
+  { name: "walk",       aliases: ["walk", "walking"],                                   emoji: "🚶", defaultFormat: "in-person", naturalWindow: { start: "11:00", end: "20:00" }, defaultDuration: 30 },
   { name: "surf",       aliases: ["surf", "surfing"],                                   emoji: "🏄", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "18:00" }, defaultDuration: 90 },
   { name: "yoga",       aliases: ["yoga"],                                              emoji: "🧘", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
   { name: "workout",    aliases: ["workout", "gym", "training", "lift"],                emoji: "🏋️", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
-  { name: "swim",       aliases: ["swim", "swimming"],                                  emoji: "🏊", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 60 },
-  { name: "brainstorm", aliases: ["brainstorm", "brainstorming"],                       emoji: "🧠", defaultFormat: "video",     naturalWindow: null, defaultDuration: null },
-  { name: "intro",      aliases: ["intro", "introduction", "meet-and-greet"],           emoji: "👋", defaultFormat: "video",     naturalWindow: null, defaultDuration: null },
-  { name: "interview",  aliases: ["interview"],                                         emoji: "🎤", defaultFormat: "video",     naturalWindow: null, defaultDuration: null },
+  { name: "swim",       aliases: ["swim", "swimming"],                                  emoji: "🏊", defaultFormat: "in-person", naturalWindow: { start: "07:00", end: "20:00" }, defaultDuration: 45 },
+
+  // ── Work/professional activities (format-flex: null defaultFormat) ──
+  // 2026-05-12 additions. These don't lock format — coffee call vs. coffee
+  // in-person is a real distinction, and "meet" / "chat" can be any medium.
+  { name: "meet",       aliases: ["meet", "meet up", "meet-up", "get together", "hang", "1:1", "one on one", "review", "catch up in person"], emoji: "🤝", defaultFormat: null, naturalWindow: null, defaultDuration: null },
+  { name: "call",       aliases: ["call", "phone call", "ring", "give me a buzz"],     emoji: "📞", defaultFormat: "phone", naturalWindow: null, defaultDuration: null },
+  { name: "chat",       aliases: ["chat", "catch up", "quick chat"],                    emoji: "💬", defaultFormat: null, naturalWindow: null, defaultDuration: null },
+  { name: "brainstorm", aliases: ["brainstorm", "brainstorming"],                       emoji: "🧠", defaultFormat: null,    naturalWindow: null, defaultDuration: null },
+  { name: "intro",      aliases: ["intro", "introduction", "meet-and-greet"],           emoji: "👋", defaultFormat: null,    naturalWindow: null, defaultDuration: null },
+  { name: "interview",  aliases: ["interview"],                                         emoji: "🎤", defaultFormat: null,    naturalWindow: null, defaultDuration: null },
+
+  // ── Catchall ──
+  { name: "other",      aliases: ["other"],                                             emoji: "📌", defaultFormat: null, naturalWindow: null, defaultDuration: null },
 ] as const;
 
 /**
@@ -83,44 +105,57 @@ export const GENERIC_TOPICS: ReadonlySet<string> = new Set([
   "zoom", "zoom call", "video", "talk",
 ]);
 
-/** True when `topic` is one of the generic filler words. Case-insensitive, trims whitespace. */
-export function isGenericTopic(topic: string | null | undefined): boolean {
-  if (!topic) return false;
-  return GENERIC_TOPICS.has(topic.trim().toLowerCase());
-}
-
 /**
- * Look up a vocab entry by canonical name OR alias. Case-insensitive,
- * trims whitespace. Returns null when input is empty or unknown.
- *
- * Used by:
- *  - actions.ts to determine `topicSource` at create time (vocab match → "activity")
- *  - actions.ts B.1 defense-in-depth on backfill misses
- *  - deal-room.tsx getMeetingEmoji to derive emoji from activity field
+ * Look up a canonical activity entry by name or alias.
+ * Case-insensitive. Returns the canonical entry, or null when no match.
  */
-export function findActivity(input: string | null | undefined): ActivityEntry | null {
-  if (!input) return null;
-  const needle = input.trim().toLowerCase();
-  if (!needle) return null;
+export function findActivity(query: string | null | undefined): ActivityEntry | null {
+  if (!query) return null;
+  const q = query.toLowerCase().trim();
   for (const entry of ACTIVITY_VOCAB) {
-    if (entry.name === needle) return entry;
-    for (const alias of entry.aliases) {
-      if (alias === needle) return entry;
-    }
+    if (entry.name === q) return entry;
+    if (entry.aliases.some((a) => a.toLowerCase() === q)) return entry;
   }
   return null;
 }
 
-/** Emoji for a given activity name/alias. Null if not in vocab. */
+/**
+ * Emoji for an activity phrase. Returns null when the phrase isn't in the
+ * vocab — caller may fall back to a format-derived emoji or omit the icon
+ * entirely. Original null-fallback semantics preserved (callers handle the
+ * miss explicitly; do not force a 📌 default).
+ */
 export function emojiForActivity(activity: string | null | undefined): string | null {
-  return findActivity(activity)?.emoji ?? null;
+  const entry = findActivity(activity);
+  return entry?.emoji ?? null;
 }
 
-/** Default format for a given activity. Null if not in vocab. */
+/**
+ * Default duration in minutes for an activity. Returns null when the activity
+ * is format-flex (the caller should fall through to link prefs → host prefs →
+ * system default).
+ */
+export function defaultDurationForActivity(activity: string | null | undefined): number | null {
+  const entry = findActivity(activity);
+  return entry?.defaultDuration ?? null;
+}
+
+/**
+ * Default format for an activity. Returns null for format-flex activities
+ * (meet, chat, intro, brainstorm, interview, other). Caller falls through to
+ * link prefs → host prefs → system default when null.
+ */
 export function defaultFormatForActivity(
   activity: string | null | undefined,
-): ActivityEntry["defaultFormat"] | null {
-  return findActivity(activity)?.defaultFormat ?? null;
+): "in-person" | "video" | "phone" | null {
+  const entry = findActivity(activity);
+  return entry?.defaultFormat ?? null;
+}
+
+/** True when `topic` is one of the generic filler words. Case-insensitive, trims whitespace. */
+export function isGenericTopic(topic: string | null | undefined): boolean {
+  if (!topic) return false;
+  return GENERIC_TOPICS.has(topic.trim().toLowerCase());
 }
 
 /** Natural window for the proactive-widening prompt. Null if not in vocab or activity has no natural window. */
@@ -131,25 +166,10 @@ export function naturalWindowForActivity(
 }
 
 /**
- * Sensible duration override for a given activity. Null if the activity
- * isn't in the vocab or doesn't carry an opinion. Read by handleCreateLink
- * before falling through to the global 30-min default.
- */
-export function defaultDurationForActivity(
-  activity: string | null | undefined,
-): number | null {
-  return findActivity(activity)?.defaultDuration ?? null;
-}
-
-/**
  * Render the canonical activity table as a markdown block for build-time
  * substitution into calendar-event-composer.md. Used by runtime-prompts/index.ts
  * when serving the composer prompt — placeholder `{{ACTIVITY_VOCAB_TABLE}}`
  * in the .md file gets replaced with the output of this function.
- *
- * Two formats are emitted:
- *  - emoji line (for the §"Set activity + activityIcon" rule)
- *  - natural-window table (for §"Proactive widening" heuristic)
  *
  * Keep this rendering deterministic — playbook hash stability matters for
  * eval reproducibility.

@@ -16,11 +16,14 @@ describe("activity-vocab — module shape", () => {
     const names = ACTIVITY_VOCAB.map((e) => e.name);
     // Subset assertion — these must exist for the backfill SQL in
     // 20260428_add_topic_source/migration.sql to classify correctly.
+    // 2026-05-12: bike ride → bike-ride (kebab-case rename per event-data-model
+    // proposal); 4 new entries (meet, call, chat, other).
     for (const required of [
       "coffee", "breakfast", "lunch", "dinner", "drinks",
-      "bike ride", "hike", "run", "walk", "surf",
+      "bike-ride", "hike", "run", "walk", "surf",
       "yoga", "workout", "swim",
       "brainstorm", "intro", "interview",
+      "meet", "call", "chat", "other",
     ]) {
       expect(names).toContain(required);
     }
@@ -47,7 +50,7 @@ describe("isGenericTopic", () => {
   });
 
   it("is false for activity vocab entries (those are NOT generic)", () => {
-    expect(isGenericTopic("bike ride")).toBe(false);
+    expect(isGenericTopic("bike-ride")).toBe(false);
     expect(isGenericTopic("coffee")).toBe(false);
     expect(isGenericTopic("hike")).toBe(false);
   });
@@ -71,14 +74,16 @@ describe("isGenericTopic", () => {
 
 describe("findActivity", () => {
   it("matches by canonical name (case-insensitive)", () => {
-    expect(findActivity("Bike Ride")?.name).toBe("bike ride");
+    expect(findActivity("Bike-Ride")?.name).toBe("bike-ride");
     expect(findActivity("coffee")?.name).toBe("coffee");
     expect(findActivity("DINNER")?.name).toBe("dinner");
   });
 
   it("matches by alias", () => {
-    expect(findActivity("biking")?.name).toBe("bike ride");
-    expect(findActivity("cycling")?.name).toBe("bike ride");
+    // 'bike ride' (with space) preserved as alias for backward compat
+    expect(findActivity("bike ride")?.name).toBe("bike-ride");
+    expect(findActivity("biking")?.name).toBe("bike-ride");
+    expect(findActivity("cycling")?.name).toBe("bike-ride");
     expect(findActivity("brunch")?.name).toBe("lunch");
     expect(findActivity("cocktails")?.name).toBe("drinks");
   });
@@ -88,6 +93,9 @@ describe("findActivity", () => {
   });
 
   it("returns null for non-vocab phrases", () => {
+    // 2026-05-12: "standup" was previously in this list as a non-vocab phrase.
+    // Considered adding it as a `meet` alias but kept the conservative position
+    // (no implicit work-meeting expansion); test preserved.
     expect(findActivity("Q3 review")).toBeNull();
     expect(findActivity("standup")).toBeNull();
   });
@@ -103,10 +111,16 @@ describe("findActivity", () => {
 describe("emojiForActivity", () => {
   it("returns the canonical emoji for known activities", () => {
     expect(emojiForActivity("coffee")).toBe("☕");
-    expect(emojiForActivity("bike ride")).toBe("🚴");
+    expect(emojiForActivity("bike-ride")).toBe("🚴");
+    expect(emojiForActivity("bike ride")).toBe("🚴"); // alias
     expect(emojiForActivity("biking")).toBe("🚴"); // alias
     expect(emojiForActivity("drinks")).toBe("🍻");
     expect(emojiForActivity("hike")).toBe("🥾");
+    // 2026-05-12 additions
+    expect(emojiForActivity("meet")).toBe("🤝");
+    expect(emojiForActivity("call")).toBe("📞");
+    expect(emojiForActivity("chat")).toBe("💬");
+    expect(emojiForActivity("other")).toBe("📌");
   });
 
   it("returns null for unknown activities", () => {
@@ -118,16 +132,26 @@ describe("emojiForActivity", () => {
 
 describe("defaultFormatForActivity", () => {
   it("returns in-person for physical activities", () => {
-    expect(defaultFormatForActivity("bike ride")).toBe("in-person");
+    expect(defaultFormatForActivity("bike-ride")).toBe("in-person");
     expect(defaultFormatForActivity("coffee")).toBe("in-person");
     expect(defaultFormatForActivity("dinner")).toBe("in-person");
     expect(defaultFormatForActivity("hike")).toBe("in-person");
   });
 
-  it("returns video for office-style activities", () => {
-    expect(defaultFormatForActivity("brainstorm")).toBe("video");
-    expect(defaultFormatForActivity("interview")).toBe("video");
-    expect(defaultFormatForActivity("intro")).toBe("video");
+  it("returns null for format-flex activities (2026-05-12 event-data-model)", () => {
+    // brainstorm / intro / interview / meet / chat / other are now format-flex
+    // (defaultFormat: null). Host emission or link prefs decide. Reviewer N2
+    // confirmed: keep host override > vocab default (don't lock).
+    expect(defaultFormatForActivity("brainstorm")).toBeNull();
+    expect(defaultFormatForActivity("interview")).toBeNull();
+    expect(defaultFormatForActivity("intro")).toBeNull();
+    expect(defaultFormatForActivity("meet")).toBeNull();
+    expect(defaultFormatForActivity("chat")).toBeNull();
+    expect(defaultFormatForActivity("other")).toBeNull();
+  });
+
+  it("returns phone for call (format-locked)", () => {
+    expect(defaultFormatForActivity("call")).toBe("phone");
   });
 
   it("returns null for unknown activities", () => {
@@ -168,8 +192,9 @@ describe("playbook substitution renderers", () => {
     const md = renderActivityVocabMarkdown();
     expect(md.length).toBeGreaterThan(0);
     expect(md).toContain("☕ coffee");
-    expect(md).toContain("🚴 bike ride");
+    expect(md).toContain("🚴 bike-ride");
     expect(md).toContain("🍻 drinks");
+    expect(md).toContain("🤝 meet"); // 2026-05-12 addition
     // Source-of-truth pointer in the rendered text — keeps the LLM grounded.
     expect(md).toContain("activity-vocab.ts");
   });
