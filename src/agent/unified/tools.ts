@@ -18,8 +18,9 @@ import { loadCalendar } from "./tool-impls/load-calendar";
 import { loadActiveSessions } from "./tool-impls/load-active-sessions";
 import { loadPreferences } from "./tool-impls/load-preferences";
 import { loadRecentHistory } from "./tool-impls/load-recent-history";
-import { execAction, type ToolContext } from "./tool-impls/_exec";
+import { execAction, type ToolContext, type GroundingFire } from "./tool-impls/_exec";
 import type { ActionResult } from "@/agent/actions";
+import type { LoadResultShape } from "./grounding-check";
 
 export type AgentToolContext = {
   userId: string;
@@ -34,6 +35,38 @@ export type AgentToolContext = {
    * subset yet). Gates registration of the tool — see below.
    */
   channelId?: string;
+  /**
+   * 2-turn preload (host + envoy) for the grounding check's `recentThread`
+   * evidence scope. Set by the runner; aligned with the prompt-context
+   * window the model sees. Undefined when the runner trimmed history due
+   * to staleness (>10min gap) or when the runner didn't load history.
+   * 2026-05-12 grounding-check-evidence-scope-redesign proposal (PR-B/C).
+   */
+  recentThread?: {
+    priorUserTurn?: string;
+    priorEnvoyTurn?: string;
+  };
+  /**
+   * Per-turn accumulator getter. The runner builds a closure-captured
+   * mutable `thisTurnToolResults` array; this getter exposes it read-only
+   * for the grounding check's value-match logic. LOAD tool wrappers append
+   * via `recordToolResult` (sibling field).
+   */
+  getThisTurnToolResults?: () => ReadonlyArray<LoadResultShape>;
+  /**
+   * Per-turn accumulator setter. LOAD tool wrappers call this after their
+   * impl returns so subsequent grounding-check invocations can see the
+   * results. Runner sets `recordToolResult` and `getThisTurnToolResults`
+   * as a paired set against the same backing array.
+   */
+  recordToolResult?: (toolName: string, result: unknown) => void;
+  /**
+   * Per-turn grounding-check fire telemetry accumulator. The runner threads
+   * this in so check fires bubble up to `metadata.unifiedTurn.groundingCheckFires`
+   * (PR-D). When unset, fires are dropped — no metadata regression for
+   * callers that haven't wired the accumulator.
+   */
+  recordGroundingFire?: (fire: GroundingFire) => void;
 };
 
 // Shared availability window schema — matches AvailabilityWindow[] contract.
@@ -91,6 +124,10 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     userId: ctx.userId,
     meetSlug: ctx.meetSlug,
     userMessage: ctx.userMessage,
+    recentThread: ctx.recentThread,
+    getThisTurnToolResults: ctx.getThisTurnToolResults,
+    recordToolResult: ctx.recordToolResult,
+    recordGroundingFire: ctx.recordGroundingFire,
   };
 
   // Per-request seen-call set. Guards against the model issuing the same write
@@ -133,8 +170,11 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       lookaheadDays: z.number().int().min(1).max(60).default(14)
         .describe("Days of calendar data to load (default 14, max 60)."),
     }),
-    execute: async ({ lookaheadDays }) =>
-      loadCalendar({ lookaheadDays, toolCallId: "", userId: ctx.userId, timezone: ctx.timezone }),
+    execute: async ({ lookaheadDays }) => {
+      const result = await loadCalendar({ lookaheadDays, toolCallId: "", userId: ctx.userId, timezone: ctx.timezone });
+      ctx.recordToolResult?.("LOAD_calendar", result);
+      return result;
+    },
   });
 
   const LOAD_active_sessions = tool({
@@ -142,7 +182,11 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       "Load active sessions + their links. Call before any session/link write. " +
       "Never fabricate session IDs or link codes; ground in this output.",
     inputSchema: z.object({}),
-    execute: async () => loadActiveSessions(ctx.userId),
+    execute: async () => {
+      const result = await loadActiveSessions(ctx.userId);
+      ctx.recordToolResult?.("LOAD_active_sessions", result);
+      return result;
+    },
   });
 
   const LOAD_preferences = tool({
@@ -150,7 +194,11 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       "Load preferences, rules (incl. bookable links with codes/IDs), and knowledge. " +
       "Call before any rule/bookable/primary write. Returns real IDs — never fabricate.",
     inputSchema: z.object({}),
-    execute: async () => loadPreferences(ctx.userId),
+    execute: async () => {
+      const result = await loadPreferences(ctx.userId);
+      ctx.recordToolResult?.("LOAD_preferences", result);
+      return result;
+    },
   });
 
   // LOAD_recent_history — fetches older conversation turns on demand.
@@ -188,8 +236,11 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
               "Only load turns within the last N minutes. Useful when the host says 'earlier today' or names a recent timeframe.",
             ),
         }),
-        execute: async (args) =>
-          loadRecentHistory(channelIdForHistory, args),
+        execute: async (args) => {
+          const result = await loadRecentHistory(channelIdForHistory, args);
+          ctx.recordToolResult?.("LOAD_recent_history", result);
+          return result;
+        },
       })
     : null;
 

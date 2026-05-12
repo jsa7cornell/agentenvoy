@@ -34,7 +34,9 @@ import {
   computeTurnCost,
   type TurnCost,
 } from "./model-policy";
-import { buildUnifiedTools } from "./tools";
+import { buildUnifiedTools, type AgentToolContext } from "./tools";
+import type { LoadResultShape } from "./grounding-check";
+import type { GroundingFire } from "./tool-impls/_exec";
 import { runSelfCheck, type ToolCallSummary } from "./self-check";
 import {
   runPostStreamChecks,
@@ -550,16 +552,9 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           data: { channelId: ctx.channelId, role: "user", content: ctx.message },
         });
 
-        // Build tool surface for this request (with userMessage for Layer 2 grounding).
-        const tools = buildUnifiedTools({
-          userId: ctx.userId,
-          timezone: ctx.timezone,
-          meetSlug: ctx.meetSlug,
-          userMessage: ctx.message,
-          channelId: ctx.channelId,
-        });
-
-        // Load recent conversation history (host-channel-scoped). The
+        // Load recent conversation history (host-channel-scoped). Loaded
+        // BEFORE buildUnifiedTools so the per-turn grounding-check
+        // `recentThread` window is available to the tool context. The
         // `priorEnvoyTurnAgeMs` field gates the v3 recency-window Haiku tier
         // selection (cost-reduction proposal 2026-05-12 §A). Threaded through
         // UnifiedTurnConfig so deal-room callers (A.4) also benefit.
@@ -570,6 +565,45 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           priorEnvoyTurnAgeMs,
           historyTrimmedForStaleness,
         } = await loadRecentHistory(ctx.channelId);
+
+        // ── Per-turn accumulators for grounding-check value-match + telemetry ──
+        // 2026-05-12 grounding-check-evidence-scope-redesign (PR-B):
+        // - thisTurnToolResults: LOAD tool results pushed as they arrive;
+        //   read by the grounding check's value-match logic to verify that
+        //   IDs / values the model emits actually came from a LOAD.
+        // - groundingFires: structured fire records accumulated across the
+        //   turn; consumed by PR-D's metadata builder.
+        const thisTurnToolResults: LoadResultShape[] = [];
+        const groundingFires: GroundingFire[] = [];
+
+        // recentThread: extract prior user + envoy turn from the 2-turn preload.
+        // When historyTrimmedForStaleness fired, recentMessages is empty →
+        // recentThread is undefined → recentThread-scoped grounding-check
+        // fields fall back to the distinctive "stale context" error message.
+        const recentThread: AgentToolContext["recentThread"] =
+          historyTrimmedForStaleness || recentMessages.length === 0
+            ? undefined
+            : {
+                priorUserTurn: recentMessages.find((m) => m.role === "user")?.content,
+                priorEnvoyTurn: recentMessages.find((m) => m.role === "assistant")?.content,
+              };
+
+        // Build tool surface for this request (with userMessage for Layer 2 grounding).
+        const tools = buildUnifiedTools({
+          userId: ctx.userId,
+          timezone: ctx.timezone,
+          meetSlug: ctx.meetSlug,
+          userMessage: ctx.message,
+          channelId: ctx.channelId,
+          recentThread,
+          getThisTurnToolResults: () => thisTurnToolResults,
+          recordToolResult: (toolName, result) => {
+            thisTurnToolResults.push({ toolName, result } as LoadResultShape);
+          },
+          recordGroundingFire: (fire) => {
+            groundingFires.push(fire);
+          },
+        });
 
         await runUnifiedTurn({
           userId: ctx.userId,
