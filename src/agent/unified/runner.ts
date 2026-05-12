@@ -139,6 +139,15 @@ export type UnifiedTurnConfig = {
    */
   postStreamChecks?: readonly PostStreamCheck[];
   /**
+   * Getter for the per-turn grounding-check fires accumulator. The caller
+   * (host-channel or deal-room runner entry) sets this when it builds the
+   * `recordGroundingFire` callback on `AgentToolContext`. The runner reads
+   * the accumulator after the stream finishes and surfaces fires in
+   * `metadata.unifiedTurn.groundingCheckFires` (capped at 3 with truncation).
+   * 2026-05-12 grounding-check-evidence-scope-redesign PR-D.
+   */
+  getGroundingFires?: () => readonly GroundingFire[];
+  /**
    * Called after the stream finishes and metadata is composed. The caller
    * persists to whichever table is appropriate (ChannelMessage for host-channel,
    * Message for deal-room). Receives the final text, full metadata blob, and
@@ -485,6 +494,7 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
         remediationDurationMs,
         reasoningTrace: reasoningTrace.trim() ? reasoningTrace : null,
         postStreamGuards,
+        groundingCheckFires: config.getGroundingFires?.() ?? [],
       }) as object),
       ...(legacyActions.length > 0
         ? { actions: legacyActions, actionResults: legacyActionResults }
@@ -615,6 +625,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           priorEnvoyTurnCount,
           priorEnvoyTurnAgeMs,
           historyTrimmedForStaleness,
+          getGroundingFires: () => groundingFires,
           enqueue,
           persistEnvoyMessage: async ({ content, metadata, threadId }) => {
             await prisma.channelMessage.create({
@@ -857,6 +868,11 @@ function buildUnifiedMetadata(params: {
    *  guard that fired this turn (name + scope + reason). Empty array = clean
    *  turn; not persisted when empty to keep metadata payloads small. */
   postStreamGuards?: readonly PostStreamGuardRecord[];
+  /** Grounding-check (Layer 2) fires for this turn. Sibling to postStreamGuards.
+   *  Capped at first 3 fires with `_truncatedCount` indicating how many extras
+   *  fired (P4 mitigation — prevents metadata-bloat from chatty failure modes).
+   *  2026-05-12 grounding-check-evidence-scope-redesign PR-D. */
+  groundingCheckFires?: readonly GroundingFire[];
 }): Prisma.InputJsonValue {
   const {
     turnCost,
@@ -871,7 +887,22 @@ function buildUnifiedMetadata(params: {
     remediationDurationMs,
     reasoningTrace,
     postStreamGuards,
+    groundingCheckFires,
   } = params;
+
+  // Cap groundingCheckFires at first 3 with truncation count.
+  // P4 mitigation: chatty failure modes can produce many fires; cap prevents
+  // unbounded metadata growth across the 7-day measurement window.
+  const GROUNDING_FIRES_PER_TURN_CAP = 3;
+  const cappedGroundingFires =
+    groundingCheckFires && groundingCheckFires.length > 0
+      ? {
+          fires: groundingCheckFires.slice(0, GROUNDING_FIRES_PER_TURN_CAP),
+          ...(groundingCheckFires.length > GROUNDING_FIRES_PER_TURN_CAP
+            ? { _truncatedCount: groundingCheckFires.length - GROUNDING_FIRES_PER_TURN_CAP }
+            : {}),
+        }
+      : null;
 
   // Synthesize moduleGuard.bucket from tool names for corpus continuity.
   // Maps tool name prefixes to logical bucket names understood by the dashboard.
@@ -898,6 +929,9 @@ function buildUnifiedMetadata(params: {
       ...(trimmedReasoning ? { reasoningTrace: trimmedReasoning } : {}),
       ...(postStreamGuards && postStreamGuards.length > 0
         ? { postStreamGuards: [...postStreamGuards] }
+        : {}),
+      ...(cappedGroundingFires
+        ? { groundingCheckFires: cappedGroundingFires as unknown as Prisma.InputJsonValue }
         : {}),
       cost: {
         inputTokens: turnCost.inputTokens,

@@ -187,6 +187,7 @@ export function runDealroomTurn(ctx: DealroomTurnContext): ReadableStream<Uint8A
           priorEnvoyTurnCount: ctxOut.session.priorEnvoyTurnCount,
           priorEnvoyTurnAgeMs: ctxOut.session.priorEnvoyTurnAgeMs,
           historyTrimmedForStaleness: ctxOut.session.historyTrimmedForStaleness,
+          getGroundingFires: () => groundingFires,
           enqueue,
           persistEnvoyMessage: async ({ content, metadata }) => {
             // Strip inline blocks (delegate-speaker, status-update, tz-switch)
