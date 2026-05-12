@@ -324,6 +324,7 @@ function SlotChipRows({
   onSelectSlot,
   looseMutualCount,
   hostFirstName,
+  inPlaceApplyMode = false,
 }: {
   windows: WindowCard[];
   slotsForDay: Slot[];
@@ -333,7 +334,27 @@ function SlotChipRows({
   onSelectSlot?: (msg: string, slot: { start: string; end: string }) => void;
   looseMutualCount: number;
   hostFirstName?: string;
+  /**
+   * When true, chip clicks STAGE the selection (visually highlight, show a
+   * "Confirm reschedule" button below) instead of immediately applying.
+   * Used by the reschedule overlay where applying immediately was so fast
+   * users missed it and thought the picker wasn't clickable. The first-time
+   * confirm flow keeps the one-step shape because the downstream confirm
+   * card (name/email) is already the explicit second step.
+   * 2026-05-12 — added per John's feedback ("Click the picker, Click submit").
+   */
+  inPlaceApplyMode?: boolean;
 }) {
+  // 2026-05-12 — two-step pick in reschedule mode. Chip click stages the
+  // selection; a separate Confirm button below applies it. Reset when the
+  // day changes so an unapplied selection from a different day doesn't
+  // linger silently. Hooks declared above the early-return for "no
+  // available times" so the hook order stays stable.
+  const [stagedSlot, setStagedSlot] = useState<Slot | null>(null);
+  useEffect(() => {
+    setStagedSlot(null);
+  }, [dateStr]);
+
   const fmt = (iso: string) =>
     new Date(iso).toLocaleTimeString("en-US", {
       hour: "numeric", minute: "2-digit", timeZone: timezone,
@@ -390,38 +411,38 @@ function SlotChipRows({
   const hostOnlyTotal = am.hostOnly.length + pm.hostOnly.length;
 
   const renderChip = (slot: Slot, key: string, variant: "matched" | "open" | "hostOnly") => {
+    const isStaged = inPlaceApplyMode && stagedSlot?.start === slot.start;
+    const handleClick = () => {
+      if (inPlaceApplyMode) {
+        // Stage — wait for Confirm. Idempotent re-click on the same chip is a
+        // no-op (still staged). Clicking a different chip swaps the staged slot.
+        setStagedSlot(slot);
+        return;
+      }
+      onSelectSlot?.(
+        formatSlotMessage(slot, dateStr, timezone),
+        { start: slot.start, end: slot.end },
+      );
+    };
     return (
       <button
         key={key}
-        onClick={() => {
-          // 2026-05-12 — telemetry for picker-not-clickable triage. Surfaces
-          // in Vercel runtime logs via the client (console.* is captured by
-          // the feedback bundle's consoleLines for the most recent ring).
-          // Drop the telemetry when the bug is closed.
-          console.log("[picker.chip-click]", {
-            slotStart: slot.start,
-            slotEnd: slot.end,
-            dateStr,
-            hasOnSelectSlot: !!onSelectSlot,
-            variant,
-          });
-          onSelectSlot?.(
-            formatSlotMessage(slot, dateStr, timezone),
-            { start: slot.start, end: slot.end },
-          );
-        }}
+        onClick={handleClick}
         disabled={!onSelectSlot}
+        aria-pressed={isStaged || undefined}
         className={`
           inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium leading-none border transition-all
-          ${variant === "matched"
-            ? "border-emerald-300 dark:border-emerald-700 bg-emerald-100 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 hover:border-emerald-400"
-            : variant === "hostOnly"
-              ? "border-dashed border-zinc-300 dark:border-zinc-700 bg-transparent text-zinc-500 dark:text-zinc-500 hover:border-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-              : "border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-900 dark:text-indigo-100 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 hover:border-indigo-400"}
+          ${isStaged
+            ? "border-emerald-500 bg-emerald-500 text-white shadow-sm dark:bg-emerald-600 dark:border-emerald-500"
+            : variant === "matched"
+              ? "border-emerald-300 dark:border-emerald-700 bg-emerald-100 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 hover:bg-emerald-200 dark:hover:bg-emerald-900/60 hover:border-emerald-400"
+              : variant === "hostOnly"
+                ? "border-dashed border-zinc-300 dark:border-zinc-700 bg-transparent text-zinc-500 dark:text-zinc-500 hover:border-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                : "border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-900 dark:text-indigo-100 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 hover:border-indigo-400"}
           ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
         `}
       >
-        <span className="py-1">{fmt(slot.start)}</span>
+        <span className="py-1">{isStaged ? `✓ ${fmt(slot.start)}` : fmt(slot.start)}</span>
       </button>
     );
   };
@@ -439,6 +460,20 @@ function SlotChipRows({
 
   const showHostOnlyReveal = hostOnlyTotal > 0;
 
+  // Confirm row — only when inPlaceApplyMode is on AND a chip has been
+  // staged. Click confirm → call onSelectSlot with the staged slot. Click
+  // cancel → un-stage so the user can keep browsing slots without committing.
+  const stagedWhenLabel = stagedSlot
+    ? new Date(stagedSlot.start).toLocaleString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: timezone,
+      })
+    : null;
+
   return (
     <div className="space-y-1.5">
       {am.primary.length > 0 && <PrimaryLane label="Morning" slots={am.primary} />}
@@ -455,6 +490,40 @@ function SlotChipRows({
         renderChip={renderChip}
         looseMutualCount={looseMutualCount}
       />}
+      {inPlaceApplyMode && stagedSlot && stagedWhenLabel && (
+        <div
+          className="mt-3 flex items-center justify-between gap-2 pt-2 border-t border-[#e7e2d5]"
+          data-testid="reschedule-confirm-row"
+        >
+          <span className="text-[12px] text-[#1a1a2e]">
+            Reschedule to <b className="font-semibold">{stagedWhenLabel}</b>?
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setStagedSlot(null)}
+              className="text-[12px] font-medium text-[#6b6458] hover:text-[#1a1a2e] cursor-pointer px-2 py-1"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!stagedSlot) return;
+                const slotToApply = stagedSlot;
+                setStagedSlot(null);
+                onSelectSlot?.(
+                  formatSlotMessage(slotToApply, dateStr, timezone),
+                  { start: slotToApply.start, end: slotToApply.end },
+                );
+              }}
+              className="text-[12px] font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg px-3 py-1 cursor-pointer transition-colors"
+            >
+              Confirm reschedule
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -579,6 +648,7 @@ function WindowCards({
         onSelectSlot={onSelectSlot}
         looseMutualCount={looseMutualCount}
         hostFirstName={hostFirstName}
+        inPlaceApplyMode={inPlaceApplyMode}
       />
     );
   }
