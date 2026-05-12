@@ -278,8 +278,21 @@ export function dealRoomToMeetingCardProps(
     // Phone: host calls guest. PR2b will add the real phoneNumber field.
     channel = { kind: "phone", phoneNumber: "(unknown)", hostCallsGuest: true };
   } else {
-    // in-person (or unknown format falls back to in-person)
-    channel = { kind: "in-person", location: location ?? "TBD" };
+    // in-person (or unknown format falls back to in-person).
+    // 2026-05-11 — when there's no venue set, surface format context in the
+    // fallback string rather than a bare "TBD". Two cases:
+    //   - host originally deferred venue to the guest (link.parameters
+    //     .guestPicks.location === true): the meeting confirmed without a
+    //     pin; show "Venue TBD — guest to choose"
+    //   - venue just wasn't picked: "In-person — venue TBD" so the user
+    //     reads format AND status from the line, not just "TBD"
+    const linkGuestPicksLocation =
+      (snapshot.linkParameters?.guestPicks as { location?: boolean } | undefined)
+        ?.location === true;
+    const fallback = linkGuestPicksLocation
+      ? "Venue TBD — guest to pick"
+      : "In-person — venue TBD";
+    channel = { kind: "in-person", location: location ?? fallback };
   }
 
   // Tip from real generator (Phase 2 — source-labeled tips)
