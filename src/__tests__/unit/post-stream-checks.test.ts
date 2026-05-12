@@ -35,6 +35,17 @@ describe("isConfirmationShapedProse — pattern coverage", () => {
     { name: "Cancelled X (mid-text)", text: "All set. Cancelled the Tuesday meeting." },
     { name: "is now booked", text: "The 2pm slot is now booked." },
     { name: "is now live", text: "Your Music Lessons link is now live." },
+    // 2026-05-12 widening — present-progressive + future-intent shapes that v1
+    // missed. The exact cancel-incident transcript: "Got it — cancelling this
+    // meeting now." was the production-observed failure that motivated this batch.
+    { name: "2026-05-12 cancel incident — Got it cancelling now", text: "Got it — cancelling this meeting now." },
+    { name: "Got it — moving (present-progressive)", text: "Got it — moving it to Thursday." },
+    { name: "Done — booking (present-progressive)", text: "Done — booking that slot now." },
+    { name: "I'll cancel now (future-intent)", text: "I'll cancel that for you now." },
+    { name: "I'll move right now (future-intent)", text: "I'll move it right now." },
+    { name: "I'm cancelling (present-progressive, no preamble)", text: "I'm cancelling this for you." },
+    { name: "I'm rescheduling (present-progressive)", text: "I'm rescheduling that to Thursday." },
+    { name: "cancelling now (bare, no Got-it)", text: "Sounds good — cancelling that meeting now." },
   ];
 
   for (const { name, text } of positives) {
@@ -101,6 +112,19 @@ describe("narrationWithoutEmitCheck — Phase A.5 / cmp1nni72", () => {
       toolCalls: [],
     });
     expect(result.fired).toBe(false);
+  });
+
+  // 2026-05-12 regression — the cancel-incident transcript. Production prose
+  // was "Got it — cancelling this meeting now." with zero tool calls. The v1
+  // regex was too tight (past-tense only) and missed it. This fixture locks
+  // the widened-regex shape so future tuning can't accidentally reopen the gap.
+  it("regression: fires on 2026-05-12 cancel-incident exact transcript", () => {
+    const result = narrationWithoutEmitCheck.check({
+      fullText: "Got it — cancelling this meeting now.",
+      toolCalls: [],
+    });
+    expect(result.fired).toBe(true);
+    expect(result.scope).toBe("shape-1");
   });
 });
 
