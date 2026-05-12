@@ -61,8 +61,10 @@ const REGEN_CAP_PER_SESSION = 5;
  * follow-up PR after prompt evaluation. See proposal §2.7 for the locked
  * contract.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function generateMeetingNotes(
   _input: GenerateMeetingNotesInput,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _opts: GenerateMeetingNotesOpts,
 ): Promise<GenerateMeetingNotesOutput> {
   // PR-2 scaffolding: stub returns null/null so the field reads cleanly but
