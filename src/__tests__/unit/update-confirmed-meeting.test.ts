@@ -323,7 +323,12 @@ describe("updateConfirmedMeeting — happy paths", () => {
     });
   });
 
-  it("time update writes agreedTime + confirmedAt + duration", async () => {
+  it("time update writes agreedTime + duration", async () => {
+    // Earlier revision asserted confirmedAt was written too, but that column
+    // doesn't exist on NegotiationSession — Prisma rejected the unknown field
+    // with a runtime ValidationError. Fixed 2026-05-12 (feedback
+    // cmp1y7atv000t4g70kywwktml). See helper comment at the agreedTime
+    // assignment site for the full history.
     mockPrisma.negotiationSession.findUnique.mockResolvedValue(makeSession());
     const newStart = new Date("2026-07-01T18:00:00.000Z");
     const result = await updateConfirmedMeeting(
@@ -336,10 +341,13 @@ describe("updateConfirmedMeeting — happy paths", () => {
       where: { id: SESSION_ID, status: "agreed", archived: false },
       data: expect.objectContaining({
         agreedTime: newStart,
-        confirmedAt: newStart,
         duration: 60,
       }),
     });
+    // Regression guard: confirmedAt MUST NOT appear in the write — Prisma
+    // would reject it.
+    const call = mockPrisma.negotiationSession.updateMany.mock.calls[0][0];
+    expect(call.data).not.toHaveProperty("confirmedAt");
   });
 
   it("format update writes both agreedFormat AND session.format", async () => {

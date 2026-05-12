@@ -36,7 +36,8 @@ export type MeetingChanges = {
   /** `null` clears the field on the GCal event + DB + link.parameters. */
   location?: string | null;
   format?: "phone" | "video" | "in-person";
-  /** Helper writes BOTH `agreedTime` AND `confirmedAt` from this value. */
+  /** Helper writes `agreedTime` from this value (the canonical column read
+   *  by session-load → poll → confirmData.dateTime). */
   startTime?: Date;
   /** Optional; derived from startTime + duration when absent. */
   endTime?: Date;
@@ -329,8 +330,8 @@ async function mirrorToLinkParameters(
 
 /**
  * Apply an in-place patch to a confirmed meeting. Single source of truth for:
- *   - DB write: agreedTime, confirmedAt, agreedFormat, session.format,
- *     duration, statusLabel, gcalHtmlLink. Guarded by `updateMany WHERE
+ *   - DB write: agreedTime, agreedFormat, session.format, duration,
+ *     statusLabel, gcalHtmlLink. Guarded by `updateMany WHERE
  *     status="agreed" AND !archived` (TOCTOU safety).
  *   - GCal patch via the side-effect dispatcher (`events.patch`).
  *   - `link.parameters` mirror for personalized links.
@@ -460,7 +461,14 @@ export async function updateConfirmedMeeting(
       : "Location cleared";
   }
   if (changes.startTime !== undefined) {
-    dbUpdates.confirmedAt = resolved.startTime;
+    // `agreedTime` is the canonical column read by session-load → poll →
+    // confirmData.dateTime. Earlier versions of this code also wrote
+    // `confirmedAt`, but that column doesn't exist on NegotiationSession —
+    // Prisma rejected the write with a runtime ValidationError (500). The
+    // original /api/negotiate/update-gcal route had the same broken write
+    // since 2026-04-18 (commit 07b3747); was rarely exercised because the
+    // route was host-NextAuth-only until f040500 loosened it.
+    // Bug discovered 2026-05-12 when PR-B routed the picker through here.
     dbUpdates.agreedTime = resolved.startTime;
   }
   if (changes.duration !== undefined) {
