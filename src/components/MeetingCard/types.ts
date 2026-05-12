@@ -225,6 +225,13 @@ export interface Message {
   text: string;
   timestamp: string;
   avatarSeed?: string;
+  /**
+   * Raw Message metadata blob for admin-only surfaces (TurnCostOverlay).
+   * Populated for `role: "agent"` turns by the dock-thread mapper in
+   * deal-room.tsx; omitted on guest-lane messages. Optional so non-admin
+   * surfaces don't need to plumb it through.
+   */
+  metadata?: Record<string, unknown> | null;
 }
 
 /**
@@ -254,6 +261,23 @@ export interface EnvoyDockProps {
    * Non-functional in PR1 — wired in PR2. Leave the prop but don't require it.
    */
   onSendMessage?: (text: string) => void;
+  /**
+   * First initial of the viewer (host's first name when isHost, guest's first
+   * name otherwise). Renders on the viewer-side bubble's avatar. Fixes the
+   * 2026-05-12 bug where every viewer saw a hard-coded "S" regardless of role.
+   */
+  viewerInitial?: string;
+  /**
+   * Admin telemetry toggle — propagates to EnvoyDockThread, which renders
+   * TurnCostOverlay + ThumbsDownFeedback under agent bubbles when true.
+   * Mirrors the dashboard chat surface (feed.tsx).
+   */
+  isAdmin?: boolean;
+  /**
+   * NegotiationSession id — used by ThumbsDownFeedback under agent bubbles
+   * to file feedback against the right thread.
+   */
+  sessionId?: string | null;
 }
 
 // ── Series Page ──────────────────────────────────────────────────────────────

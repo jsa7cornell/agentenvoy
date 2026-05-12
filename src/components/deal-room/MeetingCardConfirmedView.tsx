@@ -77,6 +77,15 @@ interface Props {
    * regression) meant guests couldn't file feedback from the new surface.
    */
   feedbackLinkCode?: string;
+  /**
+   * First initial of the active viewer (host's or guest's). Propagated into
+   * EnvoyDockThread so the viewer's own messages don't get the hard-coded
+   * "S" guest avatar. 2026-05-12 fix.
+   */
+  viewerInitial?: string;
+  /** Admin flag — propagated into EnvoyDockThread for TurnCostOverlay +
+   *  ThumbsDownFeedback under agent bubbles. */
+  isAdmin?: boolean;
 }
 
 export function MeetingCardConfirmedView({
@@ -97,6 +106,8 @@ export function MeetingCardConfirmedView({
   belowCardSlot,
   showDashboardLink,
   feedbackLinkCode,
+  viewerInitial,
+  isAdmin,
 }: Props) {
   const router = useRouter();
   // ── GCal RSVP status fetch (PR2b) ────────────────────────────────────────
@@ -242,6 +253,9 @@ export function MeetingCardConfirmedView({
             onExpand={onExpandThread}
             onCollapse={onCollapseThread}
             onSendMessage={onSendMessage}
+            viewerInitial={viewerInitial}
+            isAdmin={isAdmin}
+            sessionId={sessionId}
           />
           {/* Send-feedback affordance — restored to the new card surface
               (2026-05-11). Anchored under the dock so it's reachable

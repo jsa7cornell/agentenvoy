@@ -54,6 +54,9 @@ export function EnvoyDock({
   onExpand,
   onCollapse,
   onSendMessage,
+  viewerInitial,
+  isAdmin,
+  sessionId,
 }: EnvoyDockProps) {
   const nudge = NUDGE_COPY[cardState] ?? NUDGE_COPY.confirmed;
   const isThread = state === "thread";
@@ -65,6 +68,9 @@ export function EnvoyDock({
         contextHostFirstName={contextHostFirstName}
         onCollapse={onCollapse}
         onSendMessage={onSendMessage}
+        viewerInitial={viewerInitial}
+        isAdmin={isAdmin}
+        sessionId={sessionId}
       />
     );
   }

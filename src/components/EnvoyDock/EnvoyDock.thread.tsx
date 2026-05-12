@@ -33,12 +33,32 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Message } from "@/components/MeetingCard/types";
+import { ThumbsDownFeedback } from "@/components/thumbs-down-feedback";
+import { TurnCostOverlay } from "@/components/turn-cost-overlay";
 
 export interface EnvoyDockThreadProps {
   messages: Message[];
   contextHostFirstName?: string;
   onCollapse?: () => void;
   onSendMessage?: (text: string) => void;
+  /**
+   * Single letter shown on the viewer-side bubble's avatar. Defaults to "·"
+   * when omitted. Pass the host's first initial when the viewer is the host,
+   * or the guest's first initial when the viewer is the guest — fixes
+   * 2026-05-12 bug where every viewer saw "S" regardless of role.
+   */
+  viewerInitial?: string;
+  /**
+   * Admin telemetry toggle. When true, agent (administrator-role) bubbles
+   * render TurnCostOverlay + ThumbsDownFeedback below them. Mirrors the
+   * dashboard chat (feed.tsx) admin surfaces. Default false.
+   */
+  isAdmin?: boolean;
+  /**
+   * NegotiationSession id — required for ThumbsDownFeedback to file reports
+   * against the right thread. When null, the feedback button is suppressed.
+   */
+  sessionId?: string | null;
 }
 
 export function EnvoyDockThread({
@@ -46,6 +66,9 @@ export function EnvoyDockThread({
   contextHostFirstName,
   onCollapse,
   onSendMessage,
+  viewerInitial = "·",
+  isAdmin = false,
+  sessionId = null,
 }: EnvoyDockThreadProps) {
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -134,7 +157,13 @@ export function EnvoyDockThread({
           </div>
         ) : (
           messages.map((msg) => (
-            <MessageBubble key={msg.id} msg={msg} />
+            <MessageBubble
+              key={msg.id}
+              msg={msg}
+              viewerInitial={viewerInitial}
+              isAdmin={isAdmin}
+              sessionId={sessionId}
+            />
           ))
         )}
       </div>
@@ -169,21 +198,37 @@ export function EnvoyDockThread({
   );
 }
 
-function MessageBubble({ msg }: { msg: Message }) {
-  const isGuest = msg.role === "guest";
+function MessageBubble({
+  msg,
+  viewerInitial,
+  isAdmin,
+  sessionId,
+}: {
+  msg: Message;
+  viewerInitial: string;
+  isAdmin: boolean;
+  sessionId: string | null;
+}) {
+  // Dock-thread role model is two-lane by design (per 2026-05-11 PR2a
+  // mapper-comment): "agent" = administrator turn from Envoy, "guest" = the
+  // viewer's own side, regardless of whether the viewer is the actual
+  // session host or the actual session guest. The avatar letter on the
+  // viewer side uses `viewerInitial` so a host viewer sees their own
+  // initial — not the hard-coded "S" that produced the 2026-05-12 bug.
+  const isViewerSide = msg.role === "guest";
 
-  const avatarStyle = isGuest
+  const avatarStyle = isViewerSide
     ? { background: "linear-gradient(135deg,#fbbf24,#f43f5e)" }
     : { background: "linear-gradient(135deg,#6366f1,#a855f7)" };
 
-  const bubbleClass = isGuest
+  const bubbleClass = isViewerSide
     ? "bg-[#eef2ff] border border-[#c7d2fe] rounded-[13px] px-[11px] py-[8px] text-[12.5px] leading-[1.45] text-[#1a1a2e] max-w-[260px]"
     : "bg-[#faf8f3] border border-[#e7e2d5] rounded-[13px] px-[11px] py-[8px] text-[12.5px] leading-[1.45] text-[#1a1a2e] max-w-[260px]";
 
-  const avatarLetter = isGuest ? "S" : "A";
+  const avatarLetter = isViewerSide ? viewerInitial : "A";
 
   return (
-    <div className={`flex gap-2 items-start ${isGuest ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-2 items-start ${isViewerSide ? "flex-row-reverse" : ""}`}>
       <div
         className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-white text-[9.5px] font-bold flex-shrink-0 mt-[2px]"
         style={avatarStyle}
@@ -193,10 +238,25 @@ function MessageBubble({ msg }: { msg: Message }) {
       <div>
         <div className={bubbleClass}>{msg.text}</div>
         <div
-          className={`text-[10px] text-[#c9c2ae] mt-[2px] px-1 ${isGuest ? "text-right" : ""}`}
+          className={`text-[10px] text-[#c9c2ae] mt-[2px] px-1 ${isViewerSide ? "text-right" : ""}`}
         >
           {msg.timestamp}
         </div>
+        {/*
+          Admin-only telemetry surfaces under agent bubbles. Mirrors the
+          dashboard chat (feed.tsx) — TurnCostOverlay shows model tier +
+          tool calls + cost + duration on demand; ThumbsDownFeedback files
+          structured failure-mode reports against this turn's session id.
+          Both render nothing when !isAdmin. The host-side viewer is the
+          intended admin audience; guest-side viewers see no overlay even
+          if they happen to be admins of a different session.
+        */}
+        {!isViewerSide && isAdmin && (
+          <div className="flex items-center gap-1 mt-[2px]">
+            <TurnCostOverlay metadata={msg.metadata ?? null} isAdmin={isAdmin} />
+            <ThumbsDownFeedback sessionId={sessionId} messageContent={msg.text} />
+          </div>
+        )}
       </div>
     </div>
   );
