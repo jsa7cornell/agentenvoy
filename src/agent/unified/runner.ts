@@ -117,6 +117,14 @@ export type UnifiedTurnConfig = {
    * dead history. `undefined` = no prior envoy turns (cold channel).
    */
   priorEnvoyTurnAgeMs?: number;
+  /**
+   * Whether the caller's history loader trimmed the recentMessages array to
+   * empty because the prior envoy turn was older than its staleness threshold
+   * (10 min for host-channel per `STALE_HISTORY_THRESHOLD_MS`; deal-room mirrors
+   * the same). Persisted to `metadata.unifiedTurn.historyTrimmedForStaleness`
+   * for the 7-day measurement window. Defaults to false.
+   */
+  historyTrimmedForStaleness?: boolean;
   /** Stream sink for status + text frames. Caller owns the ReadableStream. */
   enqueue: EnqueueFn;
   /**
@@ -164,6 +172,7 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
     priorEnvoyTurnCount,
     enqueue,
     priorEnvoyTurnAgeMs,
+    historyTrimmedForStaleness = false,
     postStreamChecks = DEFAULT_POST_STREAM_CHECKS,
     persistEnvoyMessage,
   } = config;
@@ -464,6 +473,7 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
         modelId: modelSelection.modelId,
         modelSelectionReason: modelSelection.reason,
         thinkingEnabled,
+        historyTrimmedForStaleness,
         durationMs,
         selfCheck: selfCheckResult,
         remediated,
@@ -554,6 +564,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           priorToolUseInHistory,
           priorEnvoyTurnCount,
           priorEnvoyTurnAgeMs,
+          historyTrimmedForStaleness,
         } = await loadRecentHistory(ctx.channelId);
 
         await runUnifiedTurn({
@@ -565,6 +576,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           priorToolUseInHistory,
           priorEnvoyTurnCount,
           priorEnvoyTurnAgeMs,
+          historyTrimmedForStaleness,
           enqueue,
           persistEnvoyMessage: async ({ content, metadata, threadId }) => {
             await prisma.channelMessage.create({
@@ -664,6 +676,24 @@ function withTrailingCacheBreakpoint(
   );
 }
 
+/**
+ * If the most recent prior envoy turn is older than this, history is treated
+ * as stale and dropped from the loaded prompt context (only the current user
+ * turn is sent to the model). This is the structural fix for the F14
+ * cross-thread parameter scramble family — when a host returns to a channel
+ * after hours, the model used to grab IDs and names from 17-hour-old turns
+ * and confuse them with the current request (cmp2qcnjy0011s5n70linsdkx,
+ * 2026-05-12 — "Christine coffee" turn confused with a Susan link from
+ * the prior day's history).
+ *
+ * John's prescription (2026-05-12): *"if a thread is not recent (prior 10
+ * mins) ignore anything ahead of it."* 10 min is tighter than the 15-min
+ * `HAIKU_RECENCY_WINDOW_MS` in model-policy.ts — by design. Tier routing
+ * (Haiku vs. Sonnet) tolerates a 15-min in-flight grace period; prompt
+ * context tolerates only 10. The two thresholds can be tuned independently.
+ */
+const STALE_HISTORY_THRESHOLD_MS = 10 * 60 * 1000;
+
 async function loadRecentHistory(
   channelId: string,
 ): Promise<{
@@ -675,6 +705,10 @@ async function loadRecentHistory(
    *  selectModelForTurn so 8h+ stale "prior tool use" doesn't trap dead
    *  history on Sonnet. */
   priorEnvoyTurnAgeMs?: number;
+  /** Whether history was trimmed to empty because the prior envoy turn was
+   *  >STALE_HISTORY_THRESHOLD_MS old. Persisted to metadata for the 7-day
+   *  measurement window. */
+  historyTrimmedForStaleness: boolean;
 }> {
   // Window cut from 20 → 10 (cost-reduction PR 2026-05-07). 10 turns covers
   // the typical multi-turn conversation; longer-tail context is rarely
@@ -685,16 +719,9 @@ async function loadRecentHistory(
     take: 10,
     select: { role: true, content: true, metadata: true, createdAt: true },
   });
-  // Reverse so oldest-first, map envoy → assistant for AI SDK.
-  const messages = rows
-    .reverse()
-    .map((r) => ({
-      role: r.role === "envoy" ? ("assistant" as const) : ("user" as const),
-      content: r.content,
-    }));
   // Detect whether any envoy turn in the window made a tool call. Used by the
   // tier-selection heuristic to keep Sonnet engaged for multi-step flows.
-  const priorToolUseInHistory = rows.some((r) => {
+  const priorToolUseInHistoryRaw = rows.some((r) => {
     if (r.role !== "envoy") return false;
     const md = r.metadata as { unifiedTurn?: { toolCalls?: string[] } } | null;
     return Array.isArray(md?.unifiedTurn?.toolCalls) && md.unifiedTurn.toolCalls.length > 0;
@@ -709,11 +736,37 @@ async function loadRecentHistory(
   const priorEnvoyTurnAgeMs = mostRecentEnvoy
     ? Date.now() - mostRecentEnvoy.createdAt.getTime()
     : undefined;
+
+  // Stale-history trim. When the prior envoy turn is older than the
+  // threshold, drop history entirely — the model sees only the current user
+  // turn. Closes the F14 cross-thread bleed family.
+  //
+  // priorToolUseInHistory is also forced to false in the trimmed case
+  // because the model isn't actually seeing those tool calls — keeping
+  // it true would lie to the tier router (which would keep Sonnet for an
+  // already-fresh channel).
+  const historyTrimmedForStaleness =
+    typeof priorEnvoyTurnAgeMs === "number" &&
+    priorEnvoyTurnAgeMs > STALE_HISTORY_THRESHOLD_MS;
+
+  const messages = historyTrimmedForStaleness
+    ? []
+    : rows
+        .reverse()
+        .map((r) => ({
+          role: r.role === "envoy" ? ("assistant" as const) : ("user" as const),
+          content: r.content,
+        }));
+  const priorToolUseInHistory = historyTrimmedForStaleness
+    ? false
+    : priorToolUseInHistoryRaw;
+
   return {
     messages,
     priorToolUseInHistory,
     priorEnvoyTurnCount,
     priorEnvoyTurnAgeMs,
+    historyTrimmedForStaleness,
   };
 }
 
@@ -729,6 +782,11 @@ function buildUnifiedMetadata(params: {
    *  with `cost.outputTokens` lets us measure the post-2026-05-12 thinking
    *  gate's actual cost impact. */
   thinkingEnabled: boolean;
+  /** Whether the loader trimmed history to empty because the prior envoy turn
+   *  was older than the staleness threshold. Persisted to telemetry so the
+   *  7-day measurement window can attribute regression-free turns to the trim
+   *  firing (and false-positive trims to a too-tight threshold). */
+  historyTrimmedForStaleness: boolean;
   durationMs: number;
   selfCheck: { passed: boolean; flaggedTools?: string[]; reason?: string };
   /** Layer 4 retry: did this turn run a remediation pass after self-check failed? */
@@ -750,6 +808,7 @@ function buildUnifiedMetadata(params: {
     modelId,
     modelSelectionReason,
     thinkingEnabled,
+    historyTrimmedForStaleness,
     durationMs,
     selfCheck,
     remediated,
@@ -774,6 +833,7 @@ function buildUnifiedMetadata(params: {
       tier: turnCost.tier,
       tierReason: modelSelectionReason,
       thinkingEnabled,
+      historyTrimmedForStaleness,
       promptVersion: PROMPT_VERSION,
       toolCalls: toolCallNames,
       durationMs,

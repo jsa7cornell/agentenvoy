@@ -67,8 +67,21 @@ export type DealroomContext = {
     priorEnvoyTurnAgeMs?: number;
     priorEnvoyTurnCount: number;
     priorToolUseInHistory: boolean;
+    /** History was trimmed to empty because the prior envoy turn was older
+     *  than `STALE_HISTORY_THRESHOLD_MS` (10 min). Mirrors the host-channel
+     *  loader; persisted to `metadata.unifiedTurn.historyTrimmedForStaleness`
+     *  by the runner. Closes the F14 cross-thread bleed family. */
+    historyTrimmedForStaleness: boolean;
   };
 };
+
+/**
+ * Mirrors `STALE_HISTORY_THRESHOLD_MS` in `runner.ts`. Kept as a separate
+ * constant here (not imported) so deal-room and host-channel can be tuned
+ * independently if their stale-context characteristics diverge — both
+ * default to 10 min per John's 2026-05-12 prescription.
+ */
+const STALE_HISTORY_THRESHOLD_MS = 10 * 60 * 1000;
 
 /**
  * Load + assemble the deal-room turn's context.
@@ -127,27 +140,43 @@ export async function loadDealroomContext(
     select: { role: true, content: true, createdAt: true, metadata: true },
   });
 
-  // History sanitization per `negotiate/message/route.ts:146-154` shape.
-  // administrator → assistant; system rows dropped; oldest-first.
-  const history: UnifiedHistoryMessage[] = rows
-    .reverse()
-    .filter((r) => r.role === "administrator" || r.role === "guest" || r.role === "host")
-    .map((r) => ({
-      role: r.role === "administrator" ? ("assistant" as const) : ("user" as const),
-      content: r.content,
-    }));
-
   // Tier-selection signals (mirrors loadRecentHistory in runner.ts).
   const mostRecentEnvoy = rows.find((r) => r.role === "administrator");
   const priorEnvoyTurnAgeMs = mostRecentEnvoy
     ? Date.now() - mostRecentEnvoy.createdAt.getTime()
     : undefined;
   const priorEnvoyTurnCount = rows.filter((r) => r.role === "administrator").length;
-  const priorToolUseInHistory = rows.some((r) => {
+  const priorToolUseInHistoryRaw = rows.some((r) => {
     if (r.role !== "administrator") return false;
     const md = r.metadata as { unifiedTurn?: { toolCalls?: string[] } } | null;
     return Array.isArray(md?.unifiedTurn?.toolCalls) && md.unifiedTurn.toolCalls.length > 0;
   });
+
+  // Stale-history trim (mirrors runner.ts). When the prior envoy turn is
+  // older than STALE_HISTORY_THRESHOLD_MS, drop history entirely — the model
+  // sees only the current user turn. Closes the F14 cross-thread bleed
+  // family for deal-room sessions just as it does for the host-channel.
+  const historyTrimmedForStaleness =
+    typeof priorEnvoyTurnAgeMs === "number" &&
+    priorEnvoyTurnAgeMs > STALE_HISTORY_THRESHOLD_MS;
+
+  // History sanitization per `negotiate/message/route.ts:146-154` shape.
+  // administrator → assistant; system rows dropped; oldest-first.
+  const history: UnifiedHistoryMessage[] = historyTrimmedForStaleness
+    ? []
+    : rows
+        .reverse()
+        .filter((r) => r.role === "administrator" || r.role === "guest" || r.role === "host")
+        .map((r) => ({
+          role: r.role === "administrator" ? ("assistant" as const) : ("user" as const),
+          content: r.content,
+        }));
+  // When history is trimmed, the model isn't actually seeing those tool
+  // calls — keeping priorToolUseInHistory true would lie to the tier router
+  // (which would keep Sonnet for an already-fresh channel).
+  const priorToolUseInHistory = historyTrimmedForStaleness
+    ? false
+    : priorToolUseInHistoryRaw;
 
   // Compose GROUND TRUTH lines. Order matters — earlier lines anchor higher
   // in the system prompt by convention; `[SESSION_ID]` is always first so
@@ -215,6 +244,7 @@ export async function loadDealroomContext(
       priorEnvoyTurnAgeMs,
       priorEnvoyTurnCount,
       priorToolUseInHistory,
+      historyTrimmedForStaleness,
     },
   };
 }
