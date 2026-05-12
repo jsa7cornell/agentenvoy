@@ -160,12 +160,16 @@ export async function requestSessionReschedule(
     console.warn("[session-state] schedule cache invalidation failed (non-blocking):", e);
   }
 
+  // Neutral statusLabel — works for both "explicit cancel" intent and
+  // "couldn't make this time, finding a new one" intent. The legacy
+  // "Rescheduling — …" framing implied the user was actively replanning,
+  // which was wrong when they just wanted to cancel (2026-05-12 capability
+  // clarification: both host and guest can cancel a meeting on an agreed
+  // session; same un-book mechanics, neutral words).
   const statusLabel =
     input.initiator === "host"
-      ? "Rescheduling — finding a new time"
-      : negotiation.link.inviteeName
-      ? `Rescheduling — ${negotiation.link.inviteeName} finding a new time`
-      : "Rescheduling — guest finding a new time";
+      ? "Cancelled by host — session open"
+      : "Cancelled by guest — session open";
 
   await prisma.negotiationSession.update({
     where: { id: input.sessionId },
@@ -180,10 +184,14 @@ export async function requestSessionReschedule(
     },
   });
 
+  // Same neutral framing in the thread system message. "Open if anyone
+  // wants to find a new time" leaves the door open for re-engagement
+  // without presuming intent (legacy text said "A new time is being
+  // arranged" which was wrong when the speaker just wanted to cancel).
   const systemContent =
     input.initiator === "host"
-      ? "The host has requested to reschedule this meeting. The previous time has been cancelled and attendees have been notified. A new time is being arranged."
-      : "The guest has requested to reschedule this meeting. The previous time has been cancelled and attendees have been notified. A new time is being arranged.";
+      ? "The host cancelled this meeting. The previous time has been removed and attendees have been notified. The session is open if anyone wants to find a new time."
+      : "The guest cancelled this meeting. The previous time has been removed and attendees have been notified. The session is open if anyone wants to find a new time.";
 
   await prisma.message.create({
     data: {

@@ -121,13 +121,17 @@ describe("buildUnifiedToolsFor — role-aware tool surface", () => {
     expect(names).toContain("session_save_guest_info"); // guest can save their own info
     expect(names).toContain("LOAD_calendar_context");
     expect(names).toContain("LOAD_preferences");
+    // 2026-05-12 capability clarification: guest can move a meeting too,
+    // but the prompt constrains the dateTime to OFFERABLE SLOTS (host
+    // can override their own hours; guest cannot). The tool is in the
+    // surface; the prompt does the policing.
+    expect(names).toContain("session_update_time");
 
     // Guest exclusions — no host-link or account writes:
     expect(names).not.toContain("personal_link_update"); // guests don't edit host's link
-    expect(names).not.toContain("session_update_time");
-    expect(names).not.toContain("session_update_format");
-    expect(names).not.toContain("session_update_location");
-    expect(names).not.toContain("session_cancel"); // host cancels; guest reschedules
+    expect(names).not.toContain("session_update_format"); // negotiation territory; lock_activity_location is the negotiated path
+    expect(names).not.toContain("session_update_location"); // same
+    expect(names).not.toContain("session_cancel"); // host-only — ends the whole thread; guest uses session_request_reschedule to un-book
     expect(names).not.toContain("bookable_link_create");
     expect(names).not.toContain("rule_add");
     expect(names).not.toContain("primary_link_update");
