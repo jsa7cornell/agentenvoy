@@ -576,25 +576,17 @@ async function handleCancel(
 }
 
 /**
- * For confirmed (agreed + calendarEventId) sessions, post a gcal_update_proposal
- * channel message instead of writing directly. The host sees a GcalUpdateCard
- * in the feed and must click Confirm before we touch GCal.
- */
-/**
- * Apply an in-chat update to a confirmed session by patching the GCal event
- * directly, mirroring to `link.parameters` for personalized links, and
- * posting a system message to the deal-room thread.
+ * Apply an in-chat update to a confirmed session: patch GCal, mirror to DB
+ * session row + link.parameters, post a thread system message. Used by
+ * `handleUpdateLocation` / `handleUpdateTime` / `handleUpdateFormat` for
+ * sessions in `status: "agreed"`. The user typing the change in chat IS
+ * the authorization — no host-feed approval step.
  *
- * Replaces the `postGcalUpdateProposal` dashboard-approval flow for
- * deal-room-originated edits (decided 2026-05-11 by John): when the user
- * is typing the change in the chat, their statement is the authorization —
- * no second click in the host feed required.
+ * Caller must have already authorized `userId` against `session.hostId`.
  *
- * Caller must have already authorized userId against session.hostId. Mirrors
- * the safety invariants of `/api/negotiate/update-gcal/route.ts`:
- *   - Ownership gate via assertAgentEnvoyOwnedEvent.
- *   - DB updateMany WHERE status="agreed" + !archived for TOCTOU safety.
- *   - GCal call outside any prisma transaction.
+ * NOTE — PR-C of the 2026-05-11 update-confirmed-meeting refactor will
+ * delete this function in favor of `src/lib/update-confirmed-meeting.ts`'s
+ * `updateConfirmedMeeting()`. Same semantics; one source of truth.
  */
 async function applyConfirmedSessionPatch(
   session: {

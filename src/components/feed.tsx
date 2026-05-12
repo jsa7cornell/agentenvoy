@@ -13,7 +13,6 @@ import { PrimaryLinkFlow } from "./onboarding/primary-link-flow";
 import { PreferencesExtendedFlow } from "./onboarding/preferences-extended-flow";
 import { DormantReturnBubble, type DormantContext } from "./onboarding/DormantReturnBubble";
 import { tuningInProgress } from "@/lib/onboarding/dormant-eligibility";
-import { GcalUpdateCard } from "./gcal-update-card";
 // RuleConfirmCard / RuleConfirmSheet imports retired 2026-05-03 — the
 // bookable-link create flow is now chat-driven (proposal §3.8). The
 // `BookableLinkProposal` type is still imported because legacy
@@ -2169,13 +2168,12 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
 
           // System message
           if (msg.role === "system") {
-            if (msg.metadata?.kind === "gcal_update_proposal") {
-              return (
-                <div key={msg.id} className="py-2">
-                  <GcalUpdateCard proposal={msg.metadata as unknown as Parameters<typeof GcalUpdateCard>[0]["proposal"]} />
-                </div>
-              );
-            }
+            // gcal_update_proposal — host-feed approval card retired 2026-05-11
+            // (proposal: update-confirmed-meeting). Historical messages with
+            // this metadata.kind fall through to the generic system-message
+            // render below; their content text ("Envoy is proposing an update
+            // to the confirmed meeting.") reads as informational with no
+            // orphaned approval button.
             // Office Hours rule_proposal: retired from the chat-create flow
             // 2026-05-03 (proposal `2026-05-03_recurring-and-office-hours-widgets`
             // §3.8). The propose-then-confirm pattern was replaced by a

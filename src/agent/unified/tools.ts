@@ -504,7 +504,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   const session_update_format = tool({
     description:
       "Change a session's format (video/phone/in-person). Requires sessionId. " +
-      "Confirmed sessions get a gcal_update_proposal posted to the feed.",
+      "Confirmed sessions are patched in place — the GCal event is updated " +
+      "immediately, no host-approval step.",
     inputSchema: z.object({
       sessionId: z.string(),
       format: z.enum(["video", "phone", "in-person"]).describe("New meeting format."),
@@ -532,7 +533,10 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
   const session_update_location = tool({
     description:
-      "Set/update a session's location. Confirmed sessions get a gcal_update_proposal.",
+      "Set/update a session's location. Confirmed sessions are patched in " +
+      "place — the GCal event's location field is updated immediately. For " +
+      "in-person meetings, the venue surfaces on the GCal chip + mobile " +
+      "notifications, not just the description body.",
     inputSchema: z.object({
       sessionId: z.string(),
       location: z.string().describe("Location string (address, place name, or video URL)."),

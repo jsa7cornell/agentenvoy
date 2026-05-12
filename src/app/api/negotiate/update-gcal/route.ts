@@ -6,12 +6,10 @@ import type { RefusalReason } from "@/lib/update-confirmed-meeting";
 
 // POST /api/negotiate/update-gcal
 //
-// Thin wrapper over `updateConfirmedMeeting` (PR-A). The helper owns
-// resolution + GCal patch + DB writes + thread system message + actor
-// metadata. This route's job is body parsing, refusal-to-HTTP mapping,
-// and 500-shim for unexpected throws.
-//
-// Wire shape preserved (no caller-visible behavior change post-PR-A).
+// Thin wrapper over `updateConfirmedMeeting` (PR-A of the 2026-05-11
+// refactor). The helper owns resolution + GCal patch + DB writes + thread
+// system message + actor metadata. This route's job is body parsing,
+// refusal-to-HTTP mapping, and 500-shim for unexpected throws.
 //
 // Auth: sessionId-only — same model as /api/negotiate/reschedule,
 // /confirm, /message. Anyone holding the deal-room URL can patch. GCal
