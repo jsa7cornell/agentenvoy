@@ -84,6 +84,14 @@ export type DealroomContext = {
 const STALE_HISTORY_THRESHOLD_MS = 10 * 60 * 1000;
 
 /**
+ * Progressive context loading (mirrors `FRESH_HISTORY_PRELOAD_TURNS` in
+ * runner.ts). When fresh, preload only the most recent envoy turn + its
+ * immediately preceding user turn. The model calls `LOAD_recent_history`
+ * to fetch more on demand. Closes the F14 cross-thread bleed family.
+ */
+const FRESH_HISTORY_PRELOAD_TURNS = 2;
+
+/**
  * Load + assemble the deal-room turn's context.
  *
  * Hits Prisma three times:
@@ -162,11 +170,16 @@ export async function loadDealroomContext(
 
   // History sanitization per `negotiate/message/route.ts:146-154` shape.
   // administrator → assistant; system rows dropped; oldest-first.
+  // Progressive preload: when fresh, take only FRESH_HISTORY_PRELOAD_TURNS
+  // (last administrator + preceding human). When stale, drop entirely.
+  // Filter happens BEFORE the slice so system rows in the window don't push
+  // a real turn pair out of the preload.
   const history: UnifiedHistoryMessage[] = historyTrimmedForStaleness
     ? []
     : rows
-        .reverse()
         .filter((r) => r.role === "administrator" || r.role === "guest" || r.role === "host")
+        .slice(0, FRESH_HISTORY_PRELOAD_TURNS) // rows are desc — take newest N
+        .reverse()
         .map((r) => ({
           role: r.role === "administrator" ? ("assistant" as const) : ("user" as const),
           content: r.content,

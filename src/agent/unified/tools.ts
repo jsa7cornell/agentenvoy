@@ -17,6 +17,7 @@ import { z } from "zod";
 import { loadCalendar } from "./tool-impls/load-calendar";
 import { loadActiveSessions } from "./tool-impls/load-active-sessions";
 import { loadPreferences } from "./tool-impls/load-preferences";
+import { loadRecentHistory } from "./tool-impls/load-recent-history";
 import { execAction, type ToolContext } from "./tool-impls/_exec";
 import type { ActionResult } from "@/agent/actions";
 
@@ -26,6 +27,13 @@ export type AgentToolContext = {
   meetSlug?: string;
   /** Current user message — forwarded to Layer 2 grounding check. */
   userMessage?: string;
+  /**
+   * ChannelMessage scope for `LOAD_recent_history`. Set by the host-channel
+   * runner; left undefined by deal-room callers (they have a different
+   * history table and don't expose `LOAD_recent_history` in their tool
+   * subset yet). Gates registration of the tool — see below.
+   */
+  channelId?: string;
 };
 
 // Shared availability window schema — matches AvailabilityWindow[] contract.
@@ -144,6 +152,46 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     inputSchema: z.object({}),
     execute: async () => loadPreferences(ctx.userId),
   });
+
+  // LOAD_recent_history — fetches older conversation turns on demand.
+  //
+  // The runner preloads only the last 2 turns (preceding user + envoy) into
+  // the prompt. When the host's message references something OLDER than
+  // those 2 turns ("the one from earlier today", "the Wednesday rule"), the
+  // model calls this tool to fetch more context — same pattern as
+  // LOAD_calendar_context / LOAD_active_sessions / LOAD_preferences.
+  //
+  // Only registered when ctx.channelId is set (host-channel scope). Deal-room
+  // callers don't expose this tool in v1 — their history is session-scoped
+  // and follows a different progressive-loading roadmap.
+  const channelIdForHistory = ctx.channelId;
+  const LOAD_recent_history = channelIdForHistory
+    ? tool({
+        description:
+          "Load older conversation turns from this channel. The current turn already includes the previous user message + previous envoy turn; call this tool ONLY when the host references something earlier ('the meeting I set up this morning', 'the Wednesday rule', 'what we discussed earlier'). Do NOT call this defensively — most turns don't need older context. Specify count OR sinceMinutesAgo (or both for tighter intersection).",
+        inputSchema: z.object({
+          count: z
+            .number()
+            .int()
+            .min(1)
+            .max(20)
+            .optional()
+            .describe(
+              "How many turns back to load (max 20). Defaults to 5 when neither arg given.",
+            ),
+          sinceMinutesAgo: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe(
+              "Only load turns within the last N minutes. Useful when the host says 'earlier today' or names a recent timeframe.",
+            ),
+        }),
+        execute: async (args) =>
+          loadRecentHistory(channelIdForHistory, args),
+      })
+    : null;
 
   // ---------------------------------------------------------------------------
   // Personal links — for one named guest
@@ -734,6 +782,10 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     LOAD_calendar_context,
     LOAD_active_sessions,
     LOAD_preferences,
+    // LOAD_recent_history only present when channelId is set (host-channel scope).
+    // Spread-conditional so the key is absent from the tool surface for callers
+    // that didn't pass a channelId (deal-room v1).
+    ...(LOAD_recent_history ? { LOAD_recent_history } : {}),
     // Personal links
     personal_link_create,
     personal_link_update,

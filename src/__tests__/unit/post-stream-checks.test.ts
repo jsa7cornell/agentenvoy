@@ -173,19 +173,92 @@ describe("runPostStreamChecks — convergence behavior", () => {
     expect(failedTool[0]?.scope).toBe("shape-3");
   });
 
-  it("returns empty when neither check fires", () => {
+  it("returns empty when no check fires", () => {
     const result = runPostStreamChecks({
       fullText: "Your timezone is set to America/New_York (EDT).",
       toolCalls: [{ toolName: "LOAD_preferences", success: undefined }],
     });
     expect(result).toHaveLength(0);
   });
+});
+
+describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
+  const successfulWrite = { toolName: "personal_link_create", success: true } as const;
+
+  it("fires on prose > 240 chars when a successful write happened (cmp2qcnjy shape)", () => {
+    const longProse =
+      "Now I'll load the calendar to see today and tomorrow, then update the link " +
+      "to auto-confirm one of those two dates. Based on the calendar, today is May 12 " +
+      "and tomorrow is May 13. The most recent Susan link is already scheduled — " +
+      "I'll update that existing link to correct the guestPicks field.";
+    const result = runPostStreamChecks({
+      fullText: longProse,
+      toolCalls: [successfulWrite],
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe("narration-leak");
+    expect(result[0]?.scope).toBe("length");
+  });
+
+  it("fires on 'Now I\\'ll' phrase even when prose is short", () => {
+    const result = runPostStreamChecks({
+      fullText: "Now I'll create that link for you.",
+      toolCalls: [successfulWrite],
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe("narration-leak");
+    expect(result[0]?.scope).toBe("thinking-out-loud");
+  });
+
+  it("fires on 'However, looking more carefully' (the cmp2qcnjy smoking gun)", () => {
+    const result = runPostStreamChecks({
+      fullText: "However, looking more carefully — let me update the link.",
+      toolCalls: [successfulWrite],
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.name).toBe("narration-leak");
+    expect(result[0]?.scope).toBe("thinking-out-loud");
+  });
+
+  it("does NOT fire on a clean one-sentence confirmation", () => {
+    const result = runPostStreamChecks({
+      fullText: "Here's a coffee link for Christine today or tomorrow at Stanford Research Coupa Cafe. Let me know if you want to adjust.",
+      toolCalls: [successfulWrite],
+    });
+    // narrationWithoutEmit won't fire (tools > 0), successTheater won't fire
+    // (no success: false), narrationLeak won't fire (length under cap + no
+    // forbidden phrases).
+    expect(result).toHaveLength(0);
+  });
+
+  it("does NOT fire when no write happened — owned by narrationWithoutEmitCheck instead", () => {
+    const result = runPostStreamChecks({
+      fullText:
+        "Now I'll load the calendar to see today and tomorrow, then update the link to auto-confirm one of those two dates. Based on the calendar, today is May 12 and tomorrow is May 13. The most recent Susan link is already scheduled.",
+      toolCalls: [],
+    });
+    // Only narration-without-emit fires (the prose looks confirmation-shaped,
+    // tools.length === 0). narrationLeak skips this case.
+    expect(result.map((r) => r.name)).not.toContain("narration-leak");
+  });
+
+  it("does NOT fire when the write failed — owned by successTheaterCheck", () => {
+    const result = runPostStreamChecks({
+      fullText:
+        "Now I'll create the link. The most recent Susan session is already scheduled. " +
+        "Based on the calendar, the slot is taken. I'll update that existing link.",
+      toolCalls: [{ toolName: "personal_link_create", success: false }],
+    });
+    // successTheater owns this (failed write + prose). narrationLeak skips.
+    expect(result.map((r) => r.name)).not.toContain("narration-leak");
+  });
 
   it("uses DEFAULT_POST_STREAM_CHECKS when no override passed", () => {
-    expect(DEFAULT_POST_STREAM_CHECKS.length).toBe(2);
+    expect(DEFAULT_POST_STREAM_CHECKS.length).toBe(3);
     expect(DEFAULT_POST_STREAM_CHECKS.map((c) => c.name)).toEqual([
       "narration-without-emit",
       "success-theater",
+      "narration-leak",
     ]);
   });
 

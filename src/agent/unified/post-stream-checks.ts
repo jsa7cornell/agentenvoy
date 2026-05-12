@@ -200,18 +200,120 @@ export const successTheaterCheck: PostStreamCheck = {
 };
 
 // ---------------------------------------------------------------------------
+// Check 3 — narrationLeakCheck (cost-reduction 2026-05-12 follow-up)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fires when the model produced confirmation-shaped prose AND a successful
+ * write, BUT the prose is structurally too long OR contains "thinking out
+ * loud" phrases that the system prompt explicitly forbids.
+ *
+ * Background (cmp2qcnjy0011s5n70linsdkx, 2026-05-12): a Haiku turn emitted
+ * a correct `personal_link_create` but wrote a 1,126-character multi-
+ * paragraph response with phrases like "Now I'll load the calendar...",
+ * "However, looking more carefully...", "Let me update the link...".
+ * That violates STEP 2 OUTPUT RULE in the unified-agent prompt
+ * ("Stay silent before the tool calls. Output exactly the one template
+ * sentence below — and stop."), but prompt rules don't bind 100%.
+ * This is the structural backstop.
+ *
+ * γ-default (flag-only) per the cost-reduction proposal's B2 — writes to
+ * `metadata.unifiedTurn.postStreamGuards` but does NOT replace `fullText`.
+ * After 7 days of telemetry we decide whether to escalate to truncate-to-
+ * last-sentence or remediation rerun.
+ *
+ * Two sub-checks:
+ *   - "length" — prose > MAX_CONFIRMATION_LEN_CHARS on a successful write
+ *     turn. Cheap, deterministic, catches the multi-paragraph case.
+ *   - "thinking-out-loud" — prose matches known reasoning-leak phrases.
+ *     Catches shorter leaks where length alone wouldn't fire.
+ *
+ * Returns the FIRST sub-shape that fires (length wins if both match).
+ */
+const MAX_CONFIRMATION_LEN_CHARS = 240;
+
+/**
+ * Phrases the unified-agent prompt's FAILURE GALLERY explicitly forbids
+ * (STEP 2 OUTPUT RULE + the cmp2qcnjy "shared reasoning" row).
+ * Word-boundary anchored to avoid false positives on substrings.
+ */
+const THINKING_OUT_LOUD_PATTERNS: readonly RegExp[] = [
+  /\bNow I[''']ll\b/i,                     // "Now I'll load the calendar..."
+  // "Let me <think-verb>" — NOT "Let me know" (canonical template close).
+  /\bLet me (?:check|load|look|update|verify|fetch|see|think|review|reconsider|update the|check the|load the|look at|see if|think about)\b/i,
+  /\bI[''']ll (?:load|check|look|update|update the|create the|fetch)\b/i,
+  /\bHowever,?\s+looking more carefully\b/i, // The cmp2qcnjy smoking gun
+  /\bOn review\b/i,                         // From the old remediation prompt
+  /\bLooking (?:more carefully|at this again)\b/i,
+  /\bThinking about this\b/i,
+  /\bThe user (?:specified|said|wants|is asking)\b/i,  // Narrating the model's parse of the user
+  /\bBased on the (?:calendar|preferences|sessions)\b/i,
+  /\bSince (?:the user|you) (?:specified|said|mentioned)\b/i,
+];
+
+/**
+ * Does the prose contain a known "thinking out loud" phrase?
+ */
+export function hasThinkingOutLoudPhrase(text: string): boolean {
+  if (!text) return false;
+  for (const rx of THINKING_OUT_LOUD_PATTERNS) {
+    if (rx.test(text)) return true;
+  }
+  return false;
+}
+
+export const narrationLeakCheck: PostStreamCheck = {
+  name: "narration-leak",
+  check: ({ fullText, toolCalls }) => {
+    // Only fires on turns where SOMETHING got done. A turn with zero writes
+    // is owned by narrationWithoutEmitCheck (shape-1); a turn with failed
+    // writes is owned by successTheaterCheck (shape-3). This guard targets
+    // the "correct action, wrong prose" case.
+    const writeToolCalls = toolCalls.filter((tc) => !tc.toolName.startsWith("LOAD_"));
+    if (writeToolCalls.length === 0) return { fired: false };
+    const anySuccess = writeToolCalls.some((tc) => tc.success === true);
+    if (!anySuccess) return { fired: false };
+
+    // Length-cap sub-check. Threshold deliberately generous (240 chars =
+    // ~40 words) so the canonical one-sentence templates pass cleanly.
+    if (fullText.length > MAX_CONFIRMATION_LEN_CHARS) {
+      return {
+        fired: true,
+        scope: "length",
+        reason: `Prose ${fullText.length} chars > ${MAX_CONFIRMATION_LEN_CHARS} char cap (expected one short sentence).`,
+      };
+    }
+
+    // Thinking-out-loud sub-check.
+    if (hasThinkingOutLoudPhrase(fullText)) {
+      return {
+        fired: true,
+        scope: "thinking-out-loud",
+        reason: `Prose contains a forbidden "thinking out loud" phrase (Now I'll / Let me / However looking more carefully / etc.).`,
+      };
+    }
+
+    return { fired: false };
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Default check set
 // ---------------------------------------------------------------------------
 
 /**
- * The default post-stream check array a runner caller should use. Both
- * checks run on every turn; they're cheap (regex over a few KB of prose +
- * a flag check over the tool-call array) and partition the failure space
- * cleanly.
+ * The default post-stream check array a runner caller should use. All
+ * three checks run on every turn; they're cheap (regex over a few KB of
+ * prose + a flag check over the tool-call array) and partition the failure
+ * space cleanly:
+ *   - shape-1 (no tools) → narrationWithoutEmitCheck
+ *   - shape-3 (failed write, lying prose) → successTheaterCheck
+ *   - length / thinking-out-loud (successful write, wrong-shape prose) → narrationLeakCheck
  */
 export const DEFAULT_POST_STREAM_CHECKS: readonly PostStreamCheck[] = [
   narrationWithoutEmitCheck,
   successTheaterCheck,
+  narrationLeakCheck,
 ];
 
 // ---------------------------------------------------------------------------

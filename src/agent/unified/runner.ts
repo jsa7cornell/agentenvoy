@@ -370,13 +370,16 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
           {
             role: "user",
             content:
-              `[INTERNAL — self-check flagged your prior turn]\n` +
+              `[INTERNAL]\n` +
               `Flagged: ${(selfCheckResult.flaggedTools ?? []).join(", ") || "(unspecified)"}\n` +
               `Reason: ${selfCheckResult.reason ?? "(unspecified)"}\n\n` +
-              `Call the correction tool first, then emit one short sentence describing the final correct state. ` +
-              `Match the confirmation-template style from the system prompt (e.g. "Coaching Sessions is daily now, every day 2–5pm."). ` +
-              `Do not add preamble. Do not add apology. Do not reference the prior turn.\n\n` +
-              `If on review the prior turn's tool calls were actually correct (the self-check flag was a false positive), do NOT call any correction tool. Output a single sentence in the system prompt's confirmation-template style describing what was done. Do not say "no correction tool available". Do not expose internal field names like \`guestPicks\`, \`recurrence\`, or \`availability\`. Do not explain why the original was correct — just confirm the action.`,
+              // Tightened 2026-05-12: the prior remediation prompt framed the
+              // task as "if on review the prior turn's tool calls were actually
+              // correct..." which Haiku narrated literally ("However, looking
+              // more carefully..."), producing the reasoning-leak prose
+              // (cmp2qcnjy0011s5n70linsdkx). The new instruction is template-
+              // only with no "review" framing.
+              `Output exactly one confirmation sentence in the system prompt's template style ("Wednesdays blocked.", "Susan's link is updated — 45 min, in-person."). If a correction tool is needed, call it FIRST, silently, then emit the one sentence. If no correction is needed, emit the one sentence describing the final state. Never narrate reasoning. Never say "looking more carefully", "however", "now I'll", "let me", "on review", or any "thinking out loud" phrase. Never expose internal field names (\`guestPicks\`, \`recurrence\`, \`availability\`). Never reference the prior turn. One sentence. Period.`,
           },
         ],
         tools,
@@ -553,6 +556,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           timezone: ctx.timezone,
           meetSlug: ctx.meetSlug,
           userMessage: ctx.message,
+          channelId: ctx.channelId,
         });
 
         // Load recent conversation history (host-channel-scoped). The
@@ -678,21 +682,33 @@ function withTrailingCacheBreakpoint(
 
 /**
  * If the most recent prior envoy turn is older than this, history is treated
- * as stale and dropped from the loaded prompt context (only the current user
- * turn is sent to the model). This is the structural fix for the F14
- * cross-thread parameter scramble family — when a host returns to a channel
- * after hours, the model used to grab IDs and names from 17-hour-old turns
- * and confuse them with the current request (cmp2qcnjy0011s5n70linsdkx,
- * 2026-05-12 — "Christine coffee" turn confused with a Susan link from
- * the prior day's history).
+ * as stale and dropped from the loaded prompt context entirely. The model
+ * sees only the current user turn. Closes the F14 cross-thread bleed family
+ * (cmp2qcnjy0011s5n70linsdkx, 2026-05-12 — "Christine coffee" turn
+ * confused with a Susan link from the prior day's history).
  *
  * John's prescription (2026-05-12): *"if a thread is not recent (prior 10
  * mins) ignore anything ahead of it."* 10 min is tighter than the 15-min
  * `HAIKU_RECENCY_WINDOW_MS` in model-policy.ts — by design. Tier routing
- * (Haiku vs. Sonnet) tolerates a 15-min in-flight grace period; prompt
- * context tolerates only 10. The two thresholds can be tuned independently.
+ * tolerates a 15-min in-flight grace period; prompt context tolerates only 10.
  */
 const STALE_HISTORY_THRESHOLD_MS = 10 * 60 * 1000;
+
+/**
+ * Progressive context loading (2026-05-12, John's directive):
+ * Even when history is fresh (<STALE_HISTORY_THRESHOLD_MS), we preload only
+ * the most recent envoy turn + its immediately preceding user turn — NOT all
+ * 10 rows. This handles the "yes go for it" / "change it to 30 min" / bare
+ * confirmation shape (which needs to know what `it` is) without exposing the
+ * full history to cross-thread scramble.
+ *
+ * When the model encounters a reference it can't resolve from the preloaded
+ * pair (e.g., "the one from earlier today", "the Wednesday rule"), it calls
+ * `LOAD_recent_history(count?, sinceMinutesAgo?)` to fetch more. Consistent
+ * with the rest of the LOAD_* tool family — calendar, sessions, preferences
+ * are all on-demand; history now joins them.
+ */
+const FRESH_HISTORY_PRELOAD_TURNS = 2; // last user + last envoy
 
 async function loadRecentHistory(
   channelId: string,
@@ -710,9 +726,11 @@ async function loadRecentHistory(
    *  measurement window. */
   historyTrimmedForStaleness: boolean;
 }> {
-  // Window cut from 20 → 10 (cost-reduction PR 2026-05-07). 10 turns covers
-  // the typical multi-turn conversation; longer-tail context is rarely
-  // load-bearing and the savings are ~1,500 tokens per turn.
+  // Take 10 for the signal computation (priorToolUseInHistory looks across
+  // the recent window) but PRELOAD only FRESH_HISTORY_PRELOAD_TURNS into the
+  // prompt context. Progressive-context architecture per John's 2026-05-12
+  // directive — everything beyond the 2-turn preload is loaded on demand via
+  // LOAD_recent_history.
   const rows = await prisma.channelMessage.findMany({
     where: { channelId },
     orderBy: { createdAt: "desc" },
@@ -749,9 +767,13 @@ async function loadRecentHistory(
     typeof priorEnvoyTurnAgeMs === "number" &&
     priorEnvoyTurnAgeMs > STALE_HISTORY_THRESHOLD_MS;
 
+  // Progressive preload: when fresh, keep only the last
+  // FRESH_HISTORY_PRELOAD_TURNS (preceding user + envoy turn — handles "yes",
+  // "change it", bare confirmations). When stale, drop entirely.
   const messages = historyTrimmedForStaleness
     ? []
     : rows
+        .slice(0, FRESH_HISTORY_PRELOAD_TURNS) // rows are desc — take newest N
         .reverse()
         .map((r) => ({
           role: r.role === "envoy" ? ("assistant" as const) : ("user" as const),
