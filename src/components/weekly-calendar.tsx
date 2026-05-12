@@ -177,6 +177,16 @@ interface WeeklyCalendarProps {
     end: string;
     level: "protect" | "block";
   }) => Promise<void> | void;
+  /**
+   * Click-to-remove-rule: when set, the block-reason popover shown on
+   * scored slots gains a "Remove this rule" button. Fires only for slots
+   * whose protection comes from a user-created block rule (slot.kind ===
+   * "blocked_window" with an eventSummary label). The handler looks up
+   * the rule by originalText and removes it from structuredRules.
+   */
+  onRemoveSlotRule?: (params: {
+    ruleLabel: string;
+  }) => Promise<void> | void;
   /** Number of consecutive days to render starting from weekStart.
    *  Defaults to 7 (full week). When < 7, the grid still anchors to
    *  weekStart so the week-nav still aligns; the panel caller can
@@ -209,6 +219,7 @@ export function WeeklyCalendar({
   onSlotClick,
   onEventClick,
   onCreateSlotProtection,
+  onRemoveSlotRule,
   daysToShow = 7,
   hideToolbar = false,
   headerGutterSlot,
@@ -268,6 +279,9 @@ export function WeeklyCalendar({
     slotEnd: string;
   } | null>(null);
   const [protectSaving, setProtectSaving] = useState(false);
+  // Tracks the in-flight "Remove this rule" call so the button reflects
+  // a saving state and is disabled until the schedule round-trip lands.
+  const [removingRule, setRemovingRule] = useState(false);
 
   // Drag-select state. Set on pointerdown on an open (score 0) slot when
   // onCreateSlotProtection is wired. `originRow` is the cell where the
@@ -905,12 +919,47 @@ export function WeeklyCalendar({
                 : null;
               const gcalLink = blockingEvent?.htmlLink ?? "https://calendar.google.com";
               const linkLabel = selectedLinkName ?? "Primary link";
+              // A user-created block rule landed this slot here when the
+              // scoring kind is "blocked_window" AND there's a label
+              // (originalText) on the slot. Surfacing the "Remove this rule"
+              // button only in that case avoids offering a no-op for
+              // off-hours / weekend / blackout slots which don't map to a
+              // single removable rule.
+              const isUserBlock =
+                s.kind === "blocked_window" && !!s.eventSummary;
+              const removableLabel = isUserBlock ? s.eventSummary! : null;
               return (
                 <>
                   <div className="font-semibold mb-1 text-primary">
                     {slotTierLabel(s.score)}
                   </div>
                   <div className="text-secondary leading-relaxed mb-2">{body}</div>
+                  {removableLabel && onRemoveSlotRule && (
+                    <div className="mb-2 pb-2 border-b border-DEFAULT/40">
+                      <div className="text-[10px] text-muted mb-1 italic">
+                        Rule: &ldquo;{removableLabel}&rdquo;
+                      </div>
+                      <button
+                        type="button"
+                        disabled={removingRule}
+                        onClick={async () => {
+                          if (removingRule) return;
+                          setRemovingRule(true);
+                          try {
+                            await onRemoveSlotRule({ ruleLabel: removableLabel });
+                            setOpenBlockInfo(null);
+                          } catch (err) {
+                            console.error("[remove-rule] failed:", err);
+                          } finally {
+                            setRemovingRule(false);
+                          }
+                        }}
+                        className="text-[10px] font-medium text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition disabled:opacity-50"
+                      >
+                        {removingRule ? "Removing…" : "Remove this rule"}
+                      </button>
+                    </div>
+                  )}
                   {cta === "rules" && (
                     <a
                       href="/dashboard/availability"

@@ -448,6 +448,42 @@ export function AvailabilityPanel({
     await fetchSchedule();
   }
 
+  // Remove a user-created block rule from the info popover. Matches by
+  // originalText against active block rules — fragile only if two rules
+  // happen to share identical text, which is rare (one-time rules carry
+  // a date in the text; recurring carry days/times). Removes ALL matching
+  // rules; for a recurring rule, that's the whole pattern (matches the
+  // intent of the popover, which labels the rule by its originalText).
+  async function handleRemoveSlotRule(params: { ruleLabel: string }) {
+    const getRes = await fetch("/api/tuner/preferences");
+    if (!getRes.ok) throw new Error(`prefs fetch failed (${getRes.status})`);
+    const prefs = await getRes.json();
+    const existing = (prefs.structuredRules as AvailabilityRule[] | undefined) ?? [];
+
+    const filtered = existing.filter(
+      (r) =>
+        !(
+          r.status === "active" &&
+          r.action === "block" &&
+          r.originalText === params.ruleLabel
+        ),
+    );
+    if (filtered.length === existing.length) {
+      // No match — refetch anyway so UI stays consistent with server.
+      await fetchSchedule();
+      return;
+    }
+
+    const putRes = await fetch("/api/tuner/preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ structuredRules: filtered }),
+    });
+    if (!putRes.ok) throw new Error(`prefs save failed (${putRes.status})`);
+
+    await fetchSchedule();
+  }
+
   async function handleSessionArchive(sessionId: string) {
     setSessionActionBusy(true);
     try {
@@ -1033,6 +1069,7 @@ export function AvailabilityPanel({
               primaryCalendar={calendars[0]}
               onEventClick={handleEventClick}
               onCreateSlotProtection={handleCreateSlotProtection}
+              onRemoveSlotRule={handleRemoveSlotRule}
               selectedLinkName={selectedLinkName}
             />
           ) : mobileView === "workweek" ? (
@@ -1051,6 +1088,7 @@ export function AvailabilityPanel({
               primaryCalendar={calendars[0]}
               onEventClick={handleEventClick}
               onCreateSlotProtection={handleCreateSlotProtection}
+              onRemoveSlotRule={handleRemoveSlotRule}
               selectedLinkName={selectedLinkName}
             />
           ) : (
@@ -1078,6 +1116,7 @@ export function AvailabilityPanel({
             primaryCalendar={calendars[0]}
             onEventClick={handleEventClick}
             onCreateSlotProtection={handleCreateSlotProtection}
+            onRemoveSlotRule={handleRemoveSlotRule}
             selectedLinkName={selectedLinkName}
           />
         )}
