@@ -393,12 +393,23 @@ function SlotChipRows({
     return (
       <button
         key={key}
-        onClick={() =>
+        onClick={() => {
+          // 2026-05-12 — telemetry for picker-not-clickable triage. Surfaces
+          // in Vercel runtime logs via the client (console.* is captured by
+          // the feedback bundle's consoleLines for the most recent ring).
+          // Drop the telemetry when the bug is closed.
+          console.log("[picker.chip-click]", {
+            slotStart: slot.start,
+            slotEnd: slot.end,
+            dateStr,
+            hasOnSelectSlot: !!onSelectSlot,
+            variant,
+          });
           onSelectSlot?.(
             formatSlotMessage(slot, dateStr, timezone),
             { start: slot.start, end: slot.end },
-          )
-        }
+          );
+        }}
         disabled={!onSelectSlot}
         className={`
           inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium leading-none border transition-all

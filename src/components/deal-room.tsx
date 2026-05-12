@@ -879,6 +879,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // defaults (linkFormat, linkLocation, slotDuration) so a guest's chip click
   // goes straight to a proposal card instead of round-tripping through Envoy.
   function proposeFromSlot(slot: { start: string; end: string }) {
+    // 2026-05-12 — telemetry for picker-not-clickable triage. Drop when
+    // the bug is closed.
+    console.log("[picker.proposeFromSlot]", {
+      slot,
+      reschedulingFromConfirmed,
+      sessionId,
+      slotDuration,
+      schedulingMode,
+      confirmed,
+    });
     const startMs = new Date(slot.start).getTime();
     const endMs = new Date(slot.end).getTime();
     const durationFromRange = Math.max(15, Math.round((endMs - startMs) / 60000));
@@ -914,6 +924,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         }),
       })
         .then(async (res) => {
+          // 2026-05-12 — telemetry for picker-not-clickable triage.
+          console.log("[picker.reschedule-fetch-result]", {
+            status: res.status,
+            ok: res.ok,
+            sessionId,
+            newStart: newStart.toISOString(),
+          });
           if (!res.ok) {
             const body = await res.json().catch(() => ({}));
             setMessages((prev) => [
