@@ -774,14 +774,16 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     const result = await createCalendarEvent(session.hostId, {
       summary: eventSummary,
       description: descriptionLines.join("\n"),
-      // GCal location field — surfaces the venue as the chip in week/day
-      // view. Only set for in-person; for video/phone the field stays
-      // empty so the UI doesn't render a misleading chip.
-      // 2026-05-11 — added per round-2 MCP feedback (custom location was
-      // landing in description body only; calendar chip read "No location").
-      ...(meetingFormat === "in-person" && effectiveLocation
-        ? { location: effectiveLocation }
-        : {}),
+      // GCal `location` field — always 1:1 with `effectiveLocation` (the
+      // same value the description body already carries). effectiveLocation
+      // is computed above with format-aware fallbacks: explicit address
+      // for in-person, phone-call instructions for phone, zoom URL for
+      // video+Zoom, null for video+Meet with no venue set. Whatever ends
+      // up there is what we want surfaced in the GCal chip / mobile
+      // notification / agent-scraper read of the event resource.
+      // 2026-05-11 — removed prior "in-person only" gate per John's
+      // ask: location field should track the event 1:1.
+      ...(effectiveLocation ? { location: effectiveLocation } : {}),
       startTime,
       endTime,
       attendeeEmails,
