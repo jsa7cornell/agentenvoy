@@ -76,15 +76,22 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         });
 
         // Load recent conversation history (now also returns tier signals).
-        const { messages: recentMessages, priorToolUseInHistory, priorEnvoyTurnCount } =
-          await loadRecentHistory(ctx.channelId);
+        const {
+          messages: recentMessages,
+          priorToolUseInHistory,
+          priorEnvoyTurnCount,
+          priorEnvoyTurnAgeMs,
+        } = await loadRecentHistory(ctx.channelId);
 
         // Select model tier — Haiku for short single-turn cases on established
         // channels, Sonnet for cold-channel and multi-step turns, Opus for long.
+        // priorEnvoyTurnAgeMs gates the recency window: stale prior tool use
+        // (8h+) drops to Haiku rather than keeping Sonnet on dead history.
         const modelSelection = selectModelForTurn({
           messageLength: ctx.message.length,
           priorToolUseInHistory,
           priorEnvoyTurnCount,
+          priorEnvoyTurnAgeMs,
         });
 
         // Stream the unified agent response.
@@ -100,8 +107,19 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         // is still captured to metadata.unifiedTurn.reasoningTrace
         // (admin-only diagnostic, not streamed to the client).
         //
-        // Disable via UA_THINKING_DISABLED=true env if needed.
-        const thinkingEnabled = process.env.UA_THINKING_DISABLED !== "true";
+        // Tier-aware gate (2026-05-12 cost reduction):
+        //   - UA_THINKING_DISABLED=true env: kill switch, off everywhere.
+        //   - tier === "fast" (Haiku): off — adaptive thinking burns output
+        //     tokens on a tier where its value is lowest.
+        //   - messageLength <= 80 chars: off — mechanical turns ("block
+        //     Wednesdays", "yes go for it") don't benefit from thinking and
+        //     pay output-rate tokens for it.
+        //   - everything else: adaptive (model decides budget per turn).
+        const SHORT_TURN_NO_THINK_THRESHOLD = 80;
+        const thinkingEnabled =
+          process.env.UA_THINKING_DISABLED !== "true" &&
+          modelSelection.tier !== "fast" &&
+          ctx.message.length > SHORT_TURN_NO_THINK_THRESHOLD;
         const startMs = Date.now();
         // Two cache breakpoints:
         //   1) tools + system prompt (always-stable prefix; written on first turn
@@ -185,6 +203,30 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
             input: tc.input as Record<string, unknown>,
           })),
         );
+
+        // Mirror tool calls + their results into the legacy
+        // `actions` / `actionResults` metadata shape so the feedback outcome
+        // classifier (build-filing-context.ts) and bundle builder
+        // (bundle-builder.ts) recognize this turn as having acted. Without
+        // this, every unified-runner turn that uses tools gets classified
+        // as `lastAgentOutcome: "no_action"` — and feedback triage breaks.
+        type ActionResultLike = { success?: boolean; message?: string; data?: Record<string, unknown> };
+        const legacyActions: { action: string; params: Record<string, unknown> }[] = [];
+        const legacyActionResults: { action: string; success: boolean; message: string; data?: Record<string, unknown> }[] = [];
+        for (const step of steps) {
+          const results = step.toolResults ?? [];
+          step.toolCalls.forEach((tc, i) => {
+            const input = (tc.input ?? {}) as Record<string, unknown>;
+            legacyActions.push({ action: tc.toolName, params: input });
+            const out = results[i]?.output as ActionResultLike | undefined;
+            legacyActionResults.push({
+              action: tc.toolName,
+              success: out?.success === true,
+              message: typeof out?.message === "string" ? out.message : "",
+              ...(out?.data ? { data: out.data } : {}),
+            });
+          });
+        }
 
         // Layer 4 — self-check (post-stream, fast model).
         const selfCheckResult = await runSelfCheck(
@@ -321,12 +363,17 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
                 turnCost,
                 toolCallNames: allToolCallNames,
                 modelId: modelSelection.modelId,
+                modelSelectionReason: modelSelection.reason,
+                thinkingEnabled,
                 durationMs,
                 selfCheck: selfCheckResult,
                 remediated,
                 remediationDurationMs,
                 reasoningTrace: reasoningTrace.trim() ? reasoningTrace : null,
               }) as object),
+              ...(legacyActions.length > 0
+                ? { actions: legacyActions, actionResults: legacyActionResults }
+                : {}),
               ...(linkCardExtras
                 ? {
                     linkKind: linkCardExtras.linkKind,
@@ -400,6 +447,7 @@ const TOOL_STATUS_COPY: Record<string, string> = {
   rule_remove:              "Removing rule…",
   // Preferences
   prefs_update_appearance:  "Saving appearance…",
+  prefs_update_business_hours: "Saving work hours…",
   prefs_update_timezone:    "Saving timezone…",
   knowledge_write:          "Saving note…",
 };
@@ -437,6 +485,11 @@ async function loadRecentHistory(
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   priorToolUseInHistory: boolean;
   priorEnvoyTurnCount: number;
+  /** Wall-clock ms since the most recent envoy turn was persisted. Undefined
+   *  when there are no prior envoy turns. Feeds the recency-window gate in
+   *  selectModelForTurn so 8h+ stale "prior tool use" doesn't trap dead
+   *  history on Sonnet. */
+  priorEnvoyTurnAgeMs?: number;
 }> {
   // Window cut from 20 → 10 (cost-reduction PR 2026-05-07). 10 turns covers
   // the typical multi-turn conversation; longer-tail context is rarely
@@ -445,7 +498,7 @@ async function loadRecentHistory(
     where: { channelId },
     orderBy: { createdAt: "desc" },
     take: 10,
-    select: { role: true, content: true, metadata: true },
+    select: { role: true, content: true, metadata: true, createdAt: true },
   });
   // Reverse so oldest-first, map envoy → assistant for AI SDK.
   const messages = rows
@@ -464,13 +517,33 @@ async function loadRecentHistory(
   // Count envoy turns to recognize cold channels. New users with no history
   // ought to stay on Sonnet for create-link requests even when short.
   const priorEnvoyTurnCount = rows.filter((r) => r.role === "envoy").length;
-  return { messages, priorToolUseInHistory, priorEnvoyTurnCount };
+  // Compute age of the most recent envoy turn (rows queried desc → first envoy
+  // row in the original ordering wins). Used by the recency-window gate to
+  // distinguish in-flight multi-step from stale history.
+  const mostRecentEnvoy = rows.find((r) => r.role === "envoy");
+  const priorEnvoyTurnAgeMs = mostRecentEnvoy
+    ? Date.now() - mostRecentEnvoy.createdAt.getTime()
+    : undefined;
+  return {
+    messages,
+    priorToolUseInHistory,
+    priorEnvoyTurnCount,
+    priorEnvoyTurnAgeMs,
+  };
 }
 
 function buildUnifiedMetadata(params: {
   turnCost: TurnCost;
   toolCallNames: string[];
   modelId: string;
+  /** `selectModelForTurn().reason` — persisted so production telemetry can
+   *  attribute Sonnet/Haiku routing to the actual gate that fired
+   *  ("short-no-multistep" / "short-stale-history" / "default" / etc). */
+  modelSelectionReason: string;
+  /** Whether Anthropic extended-thinking was enabled for this turn. Combined
+   *  with `cost.outputTokens` lets us measure the post-2026-05-12 thinking
+   *  gate's actual cost impact. */
+  thinkingEnabled: boolean;
   durationMs: number;
   selfCheck: { passed: boolean; flaggedTools?: string[]; reason?: string };
   /** Layer 4 retry: did this turn run a remediation pass after self-check failed? */
@@ -482,7 +555,18 @@ function buildUnifiedMetadata(params: {
    *  emitted. Capped at ~8KB to keep metadata payloads reasonable. */
   reasoningTrace?: string | null;
 }): Prisma.InputJsonValue {
-  const { turnCost, toolCallNames, modelId, durationMs, selfCheck, remediated, remediationDurationMs, reasoningTrace } = params;
+  const {
+    turnCost,
+    toolCallNames,
+    modelId,
+    modelSelectionReason,
+    thinkingEnabled,
+    durationMs,
+    selfCheck,
+    remediated,
+    remediationDurationMs,
+    reasoningTrace,
+  } = params;
 
   // Synthesize moduleGuard.bucket from tool names for corpus continuity.
   // Maps tool name prefixes to logical bucket names understood by the dashboard.
@@ -498,6 +582,8 @@ function buildUnifiedMetadata(params: {
     unifiedTurn: {
       model: modelId,
       tier: turnCost.tier,
+      tierReason: modelSelectionReason,
+      thinkingEnabled,
       promptVersion: PROMPT_VERSION,
       toolCalls: toolCallNames,
       durationMs,

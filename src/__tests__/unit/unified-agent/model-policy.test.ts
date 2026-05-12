@@ -8,15 +8,18 @@ import {
 } from "@/agent/unified/model-policy";
 
 describe("selectModelForTurn", () => {
-  // v2.1 policy (loosened gate 2026-05-07):
-  //   short (≤200) + no multi-step → fast (Haiku) — cold channels included
+  // v3 policy (recency-window gate, 2026-05-12):
+  //   short (≤200) + no multi-step + no recent prior tool use → fast (Haiku)
   //   long (>500) → deep (Opus)
   //   else → default (Sonnet)
-  // Grounding-check + self-check cover the load-bearing-create concern that
-  // previously kept cold channels on Sonnet.
+  // Recency window splits "in-flight" from "stale history": prior tool use
+  // ≤15 min ago keeps Sonnet (real mid-flow), >15 min ago drops to Haiku
+  // (dead history, the case-study turn shape).
 
   // Helper for the established-channel default state.
   const established = { priorEnvoyTurnCount: 5 } as const;
+  const RECENT_AGE_MS = 5 * 60 * 1000; // 5 min — inside the 15-min window
+  const STALE_AGE_MS = 8 * 60 * 60 * 1000; // 8h — well outside the window
 
   it("returns fast (Haiku) for short messages with no multi-step on established channel", () => {
     const r = selectModelForTurn({ messageLength: 50, ...established });
@@ -43,7 +46,22 @@ describe("selectModelForTurn", () => {
     expect(r.tier).toBe("fast");
   });
 
-  it("returns default (Sonnet) for short messages when prior tool use is in history", () => {
+  it("returns default (Sonnet) for short messages when prior tool use is recent (in-flight)", () => {
+    // The original safety case: user said "yes" 5 min after a LOAD proposal.
+    const r = selectModelForTurn({
+      messageLength: 50,
+      priorToolUseInHistory: true,
+      priorEnvoyTurnAgeMs: RECENT_AGE_MS,
+      ...established,
+    });
+    expect(r.tier).toBe("default");
+    expect(r.reason).toBe("default");
+  });
+
+  it("returns default (Sonnet) when priorToolUseInHistory but ageMs is unknown (conservative)", () => {
+    // Pre-recency callers (and tests that omit ageMs) preserve the v2
+    // behavior: any prior tool use → Sonnet. Runner always passes ageMs;
+    // this guards against partial migrations.
     const r = selectModelForTurn({
       messageLength: 50,
       priorToolUseInHistory: true,
@@ -52,11 +70,40 @@ describe("selectModelForTurn", () => {
     expect(r.tier).toBe("default");
   });
 
+  it("returns fast (Haiku) when prior tool use was >15 min ago (stale history — case-study turn)", () => {
+    // The case-study turn: 8h 40min after a personal_link_update on an
+    // unrelated topic. v2 gate kept this on Sonnet → 24s / $0.09 for "protect
+    // my calendar next monday all day". v3 routes it to Haiku.
+    const r = selectModelForTurn({
+      messageLength: 40, // "protect my calendar next monday all day"
+      priorToolUseInHistory: true,
+      priorEnvoyTurnAgeMs: STALE_AGE_MS,
+      ...established,
+    });
+    expect(r.tier).toBe("fast");
+    expect(r.reason).toBe("short-stale-history");
+  });
+
+  it("returns fast (Haiku) when prior tool use is exactly at the recency boundary (15 min)", () => {
+    // Boundary check: 15 min ages out, 14:59 stays in.
+    const exactly15Min = 15 * 60 * 1000;
+    const r = selectModelForTurn({
+      messageLength: 50,
+      priorToolUseInHistory: true,
+      priorEnvoyTurnAgeMs: exactly15Min + 1,
+      ...established,
+    });
+    expect(r.tier).toBe("fast");
+    expect(r.reason).toBe("short-stale-history");
+  });
+
   it("returns default (Sonnet) when prior envoy turn used tools (priorTurnToolCount)", () => {
-    // Mid-flow case: user just said "yes" after a LOAD proposal.
+    // Mid-flow case: user just said "yes" after a LOAD proposal — the prior
+    // envoy turn itself made tool calls. priorTurnToolCount overrides recency.
     const r = selectModelForTurn({
       messageLength: 5,
       priorTurnToolCount: 2,
+      priorEnvoyTurnAgeMs: STALE_AGE_MS, // even with stale age, in-flight wins
       ...established,
     });
     expect(r.tier).toBe("default");
