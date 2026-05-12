@@ -3298,6 +3298,7 @@ export async function handleUpdateAvailabilityRule(
       bufferMinutesBefore: ruleInput!.bufferMinutesBefore,
       bufferMinutesAfter: ruleInput!.bufferMinutesAfter,
       bufferAppliesTo: ruleInput!.bufferAppliesTo,
+      firmness: ruleInput!.firmness,
       locationLabel: ruleInput!.locationLabel,
       bookable,
       status: "active",
@@ -3308,11 +3309,11 @@ export async function handleUpdateAvailabilityRule(
     // 2026-05-05 hardening — Fix 3 (write-time dedupe): bookable rules are
     // already name-uniqueness-checked above; for everything else, scan
     // active rules for a structural match and short-circuit if found.
-    // One-time block/protect rules dedupe on (action, effectiveDate) alone —
-    // two rules protecting the same date are always duplicates regardless of
+    // One-time block rules dedupe on (action, effectiveDate) alone —
+    // two rules blocking the same date are always duplicates regardless of
     // how the originalText was phrased or which flags the composer included.
     if (action !== "bookable") {
-      const isOneTimeDate = rule.type === "one-time" && !!rule.effectiveDate && (action === "block" || action === "protect");
+      const isOneTimeDate = rule.type === "one-time" && !!rule.effectiveDate && action === "block";
       const dup = existing.find(
         (r) =>
           r.status === "active" &&

@@ -6,7 +6,7 @@
  * format consumed by the scoring engine — no LLM needed at compilation time.
  */
 
-import type { CompiledRules, BlockedWindow, ProtectedWindow, AllowWindow, CompiledBuffer, CompiledPriorityBucket } from "./scoring";
+import type { CompiledRules, BlockedWindow, AllowWindow, CompiledBuffer, CompiledPriorityBucket } from "./scoring";
 import type { LinkRecurrence } from "./recurrence";
 
 // --- Types ---
@@ -26,7 +26,7 @@ export interface AvailabilityRule {
   id: string;
   originalText: string;
   type: "ongoing" | "recurring" | "temporary" | "one-time";
-  action: "block" | "protect" | "allow" | "buffer" | "prefer" | "limit" | "location" | "bookable" | "no_in_person";
+  action: "block" | "allow" | "buffer" | "prefer" | "limit" | "location" | "bookable" | "no_in_person";
   timeStart?: string;     // "HH:MM" 24h
   timeEnd?: string;       // "HH:MM" 24h
   allDay?: boolean;
@@ -182,6 +182,34 @@ export function expireRules(rules: AvailabilityRule[]): { rules: AvailabilityRul
   return { rules: updated, changed };
 }
 
+/**
+ * Drop rules whose `action` is no longer in the supported set. Used to clean
+ * up legacy `action: "protect"` rules at read time — those were never wired
+ * into the scoring engine and have been folded into `action: "block"` with
+ * a `firmness` field. Removing them entirely is safer than leaving them in
+ * the user's rules list as confusing no-ops. Auto-cleanup on read so users
+ * never have to do anything.
+ */
+const SUPPORTED_RULE_ACTIONS = new Set<AvailabilityRule["action"]>([
+  "block",
+  "allow",
+  "buffer",
+  "prefer",
+  "limit",
+  "location",
+  "bookable",
+  "no_in_person",
+]);
+
+export function dropLegacyActionRules(
+  rules: AvailabilityRule[],
+): { rules: AvailabilityRule[]; changed: boolean } {
+  const kept = rules.filter((r) =>
+    SUPPORTED_RULE_ACTIONS.has(r.action as AvailabilityRule["action"]),
+  );
+  return { rules: kept, changed: kept.length !== rules.length };
+}
+
 // --- Deterministic Compiler ---
 
 /**
@@ -235,7 +263,6 @@ export function compileStructuredRules(
   defaultBizEnd: number = 18,
 ): CompiledRules {
   const blockedWindows: BlockedWindow[] = [];
-  const protectedWindows: ProtectedWindow[] = [];
   const allowWindows: AllowWindow[] = [];
   const buffers: CompiledBuffer[] = [];
   const priorityBuckets: CompiledPriorityBucket[] = [];
@@ -318,24 +345,6 @@ export function compileStructuredRules(
 
           blockedWindows.push(bw);
         }
-        break;
-      }
-
-      case "protect": {
-        // Protect rules produce a soft-subtraction (score 3 / stretch band).
-        // The host has declared this time protected but is willing to admit
-        // VIPs or explicit overrides. Distinct from "block" (score 5 / hard).
-        const pw: ProtectedWindow = {
-          start: rule.timeStart || "00:00",
-          end: rule.timeEnd || "23:59",
-          label: rule.originalText,
-        };
-        if (rule.daysOfWeek && rule.daysOfWeek.length > 0) {
-          pw.days = rule.daysOfWeek.map(d => DAY_NAMES[d]);
-        }
-        if (rule.expiryDate) pw.expires = rule.expiryDate;
-        if (rule.type === "one-time" && rule.effectiveDate) pw.date = rule.effectiveDate;
-        protectedWindows.push(pw);
         break;
       }
 
@@ -452,7 +461,6 @@ export function compileStructuredRules(
 
   return {
     blockedWindows,
-    protectedWindows,
     allowWindows,
     buffers,
     priorityBuckets,

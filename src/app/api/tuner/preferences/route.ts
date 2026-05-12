@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { invalidateSchedule } from "@/lib/calendar";
 import { compilePreferenceRules } from "@/lib/scoring";
-import { compileStructuredRules, expireRules } from "@/lib/availability-rules";
+import { compileStructuredRules, dropLegacyActionRules, expireRules } from "@/lib/availability-rules";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { generateBookableLinkCode } from "@/lib/bookable-links";
 import { getUserTimezone } from "@/lib/timezone";
@@ -39,8 +39,11 @@ export async function GET() {
   const compiled = (prefs as Record<string, unknown>).compiled as Record<string, unknown> | undefined;
   const structuredRules = (explicit.structuredRules as AvailabilityRule[]) ?? [];
 
+  // Drop legacy-action rules (e.g. action: "protect" — folded into block+firmness)
+  const { rules: legacyCleaned, changed: legacyChanged } = dropLegacyActionRules(structuredRules);
+
   // Auto-expire rules on read
-  const { rules: expiredCleaned, changed: expiryChanged } = expireRules(structuredRules);
+  const { rules: expiredCleaned, changed: expiryChanged } = expireRules(legacyCleaned);
 
   // Backfill bookable linkSlug/linkCode for any rule missing them
   let linksChanged = false;
@@ -59,7 +62,7 @@ export async function GET() {
       },
     };
   });
-  const changed = expiryChanged || linksChanged;
+  const changed = legacyChanged || expiryChanged || linksChanged;
 
   // Re-compile structured rules on read to pick up compiler fixes
   const activeRules = cleanedRules.filter((r: AvailabilityRule) => r.status === "active");

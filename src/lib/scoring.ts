@@ -20,8 +20,11 @@
  *
  *   LAYER 3 — Ad-hoc rules  (see `CompiledRules`)
  *     Pattern-based modifications authored by the host via natural language:
- *       BlockedWindow   — firm subtraction (score 5; VIPs cannot stretch in)
- *       ProtectedWindow — soft subtraction (score 3; VIPs / overrides may admit)
+ *       BlockedWindow   — subtraction. firmness="strong" → score 4-5 (blocked
+ *                         band, never offered). firmness="weak" → score 2-3
+ *                         (protected band, VIP stretch). One construct, two
+ *                         tiers — distinguishes "block this time" from "I'd
+ *                         rather not, but a VIP could ask."
  *       AllowWindow     — override a calendar conflict (make event transparent)
  *       CompiledBuffer  — pad N minutes around meetings of type X
  *       LocationRule    — per-pattern location override
@@ -127,11 +130,14 @@ export interface ScoredSlot {
 }
 
 /**
- * LAYER 3 rule — firm subtraction from the canvas.
+ * LAYER 3 rule — subtraction from the canvas.
  *
- * The host has declared this time off-limits and means it. Score 5 — VIPs
- * cannot stretch into a BlockedWindow. Use `ProtectedWindow` for the softer
- * "please don't, but you can if it really matters" register.
+ * The host has declared this time off-limits. Firmness controls how firm:
+ * `firmness: "strong"` lands in the blocked band (score 4-5; never offered);
+ * `firmness: "weak"` lands in the protected band (score 2-3; VIPs / overrides
+ * may stretch in). One construct, two tiers — distinguishes "block this time"
+ * from "please don't, but you can if it really matters" without needing two
+ * separate rule actions.
  *
  * Compiled from `AvailabilityRule` rows with `action: "block"`.
  */
@@ -165,28 +171,6 @@ export interface BlockedWindow {
    * buffer).
    */
   firmness?: BlockFirmness;
-}
-
-/**
- * LAYER 3 rule — soft subtraction from the canvas (stretch band).
- *
- * The host has declared this time protected but is willing to stretch into it
- * for the right meeting. Score 3 — distinct from BlockedWindow because the
- * host vocabulary, scorer behavior, and composer narration all need to
- * distinguish them. "I'm protecting Tuesday afternoons" ≠ "I'm blocked."
- *
- * Default offer-set excludes protected slots. VIP guests, post-tier-escalation,
- * or explicit host overrides can admit them.
- *
- * Compiled from `AvailabilityRule` rows with `action: "protect"`.
- */
-export interface ProtectedWindow {
-  start: string; // "HH:MM" 24-hour
-  end: string;
-  days?: string[]; // short day names: "Mon", "Tue", etc.
-  label?: string;
-  expires?: string; // ISO date "YYYY-MM-DD"
-  date?: string;   // ISO date "YYYY-MM-DD" — single-date scope (same semantics as BlockedWindow.date)
 }
 
 /** A host-set protection override for a Google Calendar event.
@@ -300,9 +284,6 @@ export interface AllowWindow {
 
 export interface CompiledRules {
   blockedWindows: BlockedWindow[];
-  /** Soft-subtraction windows (score 3 / stretch band). VIPs / explicit overrides may admit.
-   *  Optional for back-compat: existing serialized CompiledRules lack this field until PR-B re-compiles. */
-  protectedWindows?: ProtectedWindow[];
   allowWindows: AllowWindow[];
   buffers: CompiledBuffer[];
   priorityBuckets: CompiledPriorityBucket[];

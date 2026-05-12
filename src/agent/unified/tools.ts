@@ -623,10 +623,15 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     originalText: z.string().optional().describe("The host's phrasing verbatim."),
     description: z.string().optional(),
     action: z.enum([
-      "block", "protect", "allow", "buffer", "prefer", "limit", "location", "no_in_person",
+      "block", "allow", "buffer", "prefer", "limit", "location", "no_in_person",
     ]).optional().describe(
-      "block=score 5 hard; protect=score 3 soft (VIP can override); allow=ignore conflicts; " +
-      "buffer=padding; prefer=upweight; limit=cap; location=set venue; no_in_person=disable in-person.",
+      "block=subtraction (firmness=\"strong\"→score 4-5 hard, firmness=\"weak\"→score 2-3 soft, " +
+      "VIP can stretch into weak); allow=ignore conflicts; buffer=padding; prefer=upweight; " +
+      "limit=cap; location=set venue; no_in_person=disable in-person.",
+    ),
+    firmness: z.enum(["weak", "strong"]).optional().describe(
+      "Block-strength (block action only). \"weak\"=protected band (VIP-stretch). " +
+      "\"strong\"=blocked band (off-limits). Defaults to strong if omitted.",
     ),
     type: z.enum(["ongoing", "recurring", "temporary", "one-time"]).optional()
       .describe("ongoing=always; recurring=specific days; temporary=date range; one-time=single date."),
