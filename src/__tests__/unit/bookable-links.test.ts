@@ -123,9 +123,13 @@ describe("applyBookableWindow — day + window filter", () => {
 });
 
 describe("applyBookableWindow — soft protection override", () => {
-  it("overrides blocked_window inside the bookable window (score → 0)", () => {
+  it("preserves blocked_window inside the bookable window (user-explicit block wins)", () => {
+    // A user-defined `action: "block"` rule (kind: "blocked_window")
+    // represents an explicit "don't book me here" — it must NOT yield
+    // to bookable office hours. Bookable carves out the auto-protection
+    // (off_hours, weekend) but not user-declared blocks.
     const slots = [
-      slotAt(TUE_2PM_PT_UTC, "blocked_window", 2),  // Focus Time at 2pm
+      slotAt(TUE_2PM_PT_UTC, "blocked_window", 2),
     ];
     const out = applyBookableWindow({
       rule: bl(),
@@ -133,9 +137,8 @@ describe("applyBookableWindow — soft protection override", () => {
       timezone: "America/Los_Angeles",
     });
     expect(out).toHaveLength(1);
-    expect(out[0].score).toBe(0);
-    expect(out[0].kind).toBe("office_hours");
-    expect(out[0].reason).toBe("office hours");
+    expect(out[0].score).toBe(2);
+    expect(out[0].kind).toBe("blocked_window");
   });
 
   it("overrides off_hours (weekday outside business hours) inside the window", () => {

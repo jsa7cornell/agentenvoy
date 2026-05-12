@@ -82,8 +82,16 @@ export function applyBookableWindow({
       if (slotDateOnly > rule.expiryDate) continue;
     }
 
-    // 4. Hard protection stays hard — never double-book real events or blackouts.
-    const isHardProtected = slot.kind === "event" || slot.kind === "blackout";
+    // 4. Hard protection stays hard — never double-book real events,
+    //    blackouts, or user-explicit block rules. "blocked_window" is the
+    //    kind produced by `action: "block"` rules — the user said "don't
+    //    book me here," so bookable office hours must NOT carve over it.
+    //    Soft auto-protections (off_hours, weekend) still yield to the
+    //    bookable window, which is the original carve-out semantic.
+    const isHardProtected =
+      slot.kind === "event" ||
+      slot.kind === "blackout" ||
+      slot.kind === "blocked_window";
 
     // 5. Confirmed booking subtraction — if this slot overlaps a confirmed booking
     //    for the same bookable link, drop it entirely (guest B sees it gone).
