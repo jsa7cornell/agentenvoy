@@ -173,6 +173,43 @@ const MessageWithMetaSchema = z.object({
       tokenCount: z.number().optional(),
     })
     .optional(),
+  /**
+   * Unified-agent per-turn telemetry. Populated on host-bundle envoy turns
+   * when the turn ran through the Unified Agent (UNIFIED_AGENT_ENABLED=true).
+   * Stripped on guest bundles per host-only allowlist.
+   * Source of truth: `lib/channel/metadata-schema.ts:UnifiedTurnSchema`.
+   */
+  unifiedTurn: z
+    .object({
+      model: z.string(),
+      tier: z.enum(["fast", "default", "deep"]),
+      promptVersion: z.string().optional(),
+      toolCalls: z.array(z.string()),
+      durationMs: z.number(),
+      selfCheck: z.object({
+        passed: z.boolean(),
+        flaggedTools: z.array(z.string()).optional(),
+        reason: z.string().optional(),
+      }),
+      remediated: z.boolean().optional(),
+      remediationDurationMs: z.number().nullable().optional(),
+      reasoningTrace: z.string().nullable().optional(),
+      cost: z.object({
+        inputTokens: z.number(),
+        outputTokens: z.number(),
+        cacheReadTokens: z.number().optional(),
+        cacheWriteTokens: z.number().optional(),
+        costUsd: z.number(),
+      }),
+    })
+    .optional(),
+  /** Module-guard corpus bucket + emitted actions. Host-only. */
+  moduleGuard: z
+    .object({
+      bucket: z.string(),
+      emittedActions: z.array(z.string()),
+    })
+    .optional(),
 });
 
 const SessionSliceSchema = z.object({

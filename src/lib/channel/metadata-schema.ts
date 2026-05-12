@@ -99,6 +99,52 @@ export const SelfCheckRecordSchema = z.object({
 });
 export type SelfCheckRecord = z.infer<typeof SelfCheckRecordSchema>;
 
+/**
+ * Unified-agent per-turn telemetry. Written on every envoy ChannelMessage when
+ * UNIFIED_AGENT_ENABLED=true. Read by /admin/feedback turn-cost overlay and
+ * by feedback-bundle assembly so debug sessions can see what the model actually
+ * decided (model tier, tool calls, cost, self-check verdict).
+ *
+ * Host-only — NOT in GUEST_METADATA_ALLOWLIST. Tier, cost, and reasoningTrace
+ * are admin-facing diagnostics, never surfaced to guests.
+ *
+ * Source of truth for the write shape: `agent/unified/runner.ts:buildUnifiedMetadata`.
+ */
+export const UnifiedTurnSchema = z.object({
+  model: z.string(),
+  tier: z.enum(["fast", "default", "deep"]),
+  promptVersion: z.string().optional(),
+  toolCalls: z.array(z.string()),
+  durationMs: z.number(),
+  selfCheck: z.object({
+    passed: z.boolean(),
+    flaggedTools: z.array(z.string()).optional(),
+    reason: z.string().optional(),
+  }),
+  remediated: z.boolean().optional(),
+  remediationDurationMs: z.number().nullable().optional(),
+  reasoningTrace: z.string().nullable().optional(),
+  cost: z.object({
+    inputTokens: z.number(),
+    outputTokens: z.number(),
+    cacheReadTokens: z.number().optional(),
+    cacheWriteTokens: z.number().optional(),
+    costUsd: z.number(),
+  }),
+});
+export type UnifiedTurn = z.infer<typeof UnifiedTurnSchema>;
+
+/**
+ * Module-guard corpus bucket — synthesized by the unified runner from tool-call
+ * names so the dashboard's failure-mode tagging continues to work post-migration.
+ * Co-written with `unifiedTurn` by `buildUnifiedMetadata`.
+ */
+export const ModuleGuardSchema = z.object({
+  bucket: z.string(),
+  emittedActions: z.array(z.string()),
+});
+export type ModuleGuard = z.infer<typeof ModuleGuardSchema>;
+
 export const ChannelMessageMetadataSchema = z
   .object({
     kind: z.string().optional(),
@@ -122,6 +168,10 @@ export const ChannelMessageMetadataSchema = z
      * 2026-05-06.
      */
     linkUrl: z.string().optional(),
+    /** Unified-agent per-turn telemetry. Host-only. */
+    unifiedTurn: UnifiedTurnSchema.optional(),
+    /** Module-guard bucket + emitted actions for corpus continuity. Host-only. */
+    moduleGuard: ModuleGuardSchema.optional(),
   })
   .passthrough();
 export type ChannelMessageMetadata = z.infer<typeof ChannelMessageMetadataSchema>;

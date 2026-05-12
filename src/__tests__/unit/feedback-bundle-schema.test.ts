@@ -155,6 +155,77 @@ describe("FeedbackBundleV2Schema", () => {
     void _drop;
     expect(() => FeedbackBundleV2Schema.parse(invalid)).toThrow();
   });
+
+  it("accepts and round-trips unifiedTurn + moduleGuard metadata on envoy turns", () => {
+    // Regression fixture for the Phase 0 fix: prior to this, bundle assembly
+    // silently stripped `metadata.unifiedTurn` even though the runner writes it.
+    // Report cmp1nni72 surfaced as `metadata: null` purely because of bundle-side
+    // projection. This locks the host-bundle pass-through so future schema edits
+    // don't regress the debug surface.
+    const v2WithUnifiedTurn: FeedbackBundleV2 = {
+      ...V2_FIXTURE,
+      messages: {
+        recentTurns: [
+          V2_FIXTURE.messages!.recentTurns[0],
+          {
+            ...V2_FIXTURE.messages!.recentTurns[1],
+            unifiedTurn: {
+              model: "claude-sonnet-4-6",
+              tier: "default",
+              promptVersion: "abc1234",
+              toolCalls: ["LOAD_preferences", "rule_add"],
+              durationMs: 1842,
+              selfCheck: { passed: true },
+              cost: {
+                inputTokens: 3200,
+                outputTokens: 180,
+                cacheReadTokens: 2400,
+                costUsd: 0.0034,
+              },
+            },
+            moduleGuard: {
+              bucket: "rule",
+              emittedActions: ["update_availability_rule"],
+            },
+          },
+        ],
+        priorContext: V2_FIXTURE.messages!.priorContext,
+      },
+    };
+    const parsed = FeedbackBundleV2Schema.parse(v2WithUnifiedTurn);
+    expect(parsed.messages?.recentTurns[1].unifiedTurn?.model).toBe("claude-sonnet-4-6");
+    expect(parsed.messages?.recentTurns[1].unifiedTurn?.tier).toBe("default");
+    expect(parsed.messages?.recentTurns[1].unifiedTurn?.toolCalls).toEqual([
+      "LOAD_preferences",
+      "rule_add",
+    ]);
+    expect(parsed.messages?.recentTurns[1].unifiedTurn?.cost.costUsd).toBe(0.0034);
+    expect(parsed.messages?.recentTurns[1].moduleGuard?.bucket).toBe("rule");
+  });
+
+  it("rejects unifiedTurn with invalid tier value", () => {
+    const invalid = {
+      ...V2_FIXTURE,
+      messages: {
+        recentTurns: [
+          V2_FIXTURE.messages!.recentTurns[0],
+          {
+            ...V2_FIXTURE.messages!.recentTurns[1],
+            unifiedTurn: {
+              model: "claude-sonnet-4-6",
+              tier: "premium", // not in enum
+              toolCalls: [],
+              durationMs: 100,
+              selfCheck: { passed: true },
+              cost: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+            },
+          },
+        ],
+        priorContext: [],
+      },
+    };
+    expect(() => FeedbackBundleV2Schema.parse(invalid)).toThrow();
+  });
 });
 
 describe("FeedbackBundleSchema discriminated union", () => {

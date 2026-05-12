@@ -182,6 +182,14 @@ function toMessageWithMeta(m: FilingMessage): MessageWithMeta {
   if (meta.promptContext) {
     out.promptContext = meta.promptContext;
   }
+  // Unified-agent telemetry (host-only — guest bundle uses filterMetadataForGuest
+  // upstream and these aren't in GUEST_METADATA_ALLOWLIST).
+  if (meta.unifiedTurn) {
+    out.unifiedTurn = meta.unifiedTurn;
+  }
+  if (meta.moduleGuard) {
+    out.moduleGuard = meta.moduleGuard;
+  }
   return out;
 }
 
