@@ -54,7 +54,8 @@ export function EnvoyDock({
   onExpand,
   onCollapse,
   onSendMessage,
-  viewerInitial,
+  hostInitial,
+  guestInitial,
   isAdmin,
   sessionId,
 }: EnvoyDockProps) {
@@ -68,7 +69,8 @@ export function EnvoyDock({
         contextHostFirstName={contextHostFirstName}
         onCollapse={onCollapse}
         onSendMessage={onSendMessage}
-        viewerInitial={viewerInitial}
+        hostInitial={hostInitial}
+        guestInitial={guestInitial}
         isAdmin={isAdmin}
         sessionId={sessionId}
       />

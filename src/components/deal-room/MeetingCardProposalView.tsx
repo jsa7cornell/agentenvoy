@@ -56,10 +56,10 @@ interface Props {
   showDashboardLink?: boolean;
   /**
    * First initial of the active viewer (host's or guest's). Propagated into
-   * EnvoyDockThread so the viewer's own messages don't get the hard-coded
-   * "S" guest avatar. 2026-05-12 fix.
+   * EnvoyDockThread so host and guest messages each show the right initial.
    */
-  viewerInitial?: string;
+  hostInitial?: string;
+  guestInitial?: string;
   /** Admin flag — propagated into EnvoyDockThread for TurnCostOverlay +
    *  ThumbsDownFeedback under agent bubbles. */
   isAdmin?: boolean;
@@ -80,7 +80,8 @@ export function MeetingCardProposalView({
   confirmSlot,
   onFocusChat,
   showDashboardLink,
-  viewerInitial,
+  hostInitial,
+  guestInitial,
   isAdmin,
   sessionId,
 }: Props) {
@@ -162,7 +163,8 @@ export function MeetingCardProposalView({
             messages={threadMessages}
             onExpand={onExpandThread}
             onCollapse={onCollapseThread}
-            viewerInitial={viewerInitial}
+            hostInitial={hostInitial}
+            guestInitial={guestInitial}
             isAdmin={isAdmin}
             sessionId={sessionId}
             onSendMessage={onSendMessage}
