@@ -212,7 +212,9 @@ export async function PUT(req: NextRequest) {
 
   const calibratedAt = new Date();
   logCalibrationWrite({ userId: user.id, value: calibratedAt, source: "tuner-preferences" });
-  const updateData: Record<string, unknown> = {
+  // 2026-05-12: typed against Prisma.UserUpdateInput. Unknown column names
+  // now error at compile time rather than at runtime as ValidationError.
+  const updateData: Prisma.UserUpdateInput = {
     preferences: newPrefs as unknown as Prisma.InputJsonValue,
     lastCalibratedAt: calibratedAt,
   };
@@ -222,7 +224,7 @@ export async function PUT(req: NextRequest) {
 
   await prisma.user.update({
     where: { id: user.id },
-    data: updateData as unknown as Parameters<typeof prisma.user.update>[0]["data"],
+    data: updateData,
   });
 
   // Invalidate computed schedule so calendar refreshes with new preferences

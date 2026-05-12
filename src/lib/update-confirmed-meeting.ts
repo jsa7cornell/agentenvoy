@@ -454,7 +454,13 @@ export async function updateConfirmedMeeting(
 
   // DB write — TOCTOU-guarded updateMany. Only fields in `changes` get
   // touched on the session row.
-  const dbUpdates: Record<string, unknown> = {};
+  //
+  // 2026-05-12: typed against Prisma.NegotiationSessionUpdateManyMutationInput
+  // directly — unknown column names now error at compile time. Previously
+  // typed as Record<string, unknown> with a cast at the boundary, which let
+  // `confirmedAt` (non-existent column) slip through and ValidationError at
+  // runtime as a 500 on every reschedule. See SPEC §2.3.3.
+  const dbUpdates: Prisma.NegotiationSessionUpdateManyMutationInput = {};
   if ("location" in changes) {
     dbUpdates.statusLabel = resolved.location
       ? `Location updated to ${resolved.location}`
@@ -462,13 +468,9 @@ export async function updateConfirmedMeeting(
   }
   if (changes.startTime !== undefined) {
     // `agreedTime` is the canonical column read by session-load → poll →
-    // confirmData.dateTime. Earlier versions of this code also wrote
-    // `confirmedAt`, but that column doesn't exist on NegotiationSession —
-    // Prisma rejected the write with a runtime ValidationError (500). The
-    // original /api/negotiate/update-gcal route had the same broken write
-    // since 2026-04-18 (commit 07b3747); was rarely exercised because the
-    // route was host-NextAuth-only until f040500 loosened it.
-    // Bug discovered 2026-05-12 when PR-B routed the picker through here.
+    // confirmData.dateTime. (Note: NegotiationSession has no `confirmedAt`
+    // column despite some legacy code that tried to write to one — the
+    // typed update shape now refuses such writes at compile time.)
     dbUpdates.agreedTime = resolved.startTime;
   }
   if (changes.duration !== undefined) {
@@ -484,9 +486,7 @@ export async function updateConfirmedMeeting(
   if (Object.keys(dbUpdates).length > 0) {
     await prisma.negotiationSession.updateMany({
       where: { id: sessionId, status: "agreed", archived: false },
-      data: dbUpdates as Parameters<
-        typeof prisma.negotiationSession.updateMany
-      >[0]["data"],
+      data: dbUpdates,
     });
   }
 

@@ -240,7 +240,9 @@ export async function POST(req: NextRequest) {
   // search and confirm time. Mirrors handleUpdateLinkRules' negotiatedClearData
   // for contextual links. Reusable-link guest-picks proposal, decided 2026-04-28.
   if (durationChanged || formatChanged) {
-    const negotiatedClearData: Record<string, null> = {};
+    // 2026-05-12: typed against Prisma.NegotiationSessionUpdateManyMutationInput
+    // so unknown column names error at compile time.
+    const negotiatedClearData: Prisma.NegotiationSessionUpdateManyMutationInput = {};
     if (durationChanged) negotiatedClearData.negotiatedDuration = null;
     if (formatChanged) negotiatedClearData.negotiatedFormat = null;
     await prisma.negotiationSession.updateMany({
@@ -248,7 +250,7 @@ export async function POST(req: NextRequest) {
         link: { recurringWindowId: ruleId },
         status: { in: ["active", "pending"] },
       },
-      data: negotiatedClearData as Parameters<typeof prisma.negotiationSession.updateMany>[0]["data"],
+      data: negotiatedClearData,
     });
   }
   // Propagate the new duration to the denormalized NegotiationSession.duration

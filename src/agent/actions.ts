@@ -497,7 +497,10 @@ async function handleArchiveBulk(
     return { success: false, message: `Invalid filter: ${filter}. Use "unconfirmed", "expired", "cancelled", or "all".` };
   }
 
-  const where: Record<string, unknown> = {
+  // 2026-05-12: typed against Prisma.NegotiationSessionWhereInput so unknown
+  // column names error at compile time. See companion change to updateData
+  // patterns in this file.
+  const where: Prisma.NegotiationSessionWhereInput = {
     hostId: userId,
     archived: false,
   };
@@ -512,7 +515,7 @@ async function handleArchiveBulk(
   // "all" — no status filter, archives everything non-archived
 
   const result = await prisma.negotiationSession.updateMany({
-    where: where as Parameters<typeof prisma.negotiationSession.updateMany>[0]["where"],
+    where,
     data: { archived: true },
   });
 
@@ -798,7 +801,10 @@ async function handleUpdateTime(
   // Status "retime_proposed" is distinct from "proposed" so the invariant pair
   // can be enforced cleanly: "retime_proposed" implies calendarEventId != null,
   // "proposed" makes no such guarantee.
-  const updateData: Record<string, unknown> = {
+  // 2026-05-12: typed against Prisma.NegotiationSessionUpdateInput directly
+  // so unknown field names error at compile time (rather than ValidationError
+  // at runtime — the class of bug that hid `confirmedAt` for ~25 days).
+  const updateData: Prisma.NegotiationSessionUpdateInput = {
     status: "retime_proposed",
     statusLabel: "Time change proposed by host",
     agreedTime: null,
@@ -817,7 +823,7 @@ async function handleUpdateTime(
 
   await prisma.negotiationSession.update({
     where: { id: session.id },
-    data: updateData as Parameters<typeof prisma.negotiationSession.update>[0]["data"],
+    data: updateData,
   });
   // Mirror duration into link.parameters.duration for personalized links so the
   // greeting template + confirm card reflect it. Same reason as format /
@@ -1624,7 +1630,9 @@ async function handleUpdateKnowledge(
     return { success: false, message: "Missing knowledge, blockedWindows, or currentLocation to update" };
   }
 
-  const updateData: Record<string, unknown> = {};
+  // 2026-05-12: typed against Prisma.UserUpdateInput so unknown column names
+  // error at compile time.
+  const updateData: Prisma.UserUpdateInput = {};
   if (persistent !== undefined) updateData.persistentKnowledge = persistent;
   if (situational !== undefined) updateData.upcomingSchedulePreferences = situational;
   const calibratedAt = new Date();
@@ -1697,15 +1705,18 @@ async function handleUpdateKnowledge(
       newExplicit = rest;
     }
 
+    // preferences is a Prisma Json column — cast required at the
+    // JSON-write boundary (this is the legitimate use of the cast; the
+    // unknown column class of bug doesn't apply to JSON contents).
     updateData.preferences = {
       ...prefs,
       explicit: newExplicit,
-    };
+    } as Prisma.InputJsonValue;
   }
 
   await prisma.user.update({
     where: { id: userId },
-    data: updateData as Parameters<typeof prisma.user.update>[0]["data"],
+    data: updateData,
   });
 
   // Invalidate computed schedule when preferences/knowledge change
@@ -1855,7 +1866,8 @@ async function handleSaveGuestInfo(
   }
 
   // Update the link with guest info (so it persists to event card, calendar events, etc.)
-  const linkUpdate: Record<string, unknown> = {};
+  // 2026-05-12: typed against Prisma.NegotiationLinkUpdateInput.
+  const linkUpdate: Prisma.NegotiationLinkUpdateInput = {};
   if (guestName) linkUpdate.inviteeName = guestName;
   if (guestEmail) linkUpdate.inviteeEmail = guestEmail;
   if (topic) {
@@ -1868,7 +1880,7 @@ async function handleSaveGuestInfo(
 
   await prisma.negotiationLink.update({
     where: { id: session.linkId },
-    data: linkUpdate as Parameters<typeof prisma.negotiationLink.update>[0]["data"],
+    data: linkUpdate,
   });
 
   // Also save guestEmail on the session if not already set
@@ -2482,7 +2494,9 @@ async function handleExpandLink(
   // write so there's no dual-write trust issue; confirm route reads
   // negotiatedLocation ?? link.parameters.location, so the host's new value
   // now wins.
-  const negotiatedClearData: Record<string, null> = {};
+  // 2026-05-12: typed against Prisma.NegotiationSessionUpdateManyMutationInput
+  // so unknown column names error at compile time.
+  const negotiatedClearData: Prisma.NegotiationSessionUpdateManyMutationInput = {};
   if (patch.location !== undefined) {
     negotiatedClearData.negotiatedLocation = null;
     negotiatedClearData.negotiatedFormat = null;
@@ -2504,7 +2518,7 @@ async function handleExpandLink(
   if (Object.keys(negotiatedClearData).length > 0) {
     await prisma.negotiationSession.updateMany({
       where: { linkId: link.id, status: { in: ["active", "pending"] } },
-      data: negotiatedClearData as Parameters<typeof prisma.negotiationSession.updateMany>[0]["data"],
+      data: negotiatedClearData,
     });
   }
   // Propagate the host's new duration to the denormalized NegotiationSession.duration
