@@ -42,13 +42,10 @@ export interface EnvoyDockThreadProps {
   contextHostFirstName?: string;
   onCollapse?: () => void;
   onSendMessage?: (text: string) => void;
-  /**
-   * Single letter shown on the viewer-side bubble's avatar. Defaults to "·"
-   * when omitted. Pass the host's first initial when the viewer is the host,
-   * or the guest's first initial when the viewer is the guest — fixes
-   * 2026-05-12 bug where every viewer saw "S" regardless of role.
-   */
-  viewerInitial?: string;
+  /** First initial for host-sent bubbles. "·" → silhouette. */
+  hostInitial?: string;
+  /** First initial for guest-sent bubbles. "·" → silhouette. */
+  guestInitial?: string;
   /**
    * Admin telemetry toggle. When true, agent (administrator-role) bubbles
    * render TurnCostOverlay + ThumbsDownFeedback below them. Mirrors the
@@ -67,7 +64,8 @@ export function EnvoyDockThread({
   contextHostFirstName,
   onCollapse,
   onSendMessage,
-  viewerInitial = "·",
+  hostInitial = "·",
+  guestInitial = "·",
   isAdmin = false,
   sessionId = null,
 }: EnvoyDockThreadProps) {
@@ -161,7 +159,8 @@ export function EnvoyDockThread({
             <MessageBubble
               key={msg.id}
               msg={msg}
-              viewerInitial={viewerInitial}
+              hostInitial={hostInitial}
+              guestInitial={guestInitial}
               isAdmin={isAdmin}
               sessionId={sessionId}
             />
@@ -201,21 +200,17 @@ export function EnvoyDockThread({
 
 function MessageBubble({
   msg,
-  viewerInitial,
+  hostInitial,
+  guestInitial,
   isAdmin,
   sessionId,
 }: {
   msg: Message;
-  viewerInitial: string;
+  hostInitial: string;
+  guestInitial: string;
   isAdmin: boolean;
   sessionId: string | null;
 }) {
-  // Dock-thread role model is two-lane by design (per 2026-05-11 PR2a
-  // mapper-comment): "agent" = administrator turn from Envoy, "guest" = the
-  // viewer's own side, regardless of whether the viewer is the actual
-  // session host or the actual session guest. The avatar letter on the
-  // viewer side uses `viewerInitial` so a host viewer sees their own
-  // initial — not the hard-coded "S" that produced the 2026-05-12 bug.
   const isViewerSide = msg.role === "guest";
 
   const avatarStyle = isViewerSide
@@ -226,13 +221,14 @@ function MessageBubble({
     ? "bg-[#eef2ff] border border-[#c7d2fe] rounded-[13px] px-[11px] py-[8px] text-[12.5px] leading-[1.45] text-[#1a1a2e] max-w-[260px]"
     : "bg-[#faf8f3] border border-[#e7e2d5] rounded-[13px] px-[11px] py-[8px] text-[12.5px] leading-[1.45] text-[#1a1a2e] max-w-[260px]";
 
-  // Avatar content: bot icon for Envoy, person silhouette for unknown guest,
-  // initial letter for a named guest.
+  // Bot icon for Envoy; for right-lane messages use senderRole to pick the
+  // correct initial (host or guest). Fall back to silhouette when unknown.
+  const rightInitial = msg.senderRole === "host" ? hostInitial : guestInitial;
   const avatarContent = !isViewerSide
     ? <Bot size={11} strokeWidth={2} />
-    : viewerInitial === "·"
+    : rightInitial === "·"
       ? <User size={11} strokeWidth={2} />
-      : <span className="text-[9.5px] font-bold">{viewerInitial}</span>;
+      : <span className="text-[9.5px] font-bold">{rightInitial}</span>;
 
   return (
     <div className={`flex gap-2 items-start ${isViewerSide ? "flex-row-reverse" : ""}`}>

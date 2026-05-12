@@ -1834,6 +1834,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       .map((m) => ({
         id: m.id,
         role: m.role === "administrator" ? ("agent" as const) : ("guest" as const),
+        senderRole: m.role === "host" ? ("host" as const) : ("guest" as const),
         text: m.content,
         timestamp: m.createdAt ?? new Date().toISOString(),
         ...(m.role === "administrator" && m.metadata
@@ -1842,13 +1843,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       }));
   }, [messages]);
 
-  // The amber (right-side) lane always represents the guest — from both
-  // the host's and the guest's view. Always use the guest's first initial.
-  // (Previous version: `isHost ? hostName : formGuestName` showed "J" on
-  // Christine's messages when John was viewing — 2026-05-12 feedback.)
-  const viewerInitial = useMemo(() => {
-    return formGuestName.trim()[0]?.toUpperCase() ?? "·";
-  }, [formGuestName]);
+  // Both host and guest can send messages in a confirmed deal room, so we
+  // need separate initials. MessageBubble uses msg.senderRole to pick the
+  // right one. Defaults to "·" → silhouette when the name isn't known.
+  const hostInitial = useMemo(() => hostName.trim()[0]?.toUpperCase() ?? "·", [hostName]);
+  const guestInitial = useMemo(() => formGuestName.trim()[0]?.toUpperCase() ?? "·", [formGuestName]);
 
   // Fetch admin flag once for in-dock TurnCostOverlay + ThumbsDownFeedback.
   // Mirrors feed.tsx:1349-1356 exactly. The endpoint returns `{ isAdmin: bool }`;
@@ -3977,7 +3976,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                   : undefined}
                 showDashboardLink={isHost || isGuest}
                 feedbackLinkCode={feedbackCode ?? code}
-                viewerInitial={viewerInitial}
+                hostInitial={hostInitial}
+                guestInitial={guestInitial}
                 isAdmin={isAdmin}
                 belowCardSlot={
                   reschedulingFromConfirmed ? (
@@ -4032,7 +4032,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 pickerSlot={newCardPickerNode}
                 confirmSlot={newCardConfirmNode}
                 showDashboardLink={isHost || isGuest}
-                viewerInitial={viewerInitial}
+                hostInitial={hostInitial}
+                guestInitial={guestInitial}
                 isAdmin={isAdmin}
                 sessionId={sessionId}
               />

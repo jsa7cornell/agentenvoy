@@ -222,6 +222,13 @@ export interface GoogleCalendarStatus {
 export interface Message {
   id: string;
   role: "guest" | "agent";
+  /**
+   * Who actually sent this message. Both host and guest messages share
+   * role="guest" (right-lane) in the dock's two-lane model, so this field
+   * lets MessageBubble pick the correct initial when both parties are
+   * visible in the same confirmed-session thread.
+   */
+  senderRole?: "host" | "guest";
   text: string;
   timestamp: string;
   avatarSeed?: string;
@@ -262,11 +269,15 @@ export interface EnvoyDockProps {
    */
   onSendMessage?: (text: string) => void;
   /**
-   * First initial of the viewer (host's first name when isHost, guest's first
-   * name otherwise). Renders on the viewer-side bubble's avatar. Fixes the
-   * 2026-05-12 bug where every viewer saw a hard-coded "S" regardless of role.
+   * First initial for the host's right-lane bubbles. Defaults to "·" (shows
+   * silhouette) when the host name isn't available.
    */
-  viewerInitial?: string;
+  hostInitial?: string;
+  /**
+   * First initial for the guest's right-lane bubbles. Defaults to "·" (shows
+   * silhouette) when the guest name isn't known yet (e.g. primary link).
+   */
+  guestInitial?: string;
   /**
    * Admin telemetry toggle — propagates to EnvoyDockThread, which renders
    * TurnCostOverlay + ThumbsDownFeedback under agent bubbles when true.
