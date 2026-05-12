@@ -6,6 +6,7 @@ import { authoredFormat } from "./templates/authored-format";
 import { derivedCalendarOverlap } from "./templates/derived-calendar-overlap";
 import { derivedRelationshipHistory } from "./templates/derived-relationship-history";
 import { derivedSeriesProgress } from "./templates/derived-series-progress";
+import { derivedGuestPicksLocation } from "./templates/derived-guest-picks-location";
 import { generativeFallback } from "./templates/generative-fallback";
 
 const TEMPLATES: TipTemplate[] = [
@@ -16,6 +17,7 @@ const TEMPLATES: TipTemplate[] = [
   derivedCalendarOverlap,
   derivedRelationshipHistory,
   derivedSeriesProgress,
+  derivedGuestPicksLocation,
   generativeFallback,
 ].sort((a, b) => b.priority - a.priority);
 

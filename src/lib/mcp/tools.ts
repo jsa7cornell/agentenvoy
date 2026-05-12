@@ -1460,6 +1460,8 @@ export async function handleGetTip(
   // activity/location live in link.parameters (not dedicated columns)
   const linkActivity = typeof parameters.activity === "string" ? parameters.activity : null;
   const linkLocation = typeof parameters.location === "string" ? parameters.location : null;
+  const guestPicksLocation =
+    (parameters.guestPicks as { location?: boolean } | undefined)?.location === true;
 
   // AP5b: same renderTip call as deal-room renderer — role-invariant templateId/sourceKind
   const rendered = renderTip(
@@ -1470,6 +1472,7 @@ export async function handleGetTip(
       linkActivity,
       linkLocation,
       linkAuthoredTip,
+      guestPicksLocation,
     }),
     "guest", // external agent = guest perspective for AP5b role-invariance
   );

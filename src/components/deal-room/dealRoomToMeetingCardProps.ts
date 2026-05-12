@@ -184,6 +184,7 @@ function buildProposalMeetingCardProps(
       linkLocation: snapshot.linkLocation,
       isAnonymousLink: false,
       linkAuthoredTip,
+      guestPicksLocation,
     }),
     viewerRole,
   );

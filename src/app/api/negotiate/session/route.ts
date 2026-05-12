@@ -883,14 +883,18 @@ export async function POST(req: NextRequest) {
     let tipText: string;
     try {
       const posture = getLinkPosture(link, { preferences: user.preferences as import("@/lib/scoring").UserPreferences });
+      const parsedParams = parseLinkParameters(link.parameters);
+      const guestPicksLocation =
+        (parsedParams.guestPicks as { location?: boolean } | undefined)?.location === true;
       const tipInput = buildTipInput({
         hostName: user.name ?? "",
         inviteeName: link.inviteeName ?? "",
         linkFormat: effectiveFormat ?? "video",
-        linkActivity: (parseLinkParameters(link.parameters).activity as string | null) ?? null,
-        linkLocation: (parseLinkParameters(link.parameters).location as string | null) ?? null,
+        linkActivity: (parsedParams.activity as string | null) ?? null,
+        linkLocation: (parsedParams.location as string | null) ?? null,
         isAnonymousLink: link.type === "primary" || !!link.recurringWindowId,
         linkAuthoredTip: posture.tip ?? null,
+        guestPicksLocation,
       });
       tipText = renderTip(tipInput, "guest")?.text ?? DEFAULT_TIP;
     } catch {

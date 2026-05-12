@@ -7,6 +7,7 @@ export type TipSourceKind =
   | "derived-calendar-overlap"
   | "derived-relationship-history"
   | "derived-series-progress"
+  | "derived-guest-picks-location"
   | "generative-fallback";
 
 export interface TipInput {
@@ -26,6 +27,8 @@ export interface TipInput {
   bothCalendarsConnected?: boolean;
   /** Host's authored tip from Link.parameters.tip — highest priority. */
   linkAuthoredTip?: string;
+  /** Host deferred venue selection to the guest (`guestPicks.location: true`). */
+  guestPicksLocation?: boolean;
 }
 
 export interface RenderedTip {

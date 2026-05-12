@@ -457,6 +457,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [formGuestEmail, setFormGuestEmail] = useState("");
   const [formGuestPhone, setFormGuestPhone] = useState("");
   const [formGuestNote, setFormGuestNote] = useState("");
+  // Guest's pick for the meeting venue, used when host deferred location
+  // (link.parameters.guestPicks.location === true). Submitted via the
+  // confirm form's `location` field; persisted to session.negotiatedLocation
+  // by the confirm pipeline.
+  const [formGuestLocation, setFormGuestLocation] = useState("");
   // Triggers a longer celebratory glow on the top event card right after
   // confirm. Kept separate from statusAnimating (1.5s, existing status pulse).
   const [justConfirmedGlow, setJustConfirmedGlow] = useState(false);
@@ -1327,6 +1332,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         else if (names[0] && !formGuestName) setFormGuestName(names[0]);
         if (data.session?.guestEmail && !formGuestEmail) setFormGuestEmail(data.session.guestEmail);
         else if (data.link?.inviteeEmail && !formGuestEmail) setFormGuestEmail(data.link.inviteeEmail);
+        // Pre-fill the venue input from session.negotiatedLocation so a guest
+        // who already gave a location in chat doesn't have to retype it on the
+        // confirm form (and isn't blocked by the required-when-deferred gate).
+        {
+          const negotiated = (data.session as Record<string, unknown> | null | undefined)?.negotiatedLocation;
+          if (typeof negotiated === "string" && negotiated.trim() && !formGuestLocation) {
+            setFormGuestLocation(negotiated.trim());
+          }
+        }
         setSessionStatus(data.status || "active");
         setSessionStatusLabel(data.statusLabel || "");
         if (data.isGroupEvent) setIsGroupEvent(true);
@@ -2885,11 +2899,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     const inPast = dt.getTime() <= Date.now();
     const nameOk = formGuestName.trim().length > 0;
     const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formGuestEmail.trim());
-    const canSubmit = !inPast && nameOk && emailOk;
+    const locationRequired = linkGuestPicksLocation;
+    const locationOk = !locationRequired || formGuestLocation.trim().length > 0;
+    const canSubmit = !inPast && nameOk && emailOk && locationOk;
+    const effectiveLocation = locationRequired
+      ? formGuestLocation.trim() || effective.location
+      : effective.location;
     const clickConfirmButton = () => {
       if (!canSubmit) return;
       handleConfirm(
-        { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effective.location },
+        { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effectiveLocation },
         { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), guestNote: [formGuestPhone.trim() ? `Phone: ${formGuestPhone.trim()}` : null, formGuestNote.trim() || null].filter(Boolean).join("\n") || undefined }
       );
     };
@@ -2897,7 +2916,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       `\u{1F4C5} ${dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: slotTimezone })}`,
       `\u{1F550} ${dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: slotTimezone })} · ${formatDuration(effective.duration)}`,
       `${getMeetingEmoji(effective.format, null) || "\u{1F550}"} ${effective.format.charAt(0).toUpperCase() + effective.format.slice(1)}`,
-      ...(effective.location ? [`\u{1F4CD} ${effective.location}`] : []),
+      ...(effectiveLocation ? [`\u{1F4CD} ${effectiveLocation}`] : []),
     ];
     return (
       <div className={`rounded-2xl border border-emerald-300 bg-emerald-50 px-4 pt-3 pb-4 space-y-2 ${pendingProposal ? "pick-pulse-once" : ""}`}>
@@ -2948,6 +2967,21 @@ export function DealRoom({ slug, code }: DealRoomProps) {
               placeholder="+1 (555) 000-0000"
             />
           </div>
+          {linkGuestPicksLocation && (
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">
+                Where?
+              </label>
+              <input
+                type="text"
+                value={formGuestLocation}
+                onChange={(e) => setFormGuestLocation(e.target.value)}
+                maxLength={120}
+                className="w-full px-2.5 py-1.5 bg-white border border-emerald-200 rounded-md text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500"
+                placeholder="Cafe name, address, or area"
+              />
+            </div>
+          )}
           <div>
             <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">
               Anything else? <span className="text-zinc-500 font-normal normal-case tracking-normal">(optional)</span>
@@ -3427,19 +3461,25 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
                   formGuestEmail.trim(),
                 );
+                // Guest-picks-location: never auto-skip the form — the guest
+                // must enter a venue. The proposal-card branch below collects
+                // it via formGuestLocation and gates confirm.
+                const locationOk = !linkGuestPicksLocation || formGuestLocation.trim().length > 0;
                 setPendingProposal({
                   dateTime: offerSlot.start,
                   duration,
                   format: fmt,
                   location: linkLocation,
                 });
-                if (nameOk && emailOk) {
+                if (nameOk && emailOk && locationOk) {
                   handleConfirm(
                     {
                       dateTime: offerSlot.start,
                       duration,
                       format: fmt,
-                      location: linkLocation,
+                      location: linkGuestPicksLocation
+                        ? formGuestLocation.trim() || linkLocation
+                        : linkLocation,
                     },
                     {
                       guestName: formGuestName.trim(),
@@ -3488,11 +3528,20 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           const inPast = dt.getTime() <= Date.now();
           const nameOk = formGuestName.trim().length > 0;
           const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formGuestEmail.trim());
-          const canSubmit = !inPast && nameOk && emailOk;
+          // Guest-picks-location: when the host deferred venue, the guest's
+          // location is required before confirm. Submits via the location
+          // field on /api/negotiate/confirm — pipeline locks it on
+          // session.negotiatedLocation.
+          const locationRequired = linkGuestPicksLocation;
+          const locationOk = !locationRequired || formGuestLocation.trim().length > 0;
+          const canSubmit = !inPast && nameOk && emailOk && locationOk;
+          const effectiveLocation = locationRequired
+            ? formGuestLocation.trim() || effective.location
+            : effective.location;
           const clickConfirmButton = () => {
             if (!canSubmit) return;
             handleConfirm(
-              { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effective.location },
+              { dateTime: effective.dateTime, duration: effective.duration, format: effective.format, location: effectiveLocation },
               { guestName: formGuestName.trim(), guestEmail: formGuestEmail.trim(), guestNote: [formGuestPhone.trim() ? `Phone: ${formGuestPhone.trim()}` : null, formGuestNote.trim() || null].filter(Boolean).join("\n") || undefined }
             );
           };
@@ -3500,7 +3549,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             `\u{1F4C5} ${dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: slotTimezone })}`,
             `\u{1F550} ${dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: slotTimezone })} · ${formatDuration(effective.duration)}`,
             `${getMeetingEmoji(effective.format, null) || "\u{1F550}"} ${effective.format.charAt(0).toUpperCase() + effective.format.slice(1)}`,
-            ...(effective.location ? [`\u{1F4CD} ${effective.location}`] : []),
+            ...(effectiveLocation ? [`\u{1F4CD} ${effectiveLocation}`] : []),
           ];
           return (
             <div className="flex justify-start">
@@ -3563,6 +3612,21 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                         placeholder="+1 (555) 000-0000"
                       />
                     </div>
+                    {linkGuestPicksLocation && (
+                      <div>
+                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">
+                          Where?
+                        </label>
+                        <input
+                          type="text"
+                          value={formGuestLocation}
+                          onChange={(e) => setFormGuestLocation(e.target.value)}
+                          maxLength={120}
+                          className="w-full px-2.5 py-1.5 bg-surface border border-DEFAULT rounded-md text-sm text-primary placeholder:text-muted focus:outline-none focus:border-emerald-500"
+                          placeholder="Cafe name, address, or area"
+                        />
+                      </div>
+                    )}
                     <div>
                       <label className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400 mb-1">
                         Anything else? <span className="text-muted font-normal normal-case tracking-normal">(optional)</span>
