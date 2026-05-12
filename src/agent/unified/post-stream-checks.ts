@@ -94,16 +94,23 @@ export type PostStreamCheck = {
  * don't trip the gate.
  *
  * Production-observed shapes from COMPOSER.md §2 F-rows + the cmp1nni72
- * triage + the cost-reduction case study:
+ * triage + the cost-reduction case study + the 2026-05-12 deal-room cancel
+ * incident:
  *   - "Wednesday afternoon is now blocked" (cmp1nni72)
  *   - "Friday May 8 is now fully protected"
  *   - "Got it — updated location to Konditori" (dealroom past-tense template)
+ *   - "Got it — cancelling this meeting now" (2026-05-12 cancel incident —
+ *     present-progressive, NOT past tense; v1 of the regex missed this)
  *   - "Done — moved it to Thursday 3pm"
  *   - "Booked Friday 2pm" / "Cancelled" / "Created the link"
  *   - "I've blocked Friday" / "I've rescheduled it"
+ *   - "I'll cancel that now" (future-intent that implies imminent action)
  *
- * Five regexes union'd — each catches a different verb-shape so the gate's
- * sensitivity is independent of which template the model picks.
+ * Past tense ("cancelled"), present progressive ("cancelling"), and
+ * future-intent ("will cancel" / "I'll cancel") all map to the same
+ * failure mode: prose claims an action is happening/done, no tool call
+ * fired. The 2026-05-12 incident showed the v1 regex was too tight —
+ * widened here to cover all three tenses for write-effect verbs.
  */
 const CONFIRMATION_PROSE_PATTERNS: readonly RegExp[] = [
   // "X is now (fully) blocked/protected/locked/updated/created/cancelled/..."
@@ -115,6 +122,20 @@ const CONFIRMATION_PROSE_PATTERNS: readonly RegExp[] = [
   // Deal-room canonical confirmation templates — past-tense lead clause
   /\bGot\s+it\s+—\s+(?:updated|switched|moved|saved|cancell?ed|changed)\b/i,
   /\bDone\s+—\s+(?:moved|switched|saved|updated|booked|cancell?ed)\b/i,
+  // Deal-room PRESENT-PROGRESSIVE templates (2026-05-12 incident widening):
+  // "Got it — cancelling this meeting now" / "Got it — moving it" / "Done — booking now"
+  // The "-ing now" combo + a "Got it — " or "Done — " lead is the prose signature.
+  /\bGot\s+it\s+—\s+(?:cancell?ing|moving|switching|updating|saving|changing|booking)\b/i,
+  /\bDone\s+—\s+(?:cancell?ing|moving|switching|updating|saving|booking)\b/i,
+  // "I'll cancel/move/update/book/save/change that now" — future intent that
+  // implies the model is about to act. If the tool call doesn't follow, it's
+  // theater.
+  /\bI['’]ll\s+(?:cancel|move|update|book|save|change|reschedule)\b.*?\b(?:now|right\s+(?:now|away))\b/i,
+  // "I'm cancelling/moving/updating now" — present progressive without "Got it"
+  /\bI['’]?m\s+(?:cancell?ing|moving|updating|booking|saving|rescheduling)\b/i,
+  // "cancelling this meeting now" — bare present-progressive with "now"
+  // anchor. Matches even when the model omits the "Got it — " preamble.
+  /\b(?:cancell?ing|moving|updating|booking|rescheduling)\b[^.!?]*\bnow\b/i,
   // "Booked X" / "Cancelled X" / "Created X" / "Saved X" at the start of a sentence
   /(?:^|[.!?]\s+)(?:Booked|Cancell?ed|Created|Saved|Sent)\s+\w+/m,
 ];
