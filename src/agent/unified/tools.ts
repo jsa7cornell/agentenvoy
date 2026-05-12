@@ -775,3 +775,69 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
 
 export type UnifiedTools = ReturnType<typeof buildUnifiedTools>;
 export type UnifiedToolName = keyof UnifiedTools;
+
+// ---------------------------------------------------------------------------
+// Role-aware tool selector (Phase A.3, 2026-05-11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Tool surface for a single unified-agent turn, selected by role.
+ *
+ * Three call sites:
+ *   - "host-channel" → host dashboard chat (`/api/channel/chat`). Returns the
+ *     full 34-tool surface from `buildUnifiedTools`. Behavior identical to
+ *     pre-A.3 — this is the back-compat path.
+ *   - "dealroom-host" → host viewing a deal-room thread. Returns the
+ *     session-scoped subset (no account-prefs, no bookable-link creation, no
+ *     rule edits — those deflect to dashboard chat per proposal §2.6) plus
+ *     the deal-room-specific tools.
+ *   - "dealroom-guest" → guest in a deal-room thread. Returns an even
+ *     narrower subset: bilateral availability + commit/reschedule + save own
+ *     info. No write access to the host's links, rules, or prefs.
+ *
+ * Wiring: A.4's `runDealroomHostTurn` / `runDealroomGuestTurn` will call this
+ * with the appropriate role; existing `runUnifiedAgent` continues to call
+ * `buildUnifiedTools(ctx)` directly until A.4 lands — at which point it can
+ * route through `buildUnifiedToolsFor` for uniformity.
+ *
+ * Refs: proposals/2026-05-11_complete-unified-agent-migration-and-retire-classifier-composer_reviewed-2026-05-11_decided-2026-05-11.md §2.6, §3.2
+ */
+import {
+  buildDealroomTools,
+  type DealroomToolContext,
+  allowedToolsForRole,
+} from "./dealroom-tools";
+
+export type UnifiedTurnRole = "host-channel" | "dealroom-host" | "dealroom-guest";
+
+export type UnifiedToolsForInput =
+  | { role: "host-channel"; agentCtx: AgentToolContext }
+  | { role: "dealroom-host" | "dealroom-guest"; agentCtx: AgentToolContext; dealroomCtx: DealroomToolContext };
+
+/**
+ * Return the tool surface for this turn's role.
+ *
+ * For host-channel: just `buildUnifiedTools(ctx)` — no filtering, all 34 tools.
+ *
+ * For deal-room roles: build the host-channel toolset PLUS the deal-room
+ * tools, then filter to the role's allowlist. The runner additionally
+ * enforces the allowlist at execute time (defense in depth — a model that
+ * fabricates a tool name outside the allowlist gets a clear error rather
+ * than silently calling a host-channel tool from a deal-room turn).
+ */
+export function buildUnifiedToolsFor(input: UnifiedToolsForInput): Record<string, unknown> {
+  if (input.role === "host-channel") {
+    return buildUnifiedTools(input.agentCtx) as Record<string, unknown>;
+  }
+  // Deal-room: union of host-channel tools + deal-room-specific tools,
+  // filtered to the role's allowlist.
+  const baseTools = buildUnifiedTools(input.agentCtx) as Record<string, unknown>;
+  const dealroomTools = buildDealroomTools(input.dealroomCtx) as Record<string, unknown>;
+  const merged = { ...baseTools, ...dealroomTools };
+  const allowed = new Set<string>(allowedToolsForRole(input.role));
+  const filtered: Record<string, unknown> = {};
+  for (const [name, t] of Object.entries(merged)) {
+    if (allowed.has(name)) filtered[name] = t;
+  }
+  return filtered;
+}
