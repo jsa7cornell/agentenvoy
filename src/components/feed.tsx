@@ -1870,8 +1870,19 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
             const meta = m.metadata as { kind?: string } | null;
             return meta?.kind !== "onboarding";
           });
+          // Once seed-info or opener messages land in the channel, the
+          // calibrate sequence has started and the welcome card should
+          // not re-render (even while loading flips false after the POST).
+          const hasCalibrateSequenceMessages = messages.some((m) => {
+            const meta = m.metadata as { kind?: string; subkind?: string } | null;
+            return (
+              meta?.kind === "onboarding" &&
+              (meta?.subkind === "calibrate-seed-info" ||
+                meta?.subkind === "calibrate-opener")
+            );
+          });
           const showWelcome =
-            !hasRealChat && !loading && isCalibrated && !primaryLinkFlowActive;
+            !hasRealChat && !hasCalibrateSequenceMessages && !loading && isCalibrated && !primaryLinkFlowActive;
           const showTuning = isCalibrated && primaryLinkFlowActive;
           return (
             <>

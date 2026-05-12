@@ -116,6 +116,11 @@ const ACTION_LABELS: Record<string, string> = {
   no_in_person: "No in-person",
 };
 
+function labelForRule(rule: { action: string; firmness?: "weak" | "strong" }): string {
+  if (rule.action === "block" && rule.firmness === "weak") return "Protect";
+  return ACTION_LABELS[rule.action] ?? rule.action;
+}
+
 const ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   block: Ban,
   allow: CheckCircle2,
@@ -745,7 +750,7 @@ function ConfirmationCard({
           <div className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
             {/* Type (action) */}
             <span className="text-muted">Type</span>
-            <span className="text-primary font-medium">{ACTION_LABELS[rule.action]}</span>
+            <span className="text-primary font-medium">{labelForRule(rule)}</span>
             {/* Location label */}
             {rule.action === "location" && (
               isEditing ? (
@@ -1418,7 +1423,7 @@ function RuleCard({
               <div className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
                 {/* Type */}
                 <span className="text-muted">Type</span>
-                <span className="text-primary font-medium">{ACTION_LABELS[rule.action]}</span>
+                <span className="text-primary font-medium">{labelForRule(rule)}</span>
                 {/* Location */}
                 {rule.action === "location" && rule.locationLabel && (
                   <>

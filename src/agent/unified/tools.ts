@@ -742,6 +742,25 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     execute: async (params) => exec("prefs_update_appearance", "update_appearance", params),
   });
 
+  const prefs_update_business_hours = tool({
+    description:
+      "Update the host's default work hours (start/end) and/or buffer between meetings. " +
+      "Affects scoring across all links. Use this — NOT primary_link_update — when the host says " +
+      "'set my work hours to X' / 'change my business hours' / 'I work 9 to 5'. " +
+      "Integer hours only (0-23 start, 1-24 end). If the host gives fractional hours like '8:30', " +
+      "ask which whole hour to use, or tell them to set it from the dashboard.",
+    inputSchema: z.object({
+      start: z.number().int().min(0).max(23).optional()
+        .describe("Work-hours start (integer hour, 0-23). e.g. 9 for 9 AM."),
+      end: z.number().int().min(1).max(24).optional()
+        .describe("Work-hours end (integer hour, 1-24). e.g. 17 for 5 PM."),
+      buffer: z.union([
+        z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30),
+      ]).optional().describe("Buffer minutes between meetings (0, 5, 10, 15, or 30)."),
+    }),
+    execute: async (params) => exec("prefs_update_business_hours", "update_business_hours", params),
+  });
+
   const prefs_update_timezone = tool({
     description:
       "Update IANA timezone. Strict: affects how all times render. " +
@@ -820,6 +839,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     rule_remove,
     // Preferences
     prefs_update_appearance,
+    prefs_update_business_hours,
     prefs_update_timezone,
     knowledge_write,
   } as const;

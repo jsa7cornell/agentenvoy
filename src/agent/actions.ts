@@ -3898,6 +3898,12 @@ async function handleUpdateTimezone(
  * 2026-05-06_link-config-canonical-model-and-unified-edit). Once that migration
  * lands, this composite can write directly to the unified link record.
  */
+function formatClock(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `${h}:00` : `${h}:${String(m).padStart(2, "0")}`;
+}
+
 async function handleUpdatePrimaryLink(
   params: Record<string, unknown>,
   userId: string,
@@ -3911,10 +3917,36 @@ async function handleUpdatePrimaryLink(
   const businessFields: Record<string, unknown> = {};
   if (params.buffer !== undefined) businessFields.buffer = params.buffer;
   // availability[] supersedes business hours start/end once the canvas-collapse
-  // migration lands. For now the agent surface accepts availability but routing
-  // to the legacy start/end is a follow-up; surface a helpful message if the
-  // host tried to set windows directly.
+  // migration lands. Until then, route the common "weekday window of contiguous
+  // integer hours" shape through to handleUpdateBusinessHours so the host's
+  // "set my work hours 9-5" intent actually persists instead of silently
+  // no-op'ing under a fake success message.
   const hasAvailability = Array.isArray(params.availability) && (params.availability as unknown[]).length > 0;
+  let availabilityRoutingError: string | null = null;
+  if (hasAvailability) {
+    const windows = params.availability as Array<{
+      days?: number[];
+      startMinutes?: number;
+      endMinutes?: number;
+    }>;
+    const single = windows.length === 1 ? windows[0] : null;
+    const days = Array.isArray(single?.days) ? [...single!.days].sort() : null;
+    const isWeekdays = days != null && days.length === 5 && days.join(",") === "1,2,3,4,5";
+    const startMin = typeof single?.startMinutes === "number" ? single!.startMinutes : null;
+    const endMin = typeof single?.endMinutes === "number" ? single!.endMinutes : null;
+    const integerStartHour = startMin != null && startMin % 60 === 0 ? startMin / 60 : null;
+    const integerEndHour = endMin != null && endMin % 60 === 0 ? endMin / 60 : null;
+    if (isWeekdays && integerStartHour !== null && integerEndHour !== null) {
+      businessFields.start = integerStartHour;
+      businessFields.end = integerEndHour;
+    } else if (single && (startMin != null && startMin % 60 !== 0)) {
+      availabilityRoutingError =
+        `Business hours currently support whole hours only. "${formatClock(startMin)}–${formatClock(endMin ?? 0)}" can't be saved as-is — try 8–5 or 9–5, or set this from the dashboard for sub-hour precision.`;
+    } else {
+      availabilityRoutingError =
+        "Per-day availability windows aren't writable via the agent yet (canvas-collapse migration pending). For weekday work hours, ask for a single window like 'weekdays 9–5'.";
+    }
+  }
 
   const summaries: string[] = [];
 
@@ -3939,24 +3971,39 @@ async function handleUpdatePrimaryLink(
     summaries.push(r.message);
   }
 
-  if (hasAvailability) {
-    summaries.push(
-      "availability windows on Primary will land with the canvas-collapse migration (PR-B); " +
-      "for now use prefs_update_business_hours start/end or pass buffer here.",
-    );
+  // If availability was provided but didn't route to handleUpdateBusinessHours
+  // (shape couldn't be honored), surface that as a hard failure — do NOT
+  // silently return success. Callers (the unified agent) need to see the
+  // failure so they don't narrate a fictional confirmation to the host.
+  if (availabilityRoutingError && Object.keys(businessFields).length === 0) {
+    return { success: false, message: availabilityRoutingError };
   }
 
-  // format and location on Primary aren't yet in scope for this composite —
-  // the underlying storage doesn't carry them on Primary today. Bookable links
-  // do, via bookable_link_update. Surface a noop hint if the host tried.
-  if (params.format !== undefined) {
-    summaries.push("format on Primary isn't editable via the agent yet — use the dashboard.");
+  // format, location, guestPicks: not yet wired through this composite. If the
+  // caller passed ONLY one of these (no real work elsewhere), fail explicitly
+  // so the agent surfaces "can't do this yet" rather than confabulating.
+  const unsupportedRequested: string[] = [];
+  if (params.format !== undefined) unsupportedRequested.push("format");
+  if (params.location !== undefined) unsupportedRequested.push("location");
+  if (params.guestPicks !== undefined) unsupportedRequested.push("guestPicks");
+  if (unsupportedRequested.length > 0 && summaries.length === 0) {
+    return {
+      success: false,
+      message:
+        `${unsupportedRequested.join(", ")} on Primary isn't editable via the agent yet — set this from the dashboard.`,
+    };
   }
-  if (params.location !== undefined) {
-    summaries.push("location on Primary isn't editable via the agent yet — use the dashboard.");
+  // Otherwise (other work succeeded), surface the unsupported fields as
+  // informational tail-notes on the success message so the host knows what
+  // didn't take effect.
+  if (params.format !== undefined && summaries.length > 0) {
+    summaries.push("(format on Primary isn't editable via the agent yet — use the dashboard.)");
   }
-  if (params.guestPicks !== undefined) {
-    summaries.push("guestPicks on Primary isn't editable via the agent yet — use the dashboard.");
+  if (params.location !== undefined && summaries.length > 0) {
+    summaries.push("(location on Primary isn't editable via the agent yet — use the dashboard.)");
+  }
+  if (params.guestPicks !== undefined && summaries.length > 0) {
+    summaries.push("(guestPicks on Primary isn't editable via the agent yet — use the dashboard.)");
   }
 
   if (summaries.length === 0) {

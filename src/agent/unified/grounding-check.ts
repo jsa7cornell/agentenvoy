@@ -115,6 +115,13 @@ export const GROUNDING_DECLARATIONS: Record<string, GroundingDeclaration> = {
     fields: [], // No specific field gate — declaration alone makes the call strict-marked in telemetry.
   },
 
+  // prefs_update_business_hours — global posture write; affects scoring across all links.
+  prefs_update_business_hours: {
+    toolName: "prefs_update_business_hours",
+    toolSeverity: "strict",
+    fields: [], // No specific field gate — declaration alone is strict-marked.
+  },
+
   // prefs_update_timezone — changes how all times render across the system.
   prefs_update_timezone: {
     toolName: "prefs_update_timezone",
