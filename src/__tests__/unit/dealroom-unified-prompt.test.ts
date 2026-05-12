@@ -105,6 +105,39 @@ describe("dealroomUnifiedSystemPrompt — role-aware resolution", () => {
     }
   });
 
+  // 2026-05-12 — capability rules added per the deal-room post-migration
+  // triage. Each marker is a load-bearing instruction added in this batch;
+  // if any future prompt edit drops them, the model regresses on a known
+  // production behavior.
+  it("preserves the 2026-05-12 host-authority + guest-symmetry rules", () => {
+    const host = dealroomUnifiedSystemPrompt({ role: "host" });
+    const guest = dealroomUnifiedSystemPrompt({ role: "guest" });
+
+    // Host can override OFFERABLE SLOTS on their own session (issue #2).
+    expect(host).toMatch(/host is the authority on their own calendar/i);
+    // Host "cancel" on agreed routes to session_request_reschedule, NOT
+    // session_cancel — that's the conceptual model for un-book vs. end-thread
+    // (issue #3b).
+    expect(host).toMatch(/cancel.*meeting.*on an `agreed` session/i);
+    expect(host).toMatch(/Do NOT call `session_cancel`/);
+
+    // Guest gets session_update_time but must use OFFERABLE SLOTS (issue
+    // #2 symmetry).
+    expect(guest).toMatch(/Guest names a SPECIFIC different time/i);
+    expect(guest).toMatch(/OFFERABLE SLOTS constraint applies to guest-side edits/i);
+
+    // Guest can cancel a meeting — same un-book mechanics as host (issue
+    // #3b symmetry).
+    expect(guest).toMatch(/Guest says "cancel"/);
+    expect(guest).toMatch(/un-books the slot/i);
+
+    // The OFFERABLE SLOTS section now has the asymmetric framing — must
+    // appear in both role variants.
+    for (const p of [host, guest]) {
+      expect(p).toMatch(/OFFERABLE SLOTS does NOT constrain HOST-DIRECTED time edits/);
+    }
+  });
+
   it("uses only placeholder names in worked examples — no real names per Rule 26", () => {
     const host = dealroomUnifiedSystemPrompt({ role: "host" });
     const guest = dealroomUnifiedSystemPrompt({ role: "guest" });

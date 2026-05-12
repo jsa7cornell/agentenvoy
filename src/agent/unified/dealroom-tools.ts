@@ -235,6 +235,11 @@ export const DEALROOM_GUEST_ALLOWED_TOOLS = [
   "session_request_reschedule",
   // Guest can save their own info before confirming
   "session_save_guest_info",
+  // Guest can move (re-time) the meeting too, per 2026-05-12 capability
+  // clarification. Constrained to OFFERABLE SLOTS in the prompt — the model
+  // only emits dateTime values from the offered list (vs. host who can
+  // override their own hours).
+  "session_update_time",
 ] as const;
 
 export type DealroomRole = "dealroom-host" | "dealroom-guest";
