@@ -116,6 +116,24 @@ export async function POST(req: NextRequest) {
     data: { sessionId, role: messageRole, content },
   });
 
+  // -----------------------------------------------------------------------
+  // Deal-room unified-agent flag gate (Phase A.6 of the 2026-05-11 proposal).
+  // Set DEALROOM_UNIFIED_ENABLED=true in Vercel env to route deal-room turns
+  // through the single-Sonnet-call-with-tools pipeline. Kill switch: flip to
+  // false → ~60s redeploy → back on the legacy classifier+composer path.
+  // -----------------------------------------------------------------------
+  if (process.env.DEALROOM_UNIFIED_ENABLED === "true") {
+    const { runDealroomTurn } = await import("@/agent/unified/dealroom-runner");
+    const stream = runDealroomTurn({
+      sessionId,
+      speakerRole: messageRole,
+      currentMessage: content,
+    });
+    return new Response(stream, {
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+    });
+  }
+
   // Update guest email if provided (guest only)
   if (!isHost && guestEmail && !session.guestEmail) {
     await prisma.negotiationSession.update({
