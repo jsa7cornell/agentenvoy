@@ -138,6 +138,19 @@ const CONFIRMATION_PROSE_PATTERNS: readonly RegExp[] = [
   /\b(?:cancell?ing|moving|updating|booking|rescheduling)\b[^.!?]*\bnow\b/i,
   // "Booked X" / "Cancelled X" / "Created X" / "Saved X" at the start of a sentence
   /(?:^|[.!?]\s+)(?:Booked|Cancell?ed|Created|Saved|Sent)\s+\w+/m,
+  // Host-channel personal-link confirmation template (2026-05-12, cmp2wlgke):
+  // "Here's a coffee link for Bryan tomorrow" / "Here's a meeting link for
+  // Susan using your primary settings" / "Here's an invite for Marcus".
+  // The most common host-channel template — previously missed because the
+  // regex was deal-room-canonical-shaped only. Char-count bounds (instead
+  // of sentence-boundary exclusion) because activity strings can contain
+  // literal "!" or "?" (e.g., "testing is fun!!!" in cmp2wlgke).
+  /\bHere'?s\s+(?:a|an|the|your)\b[\s\S]{0,80}?\b(?:link|meeting|invite|template)\b[\s\S]{0,40}?\bfor\s+\S+/i,
+  // Bare past-participle close (2026-05-12, cmp2wlgke):
+  // "Wednesdays blocked." / "Friday May 8 protected." / "Susan's link is
+  // updated." Common across rule and link templates. Anchored to sentence
+  // end to avoid catching negations ("I haven't blocked anything").
+  /\b(?:is\s+|was\s+|has\s+been\s+)?(?:blocked|protected|updated|saved|created|scheduled|booked|cancell?ed|archived|rescheduled|moved|switched)\s*[.!]\s*$/im,
 ];
 
 /**

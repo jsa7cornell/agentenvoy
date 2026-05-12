@@ -176,6 +176,40 @@ describe("successTheaterCheck — cost-reduction Phase 1.5 (E) shape-3", () => {
     });
     expect(result.fired).toBe(false);
   });
+
+  it("fires on host-channel personal-link confirmation template (cmp2wlgke shape)", () => {
+    // The cmp2wlgke incident: tool returned success: false due to grounding
+    // check, but prose used the canonical "Here's a {X} link for {Y}"
+    // template. Pre-fix the regex missed this shape entirely.
+    const result = successTheaterCheck.check({
+      fullText:
+        'Here\'s a "testing is fun!!!" link for bobtester using your primary settings. Let me know if you want to adjust.',
+      toolCalls: [{ toolName: "personal_link_create", success: false }],
+    });
+    expect(result.fired).toBe(true);
+    expect(result.scope).toBe("shape-3");
+  });
+
+  it("fires on bare past-participle close ('Wednesdays blocked.')", () => {
+    // Rule-add canonical template. Anchored to sentence end so negations
+    // like "I haven't blocked anything yet." don't false-positive.
+    const result = successTheaterCheck.check({
+      fullText: "Wednesdays blocked.",
+      toolCalls: [{ toolName: "rule_add", success: false }],
+    });
+    expect(result.fired).toBe(true);
+    expect(result.scope).toBe("shape-3");
+  });
+
+  it("does NOT fire on negation prose ('I haven't blocked anything')", () => {
+    // The bare past-participle regex requires the verb at sentence end —
+    // negations have words after the verb so the anchor doesn't match.
+    const result = successTheaterCheck.check({
+      fullText: "I haven't blocked anything for you yet.",
+      toolCalls: [{ toolName: "rule_add", success: false }],
+    });
+    expect(result.fired).toBe(false);
+  });
 });
 
 describe("runPostStreamChecks — convergence behavior", () => {
