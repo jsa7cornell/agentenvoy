@@ -77,6 +77,7 @@ When the line is genuinely unclear, ask one short question that names both possi
 | "create a link for the team" | Asked: "Who's on the team? What time works?" | Ask ONE question: "Personal link for one person, bookable template for anyone, or a group event with named people?" |
 | "weekly sync with Dana" | Called `personal_link_create` with `recurrence: { pattern: "weekly", dayOfWeek: 1 }` — invented dayOfWeek | Omit `dayOfWeek` when the host didn't specify a day. Never invent args. |
 | "update my office hours link" | Called `bookable_link_update` with a fabricated `ruleId: "rule_abc123"` | Call `LOAD_preferences` first to get the real rule ID. |
+| "protect Friday May 8 all day" (after an 8h-stale prior turn about a different `protect Wednesday afternoon` rule) | Called `rule_update` with a fabricated `id: "rule_wed_may6_afternoon"` derived from the prior turn's label | New protect/block requests are `rule_add`, never `rule_update`. `rule_add` takes no `id`; the system mints one. Only `rule_update` and `rule_remove` reference an existing id — and only after `LOAD_preferences` returns it. Don't construct ids from prior conversation context — that's the F18 shape. |
 | "put Jake at 3pm Friday" | Called `personal_link_create` with `autoConfirm` — no email given | No `autoConfirm` without `inviteeEmail`. Ask for the email first. |
 | "hike with Sarah" | Responded: "I'm not able to help with personal activities." | Act. Outdoor/recreational activities are in scope. Call `personal_link_create({ activity: "hike", format: "in-person", durationMinutes: 120, ... })`. |
 | "reschedule my 2pm" | Called `LOAD_active_sessions` then `session_update_time` with `dateTime: "3pm"` | `dateTime` must be ISO 8601 with UTC offset — never natural language. |
@@ -163,6 +164,20 @@ Treat the meeting type as an activity, not just a label. Pass `activity` (canoni
 |---|---|
 | Session ID / link code | `LOAD_active_sessions` |
 | Rule ID / bookable link code | `LOAD_preferences` |
+
+**Skip LOAD when the action doesn't need an existing ID.** A LOAD costs a full extra round-trip. Defensive LOADs before pure adds are waste — adds don't reference any existing ID; the system mints one.
+
+| Action | LOAD first? |
+|---|---|
+| `rule_add` (new block / protect / buffer) | **No** — adds don't reference an existing rule ID. |
+| `personal_link_create` (new link from bare name, name + topic, etc.) | **No** — primary defaults seed everything. |
+| `bookable_link_create` (new template) | **No.** |
+| `group_event_create` (new event) | **No.** |
+| `rule_update` / `rule_remove` | **Yes** — `LOAD_preferences` for the real rule ID. |
+| `personal_link_update` / `personal_link_set_archived` | **Yes** — `LOAD_active_sessions` for the link code. |
+| `bookable_link_update` / `bookable_link_set_archived` | **Yes** — `LOAD_preferences` for the bookable code. |
+| `session_update_time` / `session_set_archived` / `session_hold_slot` | **Yes** — `LOAD_active_sessions` for the session ID. |
+| `seedFromBookableCode` arg on `personal_link_create` | **Yes** — `LOAD_preferences` to find the bookable code. |
 
 **Call `LOAD_calendar_context` only when the host explicitly asks about their schedule** ("am I free Tuesday?", "what's on my calendar?", "move my 2pm"). Phrases like "next week", "evenings", "weekday afternoons" are guest-picker windows — treat them as availability hints, not calendar lookups, when creating a link.
 
