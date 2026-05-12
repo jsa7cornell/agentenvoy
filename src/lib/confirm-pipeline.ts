@@ -759,7 +759,18 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
     attemptOutcome = "gcal_skipped_scope";
     attemptError = "calendar.events scope not granted; .ics fallback offered";
   } else try {
+    // 2026-05-12 event-data-model proposal (PR-2): if the link carries a
+    // host-provided `description` (shareable agenda/context, lands in the
+    // GCal event description body), prepend it ABOVE the auto-composed
+    // attribution footer. Host context appears first; "Scheduled via
+    // AgentEnvoy / Format / Location / etc." sits below. Falls back to
+    // today's behavior (auto-composed only) when description is null/empty.
+    const hostDescription =
+      typeof (session.link as { description?: string | null })?.description === "string"
+        ? (session.link as { description?: string | null }).description?.trim()
+        : null;
     const descriptionLines = [
+      ...(hostDescription ? [hostDescription, ""] : []),
       `Scheduled via AgentEnvoy`,
       `Format: ${meetingFormat}`,
       ...(effectiveLocation ? [`Location: ${effectiveLocation}`] : []),

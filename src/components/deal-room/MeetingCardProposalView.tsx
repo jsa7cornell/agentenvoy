@@ -122,9 +122,9 @@ export function MeetingCardProposalView({
               type="button"
               onClick={() => router.push("/dashboard")}
               aria-label="Back to dashboard"
-              className="absolute top-0 right-0 z-10 w-8 h-8 flex items-center justify-center rounded-full text-[#9b9480] hover:text-[#1a1a2e] hover:bg-black/5 transition-colors"
+              className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors backdrop-blur-sm"
             >
-              <span aria-hidden className="text-[18px] leading-none">✕</span>
+              <span aria-hidden className="text-[15px] font-bold leading-none">✕</span>
             </button>
           )}
           <MeetingCard {...cardPropsWithStubs} />

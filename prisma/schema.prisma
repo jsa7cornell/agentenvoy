@@ -325,7 +325,29 @@ model NegotiationLink {
   /// no topic ever set (filtered as generic or never given). Set at every
   /// write site that mutates `topic` via `deriveTopicSource()` in actions.ts.
   /// See proposal 2026-04-28_event-edit-unified-intent_*_decided-2026-04-28.md.
+  ///
+  /// DEPRECATED 2026-05-12 (event-data-model proposal): `topic` + `topicSource`
+  /// are being retired in favor of `customTitle` (explicit host override) +
+  /// derived semantics. Migration plan: PR-1 adds new columns (this PR), PR-2
+  /// dual-writes, PR-3 switches readers, PR-4 (deferred ≥3 weeks) drops these
+  /// two columns. Do NOT write new code paths reading these — read via
+  /// `customTitle ?? buildEventTitle(...)` instead.
   topicSource     String?
+  /// Host-named title override. When set, used verbatim as the event title;
+  /// when null, title derives from buildEventTitle({customTitle, activity, ...}).
+  /// Replaces `topic` for the "Q3 review"-style explicit naming case.
+  /// 2026-05-12 event-data-model-google-aligned-and-meeting-tip proposal.
+  customTitle     String?
+  /// Shareable agenda/context, lands in GCal event description body (both
+  /// host + guest see). Generator output via generateMeetingNotes(). Distinct
+  /// from `parameters.generatedTip` which is host-only on the deal-room card.
+  /// 2026-05-12 event-data-model-google-aligned-and-meeting-tip proposal.
+  description     String?
+  /// Verbatim host turn that triggered the create. Persisted internally only
+  /// (NOT exposed on MCP — see proposal §"MCP reconciliation"). Used as input
+  /// for generateMeetingNotes() regen calls. Never echoed back to the guest
+  /// surface. 2026-05-12 event-data-model-google-aligned-and-meeting-tip proposal.
+  creationPrompt  String?
   /// Timestamp of the last material edit (activity/format/duration/location/
   /// dates/hours/days/blocked time/invitees/topic). Powers the "Edited just
   /// now — activity, hours" pill. Distinct from `updatedAt` — non-material
@@ -600,6 +622,11 @@ model NegotiationSession {
   /// When the most-recent reschedule fired. Lets the deal-room render
   /// "last moved Xm ago" without parsing the JSON history.
   lastRescheduledAt DateTime?
+  /// Counter for generateMeetingNotes() regenerations on this session.
+  /// Capped at 5 per session lifetime; past that, cached values stand.
+  /// Prevents runaway cost from hosts editing 30 times in a session.
+  /// 2026-05-12 event-data-model-google-aligned-and-meeting-tip proposal.
+  meetingNotesRegens Int @default(0)
 
   link            NegotiationLink     @relation(fields: [linkId], references: [id], onDelete: Cascade)
   host            User                @relation("host", fields: [hostId], references: [id])

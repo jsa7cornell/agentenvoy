@@ -1,0 +1,146 @@
+/**
+ * Tests for buildEventTitle — the single-source-of-truth title helper.
+ *
+ * Anchored to the cmp2qcnjy regression fixture (event-data-model proposal §6
+ * verification): "coffee with Christine regarding AI discussion" should
+ * produce "Coffee: Christine + John" — not the AI-discussion-as-title shape
+ * that drove the redesign.
+ */
+import { describe, it, expect } from "vitest";
+import { buildEventTitle } from "@/lib/build-event-title";
+
+describe("buildEventTitle — 1:1 turns", () => {
+  it("cmp2qcnjy regression: coffee with Christine yields 'Coffee: Christine + John'", () => {
+    expect(buildEventTitle({
+      activity: "coffee",
+      isGroup: false,
+      inviteeDisplay: "Christine",
+      hostFirstName: "John",
+    })).toBe("Coffee: Christine + John");
+  });
+
+  it("customTitle wins verbatim, ignoring activity/invitee", () => {
+    expect(buildEventTitle({
+      customTitle: "Q3 board review",
+      activity: "coffee",
+      inviteeDisplay: "Christine",
+      hostFirstName: "John",
+    })).toBe("Q3 board review");
+  });
+
+  it("customTitle is trimmed", () => {
+    expect(buildEventTitle({ customTitle: "  Q3 board review  " })).toBe("Q3 board review");
+  });
+
+  it("empty customTitle falls through to formula", () => {
+    expect(buildEventTitle({
+      customTitle: "  ",
+      activity: "coffee",
+      inviteeDisplay: "Christine",
+      hostFirstName: "John",
+    })).toBe("Coffee: Christine + John");
+  });
+
+  it("kebab-case activity flattens hyphen in prefix", () => {
+    expect(buildEventTitle({
+      activity: "bike-ride",
+      inviteeDisplay: "Marcus",
+      hostFirstName: "John",
+    })).toBe("Bike ride: Marcus + John");
+  });
+
+  it("activity alias resolves to canonical name in prefix", () => {
+    // "biking" is an alias of bike-ride
+    expect(buildEventTitle({
+      activity: "biking",
+      inviteeDisplay: "Marcus",
+      hostFirstName: "John",
+    })).toBe("Bike ride: Marcus + John");
+  });
+
+  it("falls back to format prefix when activity is unknown", () => {
+    expect(buildEventTitle({
+      activity: "some-unknown-thing",
+      format: "phone",
+      inviteeDisplay: "Susan",
+      hostFirstName: "John",
+    })).toBe("Call: Susan + John");
+  });
+
+  it("format=video uses 'VC' prefix", () => {
+    expect(buildEventTitle({
+      format: "video",
+      inviteeDisplay: "Susan",
+      hostFirstName: "John",
+    })).toBe("VC: Susan + John");
+  });
+
+  it("no activity / no format / 1:1 → just names", () => {
+    expect(buildEventTitle({
+      inviteeDisplay: "Susan",
+      hostFirstName: "John",
+    })).toBe("Susan + John");
+  });
+
+  it("no host first name → falls back to prefix:invitee", () => {
+    expect(buildEventTitle({
+      activity: "coffee",
+      inviteeDisplay: "Susan",
+    })).toBe("Coffee: Susan");
+  });
+
+  it("no invitee → returns prefix alone", () => {
+    expect(buildEventTitle({
+      activity: "coffee",
+      hostFirstName: "John",
+    })).toBe("Coffee");
+  });
+
+  it("nothing populated → 'Meeting'", () => {
+    expect(buildEventTitle({})).toBe("Meeting");
+  });
+
+  it("format-flex activity (meet) still derives prefix", () => {
+    expect(buildEventTitle({
+      activity: "meet",
+      inviteeDisplay: "Sarah",
+      hostFirstName: "John",
+    })).toBe("Meet: Sarah + John");
+  });
+});
+
+describe("buildEventTitle — group turns", () => {
+  it("activity + group → 'Prefix (names)'", () => {
+    expect(buildEventTitle({
+      activity: "dinner",
+      isGroup: true,
+      firstNamesDisplay: "Sarah, Marcus, Diane",
+    })).toBe("Dinner (Sarah, Marcus, Diane)");
+  });
+
+  it("group with no activity → just names", () => {
+    expect(buildEventTitle({
+      isGroup: true,
+      firstNamesDisplay: "Sarah, Marcus, Diane",
+    })).toBe("Sarah, Marcus, Diane");
+  });
+
+  it("group with activity but no names → just prefix", () => {
+    expect(buildEventTitle({
+      activity: "brainstorm",
+      isGroup: true,
+    })).toBe("Brainstorm");
+  });
+
+  it("group with nothing → 'Meeting'", () => {
+    expect(buildEventTitle({ isGroup: true })).toBe("Meeting");
+  });
+
+  it("customTitle wins on group too", () => {
+    expect(buildEventTitle({
+      customTitle: "Founder Dinner",
+      isGroup: true,
+      firstNamesDisplay: "Sarah, Marcus, Diane",
+    })).toBe("Founder Dinner");
+  });
+});

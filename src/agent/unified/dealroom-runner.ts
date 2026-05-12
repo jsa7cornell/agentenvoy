@@ -38,7 +38,9 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { runUnifiedTurn } from "./runner";
-import { buildUnifiedToolsFor } from "./tools";
+import { buildUnifiedToolsFor, type AgentToolContext } from "./tools";
+import type { LoadResultShape } from "./grounding-check";
+import type { GroundingFire } from "./tool-impls/_exec";
 import { dealroomUnifiedSystemPrompt } from "@/agent/runtime-prompts";
 import {
   loadDealroomContext,
@@ -114,15 +116,43 @@ export function runDealroomTurn(ctx: DealroomTurnContext): ReadableStream<Uint8A
           currentMessage: ctx.currentMessage,
         });
 
+        // ── Per-turn accumulators for grounding-check value-match + telemetry ──
+        // 2026-05-12 grounding-check-evidence-scope-redesign (PR-C, deal-room):
+        // parallels PR-B's host-channel plumbing. Closure-captured mutables
+        // populated as LOAD tools fire; consumed by the grounding check's
+        // value-match logic + (PR-D) unifiedTurn metadata.
+        const thisTurnToolResults: LoadResultShape[] = [];
+        const groundingFires: GroundingFire[] = [];
+
+        // recentThread: extract prior user + envoy turn from the 2-turn preload.
+        // When historyTrimmedForStaleness fired upstream, ctxOut.history is
+        // empty → recentThread is undefined → recentThread-scoped grounding-
+        // check fields surface the distinctive "stale context" error.
+        const recentThread: AgentToolContext["recentThread"] =
+          ctxOut.session.historyTrimmedForStaleness || ctxOut.history.length === 0
+            ? undefined
+            : {
+                priorUserTurn: ctxOut.history.find((m) => m.role === "user")?.content,
+                priorEnvoyTurn: ctxOut.history.find((m) => m.role === "assistant")?.content,
+              };
+
         // 2. Build the role-scoped tool surface. The host-channel agent
         //    context fields (`timezone`, `meetSlug`) come from the session's
         //    host — the unified tools' execute closures need them for
         //    request-scoped tool dispatch.
-        const agentCtx = {
+        const agentCtx: AgentToolContext = {
           userId: ctxOut.session.hostId,
           timezone: ctxOut.session.hostTimezone,
           // meetSlug is N/A for deal-room writes (sessionId scopes everything).
           userMessage: ctx.currentMessage,
+          recentThread,
+          getThisTurnToolResults: () => thisTurnToolResults,
+          recordToolResult: (toolName, result) => {
+            thisTurnToolResults.push({ toolName, result } as LoadResultShape);
+          },
+          recordGroundingFire: (fire) => {
+            groundingFires.push(fire);
+          },
         };
         const role: "dealroom-host" | "dealroom-guest" =
           ctx.speakerRole === "host" ? "dealroom-host" : "dealroom-guest";
@@ -157,6 +187,7 @@ export function runDealroomTurn(ctx: DealroomTurnContext): ReadableStream<Uint8A
           priorEnvoyTurnCount: ctxOut.session.priorEnvoyTurnCount,
           priorEnvoyTurnAgeMs: ctxOut.session.priorEnvoyTurnAgeMs,
           historyTrimmedForStaleness: ctxOut.session.historyTrimmedForStaleness,
+          getGroundingFires: () => groundingFires,
           enqueue,
           persistEnvoyMessage: async ({ content, metadata }) => {
             // Strip inline blocks (delegate-speaker, status-update, tz-switch)

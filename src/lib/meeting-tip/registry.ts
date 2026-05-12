@@ -3,6 +3,7 @@ import { authoredLinkTip } from "./templates/authored-link-tip";
 import { authoredDayOf } from "./templates/authored-day-of";
 import { authoredTravel } from "./templates/authored-travel";
 import { authoredFormat } from "./templates/authored-format";
+import { generatedTip } from "./templates/generated-tip";
 import { derivedCalendarOverlap } from "./templates/derived-calendar-overlap";
 import { derivedRelationshipHistory } from "./templates/derived-relationship-history";
 import { derivedSeriesProgress } from "./templates/derived-series-progress";
@@ -14,6 +15,7 @@ const TEMPLATES: TipTemplate[] = [
   authoredDayOf,
   authoredTravel,
   authoredFormat,
+  generatedTip,
   derivedCalendarOverlap,
   derivedRelationshipHistory,
   derivedSeriesProgress,
