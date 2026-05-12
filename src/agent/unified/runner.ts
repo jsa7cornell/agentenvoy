@@ -36,6 +36,12 @@ import {
 } from "./model-policy";
 import { buildUnifiedTools } from "./tools";
 import { runSelfCheck, type ToolCallSummary } from "./self-check";
+import {
+  runPostStreamChecks,
+  DEFAULT_POST_STREAM_CHECKS,
+  type PostStreamCheck,
+  type PostStreamGuardRecord,
+} from "./post-stream-checks";
 import type { Prisma } from "@prisma/client";
 
 import { unifiedAgentSystemPrompt } from "@/agent/runtime-prompts";
@@ -114,10 +120,23 @@ export type UnifiedTurnConfig = {
   /** Stream sink for status + text frames. Caller owns the ReadableStream. */
   enqueue: EnqueueFn;
   /**
+   * Optional post-stream checks (Phase A.5 + B3-c convergence). When supplied,
+   * the runner calls `runPostStreamChecks` after the stream completes and
+   * persists fires as `metadata.unifiedTurn.postStreamGuards`. Defaults to
+   * the DEFAULT_POST_STREAM_CHECKS array when omitted; deal-room callers
+   * (A.4) and host-channel callers both get coverage by default.
+   * Pass `[]` to disable (only useful for tests).
+   */
+  postStreamChecks?: readonly PostStreamCheck[];
+  /**
    * Called after the stream finishes and metadata is composed. The caller
    * persists to whichever table is appropriate (ChannelMessage for host-channel,
    * Message for deal-room). Receives the final text, full metadata blob, and
    * an optional threadId derived from a tool result.
+   *
+   * `steps` and `fullText` are also surfaced so deal-room callers can parse
+   * `[DELEGATE_SPEAKER]` blocks off the prose + attach to the upstream guest
+   * message's metadata (per handoff §6.3).
    */
   persistEnvoyMessage: (args: PersistEnvoyMessageArgs) => Promise<void>;
 };
@@ -145,6 +164,7 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
     priorEnvoyTurnCount,
     enqueue,
     priorEnvoyTurnAgeMs,
+    postStreamChecks = DEFAULT_POST_STREAM_CHECKS,
     persistEnvoyMessage,
   } = config;
 
@@ -420,9 +440,23 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
     // feed.tsx renders a structured card instead of a bare URL blob.
     const linkCardExtras = extractLinkCardMeta(steps);
 
+    // Phase A.5 — post-stream checks (cmp1nni72 narration-without-emit +
+    // cost-reduction success-theater, converged into one module per B3-c).
+    // SEV-WARN log-only in v1; fires get persisted to
+    // `metadata.unifiedTurn.postStreamGuards` so we can measure rates before
+    // deciding whether to escalate to text-replacement or remediation rerun.
+    const postStreamToolCalls = legacyActionResults.map((r) => ({
+      toolName: r.action,
+      success: r.success,
+    }));
+    const postStreamGuards: PostStreamGuardRecord[] = runPostStreamChecks(
+      { fullText, toolCalls: postStreamToolCalls },
+      postStreamChecks,
+    );
+
     // Compose the metadata blob and hand it to the caller's persistence
     // callback. Host-channel writes to `ChannelMessage`; deal-room (A.4)
-    // will write to `Message`. Same blob shape; different table.
+    // writes to `Message`. Same blob shape; different table.
     const metadata = {
       ...(buildUnifiedMetadata({
         turnCost,
@@ -435,6 +469,7 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
         remediated,
         remediationDurationMs,
         reasoningTrace: reasoningTrace.trim() ? reasoningTrace : null,
+        postStreamGuards,
       }) as object),
       ...(legacyActions.length > 0
         ? { actions: legacyActions, actionResults: legacyActionResults }
@@ -704,6 +739,10 @@ function buildUnifiedMetadata(params: {
    *  surfaced to the host. Null when the feature is disabled or no trace was
    *  emitted. Capped at ~8KB to keep metadata payloads reasonable. */
   reasoningTrace?: string | null;
+  /** Post-stream check fires (Phase A.5 + B3-c convergence). Each entry is one
+   *  guard that fired this turn (name + scope + reason). Empty array = clean
+   *  turn; not persisted when empty to keep metadata payloads small. */
+  postStreamGuards?: readonly PostStreamGuardRecord[];
 }): Prisma.InputJsonValue {
   const {
     turnCost,
@@ -716,6 +755,7 @@ function buildUnifiedMetadata(params: {
     remediated,
     remediationDurationMs,
     reasoningTrace,
+    postStreamGuards,
   } = params;
 
   // Synthesize moduleGuard.bucket from tool names for corpus continuity.
@@ -740,6 +780,9 @@ function buildUnifiedMetadata(params: {
       selfCheck,
       ...(remediated ? { remediated: true, remediationDurationMs } : {}),
       ...(trimmedReasoning ? { reasoningTrace: trimmedReasoning } : {}),
+      ...(postStreamGuards && postStreamGuards.length > 0
+        ? { postStreamGuards: [...postStreamGuards] }
+        : {}),
       cost: {
         inputTokens: turnCost.inputTokens,
         outputTokens: turnCost.outputTokens,
