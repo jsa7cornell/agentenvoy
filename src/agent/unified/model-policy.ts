@@ -50,8 +50,17 @@ export type TurnContext = {
    *  multi-step flow in progress; we keep Sonnet for those even on short turns. */
   priorTurnToolCount?: number;
   /** Whether any prior envoy turn in the loaded history made a tool call.
-   *  Conservative gate to avoid Haiku stepping into the middle of a tool sequence. */
+   *  Combined with `priorEnvoyTurnAgeMs` to gate Haiku against in-flight
+   *  multi-step flows. */
   priorToolUseInHistory?: boolean;
+  /** Wall-clock ms since the most recent prior envoy turn was persisted.
+   *  Combined with `priorToolUseInHistory` to detect a still-in-flight tool
+   *  sequence vs. dead history: only keep Sonnet when the prior tool-using
+   *  turn is recent enough (≤ HAIKU_RECENCY_WINDOW_MS) to plausibly be the
+   *  same interaction. 8h+ gaps fall through to Haiku regardless. Undefined
+   *  ageMs is treated as "unknown" → conservative (preserves pre-recency
+   *  behavior). */
+  priorEnvoyTurnAgeMs?: number;
   /** Number of prior envoy turns in history. Retained for telemetry/back-compat;
    *  no longer gates Haiku routing (grounding-check + self-check cover the
    *  load-bearing-create concern that previously kept cold channels on Sonnet). */
@@ -62,9 +71,18 @@ export type TurnContext = {
 };
 
 /**
+ * If the most recent prior envoy turn used tools AND was within this window,
+ * we treat this turn as plausibly still in-flight and keep Sonnet. Beyond it,
+ * the conversation is cold — short messages route to Haiku even after prior
+ * tool use. 15 min covers the realistic "user got coffee mid-flow" case
+ * without stranding genuinely fresh interactions on Sonnet.
+ */
+const HAIKU_RECENCY_WINDOW_MS = 15 * 60 * 1000;
+
+/**
  * Selects the appropriate model tier for a turn.
  *
- * Tier policy (v2 — cost-reduction PR 2026-05-07):
+ * Tier policy (v3 — recency-window gate, 2026-05-12):
  *   - **Opus** when the message is long (>500 chars) or `forceDeep`. Genuinely
  *     complex intents that benefit from deeper reasoning.
  *   - **Haiku** when the message is short (≤200 chars) AND there's no recent
@@ -72,10 +90,13 @@ export type TurnContext = {
  *     handles these fine and costs ~3x less.
  *   - **Sonnet** for everything else (default tier — most tool-using turns).
  *
- * Why the multi-step gate matters: if a user says "yes" mid-flow after a
+ * Why the multi-step gate matters: if the host says "yes" mid-flow after a
  * `LOAD_active_sessions` proposal, dropping to Haiku risks losing tool-routing
- * accuracy for the follow-up. Stay on Sonnet whenever there's a tool sequence
- * in progress.
+ * accuracy. The v2 (2026-05-07) gate keyed on `priorToolUseInHistory` alone,
+ * which fired on ANY prior tool use anywhere in the 10-turn window — including
+ * 8h+ stale ones. v3 splits "in-flight" from "ever happened" using
+ * `priorEnvoyTurnAgeMs`: prior tool use within HAIKU_RECENCY_WINDOW_MS still
+ * keeps Sonnet (real in-flight case); older than that drops to Haiku.
  */
 export function selectModelForTurn(ctx: TurnContext): ModelSelection {
   if (ctx.forceDeep) {
@@ -99,19 +120,31 @@ export function selectModelForTurn(ctx: TurnContext): ModelSelection {
   if (process.env.UA_DISABLE_HAIKU === "true") {
     return { tier: "default", modelId: MODEL_TIERS.default, reason: "haiku-disabled" };
   }
-  // Drop to Haiku for short turns when no multi-step flow is in progress.
-  // The 200-char threshold catches confirmations ("go for it", "yes please"),
-  // simple acks, and single-shot questions. Cold channels are allowed here —
-  // grounding-check + self-check now cover the load-bearing-create concern
-  // that previously required established history.
-  const noMultiStep =
-    !ctx.priorTurnToolCount &&
-    !ctx.priorToolUseInHistory;
-  if (ctx.messageLength <= 200 && noMultiStep) {
+  // Multi-step gate (v3 — recency-aware):
+  //   - `priorTurnToolCount > 0`: the turn immediately before this one used tools
+  //     → still mid-flow → keep Sonnet.
+  //   - `priorToolUseInHistory` AND prior envoy turn was recent (<window) →
+  //     in-flight likely → keep Sonnet.
+  //   - `priorToolUseInHistory` AND age unknown → conservative, keep Sonnet
+  //     (preserves pre-recency behavior for callers that don't pass ageMs).
+  //   - `priorToolUseInHistory` AND age > window → dead history → route to Haiku.
+  //   - No prior tool use → route to Haiku.
+  const inMultiStep = !!ctx.priorTurnToolCount;
+  const recentPriorToolUse =
+    !!ctx.priorToolUseInHistory &&
+    (typeof ctx.priorEnvoyTurnAgeMs !== "number" ||
+      ctx.priorEnvoyTurnAgeMs <= HAIKU_RECENCY_WINDOW_MS);
+  if (ctx.messageLength <= 200 && !inMultiStep && !recentPriorToolUse) {
+    // Distinguish "stale prior tool use, recency dropped us through" from
+    // "no prior tool use ever" so production telemetry can show the v3 gate
+    // earning its keep.
+    const reason = ctx.priorToolUseInHistory
+      ? "short-stale-history"
+      : "short-no-multistep";
     return {
       tier: "fast",
       modelId: MODEL_TIERS.fast,
-      reason: "short-no-multistep",
+      reason,
     };
   }
   return { tier: "default", modelId: MODEL_TIERS.default, reason: "default" };

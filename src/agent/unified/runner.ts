@@ -104,6 +104,13 @@ export type UnifiedTurnConfig = {
   priorToolUseInHistory: boolean;
   /** Tier-selection signal: count of envoy turns in the window. */
   priorEnvoyTurnCount: number;
+  /**
+   * Tier-selection signal: age of the most recent envoy turn in ms. Gates the
+   * v3 recency-window Haiku tier selection (cost-reduction 2026-05-12 §A):
+   * stale prior tool use (8h+) drops to Haiku rather than keeping Sonnet on
+   * dead history. `undefined` = no prior envoy turns (cold channel).
+   */
+  priorEnvoyTurnAgeMs?: number;
   /** Stream sink for status + text frames. Caller owns the ReadableStream. */
   enqueue: EnqueueFn;
   /**
@@ -137,6 +144,7 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
     priorToolUseInHistory,
     priorEnvoyTurnCount,
     enqueue,
+    priorEnvoyTurnAgeMs,
     persistEnvoyMessage,
   } = config;
 
@@ -146,10 +154,13 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
 
     // Select model tier — Haiku for short single-turn cases on established
     // channels, Sonnet for cold-channel and multi-step turns, Opus for long.
+    // priorEnvoyTurnAgeMs gates the recency window: stale prior tool use
+    // (8h+) drops to Haiku rather than keeping Sonnet on dead history.
     const modelSelection = selectModelForTurn({
       messageLength: userMessage.length,
       priorToolUseInHistory,
       priorEnvoyTurnCount,
+      priorEnvoyTurnAgeMs,
     });
 
     // Stream the unified agent response.
@@ -165,8 +176,19 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
     // is still captured to metadata.unifiedTurn.reasoningTrace
     // (admin-only diagnostic, not streamed to the client).
     //
-    // Disable via UA_THINKING_DISABLED=true env if needed.
-    const thinkingEnabled = process.env.UA_THINKING_DISABLED !== "true";
+    // Tier-aware gate (2026-05-12 cost reduction §B):
+    //   - UA_THINKING_DISABLED=true env: kill switch, off everywhere.
+    //   - tier === "fast" (Haiku): off — adaptive thinking burns output
+    //     tokens on a tier where its value is lowest.
+    //   - messageLength <= 80 chars: off — mechanical turns ("block
+    //     Wednesdays", "yes go for it") don't benefit from thinking and
+    //     pay output-rate tokens for it.
+    //   - everything else: adaptive (model decides budget per turn).
+    const SHORT_TURN_NO_THINK_THRESHOLD = 80;
+    const thinkingEnabled =
+      process.env.UA_THINKING_DISABLED !== "true" &&
+      modelSelection.tier !== "fast" &&
+      userMessage.length > SHORT_TURN_NO_THINK_THRESHOLD;
     const startMs = Date.now();
     // Two cache breakpoints:
     //   1) tools + system prompt (always-stable prefix; written on first turn
@@ -406,6 +428,8 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
         turnCost,
         toolCallNames: allToolCallNames,
         modelId: modelSelection.modelId,
+        modelSelectionReason: modelSelection.reason,
+        thinkingEnabled,
         durationMs,
         selfCheck: selfCheckResult,
         remediated,
@@ -486,9 +510,16 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           userMessage: ctx.message,
         });
 
-        // Load recent conversation history (host-channel-scoped).
-        const { messages: recentMessages, priorToolUseInHistory, priorEnvoyTurnCount } =
-          await loadRecentHistory(ctx.channelId);
+        // Load recent conversation history (host-channel-scoped). The
+        // `priorEnvoyTurnAgeMs` field gates the v3 recency-window Haiku tier
+        // selection (cost-reduction proposal 2026-05-12 §A). Threaded through
+        // UnifiedTurnConfig so deal-room callers (A.4) also benefit.
+        const {
+          messages: recentMessages,
+          priorToolUseInHistory,
+          priorEnvoyTurnCount,
+          priorEnvoyTurnAgeMs,
+        } = await loadRecentHistory(ctx.channelId);
 
         await runUnifiedTurn({
           userId: ctx.userId,
@@ -498,6 +529,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
           recentMessages,
           priorToolUseInHistory,
           priorEnvoyTurnCount,
+          priorEnvoyTurnAgeMs,
           enqueue,
           persistEnvoyMessage: async ({ content, metadata, threadId }) => {
             await prisma.channelMessage.create({
@@ -565,6 +597,7 @@ const TOOL_STATUS_COPY: Record<string, string> = {
   rule_remove:              "Removing rule…",
   // Preferences
   prefs_update_appearance:  "Saving appearance…",
+  prefs_update_business_hours: "Saving work hours…",
   prefs_update_timezone:    "Saving timezone…",
   knowledge_write:          "Saving note…",
 };
@@ -602,6 +635,11 @@ async function loadRecentHistory(
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   priorToolUseInHistory: boolean;
   priorEnvoyTurnCount: number;
+  /** Wall-clock ms since the most recent envoy turn was persisted. Undefined
+   *  when there are no prior envoy turns. Feeds the recency-window gate in
+   *  selectModelForTurn so 8h+ stale "prior tool use" doesn't trap dead
+   *  history on Sonnet. */
+  priorEnvoyTurnAgeMs?: number;
 }> {
   // Window cut from 20 → 10 (cost-reduction PR 2026-05-07). 10 turns covers
   // the typical multi-turn conversation; longer-tail context is rarely
@@ -610,7 +648,7 @@ async function loadRecentHistory(
     where: { channelId },
     orderBy: { createdAt: "desc" },
     take: 10,
-    select: { role: true, content: true, metadata: true },
+    select: { role: true, content: true, metadata: true, createdAt: true },
   });
   // Reverse so oldest-first, map envoy → assistant for AI SDK.
   const messages = rows
@@ -629,13 +667,33 @@ async function loadRecentHistory(
   // Count envoy turns to recognize cold channels. New users with no history
   // ought to stay on Sonnet for create-link requests even when short.
   const priorEnvoyTurnCount = rows.filter((r) => r.role === "envoy").length;
-  return { messages, priorToolUseInHistory, priorEnvoyTurnCount };
+  // Compute age of the most recent envoy turn (rows queried desc → first envoy
+  // row in the original ordering wins). Used by the recency-window gate to
+  // distinguish in-flight multi-step from stale history.
+  const mostRecentEnvoy = rows.find((r) => r.role === "envoy");
+  const priorEnvoyTurnAgeMs = mostRecentEnvoy
+    ? Date.now() - mostRecentEnvoy.createdAt.getTime()
+    : undefined;
+  return {
+    messages,
+    priorToolUseInHistory,
+    priorEnvoyTurnCount,
+    priorEnvoyTurnAgeMs,
+  };
 }
 
 function buildUnifiedMetadata(params: {
   turnCost: TurnCost;
   toolCallNames: string[];
   modelId: string;
+  /** `selectModelForTurn().reason` — persisted so production telemetry can
+   *  attribute Sonnet/Haiku routing to the actual gate that fired
+   *  ("short-no-multistep" / "short-stale-history" / "default" / etc). */
+  modelSelectionReason: string;
+  /** Whether Anthropic extended-thinking was enabled for this turn. Combined
+   *  with `cost.outputTokens` lets us measure the post-2026-05-12 thinking
+   *  gate's actual cost impact. */
+  thinkingEnabled: boolean;
   durationMs: number;
   selfCheck: { passed: boolean; flaggedTools?: string[]; reason?: string };
   /** Layer 4 retry: did this turn run a remediation pass after self-check failed? */
@@ -647,7 +705,18 @@ function buildUnifiedMetadata(params: {
    *  emitted. Capped at ~8KB to keep metadata payloads reasonable. */
   reasoningTrace?: string | null;
 }): Prisma.InputJsonValue {
-  const { turnCost, toolCallNames, modelId, durationMs, selfCheck, remediated, remediationDurationMs, reasoningTrace } = params;
+  const {
+    turnCost,
+    toolCallNames,
+    modelId,
+    modelSelectionReason,
+    thinkingEnabled,
+    durationMs,
+    selfCheck,
+    remediated,
+    remediationDurationMs,
+    reasoningTrace,
+  } = params;
 
   // Synthesize moduleGuard.bucket from tool names for corpus continuity.
   // Maps tool name prefixes to logical bucket names understood by the dashboard.
@@ -663,6 +732,8 @@ function buildUnifiedMetadata(params: {
     unifiedTurn: {
       model: modelId,
       tier: turnCost.tier,
+      tierReason: modelSelectionReason,
+      thinkingEnabled,
       promptVersion: PROMPT_VERSION,
       toolCalls: toolCallNames,
       durationMs,

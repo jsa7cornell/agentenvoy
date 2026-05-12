@@ -140,6 +140,67 @@ export function unifiedAgentSystemPrompt(): string {
   }
 }
 
+// ── Unified deal-room agent (Phase A.2, 2026-05-11) ────────────────────────
+/**
+ * Load the unified deal-room system prompt with role-aware sections resolved.
+ *
+ * The on-disk markdown carries `{{ROLE}}` placeholder + `<!-- IF-ROLE: host -->`
+ * / `<!-- IF-ROLE: guest -->` conditional blocks. This loader substitutes the
+ * role string and strips the inactive blocks, returning a single prompt the
+ * model sees with no template syntax left.
+ *
+ * `role` is set per-request by the runner based on whether the host or guest
+ * is the speaker on this turn (derived from NextAuth session vs. negotiation
+ * session's hostId).
+ *
+ * Phase A.2 of the deal-room migration. See
+ * `proposals/2026-05-11_complete-unified-agent-migration-and-retire-classifier-composer*`
+ * §2.4 (one prompt with role awareness — decided 2026-05-11).
+ */
+export function dealroomUnifiedSystemPrompt(opts: { role: "host" | "guest" }): string {
+  let raw: string;
+  try {
+    raw = readFileSync(join(cwd, "src/agent/runtime-prompts/composers/dealroom-unified.md"), "utf-8");
+  } catch (err) {
+    throw new Error(`[runtime-prompts/index] failed to load composers/dealroom-unified.md: ${err}`);
+  }
+  return resolveRoleConditionals(applySubstitutions(raw), opts.role);
+}
+
+/**
+ * Strip `<!-- IF-ROLE: <other> -->...<!-- END-IF -->` blocks and replace the
+ * `{{ROLE}}` placeholder with the active role string.
+ *
+ * Block syntax (HTML-comment so the markdown still renders cleanly when viewed):
+ *
+ *     <!-- IF-ROLE: host -->
+ *     ...host-only content...
+ *     <!-- END-IF -->
+ *
+ * Same for guest. Non-matching blocks are removed entirely (including the
+ * surrounding markers + trailing newline). Matching blocks are preserved with
+ * the markers removed. `{{ROLE}}` is then replaced inline with the role string.
+ */
+function resolveRoleConditionals(markdown: string, role: "host" | "guest"): string {
+  const other = role === "host" ? "guest" : "host";
+  // 1. Strip inactive blocks (greedy across lines, non-greedy within).
+  //    The trailing `\n?` consumes the newline after END-IF so the resolved
+  //    prompt doesn't leave double blank lines where blocks used to be.
+  const inactiveBlock = new RegExp(
+    `<!-- IF-ROLE: ${other} -->[\\s\\S]*?<!-- END-IF -->\\n?`,
+    "g",
+  );
+  let out = markdown.replace(inactiveBlock, "");
+  // 2. Unwrap active blocks (keep their content, drop the markers + the
+  //    newlines immediately after the opening marker and before the closing).
+  const activeOpen = new RegExp(`<!-- IF-ROLE: ${role} -->\\n?`, "g");
+  const activeClose = /<!-- END-IF -->\n?/g;
+  out = out.replace(activeOpen, "").replace(activeClose, "");
+  // 3. Substitute the {{ROLE}} placeholder.
+  out = out.replace(/\{\{ROLE\}\}/g, role);
+  return out;
+}
+
 // ── Multi-agent proposal synthesizer (separate feature — /api/negotiator/synthesize) ─
 // NOTE: this is NOT the deal-room negotiator. It's the system prompt for the
 // agent that compares competing AI-agent research outputs and emits a JSON
