@@ -17,6 +17,8 @@ export interface BuildTipInputArgs {
   bothCalendarsConnected?: boolean;
   linkAuthoredTip?: string | null;
   guestPicksLocation?: boolean | null;
+  /** Model-generated tip from generateMeetingNotes — see types.ts. */
+  linkGeneratedTip?: string | null;
 }
 
 export function buildTipInput(args: BuildTipInputArgs): TipInput {
@@ -37,5 +39,6 @@ export function buildTipInput(args: BuildTipInputArgs): TipInput {
     bothCalendarsConnected: args.bothCalendarsConnected,
     linkAuthoredTip: args.linkAuthoredTip ?? undefined,
     guestPicksLocation: args.guestPicksLocation ?? false,
+    linkGeneratedTip: args.linkGeneratedTip ?? undefined,
   };
 }
