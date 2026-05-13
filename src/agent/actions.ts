@@ -37,7 +37,12 @@ import {
 } from "@/lib/mcp/parameter-resolver";
 import { isGenericTopic, findActivity, defaultDurationForActivity } from "@/lib/activity-vocab";
 import { MATERIAL_FIELDS, type MaterialField } from "@/lib/material-fields";
-import { DEFAULT_TIP } from "@/lib/meeting-tip/default-tip";
+// 2026-05-12 event-data-model proposal (PR-2b): DEFAULT_TIP fallback retired
+// for parameters.tip — invalid LLM tips now drop to null on parameters.generatedTip
+// rather than falling back to DEFAULT_TIP. The render-time pipeline handles
+// null via the generative-fallback template (priority 1) when no other source
+// applies. Import removed; comments at lines 1482 + 2206 document the prior
+// fallback semantics for historical reference.
 import { validateTip } from "@/lib/meeting-tip/validate-tip";
 
 // --- Helpers ---
