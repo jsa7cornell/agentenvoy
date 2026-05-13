@@ -1093,6 +1093,17 @@ export async function POST(req: NextRequest) {
     isGroupEvent: isGroupEvent || undefined,
     participants: participantSummary,
     groupCoordination: groupCoordinationData,
+    // 2026-05-13 cmp451sli completion: the client's primary-link guestName
+    // fallback (deal-room.tsx:1459-1465) reads `data.session?.guestName`,
+    // but this response previously had no `session` key — so the fallback
+    // silently failed for primary-link sessions where the guest filled in
+    // their name during the picker confirm flow. Surface session-scoped
+    // guest identity here so the client chain (link.inviteeName ?? session.guestName)
+    // actually reaches the second branch.
+    session: {
+      guestName: session.guestName ?? null,
+      guestEmail: session.guestEmail ?? null,
+    },
     hostName: user.name,
     // Guest-negotiated values (set by lock_activity_location in the deal room).
     // Client uses these to display the locked state in the event card thread.

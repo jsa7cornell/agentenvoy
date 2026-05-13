@@ -875,6 +875,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         // helper preserves all three behaviors and adds retime_proposed
         // handling + meetLink restoration on agreed-merge.
         applySessionFromServer(sess);
+        // 2026-05-13 cmp451sli completion: on each poll tick, if our
+        // local inviteeName is still empty (primary-link, guest name not
+        // yet learned at initial load), pick up sess.guestName once the
+        // guest enters their name in the picker. Mirrors the
+        // post-stream-refresh chain at the same line below.
+        if (sess.link?.inviteeName && !inviteeName) {
+          setInviteeName(sess.link.inviteeName);
+        } else if ((sess as { guestName?: string | null }).guestName && !inviteeName) {
+          setInviteeName((sess as { guestName: string }).guestName);
+        }
       } catch {
         // Swallow transient network errors — next tick will retry.
       }
@@ -1809,7 +1819,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             // Link-metadata refresh stays inline — it's not state the
             // reducer owns (different concern: guest name / topic / email
             // updates from save_guest_info actions).
-            if (sess.link?.inviteeName && !inviteeName) setInviteeName(sess.link.inviteeName);
+            // 2026-05-13 cmp451sli completion: mirror the initial-load
+            // fallback chain (link.inviteeName ?? session.guestName) so
+            // primary-link sessions where the guest filled in their name
+            // during the picker confirm flow update inviteeName here too.
+            // Prior version only checked sess.link.inviteeName — primary
+            // links (link.inviteeName=null) never propagated the
+            // session.guestName the guest had just entered.
+            if (sess.link?.inviteeName && !inviteeName) {
+              setInviteeName(sess.link.inviteeName);
+            } else if ((sess as { guestName?: string | null }).guestName && !inviteeName) {
+              setInviteeName((sess as { guestName: string }).guestName);
+            }
             // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
             const freshTopic = sess.link?.customTitle ?? sess.link?.topic;
             if (freshTopic && !topic) setTopic(freshTopic);
