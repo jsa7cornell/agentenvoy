@@ -363,6 +363,7 @@ async function getAuthorizedSession(sessionId: unknown, userId: string): Promise
           type: true,
           inviteeName: true,
           topic: true,
+          customTitle: true,
           parameters: true,
         },
       },
@@ -2070,7 +2071,7 @@ async function handleExpandLink(
   if (inferredLinkId) {
     link = await prisma.negotiationLink.findUnique({
       where: { id: inferredLinkId },
-      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, recurrence: true },
+      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, customTitle: true, recurrence: true },
     });
     if (link) {
       const latest = await prisma.negotiationSession.findFirst({
@@ -2083,7 +2084,7 @@ async function handleExpandLink(
   } else if (code) {
     link = await prisma.negotiationLink.findFirst({
       where: { code, userId },
-      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, recurrence: true },
+      select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, customTitle: true, recurrence: true },
     });
     // For "View it here" threading: find the most recent session on this link.
     if (link) {
@@ -2107,7 +2108,7 @@ async function handleExpandLink(
           where: { id: fallbackSessionId },
           select: {
             hostId: true,
-            link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, recurrence: true } },
+            link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, customTitle: true, recurrence: true } },
           },
         });
         if (fallbackSession && fallbackSession.hostId === userId && fallbackSession.link) {
@@ -2123,7 +2124,7 @@ async function handleExpandLink(
       select: {
         hostId: true,
         linkId: true,
-        link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, recurrence: true } },
+        link: { select: { id: true, userId: true, parameters: true, inviteeName: true, code: true, topic: true, topicSource: true, customTitle: true, recurrence: true } },
       },
     });
     if (!session) {

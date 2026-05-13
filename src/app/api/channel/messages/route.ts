@@ -69,6 +69,7 @@ export async function GET() {
               inviteeNames: true,
               inviteeEmail: true,
               topic: true,
+              customTitle: true,
               code: true,
               slug: true,
               mode: true,

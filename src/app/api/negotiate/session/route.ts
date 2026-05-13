@@ -245,7 +245,9 @@ export async function POST(req: NextRequest) {
       : undefined;
     const linkPayload = {
       type: link.type,
-      topic: link.topic,
+      // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window. Both fields surfaced for client compat.
+      topic: (link as { customTitle?: string | null }).customTitle ?? link.topic,
+      customTitle: (link as { customTitle?: string | null }).customTitle ?? null,
       inviteeName: link.inviteeName,
       inviteeNames: link.inviteeNames,
       format: parseLinkParameters(link.parameters).format ?? null,
@@ -597,7 +599,8 @@ export async function POST(req: NextRequest) {
           guestId: guestIdForCreate,
           type: "calendar",
           status: "active",
-          title: buildSessionTitle(link.topic, link, hostFirstName),
+          // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+          title: buildSessionTitle((link as { customTitle?: string | null }).customTitle ?? link.topic, link, hostFirstName),
           statusLabel: getWaitingLabel(link) || "Waiting for invitee",
           guestTimezone: resolveSeedGuestTimezoneForCreate({
           linkInviteeTimezone: link.inviteeTimezone,
@@ -726,7 +729,8 @@ export async function POST(req: NextRequest) {
     guestName: isGroupEvent ? undefined : (link.inviteeName || undefined),
     guestEmail: link.inviteeEmail || undefined,
     guestTimezone: effectiveGuestTz,
-    topic: link.topic || undefined,
+    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+    topic: (link as { customTitle?: string | null }).customTitle ?? link.topic ?? undefined,
     rules: parseLinkParameters(link.parameters),
     calendarContext,
     hostPersistentKnowledge: user.persistentKnowledge,
@@ -860,7 +864,9 @@ export async function POST(req: NextRequest) {
       ? (link.inviteeNames as string[]).join(", ")
       : null;
     const forWhom = knownNames ? ` for ${knownNames}` : "";
-    const greetingPrompt = `Someone just opened this group coordination link. This is a shared link — the same URL goes to everyone the host invited. The visitor hasn't told you their name yet. Greet them warmly in 2–3 short sentences: welcome them to the ${link.topic ? `"${link.topic}"` : "group event"} coordination${forWhom}, let them know everyone is sharing their availability here, and ask them to tell you their name so you can record their windows. Do not assume who they are or reference any individual's name as if you know it's them.`;
+    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+    const groupTitle = (link as { customTitle?: string | null }).customTitle ?? link.topic;
+    const greetingPrompt = `Someone just opened this group coordination link. This is a shared link — the same URL goes to everyone the host invited. The visitor hasn't told you their name yet. Greet them warmly in 2–3 short sentences: welcome them to the ${groupTitle ? `"${groupTitle}"` : "group event"} coordination${forWhom}, let them know everyone is sharing their availability here, and ask them to tell you their name so you can record their windows. Do not assume who they are or reference any individual's name as if you know it's them.`;
     greeting = await generateAgentResponse({
       ...context,
       conversationHistory: [{ role: "user", content: greetingPrompt }],
@@ -1039,7 +1045,9 @@ export async function POST(req: NextRequest) {
     },
     link: {
       type: link.type,
-      topic: link.topic,
+      // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window. Both surfaced for client compat.
+      topic: (link as { customTitle?: string | null }).customTitle ?? link.topic,
+      customTitle: (link as { customTitle?: string | null }).customTitle ?? null,
       inviteeName: link.inviteeName,
       inviteeNames: link.inviteeNames,
       // Per-field "Edited just now" pill — proposal 2026-04-28 §3.C.

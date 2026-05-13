@@ -129,7 +129,7 @@ async function handleModifyLinkTool(
 ): Promise<CallToolResult> {
   const link = await prisma.negotiationLink.findUnique({
     where: { id: args.linkId },
-    select: { id: true, userId: true, topic: true },
+    select: { id: true, userId: true, topic: true, customTitle: true },
   });
   if (!link) return fail("link_not_found", `Link ${args.linkId} not found`);
   if (link.userId !== userId) return fail("not_authorized", "Link does not belong to this host");

@@ -1629,7 +1629,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             setSessionStatusLabel(sess.statusLabel || "");
             // Update link info (guest name, topic, email) if changed by save_guest_info action
             if (sess.link?.inviteeName && !inviteeName) setInviteeName(sess.link.inviteeName);
-            if (sess.link?.topic && !topic) setTopic(sess.link.topic);
+            // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+            const freshTopic = sess.link?.customTitle ?? sess.link?.topic;
+            if (freshTopic && !topic) setTopic(freshTopic);
             const freshEmail = sess.guestEmail || sess.link?.inviteeEmail;
             if (freshEmail && !guestEmail) setGuestEmail(freshEmail);
           }

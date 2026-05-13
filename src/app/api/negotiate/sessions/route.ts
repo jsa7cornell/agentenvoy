@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
           inviteeName: true,
           inviteeEmail: true,
           topic: true,
+          customTitle: true,
         },
       },
       _count: { select: { messages: true } },

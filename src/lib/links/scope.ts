@@ -211,7 +211,7 @@ export async function findAffectedVariances(
 ): Promise<Array<{ id: string; name: string }>> {
   const links = await prisma.negotiationLink.findMany({
     where: { userId, type: "bookable" },
-    select: { id: true, slug: true, code: true, parameters: true, topic: true },
+    select: { id: true, slug: true, code: true, parameters: true, topic: true, customTitle: true },
   });
 
   const affected: Array<{ id: string; name: string }> = [];
@@ -230,7 +230,8 @@ export async function findAffectedVariances(
     if (differs) {
       affected.push({
         id: link.id,
-        name: link.topic || link.code || link.slug,
+        // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+        name: link.customTitle ?? link.topic ?? link.code ?? link.slug,
       });
     }
   }

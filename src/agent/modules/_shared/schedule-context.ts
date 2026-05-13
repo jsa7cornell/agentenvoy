@@ -424,6 +424,7 @@ export async function loadScheduleContext(
               inviteeName: true,
               inviteeEmail: true,
               topic: true,
+              customTitle: true,
               code: true,
               slug: true,
             },

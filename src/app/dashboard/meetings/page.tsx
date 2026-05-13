@@ -19,6 +19,8 @@ interface ActiveSession {
     inviteeName?: string;
     inviteeEmail?: string;
     topic?: string;
+    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+    customTitle?: string | null;
   };
 }
 
@@ -153,7 +155,8 @@ export default function MeetingsPage() {
                     })
                   : `Created ${new Date(s.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
                 const guestLabel = s.link.inviteeName || s.guestEmail || s.link.inviteeEmail || "Guest";
-                const title = s.title || s.link.topic || `Meeting with ${guestLabel}`;
+                // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+                const title = s.title || s.link.customTitle || s.link.topic || `Meeting with ${guestLabel}`;
 
                 // Inline cancel confirm state
                 if (confirmCancel === s.id) {

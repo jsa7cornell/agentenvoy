@@ -65,6 +65,8 @@ interface UpcomingEventRow extends SessionLike {
     inviteeName?: string | null;
     inviteeEmail?: string | null;
     topic?: string | null;
+    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+    customTitle?: string | null;
   } | null;
 }
 
@@ -139,6 +141,8 @@ function buildEventSub(s: UpcomingEventRow): string {
     if (s.link?.slug && s.link?.code) return `via /meet/${s.link.slug}/${s.link.code}`;
     return "via Drop-in Hours";
   }
+  // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+  if (s.link?.customTitle) return s.link.customTitle;
   if (s.link?.topic) return s.link.topic;
   if (s.link?.inviteeName) return `with ${s.link.inviteeName}`;
   return "";

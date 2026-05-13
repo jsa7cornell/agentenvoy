@@ -606,7 +606,9 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
       : null);
   const eventSummary = (() => {
     if (effectiveActivity) return `${effectiveActivity.charAt(0).toUpperCase() + effectiveActivity.slice(1)} — ${guestLabel}`;
-    if (session.link.topic) return `${session.link.topic} — ${guestLabel}`;
+    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+    const titleField = session.link.customTitle ?? session.link.topic;
+    if (titleField) return `${titleField} — ${guestLabel}`;
     if (meetingFormat === "phone") return `Phone call: ${guestLabel} & ${hostLabel}`;
     return `Meeting with ${guestLabel}`;
   })();
@@ -1198,7 +1200,8 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
           html:
             `<p>Hi ${excusedLabel},</p>` +
             `<p>${session.host.name || "The organizer"} confirmed ${
-              session.link.topic || "the meeting"
+              // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+              session.link.customTitle || session.link.topic || "the meeting"
             } for a time that didn't work for you. The rest of the group is meeting on ${startTime.toISOString()}.</p>` +
             `<p>If you'd still like to connect, reply at <a href="${dealRoomUrl}">${dealRoomUrl}</a>.</p>`,
           context: {
@@ -1225,7 +1228,8 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   const { subject: confirmSubject, html: confirmHtml } = buildGuestConfirmationEmail({
     hostName: session.host.name || "The organizer",
     guestName: guestName || undefined,
-    topic: session.link.topic || undefined,
+    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+    topic: session.link.customTitle || session.link.topic || undefined,
     dateTime: startTime,
     duration: durationMin,
     format: meetingFormat,

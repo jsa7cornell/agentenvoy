@@ -27,3 +27,35 @@ if [ -n "$SCHEMA_STAGED" ] && [ -z "$MIGRATION_STAGED" ]; then
   echo "    (The schema-validate GH Action will fail on push if a real drift reaches main.)"
   echo ""
 fi
+
+# 2026-05-12 event-data-model proposal (PR-3): the `topic` + `topicSource`
+# columns on NegotiationLink are being retired in favor of `customTitle`.
+# New code must read from `customTitle ?? topic` during the migration window
+# (PR-3) and from `customTitle` exclusively after the deferred drop (PR-4).
+# This lint blocks NEW `link.topic` / `session.link.topic` reader sites from
+# being added — existing sites under PR-3 use the `customTitle ?? topic` shim
+# and are allowed (recognized by the comment marker on the same line).
+NEW_TOPIC_READS=$(git diff --cached --unified=0 -- 'app/src/**/*.ts' 'app/src/**/*.tsx' 2>/dev/null \
+  | grep -E '^\+' \
+  | grep -v '^\+\+\+' \
+  | grep -E '\b(link|sess|session)[?]?\.topic\b' \
+  | grep -vE 'customTitle.*\.topic|topic: true|PR-3 reader-switchover' \
+  || true)
+
+if [ -n "$NEW_TOPIC_READS" ]; then
+  echo ""
+  echo "✗  BLOCKED — new \`link.topic\` reader added without the customTitle shim."
+  echo ""
+  echo "    The \`topic\` column is being retired (2026-05-12 event-data-model proposal,"
+  echo "    PR-3 in flight, PR-4 drop deferred ≥3 weeks). New readers must use:"
+  echo ""
+  echo "        link.customTitle ?? link.topic"
+  echo ""
+  echo "    Add a \`// PR-3 reader-switchover: prefer customTitle\` comment on the line"
+  echo "    above to mark the site as migration-aware."
+  echo ""
+  echo "    Offending lines:"
+  echo "$NEW_TOPIC_READS" | sed 's/^/      /' | head -10
+  echo ""
+  exit 1
+fi

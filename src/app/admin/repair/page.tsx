@@ -44,7 +44,7 @@ export default async function AdminRepairPage() {
       meetLink: true,
       host: { select: { id: true, name: true, email: true } },
       link: {
-        select: { slug: true, code: true, topic: true },
+        select: { slug: true, code: true, topic: true, customTitle: true },
       },
     },
     orderBy: { agreedTime: "desc" },
