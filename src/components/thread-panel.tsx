@@ -26,6 +26,8 @@ interface ThreadSession {
     inviteeName?: string;
     inviteeEmail?: string;
     topic?: string;
+    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+    customTitle?: string | null;
     code?: string;
     slug: string;
   };
@@ -175,7 +177,8 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
           <span role="img" aria-label="calendar">&#128197;</span>
         </div>
         <h2 className="text-sm font-semibold text-gray-100 truncate flex-1 min-w-0">
-          {session.title || session.link.topic || "Thread"}
+          {/* PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window */}
+          {session.title || session.link.customTitle || session.link.topic || "Thread"}
         </h2>
         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide flex-shrink-0 ${statusColor}`}>
           {session.statusLabel || session.status}
@@ -196,7 +199,7 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
         {session.link.code && (
           <ThreadLinkActions
             url={`${typeof window !== "undefined" ? window.location.origin : ""}/meet/${session.link.slug}/${session.link.code}`}
-            topic={session.title || session.link.topic}
+            topic={session.title || session.link.customTitle || session.link.topic}
           />
         )}
       </div>

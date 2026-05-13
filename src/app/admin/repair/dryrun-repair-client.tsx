@@ -13,7 +13,7 @@ interface BrokenSession {
   calendarEventId: string | null;
   meetLink: string | null;
   host: { id: string; name: string | null; email: string | null };
-  link: { slug: string; code: string | null; topic: string | null };
+  link: { slug: string; code: string | null; topic: string | null; customTitle: string | null };
 }
 
 interface Props {
@@ -111,7 +111,8 @@ export function DryrunRepairClient({ initial }: Props) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-sm font-semibold">
-                  {s.title || s.link.topic || "Meeting"}
+                  {/* PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window */}
+                  {s.title || s.link.customTitle || s.link.topic || "Meeting"}
                 </span>
                 <span className="text-[10px] uppercase tracking-wider text-muted">
                   {s.agreedFormat || "meeting"} · {s.duration || 30}m

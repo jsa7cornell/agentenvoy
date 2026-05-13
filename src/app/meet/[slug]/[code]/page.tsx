@@ -18,6 +18,7 @@ async function getLinkData(slug: string, code: string) {
       where: { slug, code },
       select: {
         topic: true,
+        customTitle: true,
         inviteeName: true,
         parameters: true,
         mode: true,

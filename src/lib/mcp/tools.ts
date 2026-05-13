@@ -1457,6 +1457,13 @@ export async function handleGetTip(
     linkAuthoredTip = typeof parameters.tip === "string" ? parameters.tip : null;
   }
 
+  // 2026-05-12 event-data-model proposal (PR-2b): generated-tip is the new
+  // lower-priority slot below authored-link-tip. Reads from
+  // parameters.generatedTip; the get_tip MCP tool surfaces it with a new
+  // sourceKind enum value `generative-author-time` per the MCP reconciliation.
+  const linkGeneratedTip =
+    typeof parameters.generatedTip === "string" ? parameters.generatedTip : null;
+
   // activity/location live in link.parameters (not dedicated columns)
   const linkActivity = typeof parameters.activity === "string" ? parameters.activity : null;
   const linkLocation = typeof parameters.location === "string" ? parameters.location : null;
@@ -1472,6 +1479,7 @@ export async function handleGetTip(
       linkActivity,
       linkLocation,
       linkAuthoredTip,
+      linkGeneratedTip,
       guestPicksLocation,
     }),
     "guest", // external agent = guest perspective for AP5b role-invariance

@@ -282,18 +282,20 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         .describe("One-shot: pre-commit the slot. Requires inviteeEmail. Handler creates the link AND writes a GCal event."),
       guestPicks: guestPicksFullSchema.optional()
         .describe("Fields the guest decides themselves. Set when host explicitly defers: 'he picks the spot' → location:true, 'her call on duration' → duration:true, 'whatever format works' → format:true, 'she picks the day' → date:true. Never infer deferral — only set when the host said it."),
+      // 2026-05-12 event-data-model proposal (PR-2b): customTitle / description / tip
+      // are the new canonical surface for host-named titles + shareable agenda + host-
+      // facing tip. Emit only when the host's message has the corresponding signal —
+      // don't fabricate. Description and tip flow through the meeting-tip pipeline
+      // alongside the existing host-authored `parameters.tip` (which stays as today's
+      // priority-11 source; the generator output here lands at lower priority).
+      customTitle: z.string().max(80).optional()
+        .describe("Host's explicit override of the meeting title (e.g. 'Q3 board review'). Use ONLY when host explicitly named the meeting; otherwise omit and let the title derive from activity + invitee."),
+      description: z.string().max(500).optional()
+        .describe("Shareable agenda/context the host gave (e.g. 'discussing AI strategy', 'parking is in the lot underneath'). Lands in the GCal event description body — guest will see it. Paraphrase the host; don't quote verbatim. Omit when the host gave no agenda-shaped content."),
+      tip: z.string().max(280).optional()
+        .describe("Host-only nudge for them to read in the deal-room card (e.g. 'remind her about the parking lot', 'bring the printed slides'). Never shown to the guest. Paraphrase the host; don't quote verbatim. Omit when the host gave no host-facing nudge."),
     }),
-    execute: async (params) => {
-      // The legacy create_link handler builds the meeting title from `topic`, not
-      // `activity`. The unified personal_link_create schema only exposes `activity`,
-      // so mirror it onto `topic` here when topic isn't separately provided.
-      // Without this, "coffee with Susan" produces a title like "Susan + John" with
-      // no activity prefix, and the card emoji-from-title fallback can't fire.
-      const enriched = (params.activity && !(params as { topic?: unknown }).topic)
-        ? { ...params, topic: params.activity }
-        : params;
-      return exec("personal_link_create", "create_link", enriched);
-    },
+    execute: async (params) => exec("personal_link_create", "create_link", params),
   });
 
   const personal_link_update = tool({
@@ -317,6 +319,14 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       guestPicks: guestPicksFullSchema.optional(),
       recurrence: recurrenceSchema.nullable().optional()
         .describe("Set to update the recurrence pattern; null to clear."),
+      // 2026-05-12 event-data-model proposal (PR-2b): customTitle / description / tip
+      // edits route through the same fields as create. Set null to clear.
+      customTitle: z.string().max(80).nullable().optional()
+        .describe("Host-named title override. Pass a string to set; null to clear and fall back to derived title."),
+      description: z.string().max(500).nullable().optional()
+        .describe("Shareable agenda/context for the GCal event description. Pass null to clear."),
+      tip: z.string().max(280).nullable().optional()
+        .describe("Host-only nudge for the deal-room card. Pass null to clear."),
     }),
     execute: async (params) => exec("personal_link_update", "update_link", params),
   });
@@ -457,9 +467,17 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
       "Infer format from event type: dinner/meal/social/gathering → 'in-person'; VC/call/sync/meeting → 'video'; phone → 'phone'. Pass format even when not explicitly stated if the event type makes it obvious. " +
       "Infer durationMinutes from event type: dinner ≈ 120, lunch/coffee ≈ 90, casual coffee ≈ 60, sync/call ≈ 30–45. Pass duration even when not explicitly stated if the event type makes it obvious.",
     inputSchema: z.object({
-      topic: z.string().describe("Event title or occasion (e.g. 'Founder Dinner')."),
+      // 2026-05-12 event-data-model proposal (PR-2b): on group events, `topic`
+      // has historically meant "the explicit event title" — same semantics as
+      // `customTitle` on personal links. Both names are accepted during the
+      // migration window; the handler normalizes to customTitle. New code paths
+      // prefer customTitle; topic is kept for backward compat through PR-3 + drop.
+      customTitle: z.string().optional()
+        .describe("Event title or occasion (e.g. 'Founder Dinner'). Preferred over `topic`. Required if `topic` not provided."),
+      topic: z.string().optional()
+        .describe("DEPRECATED — use `customTitle`. Accepted during migration window."),
       activity: z.string().optional()
-        .describe("Canonical activity word ('dinner', 'sync', 'workshop'). Drives icon/format defaults. Often inferable from topic."),
+        .describe("Canonical activity word ('dinner', 'sync', 'workshop'). Drives icon/format defaults. Often inferable from customTitle."),
       activityIcon: z.string().max(8).optional()
         .describe("Single emoji for the event (🍽️ dinner, 🍻 drinks, 👋 meet-and-greet, 🎤 panel, etc.)."),
       inviteeNames: z.array(z.string()).optional()
@@ -470,13 +488,24 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
         .describe("Meeting duration in minutes if host specified (e.g. 45, 60, 120)."),
       format: z.enum(["video", "phone", "in-person"]).optional()
         .describe("Meeting format if host specified. 'VC' / 'video call' → 'video'."),
+      description: z.string().max(500).optional()
+        .describe("Shareable agenda/context the host gave. Lands in the GCal event description for the spawned events. Paraphrase, don't quote."),
+      tip: z.string().max(280).optional()
+        .describe("Host-only nudge for the deal-room card. Never shown to guests."),
     }),
     execute: async (params) => {
       // create_link handler reads `duration` (not durationMinutes) on group links;
       // map here so the host's "45 mins" actually persists.
-      const { durationMinutes, ...rest } = params;
+      const { durationMinutes, customTitle, topic, ...rest } = params;
+      // Backward compat: accept either customTitle or topic; the handler reads
+      // params.customTitle (preferred) and falls back to params.topic.
+      const titlePayload =
+        customTitle ?? topic
+          ? { customTitle: customTitle ?? topic, topic: customTitle ?? topic }
+          : {};
       return exec("group_event_create", "create_link", {
         ...rest,
+        ...titlePayload,
         type: "group",
         ...(durationMinutes !== undefined ? { duration: durationMinutes } : {}),
       });
@@ -484,15 +513,29 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   });
 
   const group_event_update = tool({
-    description: "Edit a group event (topic / invitees / windows). Requires sessionId.",
+    description: "Edit a group event (title / invitees / windows / description / tip). Requires sessionId.",
     inputSchema: z.object({
       sessionId: z.string(),
-      topic: z.string().optional(),
+      customTitle: z.string().optional()
+        .describe("Updated event title. Preferred over `topic`."),
+      topic: z.string().optional()
+        .describe("DEPRECATED — use `customTitle`. Accepted during migration window."),
       inviteeNames: z.array(z.string()).optional(),
       windows: z.array(z.string()).optional(),
+      description: z.string().max(500).nullable().optional()
+        .describe("Updated shareable agenda. Pass null to clear."),
+      tip: z.string().max(280).nullable().optional()
+        .describe("Updated host-only nudge. Pass null to clear."),
     }),
-    execute: async (params) =>
-      exec("group_event_update", "update_link", params, { sessionId: params.sessionId }),
+    execute: async (params) => {
+      // Backward compat: normalize topic → customTitle on input.
+      const { customTitle, topic, ...rest } = params;
+      const titlePayload =
+        customTitle !== undefined || topic !== undefined
+          ? { customTitle: customTitle ?? topic, topic: customTitle ?? topic }
+          : {};
+      return exec("group_event_update", "update_link", { ...rest, ...titlePayload }, { sessionId: params.sessionId });
+    },
   });
 
   const group_event_set_archived = tool({

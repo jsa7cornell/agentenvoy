@@ -125,6 +125,7 @@ export async function GET() {
       slug: true,
       inviteeName: true,
       topic: true,
+      customTitle: true,
       expiresAt: true,
       createdAt: true,
       lastMaterialEditAt: true,

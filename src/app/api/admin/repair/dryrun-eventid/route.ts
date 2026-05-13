@@ -53,7 +53,7 @@ export async function GET() {
       meetLink: true,
       host: { select: { id: true, name: true, email: true } },
       link: {
-        select: { slug: true, code: true, topic: true, parameters: true },
+        select: { slug: true, code: true, topic: true, customTitle: true, parameters: true },
       },
     },
     orderBy: { agreedTime: "desc" },
@@ -115,7 +115,9 @@ export async function POST(req: NextRequest) {
   const guestLabel = session.guestName || session.guestEmail || "guest";
   const hostLabel = session.host.name || "Host";
   const eventSummary = (() => {
-    if (session.link.topic) return `${session.link.topic} — ${guestLabel}`;
+    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+    const title = session.link.customTitle ?? session.link.topic;
+    if (title) return `${title} — ${guestLabel}`;
     if (meetingFormat === "phone") return `Phone call: ${guestLabel} & ${hostLabel}`;
     return `Meeting with ${guestLabel}`;
   })();

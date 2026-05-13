@@ -92,7 +92,15 @@ export async function execAction(
   const results = await executeActions(
     [{ action, params }],
     ctx.userId,
-    { sessionId: ctx.sessionId, meetSlug: ctx.meetSlug },
+    {
+      sessionId: ctx.sessionId,
+      meetSlug: ctx.meetSlug,
+      // 2026-05-12 event-data-model proposal (PR-2c): thread the current user
+      // message down so handleCreateLink can persist it on
+      // NegotiationLink.creationPrompt. Used by regenerateMeetingNotesForLink
+      // on activity/time/invitee edit triggers.
+      userMessage: ctx.userMessage,
+    },
   );
   return results[0] ?? { success: false, message: "No result returned" };
 }

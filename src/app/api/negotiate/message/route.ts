@@ -290,7 +290,8 @@ export async function POST(req: NextRequest) {
     // active. Host turns (messageRole === "host") skip the parser because
     // the host is presumed to speak in host tz, not viewer tz.
     guestMessage: messageRole === "guest" ? content : undefined,
-    topic: session.link.topic || undefined,
+    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+    topic: (session.link as { customTitle?: string | null }).customTitle ?? session.link.topic ?? undefined,
     rules: parseLinkParameters(session.link.parameters),
     calendarContext,
     scoredSlots,

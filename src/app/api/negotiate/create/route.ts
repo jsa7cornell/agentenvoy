@@ -102,7 +102,9 @@ export async function POST(req: NextRequest) {
       inviteeEmail: link.inviteeEmail,
       inviteeName: link.inviteeName,
       inviteeTimezone: link.inviteeTimezone,
-      topic: link.topic,
+      // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
+      topic: link.customTitle ?? link.topic,
+      customTitle: link.customTitle,
       parameters: link.parameters,
     },
   });
