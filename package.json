@@ -11,7 +11,10 @@
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "INTEGRATION_TEST_DB_OK=1 vitest run --config vitest.integration.config.ts",
     "test:e2e": "vitest run --config vitest.config.ts",
-    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
+    "test:e2e:browser": "playwright test",
+    "test:e2e:browser:ui": "playwright test --ui",
+    "test:e2e:browser:install": "playwright install chromium",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e && npm run test:e2e:browser",
     "db:migrate:dev": "tsx scripts/safe-prisma.ts migrate dev",
     "db:migrate:reset": "tsx scripts/safe-prisma.ts migrate reset",
     "db:push:reset": "tsx scripts/safe-prisma.ts db push --force-reset",
@@ -54,6 +57,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

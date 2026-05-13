@@ -334,6 +334,21 @@ export async function POST(req: NextRequest) {
             isGroupEvent: true,
             participants: participantSummary,
             hostName: user.name,
+            // 2026-05-13 cmp451sli completion (PR 2 of 2): mirror the same
+            // `session: { guestName, guestEmail }` sub-key the fresh-greeting
+            // return at the bottom of this file already emits. The client
+            // (deal-room.tsx:1463) reads `data.session?.guestName` as the
+            // primary-link fallback. PR 1 only patched the fresh-greeting
+            // path; this path (group-mode + agreed) was missed, which is
+            // why John saw the "G" sentinel after a hard refresh.
+            // TODO: extract these 4 nearly-identical return payloads into
+            // a `buildSessionResumePayload(session, link, ...)` helper per
+            // PLAYBOOK Rule 28 — having the same field set repeated 4 times
+            // is the construct that produced this bug.
+            session: {
+              guestName: existingSession.guestName ?? null,
+              guestEmail: existingSession.guestEmail ?? null,
+            },
           });
         }
 
@@ -358,6 +373,11 @@ export async function POST(req: NextRequest) {
             isGroupEvent: true,
             participants: participantSummary,
             hostName: user.name,
+            // 2026-05-13 cmp451sli completion (PR 2 of 2) — see fix note above.
+            session: {
+              guestName: existingSession.guestName ?? null,
+              guestEmail: existingSession.guestEmail ?? null,
+            },
           });
         }
       }
@@ -416,6 +436,14 @@ export async function POST(req: NextRequest) {
             hostTimezone: hostTimezoneEarly,
             viewerTimezone: existingSession.viewerTimezone ?? null,
             hostName: user.name,
+            // 2026-05-13 cmp451sli completion (PR 2 of 2) — single-mode +
+            // agreed-status path. This is the branch the link uvkh68 hit
+            // when the prior fix shipped to only the fresh-greeting return.
+            // See sibling fix block above for full context + TODO.
+            session: {
+              guestName: existingSession.guestName ?? null,
+              guestEmail: existingSession.guestEmail ?? null,
+            },
           });
         }
 
@@ -454,6 +482,12 @@ export async function POST(req: NextRequest) {
             hostTimezone: hostTimezoneEarly,
             viewerTimezone: existingSession.viewerTimezone ?? null,
             hostName: user.name,
+            // 2026-05-13 cmp451sli completion (PR 2 of 2) — single-mode +
+            // resumed-with-greeting path. See sibling fix block above.
+            session: {
+              guestName: existingSession.guestName ?? null,
+              guestEmail: existingSession.guestEmail ?? null,
+            },
           });
         }
 
