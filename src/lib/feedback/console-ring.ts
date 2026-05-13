@@ -31,7 +31,13 @@ function format(level: Level, args: unknown[]): string {
     })
     .join(" ");
   const line = `[${ts}] ${level.toUpperCase()} ${body}`;
-  return line.length > MAX_LINE_LEN ? line.slice(0, MAX_LINE_LEN) + "…" : line;
+  // Off-by-one guard: keep the truncated string at exactly MAX_LINE_LEN so the
+  // server's `z.string().max(MAX_LINE_LEN)` Zod check passes. Pre-2026-05-13:
+  // `slice(0, MAX_LINE_LEN) + "…"` produced MAX_LINE_LEN+1, silently rejecting
+  // any feedback submission whose ring captured a long stack trace or JSON
+  // dump with "Invalid submission" — surfaced by John on 2026-05-13 on link
+  // rnmp4f. The ellipsis costs one of the MAX_LINE_LEN budget.
+  return line.length > MAX_LINE_LEN ? line.slice(0, MAX_LINE_LEN - 1) + "…" : line;
 }
 
 export function installConsoleRing(): void {

@@ -285,9 +285,26 @@ function SendFeedbackModal({ mode, linkCode, sessionId, onClose }: ModalProps) {
         agentPrompt?: string;
         error?: string;
         errorRef?: string;
+        issues?: {
+          fieldErrors?: Record<string, string[]>;
+          formErrors?: string[];
+        };
       };
       if (!res.ok || !json.ok) {
         if (json.errorRef) setErrorRef(json.errorRef);
+        // Surface Zod field-level rejections so "Invalid submission" stops
+        // being a dead-end. Names the first failing field (e.g. consoleLines,
+        // userText, url) so the user can see WHAT failed, not just THAT it did.
+        // 2026-05-13: paired with the console-ring off-by-one fix; if a future
+        // schema drift causes Invalid submission, the field name surfaces here.
+        const fieldErrors = json.issues?.fieldErrors;
+        if (fieldErrors && Object.keys(fieldErrors).length > 0) {
+          const firstField = Object.keys(fieldErrors)[0];
+          const firstMsg = fieldErrors[firstField]?.[0];
+          throw new Error(
+            `${json.error ?? "Validation failed"} — field "${firstField}"${firstMsg ? ` (${firstMsg})` : ""}`,
+          );
+        }
         throw new Error(json.error ?? `HTTP ${res.status}`);
       }
       setSubmittedId(json.reportId ?? "");
