@@ -138,9 +138,11 @@ export function buildDealroomTools(ctx: DealroomToolContext): ToolSet {
 
   const session_request_reschedule = tool({
     description:
-      "Reset a confirmed meeting back to active negotiation. Use when the speaker says 'reschedule', 'move it', or similar on a session in 'agreed' state. " +
+      "Cancel / un-book a live meeting and reopen the session for re-engagement. " +
+      "Use when the speaker says 'cancel meeting', 'reschedule', 'move it', or 'I can't make it' on a session that has a live calendar event " +
+      "(status `agreed` OR `retime_proposed`). " +
       "STRICT: deletes the GCal event (notifying attendees), releases holds, clears the slot. Irreversible without a new confirm. " +
-      "Only valid on confirmed (agreed) sessions; will fail with 'not_in_agreed_state' otherwise.",
+      "Fails with 'no_live_event' if the session has no calendarEventId (never confirmed, or already unbooked).",
     inputSchema: z.object({
       reason: z.string().optional()
         .describe("Optional reason for the reschedule, surfaced in the system message."),

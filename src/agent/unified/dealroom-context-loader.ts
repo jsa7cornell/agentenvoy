@@ -216,10 +216,21 @@ export async function loadDealroomContext(
     groundTruthLines.push(`[LOCKED] Format: ${negotiated.format}`);
   }
 
-  // F2/F15 sessionLiveEvent — when the session is `agreed` with a live GCal
-  // event, signal so the model treats follow-up turns as re-times of a
-  // confirmed meeting (not fresh negotiation). Mirrors `negotiate/message/route.ts:303-311`.
-  if (session.status === "agreed" && session.calendarEventId) {
+  // [SESSION_STATUS] — always surface the row's status so the model can
+  // branch correctly. Without this, `retime_proposed` (which preserves
+  // calendarEventId per SPEC §2.3.2) was indistinguishable from `agreed`
+  // in the model's view, and "cancel meeting" turns failed with confusing
+  // contradictory prose (2026-05-13 — feedback on session cmp49wwuy).
+  groundTruthLines.push(`[SESSION_STATUS] ${session.status}`);
+
+  // F2/F15 sessionLiveEvent — fires whenever a live GCal event exists,
+  // regardless of whether status is `agreed` (classic confirmed) or
+  // `retime_proposed` (host moved the time; guest hasn't reconfirmed but
+  // the event with the prior time is still on the calendar). Both states
+  // mean the session is a confirmed meeting being EDITED, not fresh
+  // negotiation. Mirrors `negotiate/message/route.ts:303-311` widened per
+  // 2026-05-13 retime-proposed gap.
+  if (session.calendarEventId) {
     const agreedTime = session.agreedTime ? session.agreedTime.toISOString() : null;
     groundTruthLines.push(
       `[SESSION_LIVE_EVENT] calendarEventId=${session.calendarEventId}` +

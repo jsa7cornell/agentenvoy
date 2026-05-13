@@ -94,18 +94,28 @@ export type RequestRescheduleInput = {
 
 export type RequestRescheduleResult =
   | { success: true; calendarEventCleared: boolean }
-  | { success: false; reason: "session_not_found" | "not_in_agreed_state" };
+  | { success: false; reason: "session_not_found" | "no_live_event" };
 
 /**
- * Reset a confirmed meeting back to active negotiation. Deletes the GCal
- * event (notifying attendees), releases active holds, invalidates the
- * schedule cache, and clears agreed-state fields.
+ * Reset a confirmed (or retime-pending) meeting back to active negotiation.
+ * Deletes the GCal event (notifying attendees), releases active holds,
+ * invalidates the schedule cache, and clears agreed-state fields.
  *
  * Mirrors `/api/negotiate/reschedule/route.ts:50-118` exactly. The new
  * `session_request_reschedule` tool calls this helper; the legacy route
  * will converge here in a follow-up. SPEC §2.3.2 invariant: `calendarEventId`
  * is cleared HERE because this IS the cancel-pipeline for the prior agreed
  * event — same semantic as the legacy route.
+ *
+ * Accepted source states: `agreed` (classic re-time/cancel of a confirmed
+ * meeting) AND `retime_proposed` (host already moved the time but guest
+ * hasn't reconfirmed; the live GCal event still exists with the old time).
+ * Both states preserve `calendarEventId`, so the cleanup mechanics are
+ * identical. Gated by `calendarEventId != null` rather than a status
+ * allowlist so a future state with the same shape works without code
+ * churn. (2026-05-13 — surfaced by feedback report on session
+ * cmp49wwuy0009134bdsmobaz6 where "cancel meeting" on a retime_proposed
+ * session failed with the prior overly-strict `not_in_agreed_state` gate.)
  */
 export async function requestSessionReschedule(
   input: RequestRescheduleInput,
@@ -118,8 +128,10 @@ export async function requestSessionReschedule(
     },
   });
   if (!negotiation) return { success: false, reason: "session_not_found" };
-  if (negotiation.status !== "agreed") {
-    return { success: false, reason: "not_in_agreed_state" };
+  if (!negotiation.calendarEventId) {
+    // No live event to cancel — session was never confirmed, or was already
+    // unbooked. Caller should narrate "nothing to cancel" honestly.
+    return { success: false, reason: "no_live_event" };
   }
 
   let calendarEventCleared = false;

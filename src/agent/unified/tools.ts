@@ -659,7 +659,9 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
   const session_update_time = tool({
     description:
       "Change a session's time/duration. dateTime MUST include UTC offset. " +
-      "Use OFFERABLE SLOTS values; don't compute offsets. Requires sessionId + dateTime or duration.",
+      "Use OFFERABLE SLOTS values; don't compute offsets. Requires sessionId + dateTime or duration. " +
+      "Confirmed sessions are patched in place — the GCal event is updated " +
+      "immediately, no host-approval step.",
     inputSchema: z.object({
       sessionId: z.string(),
       dateTime: z.string().optional()

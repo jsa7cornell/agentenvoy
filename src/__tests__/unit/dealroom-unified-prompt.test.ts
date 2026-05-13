@@ -115,10 +115,13 @@ describe("dealroomUnifiedSystemPrompt — role-aware resolution", () => {
 
     // Host can override OFFERABLE SLOTS on their own session (issue #2).
     expect(host).toMatch(/host is the authority on their own calendar/i);
-    // Host "cancel" on agreed routes to session_request_reschedule, NOT
-    // session_cancel — that's the conceptual model for un-book vs. end-thread
-    // (issue #3b).
-    expect(host).toMatch(/cancel.*meeting.*on an `agreed` session/i);
+    // Host "cancel" on a live-event session (agreed OR retime_proposed)
+    // routes to session_request_reschedule, NOT session_cancel — that's
+    // the conceptual model for un-book vs. end-thread (issue #3b).
+    // 2026-05-13: widened from `agreed`-only to include `retime_proposed`
+    // after feedback report on session cmp49wwuy where retime_proposed +
+    // "cancel meeting" failed with contradictory prose.
+    expect(host).toMatch(/cancel.*meeting.*on a session with a live event/i);
     expect(host).toMatch(/Do NOT call `session_cancel`/);
 
     // Guest gets session_update_time but must use OFFERABLE SLOTS (issue
