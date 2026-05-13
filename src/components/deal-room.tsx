@@ -1330,9 +1330,21 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             typeof steering === "string" && steering.length > 0 ? steering : null,
           );
         }
+        // 2026-05-13 cmp451sli fix: for PRIMARY links the host has no fixed
+        // invitee at link-create time — link.inviteeName / inviteeNames are
+        // null. The guest fills in their name in the picker confirm flow,
+        // which persists to `session.guestName`. Fall back to that so the
+        // MeetingCard who-row renders "John Anderson & Suzie Bean" instead of
+        // "John Anderson & G" (the splitName() fallback initial). Same fix
+        // applies to personalized links where a guest overrode the host-
+        // suggested name during confirm.
         const names: string[] = Array.isArray(data.link?.inviteeNames) && (data.link.inviteeNames as string[]).length > 0
           ? (data.link.inviteeNames as string[])
-          : data.link?.inviteeName ? [data.link.inviteeName] : [];
+          : data.link?.inviteeName
+            ? [data.link.inviteeName]
+            : data.session?.guestName
+              ? [data.session.guestName]
+              : [];
         setInviteeNames(names);
         setInviteeName(names[0] ?? "");
         // Pre-fill the confirm-card form from any info we already have so the
