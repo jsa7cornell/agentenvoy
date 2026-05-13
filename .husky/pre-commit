@@ -38,7 +38,7 @@ fi
 NEW_TOPIC_READS=$(git diff --cached --unified=0 -- 'app/src/**/*.ts' 'app/src/**/*.tsx' 2>/dev/null \
   | grep -E '^\+' \
   | grep -v '^\+\+\+' \
-  | grep -E '\b(link|sess|session)[?]?\.topic\b' \
+  | grep -E '\b(link|sess|session)\??\.topic\b' \
   | grep -vE 'customTitle.*\.topic|topic: true|PR-3 reader-switchover' \
   || true)
 

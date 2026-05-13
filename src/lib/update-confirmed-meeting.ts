@@ -512,6 +512,33 @@ export async function updateConfirmedMeeting(
     },
   });
 
+  // 2026-05-13 event-data-model proposal (PR-2c follow-up): regenerate
+  // description+tip when time changes — the scheduled time is a regen
+  // trigger per §2.7 of the decided spec (activity / time / invitee change).
+  // PR-2c shipped activity + invitee triggers in handleExpandLink; this
+  // closes the time-change trigger that the original proposal called out
+  // as a one-line addition to this helper.
+  //
+  // Fire-and-forget: regen errors are non-blocking on the update. Format /
+  // location / duration changes do NOT trigger regen — they don't change
+  // the tip's content scope (per the proposal's locked triggers).
+  if (changes.startTime !== undefined) {
+    const linkIdForRegen = session.link.id;
+    void (async () => {
+      try {
+        const { regenerateMeetingNotesForLink } = await import(
+          "@/lib/regenerate-meeting-notes"
+        );
+        await regenerateMeetingNotesForLink(linkIdForRegen);
+      } catch (e) {
+        console.warn(
+          `[update-confirmed-meeting] regenerateMeetingNotesForLink failed: ${(e as Error).message}`,
+          { linkId: linkIdForRegen, sessionId },
+        );
+      }
+    })();
+  }
+
   return {
     ok: true,
     resolved,
