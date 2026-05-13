@@ -216,6 +216,8 @@ export const DEALROOM_HOST_ALLOWED_TOOLS = [
   // Deal-room new tools
   "session_set_status",
   "session_request_reschedule",
+  // Telemetry
+  "flag_ambiguity",
 ] as const;
 
 export const DEALROOM_GUEST_ALLOWED_TOOLS = [
@@ -240,6 +242,8 @@ export const DEALROOM_GUEST_ALLOWED_TOOLS = [
   // only emits dateTime values from the offered list (vs. host who can
   // override their own hours).
   "session_update_time",
+  // Telemetry
+  "flag_ambiguity",
 ] as const;
 
 export type DealroomRole = "dealroom-host" | "dealroom-guest";

@@ -890,6 +890,26 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     execute: async (params) => exec("knowledge_write", "update_knowledge", params),
   });
 
+  // ---------------------------------------------------------------------------
+  // Ambiguity telemetry — no-side-effect tool the agent calls when it hits a
+  // genuinely ambiguous host turn (two plausible readings, materially different
+  // outcomes). Recorded via unifiedTurn.toolCalls; counts how often the agent
+  // flags ambiguity. See unified-agent.md → AMBIGUITY.
+  // ---------------------------------------------------------------------------
+  const flag_ambiguity = tool({
+    description:
+      "Log a genuinely ambiguous host turn before clarifying OR acting-and-confirming. " +
+      "Call only when two readings are each plausible AND produce materially different artifacts. " +
+      "Do NOT call for minor uncertainty or surface-detail choices.",
+    inputSchema: z.object({
+      readingA: z.string().max(160).describe("One plausible reading of the host's message."),
+      readingB: z.string().max(160).describe("The other plausible reading."),
+      handling: z.enum(["ask", "act_and_confirm"])
+        .describe("'ask' = ask host before acting (long-lived/irreversible). 'act_and_confirm' = act on best guess and surface the other reading in narration (cheap to revise)."),
+    }),
+    execute: async () => ({ success: true, message: "ambiguity flagged" }),
+  });
+
   return {
     // LOAD tools
     LOAD_calendar_context,
@@ -936,6 +956,8 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     prefs_update_business_hours,
     prefs_update_timezone,
     knowledge_write,
+    // Telemetry
+    flag_ambiguity,
   } as const;
 }
 

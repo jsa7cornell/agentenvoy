@@ -29,7 +29,7 @@ import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
 import { parseRecurrence, readRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { UserPreferences } from "@/lib/scoring";
 import { buildEventTitle } from "@/lib/build-event-title";
-import { parseLinkParameters } from "@/lib/link-parameters";
+import { parseLinkParameters, type AvailabilityWindow } from "@/lib/link-parameters";
 import { snapshotPostureFromUser } from "@/lib/links/create";
 import {
   GUEST_PICKS_DURATION_MIN_MINUTES,
@@ -1320,8 +1320,16 @@ export async function handleCreateLink(
   // event-spanning concept (e.g. surf trip "noon to noon"). Drop the
   // restrictToWindows when the link is date-mode, leaving the day-level
   // `restrictToDays` and other restrictions intact.
-  let rawAvailability =
-    paramsAvail && typeof paramsAvail === "object" ? { ...paramsAvail } : undefined;
+  // Preserve array shape — the unified-agent tool emits `availability` as
+  // AvailabilityWindow[]. `{...arr}` would corrupt it to `{ "0": ..., "1": ... }`
+  // and downstream Array.isArray(rules.availability) checks would drop the
+  // windows entirely (see report cmp4epo6t).
+  let rawAvailability: typeof paramsAvail | AvailabilityWindow[] | undefined =
+    Array.isArray(paramsAvail)
+      ? ([...paramsAvail] as AvailabilityWindow[])
+      : paramsAvail && typeof paramsAvail === "object"
+      ? { ...paramsAvail }
+      : undefined;
   // When no explicit availability was provided but a bookable seed has windows,
   // apply them so the slot picker respects the bookable's schedule (e.g. M/T 3–5pm).
   if (!rawAvailability && seedBookable && (seedBookable.timeStart || seedBookable.daysOfWeek)) {
@@ -1350,7 +1358,9 @@ export async function handleCreateLink(
   // restriction but the LLM didn't emit a concrete dateRange, constrain to
   // the next 14 days in host timezone. Prevents "find time with X next
   // Monday" from being interpreted as "all Mondays for the next 3 months."
-  const restrictToDays = availability?.restrictToDays as string[] | undefined;
+  const restrictToDays = !Array.isArray(availability)
+    ? (availability?.restrictToDays as string[] | undefined)
+    : undefined;
   if (!dateRange && urgency === "asap" && Array.isArray(restrictToDays) && restrictToDays.length > 0) {
     const userRow2 = await prisma.user.findUnique({
       where: { id: userId },

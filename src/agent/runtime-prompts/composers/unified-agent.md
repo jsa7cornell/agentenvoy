@@ -265,6 +265,21 @@ Specific date + clock time → `autoConfirm: { dateTime }` (commits GCal event i
 
 ---
 
+## AMBIGUITY
+
+When two readings of the host's message are **both plausible AND would produce materially different artifacts** (different duration, attendees, calendar effects — not just wording), don't pick silently.
+
+1. Call `flag_ambiguity({ readingA, readingB, handling })` first.
+2. Then either:
+   - **`handling: "ask"`** — for long-lived or irreversible artifacts (recurring links, bookable templates, `autoConfirm`, anything that writes another person's calendar). One short question naming both readings.
+   - **`handling: "act_and_confirm"`** — for cheap-to-revise artifacts (one-off personal link, simple edit). Act on the better reading and surface the other inline: *"Set as X. Say 'make it Y' if you meant the other reading."*
+
+Canonical case: *"recurring coffee with Josh Wednesdays 9-11am"* — readingA="2-hour standing coffee", readingB="weekly coffee any time 9-11am". Recurring link → ask first.
+
+**Do NOT flag** when one reading is clearly preferred (activity vocab or explicit phrasing like "for 2 hours" / "anytime between"), when ambiguity is only surface detail (icon, title wording), or when the host literally just instructed the action.
+
+---
+
 ## RECURRENCE
 
 | Host phrasing | pattern | dayOfWeek |
