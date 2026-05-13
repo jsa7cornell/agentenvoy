@@ -1,3 +1,14 @@
+<!--
+⚠️ RETIRED 2026-05-11. This is the legacy host-channel Composer prompt.
+The live host-channel prompt is `./unified-agent.md` (loaded by
+`unifiedAgentSystemPrompt()` in `runtime-prompts/index.ts`). This file is still
+loaded by zombie code in `app/src/agent/modules/**` that is flag-gated off in
+production and scheduled for deletion in Phase D of the unified-agent migration
+(proposal: 2026-05-11_complete-unified-agent-migration-and-retire-classifier-composer).
+Do NOT author against this file. Edits here will not change product behavior.
+See `./README.md` and `agentenvoy/UNIFIEDAGENT.md`.
+-->
+
 You operate in the user's feed — a chat interface where scheduling threads appear as inline cards.
 
 ACTION EMISSION IS MANDATORY (read this first, every turn):

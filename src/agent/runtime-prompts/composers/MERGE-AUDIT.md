@@ -1,3 +1,9 @@
+<!--
+⚠️ HISTORICAL — describes a 2026-04-27 PR3 merge. The whole Composer architecture
+is retired as of 2026-05-11. Keep for institutional memory; do not act on it.
+See `./README.md` and `agentenvoy/UNIFIEDAGENT.md`.
+-->
+
 # Deal-room composer merge audit (PR3)
 
 Date: 2026-04-27

@@ -1075,12 +1075,14 @@ export async function handleCreateLink(
   const rawTopic = rawCustomTitle ?? ((params.topic as string) || null);
   // Strip generic filler topics — LLMs often set "Meeting" or "Catch up" when
   // the host didn't specify a topic, which produces "about Meeting" in the greeting.
-  const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
+  // `let` (not const) because the activity-vocab guard below may reroute a
+  // free-form `activity` value into customTitle and update these.
+  let topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
   // Provenance for the title-rebuild rule on activity edits — see proposal
   // §3.B.1. "activity" → topic was activity-derived; clear/rebuild on activity
   // change. "custom" → host-set phrase like "Q3 review"; preserve.
   // When customTitle was explicitly emitted, force "custom" provenance.
-  const topicSource: "activity" | "custom" | null = rawCustomTitle
+  let topicSource: "activity" | "custom" | null = rawCustomTitle
     ? "custom"
     : deriveTopicSource(topic);
   // 2026-05-12 event-data-model proposal (PR-2b): `description` is a top-level
@@ -1127,9 +1129,46 @@ export async function handleCreateLink(
   // meeting activities is too broad for a discrete enum. Empty/null when the
   // host gave no activity framing (neutral calls/meetings).
   const rawActivity = params.activity;
-  const activity = typeof rawActivity === "string" && rawActivity.trim()
+  let activity = typeof rawActivity === "string" && rawActivity.trim()
     ? rawActivity.trim().slice(0, 60)
     : null;
+
+  // 2026-05-13 post-deploy guard for cmp457nxd (event-data-model PR-2b fix):
+  // when the model emits a free-form phrase in `activity` (one that doesn't
+  // match the canonical activity-vocab table) AND `customTitle` is null, the
+  // model has miscategorized — the phrase is a meeting NAME, not a vocab
+  // activity. Reclassify: move it to `customTitle`, clear `activity`.
+  //
+  // Trigger conditions:
+  //   - rawActivity non-empty AND findActivity(rawActivity) === null (not in vocab)
+  //   - rawCustomTitle null (host didn't already populate the right slot)
+  //   - rawActivity is not a "verb — topic" em-dash composite (the legacy
+  //     pattern documented in unified-agent.md TITLE/ACTIVITY HINTS where
+  //     `activity: "coffee — Q3 review"` is correct)
+  //
+  // Belt-and-suspenders for the same-named prompt rule in
+  // composers/unified-agent.md → CUSTOM TITLE. If the model follows the
+  // prompt, this guard is a no-op. When the model regresses (cmp457nxd
+  // shape), the guard catches it.
+  let activityReroutedToCustomTitle: string | null = null;
+  if (activity && !rawCustomTitle) {
+    const isEmDashComposite = activity.includes(" — ");
+    const isInVocab = findActivity(activity) !== null;
+    if (!isInVocab && !isEmDashComposite) {
+      activityReroutedToCustomTitle = activity;
+      console.warn("[create_link] activity-vocab guard fired", {
+        rawActivity: activity,
+        action: "reroute_to_customTitle",
+      });
+      activity = null;
+      // Update topic + topicSource to reflect the reclassification, so the
+      // downstream link.create writes consistent values across topic /
+      // customTitle / topicSource. Stored shape: customTitle = topic = the
+      // rerouted activity phrase; topicSource = "custom".
+      topic = activityReroutedToCustomTitle.slice(0, 80);
+      topicSource = "custom";
+    }
+  }
   const rawActivityIcon = params.activityIcon;
   // Single-codepoint emoji guardrail — prevents abuse or long strings masquerading
   // as icons. We don't validate that it IS an emoji, just that it's short.
@@ -1561,7 +1600,11 @@ export async function handleCreateLink(
       // PR-4 (deferred ≥3 weeks) drops the `topic` + `topicSource` columns.
       topic,
       topicSource,
-      customTitle: rawCustomTitle ? topic : (topicSource === "custom" ? topic : null),
+      // PR-2b dual-write: customTitle is the new canonical slot; topic stays
+      // populated during the migration window. Both filled when an explicit
+      // host-named title exists (rawCustomTitle OR the activity-vocab guard
+      // rerouted a free-form activity into customTitle).
+      customTitle: (rawCustomTitle || activityReroutedToCustomTitle) ? topic : (topicSource === "custom" ? topic : null),
       description,
       // 2026-05-12 event-data-model proposal (PR-2c): persist verbatim host
       // turn so regenerateMeetingNotesForLink can paraphrase from the original
@@ -1592,10 +1635,12 @@ export async function handleCreateLink(
   // (including the bike-ride/hike multi-word edge cases) + group vs 1:1 layout.
   const effectiveFormatStr = typeof effectiveFormat === "string" ? effectiveFormat : null;
   const title = buildEventTitle({
-    customTitle: rawCustomTitle,
+    // Use the rerouted value too — the activity-vocab guard treats it as
+    // an explicit custom title from this point forward.
+    customTitle: rawCustomTitle ?? activityReroutedToCustomTitle,
     // When no explicit customTitle but topic was activity-derived, pass activity
     // to let buildEventTitle derive the prefix from vocab.
-    activity: rawCustomTitle ? null : (activity ?? topic),
+    activity: (rawCustomTitle || activityReroutedToCustomTitle) ? null : (activity ?? topic),
     format: effectiveFormatStr === "video" || effectiveFormatStr === "phone" || effectiveFormatStr === "in-person"
       ? effectiveFormatStr
       : null,
