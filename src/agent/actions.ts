@@ -249,6 +249,13 @@ export async function executeActions(
      * with no session boundary) omit it.
      */
     triggeringRole?: "host" | "guest";
+    /**
+     * 2026-05-12 event-data-model proposal (PR-2c): verbatim host user message
+     * that triggered this action. Persisted on `NegotiationLink.creationPrompt`
+     * at create time so generateMeetingNotes has the original prose to
+     * paraphrase from on regen. Optional — non-creation actions don't need it.
+     */
+    userMessage?: string;
     onActionStart?: (action: ActionRequest, index: number) => void;
   }
 ): Promise<ActionResult[]> {
@@ -275,7 +282,7 @@ export async function executeActions(
 async function executeAction(
   action: ActionRequest,
   userId: string,
-  context?: { sessionId?: string; meetSlug?: string; triggeringRole?: "host" | "guest" }
+  context?: { sessionId?: string; meetSlug?: string; triggeringRole?: "host" | "guest"; userMessage?: string }
 ): Promise<ActionResult> {
   switch (action.action) {
     case "archive":
@@ -293,7 +300,7 @@ async function executeAction(
     case "update_location":
       return handleUpdateLocation(action.params, userId, context?.sessionId, context?.triggeringRole);
     case "create_link":
-      return handleCreateLink(action.params, userId, context?.meetSlug);
+      return handleCreateLink(action.params, userId, context?.meetSlug, context?.userMessage);
     case "expand_link":
     case "update_link":
       // `update_link` is the canonical name; `expand_link` is kept as an
@@ -961,10 +968,16 @@ async function handleUpdateLocation(
   };
 }
 
+// 2026-05-12 event-data-model proposal (PR-2c): handleCreateLink accepts
+// `creationPromptOverride` so the unified-agent runner can persist the
+// verbatim host turn that triggered the create. Threaded via executeActions
+// context.userMessage → executeAction → here. Used by regenerateMeetingNotes
+// on edit triggers (activity / time / invitee change).
 export async function handleCreateLink(
   params: Record<string, unknown>,
   userId: string,
-  meetSlug?: string
+  meetSlug?: string,
+  creationPromptOverride?: string,
 ): Promise<ActionResult> {
   // Always fetch both slug (if needed) and name in one query so the session
   // title can use "John + Guest" format. When meetSlug is already provided via
@@ -1544,6 +1557,13 @@ export async function handleCreateLink(
       topicSource,
       customTitle: rawCustomTitle ? topic : (topicSource === "custom" ? topic : null),
       description,
+      // 2026-05-12 event-data-model proposal (PR-2c): persist verbatim host
+      // turn so regenerateMeetingNotesForLink can paraphrase from the original
+      // wording on edit triggers. Trimmed + capped at 2000 chars (long enough
+      // for a verbose host turn; short enough to keep DB rows reasonable).
+      ...(creationPromptOverride && creationPromptOverride.trim().length > 0
+        ? { creationPrompt: creationPromptOverride.trim().slice(0, 2000) }
+        : {}),
       hostNote,
       parameters: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["parameters"],
       ...(recurrenceForLink
@@ -2467,6 +2487,34 @@ async function handleExpandLink(
       ...materialEditWrite,
     },
   });
+
+  // 2026-05-12 event-data-model proposal (PR-2c): regenerate description+tip
+  // on substantive content edits. Triggers: activity, invitee. (Time edits
+  // flow through updateConfirmedMeeting which calls the helper from there.)
+  // Format / location / customTitle / duration / recurrence / activityIcon
+  // do NOT regen — they don't change the tip's content scope.
+  // Fire-and-forget: regen errors are non-blocking on the edit.
+  const regenTriggered =
+    patch.activity !== undefined || inviteeNamesPatch !== undefined;
+  if (regenTriggered) {
+    // Dynamic import to keep the regen path out of the create-link hot path's
+    // dependency graph (the helper imports prisma + generateMeetingNotes,
+    // both already loaded elsewhere but the indirection keeps the option of
+    // tree-shaking the helper out of create-link bundles in future).
+    void (async () => {
+      try {
+        const { regenerateMeetingNotesForLink } = await import(
+          "@/lib/regenerate-meeting-notes"
+        );
+        await regenerateMeetingNotesForLink(link.id);
+      } catch (e) {
+        console.warn(
+          `[update-link] regenerateMeetingNotesForLink failed: ${(e as Error).message}`,
+          { linkId: link.id },
+        );
+      }
+    })();
+  }
 
   // Invitee-set swap: rebuild SessionInvitee rows on every active session
   // for this link, and refresh session titles so the dashboard card reflects
