@@ -170,11 +170,18 @@ function buildProposalMeetingCardProps(
     channel = { kind: "in-person", location: snapshot.linkLocation ?? "TBD" };
   }
 
-  // Tip — same logic as confirmed path; renderTip falls back to DEFAULT_TIP
+  // Tip — same logic as confirmed path; renderTip falls back to DEFAULT_TIP.
+  // 2026-05-12 event-data-model proposal (PR-2b): linkGeneratedTip threads
+  // through alongside linkAuthoredTip. Priority chain (registry.ts):
+  // authored-link-tip (11, parameters.tip) > generated-tip (9, parameters
+  // .generatedTip) > derived-* > generative-fallback. Both flow through here
+  // so the renderer can pick the highest priority that applies.
   const linkAuthoredTip =
     (snapshot.linkParameters?.tip as string | undefined) ??
     snapshot.userPrimaryTip ??
     null;
+  const linkGeneratedTip =
+    (snapshot.linkParameters?.generatedTip as string | undefined) ?? null;
   const rendered = renderTip(
     buildTipInput({
       hostName: snapshot.hostName,
@@ -184,6 +191,7 @@ function buildProposalMeetingCardProps(
       linkLocation: snapshot.linkLocation,
       isAnonymousLink: false,
       linkAuthoredTip,
+      linkGeneratedTip,
       guestPicksLocation,
     }),
     viewerRole,
@@ -298,10 +306,14 @@ export function dealRoomToMeetingCardProps(
   // Tip from real generator (Phase 2 — source-labeled tips)
   // linkAuthoredTip: pull from Link.parameters.tip (variance) or
   // userPrimaryTip (primary link). Falls back to DEFAULT_TIP via renderTip.
+  // 2026-05-12 event-data-model proposal (PR-2b): linkGeneratedTip threads
+  // through alongside linkAuthoredTip — same as the proposal-state path.
   const linkAuthoredTip =
     (snapshot.linkParameters?.tip as string | undefined) ??
     snapshot.userPrimaryTip ??
     null;
+  const linkGeneratedTip =
+    (snapshot.linkParameters?.generatedTip as string | undefined) ?? null;
   const rendered = renderTip(
     buildTipInput({
       hostName: snapshot.hostName,
@@ -311,6 +323,7 @@ export function dealRoomToMeetingCardProps(
       linkLocation: snapshot.linkLocation,
       isAnonymousLink: false,
       linkAuthoredTip,
+      linkGeneratedTip,
     }),
     viewerRole,
   );

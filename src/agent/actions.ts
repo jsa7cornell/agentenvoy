@@ -28,6 +28,7 @@ import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
 import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
 import { parseRecurrence, readRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { UserPreferences } from "@/lib/scoring";
+import { buildEventTitle } from "@/lib/build-event-title";
 import { parseLinkParameters } from "@/lib/link-parameters";
 import { snapshotPostureFromUser } from "@/lib/links/create";
 import {
@@ -1045,14 +1046,32 @@ export async function handleCreateLink(
       console.warn(`[create_link] invalid inviteeTimezone "${rawInviteeTz}" — dropping`);
     }
   }
+  // 2026-05-12 event-data-model proposal (PR-2b): `customTitle` is the new
+  // canonical host-named-title field; `topic` stays for backward compat during
+  // the migration window. Read customTitle first (preferred); fall back to topic.
+  // When customTitle is explicitly provided by the model, treat as a custom
+  // override regardless of content (model only emits customTitle when host
+  // explicitly named the meeting per the new tool schema).
+  const rawCustomTitle = (params.customTitle as string) || null;
+  const rawTopic = rawCustomTitle ?? ((params.topic as string) || null);
   // Strip generic filler topics — LLMs often set "Meeting" or "Catch up" when
   // the host didn't specify a topic, which produces "about Meeting" in the greeting.
-  const rawTopic = (params.topic as string) || null;
   const topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic;
   // Provenance for the title-rebuild rule on activity edits — see proposal
   // §3.B.1. "activity" → topic was activity-derived; clear/rebuild on activity
   // change. "custom" → host-set phrase like "Q3 review"; preserve.
-  const topicSource = deriveTopicSource(topic);
+  // When customTitle was explicitly emitted, force "custom" provenance.
+  const topicSource: "activity" | "custom" | null = rawCustomTitle
+    ? "custom"
+    : deriveTopicSource(topic);
+  // 2026-05-12 event-data-model proposal (PR-2b): `description` is a top-level
+  // column. Shareable agenda/context the host gave — paraphrased by the model.
+  // Lands in the GCal event description body for guest visibility.
+  const rawDescription = params.description;
+  const description: string | null =
+    typeof rawDescription === "string" && rawDescription.trim()
+      ? rawDescription.trim().slice(0, 500)
+      : null;
 
   // hostNote — host-supplied framing surfaced verbatim in greeting. Defense-in-
   // depth: reject newlines/control chars at the boundary, then route through
@@ -1443,23 +1462,30 @@ export async function handleCreateLink(
   const linkRules = normalizeLinkParameters({
     ...linkRulesPreIntent,
     intent: { steering: validatedSteering },
-    // Tip: validate the LLM-emitted tip (Phase 2 PR4). If present and valid,
-    // use it; otherwise fall back to DEFAULT_TIP. Primary links do NOT get
-    // seeded here — their tip lives on user.preferences.explicit.tip and is
-    // handled by the renderTip fallback.
-    // See proposal 2026-05-11_llm-tip-seed-at-create-link.md §8.1 v2.
-    tip: (() => {
+    // 2026-05-12 event-data-model proposal (PR-2b): the LLM-emitted tip now
+    // lands on `parameters.generatedTip` (priority-9 template, below host-
+    // authored `parameters.tip` at priority 11). Validation kept — invalid
+    // tips drop to null rather than DEFAULT_TIP (the generated-tip template
+    // is silent on null; renderer falls through to derived/fallback layers).
+    // The prior `parameters.tip` write here is removed — that field is
+    // reserved for host pencil-edits per the proposal's B1 acceptance.
+    // See proposals/2026-05-12_event-data-model-google-aligned-and-meeting-tip
+    // §"Tip render priority" and 2026-05-11_llm-tip-seed-at-create-link
+    // (superseded for the LLM-seed-on-create flow).
+    generatedTip: (() => {
       const rawTip = typeof params.tip === "string" ? params.tip : undefined;
+      if (!rawTip) return null;
       const locationParam = typeof location === "string" ? location : null;
       const tipValidation = validateTip(rawTip, locationParam);
-      if (rawTip && !tipValidation.valid) {
-        console.warn("[tip-seed] LLM tip rejected", {
+      if (!tipValidation.valid) {
+        console.warn("[generated-tip] LLM tip rejected", {
           linkCode: code,
           reasons: tipValidation.reasons,
           text: rawTip,
         });
+        return null;
       }
-      return tipValidation.valid ? rawTip! : DEFAULT_TIP;
+      return rawTip.slice(0, 280);
     })(),
   });
   // Silence unused-import warnings for constants referenced only in playbooks.
@@ -1510,8 +1536,14 @@ export async function handleCreateLink(
       inviteeNames,
       inviteeEmail,
       inviteeTimezone,
+      // 2026-05-12 event-data-model proposal (PR-2b): dual-write topic +
+      // customTitle during the migration window. PR-3 switches readers to
+      // customTitle (with `customTitle ?? buildEventTitle(...)` shim);
+      // PR-4 (deferred ≥3 weeks) drops the `topic` + `topicSource` columns.
       topic,
       topicSource,
+      customTitle: rawCustomTitle ? topic : (topicSource === "custom" ? topic : null),
+      description,
       hostNote,
       parameters: linkRules as Parameters<typeof prisma.negotiationLink.create>[0]["data"]["parameters"],
       ...(recurrenceForLink
@@ -1523,34 +1555,29 @@ export async function handleCreateLink(
   const hostFirstName = resolveHostFirstName({ name: hostName });
   const { getInviteeDisplay, getWaitingLabel } = await import("@/lib/invitee-display");
   const inviteeDisplay = getInviteeDisplay({ inviteeNames, inviteeName });
-  // topic is already null if it was generic (stripped at line 786 above).
-  // Capitalize the meaningful activity phrase if present.
-  const activityLabel = topic
-    ? topic.charAt(0).toUpperCase() + topic.slice(1)
-    : null;
-
-  // Format-derived prefix when no meaningful activity.
-  const effectiveFormatStr = typeof effectiveFormat === "string" ? effectiveFormat : null;
-  const formatPrefix =
-    effectiveFormatStr === "phone" ? "Call"
-    : effectiveFormatStr === "video" ? "VC"
-    : null;
-
-  const prefix = activityLabel ?? formatPrefix;
   const isGroup = Array.isArray(inviteeNames) && inviteeNames.length > 1;
   const { getInviteeFirstNamesDisplay } = await import("@/lib/invitee-display");
   const firstNamesDisplay = getInviteeFirstNamesDisplay({ inviteeNames, inviteeName });
 
-  const title =
-    isGroup
-      ? prefix
-        ? `${prefix} (${firstNamesDisplay})`
-        : firstNamesDisplay || "Meeting"
-      : !inviteeDisplay
-      ? (prefix ?? "Meeting")
-      : prefix
-      ? `${prefix}: ${inviteeDisplay} + ${hostFirstName}`
-      : `${inviteeDisplay} + ${hostFirstName}`;
+  // 2026-05-12 event-data-model proposal (PR-2b): title computation now flows
+  // through the single-source-of-truth `buildEventTitle` helper. Eliminates the
+  // actions.ts:1544 ↔ deal-room.tsx:1654 drift the proposal §1.1 documents.
+  // The helper handles customTitle override + activity-to-prefix mapping
+  // (including the bike-ride/hike multi-word edge cases) + group vs 1:1 layout.
+  const effectiveFormatStr = typeof effectiveFormat === "string" ? effectiveFormat : null;
+  const title = buildEventTitle({
+    customTitle: rawCustomTitle,
+    // When no explicit customTitle but topic was activity-derived, pass activity
+    // to let buildEventTitle derive the prefix from vocab.
+    activity: rawCustomTitle ? null : (activity ?? topic),
+    format: effectiveFormatStr === "video" || effectiveFormatStr === "phone" || effectiveFormatStr === "in-person"
+      ? effectiveFormatStr
+      : null,
+    isGroup,
+    inviteeDisplay,
+    firstNamesDisplay,
+    hostFirstName,
+  });
 
   const session = await prisma.negotiationSession.create({
     data: {
@@ -2152,6 +2179,31 @@ async function handleExpandLink(
     patch.location = loc || undefined;
   }
 
+  // 2026-05-12 event-data-model proposal (PR-2b): host-edited generated tip.
+  // Lands on parameters.generatedTip via normalizeLinkParameters (parallel to
+  // the create-time flow in handleCreateLink). Validation matches the create
+  // path: invalid tips drop to null rather than DEFAULT_TIP.
+  if (params.tip !== undefined) {
+    if (params.tip === null) {
+      patch.generatedTip = null;
+    } else if (typeof params.tip === "string") {
+      const locationParam =
+        typeof patch.location === "string" ? patch.location :
+        typeof existingRules.location === "string" ? existingRules.location : null;
+      const tipValidation = validateTip(params.tip, locationParam);
+      if (!tipValidation.valid) {
+        console.warn("[generated-tip] LLM tip rejected on update", {
+          linkCode: link.code,
+          reasons: tipValidation.reasons,
+          text: params.tip,
+        });
+        patch.generatedTip = null;
+      } else {
+        patch.generatedTip = params.tip.slice(0, 280);
+      }
+    }
+  }
+
   // guestPicks / guestGuidance — the host can change deferrals after link
   // creation ("actually let her choose the spot"). Accepted on `update_link`
   // per proposal 2026-04-29 §3.B (link-handler-consolidation). Today's
@@ -2276,11 +2328,55 @@ async function handleExpandLink(
   // Defense-in-depth: if topicSource is null but link.topic is set (legacy
   // row missed by the migration backfill), fall back to findActivity() text
   // match so the row gets cleaned up on first edit.
-  let topicClearUpdate: { topic: null; topicSource: null } | null = null;
+  let topicClearUpdate: { topic: null; topicSource: null; customTitle: null } | null = null;
   if (patch.activity !== undefined && link.topic) {
     const provenance = link.topicSource ?? (findActivity(link.topic) ? "activity" : "custom");
     if (provenance === "activity") {
-      topicClearUpdate = { topic: null, topicSource: null };
+      // 2026-05-12 event-data-model proposal (PR-2b): also clear `customTitle`
+      // (mirror of topic during the migration window). After PR-3 reader
+      // switchover lands, only customTitle is read.
+      topicClearUpdate = { topic: null, topicSource: null, customTitle: null };
+    }
+  }
+
+  // 2026-05-12 event-data-model proposal (PR-2b): customTitle / description /
+  // tip update path. customTitle is the new host-named-title field; mirrors
+  // to topic + topicSource during the migration window. description lives as
+  // a top-level column.
+  let customTitleUpdate: {
+    customTitle?: string | null;
+    topic?: string | null;
+    topicSource?: "custom" | null;
+    description?: string | null;
+  } | null = null;
+  const rawCustomTitleUpdate =
+    params.customTitle !== undefined
+      ? params.customTitle
+      : params.topic !== undefined
+        ? params.topic
+        : undefined;
+  if (rawCustomTitleUpdate !== undefined) {
+    customTitleUpdate = customTitleUpdate ?? {};
+    if (rawCustomTitleUpdate === null || rawCustomTitleUpdate === "") {
+      customTitleUpdate.customTitle = null;
+      customTitleUpdate.topic = null;
+      customTitleUpdate.topicSource = null;
+    } else if (typeof rawCustomTitleUpdate === "string") {
+      const titleStr = rawCustomTitleUpdate.trim().slice(0, 80);
+      // Treat generic filler as no-op; allow real titles.
+      if (titleStr && !isGenericTopic(titleStr)) {
+        customTitleUpdate.customTitle = titleStr;
+        customTitleUpdate.topic = titleStr;
+        customTitleUpdate.topicSource = "custom";
+      }
+    }
+  }
+  if (params.description !== undefined) {
+    customTitleUpdate = customTitleUpdate ?? {};
+    if (params.description === null || params.description === "") {
+      customTitleUpdate.description = null;
+    } else if (typeof params.description === "string") {
+      customTitleUpdate.description = params.description.trim().slice(0, 500);
     }
   }
 
@@ -2366,6 +2462,7 @@ async function handleExpandLink(
           }
         : {}),
       ...(topicClearUpdate ?? {}),
+      ...(customTitleUpdate ?? {}),
       ...(recurrencePatchWrite ?? {}),
       ...materialEditWrite,
     },

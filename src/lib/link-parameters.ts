@@ -298,7 +298,21 @@ export const linkParametersSchema = z
     // 2026-05-10 — PR4 host-authored tip (link-edit-modal). Surfaced verbatim
     // in the MeetingCard tip slot and (post PR3) in the EnvoyDock thread.
     // Max 280 chars matches the textarea cap in link-edit-modal.
+    //
+    // 2026-05-12 event-data-model proposal (PR-2b): semantic shift —
+    // `parameters.tip` is now RESERVED for host pencil-edit writes. The
+    // LLM-emitted tip (formerly written here) now lands on
+    // `parameters.generatedTip` (priority-9 template). Existing rows with
+    // their LLM-seed in `tip` continue to render at priority 11 until host
+    // pencil-edits or PR-3 migrates them.
     tip: z.string().max(280).optional(),
+
+    // 2026-05-12 event-data-model proposal (PR-2b): LLM-emitted tip from
+    // create-time tool emission or follow-up generateMeetingNotes (Haiku 4.5)
+    // regeneration. Priority-9 template `generated-tip` reads from here.
+    // Nullable: explicit `null` after host clears via update_link; absent
+    // for legacy rows. Max 280 mirrors the host-authored cap.
+    generatedTip: z.string().max(280).nullable().optional(),
   })
   .passthrough();
 

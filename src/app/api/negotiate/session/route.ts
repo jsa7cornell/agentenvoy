@@ -886,6 +886,13 @@ export async function POST(req: NextRequest) {
       const parsedParams = parseLinkParameters(link.parameters);
       const guestPicksLocation =
         (parsedParams.guestPicks as { location?: boolean } | undefined)?.location === true;
+      // 2026-05-12 event-data-model proposal (PR-2b): linkGeneratedTip threads
+      // through alongside linkAuthoredTip. parameters.generatedTip is the
+      // priority-9 slot below authored-link-tip (11).
+      const linkGeneratedTip =
+        typeof parsedParams.generatedTip === "string"
+          ? (parsedParams.generatedTip as string)
+          : null;
       const tipInput = buildTipInput({
         hostName: user.name ?? "",
         inviteeName: link.inviteeName ?? "",
@@ -894,6 +901,7 @@ export async function POST(req: NextRequest) {
         linkLocation: (parsedParams.location as string | null) ?? null,
         isAnonymousLink: link.type === "primary" || !!link.recurringWindowId,
         linkAuthoredTip: posture.tip ?? null,
+        linkGeneratedTip,
         guestPicksLocation,
       });
       tipText = renderTip(tipInput, "guest")?.text ?? DEFAULT_TIP;
