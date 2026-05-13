@@ -27,8 +27,9 @@
  *     is no longer emitted under UA, but `[DELEGATE_SPEAKER]` + future
  *     `[TIMEZONE_SWITCH]` blocks still get stripped for clean display).
  *
- * Phase A.6 wires this into `/api/negotiate/message/route.ts` behind the
- * `DEALROOM_UNIFIED_ENABLED` flag.
+ * Wired into `/api/negotiate/message/route.ts` unconditionally as of
+ * 2026-05-13 (the `DEALROOM_UNIFIED_ENABLED` kill-switch flag from Phase
+ * A.6 was deleted; the deal-room runs unified-agent for every turn).
  *
  * Refs:
  *   - proposals/2026-05-11_complete-unified-agent-migration-and-retire-classifier-composer_reviewed-2026-05-11_decided-2026-05-11.md §2 + §3.2

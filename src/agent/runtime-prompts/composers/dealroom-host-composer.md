@@ -1,9 +1,12 @@
 <!--
-⚠️ RETIRED 2026-05-11. The live deal-room prompt is `./dealroom-unified.md`
-(role-aware; loaded by `dealroomUnifiedSystemPrompt({ role })` in
-`runtime-prompts/index.ts`). This file is loaded only by `agent/composer.ts` which
-is flag-gated off in production (`DEALROOM_UNIFIED_ENABLED=true`) and scheduled
-for deletion in Phase D of the unified-agent migration. Do NOT author here.
+⚠️ RETIRED 2026-05-11; DEAD CODE 2026-05-13.
+The live deal-room prompt is `./dealroom-unified.md` (role-aware; loaded by
+`dealroomUnifiedSystemPrompt({ role })` in `runtime-prompts/index.ts`).
+This file was loaded only by `agent/composer.ts` via the legacy deal-room
+route path, which was deleted 2026-05-13 (the `DEALROOM_UNIFIED_ENABLED`
+kill-switch flag was removed; the deal-room runs unified-agent
+unconditionally). No production caller remains. Scheduled for deletion
+in Phase D of the unified-agent migration. Do NOT author here.
 See `./README.md` and `agentenvoy/UNIFIEDAGENT.md`.
 -->
 
