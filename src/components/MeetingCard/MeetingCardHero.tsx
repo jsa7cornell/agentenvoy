@@ -140,9 +140,23 @@ function FullHero(props: MeetingCardProps) {
   // 2026-05-10 hotfix: defensive against empty firstName.
   const otherInitial = (otherParty.firstName?.[0] ?? "?").toUpperCase();
 
-  const confirmedLabel = otherParty.firstName
-    ? `Confirmed by ${otherParty.firstName}`
-    : "Confirmed";
+  // 2026-05-13 cmp451sli fix: the prior label "Confirmed by {otherParty}" was
+  // role-symmetric but semantically wrong from the guest's perspective. In our
+  // flow the GUEST always presses the confirm button via the picker — the host
+  // is never the confirming party. From the host's perspective, "Confirmed by
+  // Suzie" is correct. From the guest's, "Confirmed by John" reads as "John
+  // confirmed this" — which isn't what happened. The guest filed cmp451sli
+  // expecting to see her own name. The cleaner role-aware framing:
+  //   - host viewer  → "Confirmed by {guest}" (who actually pressed confirm)
+  //   - guest viewer → "Confirmed with {host}" (different prep — describes the
+  //     meeting relation, not the action attribution)
+  // When firstName is missing, fall back to bare "Confirmed".
+  const confirmedLabel = (() => {
+    if (!otherParty.firstName) return "Confirmed";
+    return viewerRole === "guest"
+      ? `Confirmed with ${otherParty.firstName}`
+      : `Confirmed by ${otherParty.firstName}`;
+  })();
 
   // R5: eyebrow only — no "you're all set" / no name.
   const eyebrow = series
