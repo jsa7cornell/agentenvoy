@@ -11,7 +11,7 @@ Only **two** prompt files in this directory are loaded by the live runtime:
 | `unified-agent.md` | `unifiedAgentSystemPrompt()` → `app/src/agent/unified/runner.ts` | Host channel (every host turn) |
 | `dealroom-unified.md` | `dealroomUnifiedSystemPrompt()` → `app/src/agent/unified/dealroom-runner.ts` | Deal-room negotiation (post-Phase-A migration) |
 
-**Every other `.md` file in this directory is retired institutional memory.** They are still loaded by code in `app/src/agent/modules/**` and `app/src/agent/composer.ts`, but those code paths are flag-gated off in production (`UNIFIED_AGENT_ENABLED=true`, `DEALROOM_UNIFIED_ENABLED=true`) and are scheduled for deletion in Phase D of the migration. Do not author against them — edits there will not change product behavior, and they actively mislead future agents who read corpus docs that still reference them.
+**Every other `.md` file in this directory is retired institutional memory.** They are still loaded by code in `app/src/agent/modules/**` and `app/src/agent/composer.ts`, but the production routes that called those paths are **dead code** as of 2026-05-13 — the deal-room kill-switch flag (`DEALROOM_UNIFIED_ENABLED`) was deleted along with the legacy composer body in `/api/negotiate/message/route.ts`. The composer code stays in the tree pending Phase D's full retirement of `composer.ts` + `modules/**`. Do not author against these files — edits will not change product behavior, and they actively mislead future agents who read corpus docs that still reference them.
 
 ## Retired files (do NOT author against)
 
