@@ -23,6 +23,7 @@ import { ExternalAgentPrimer } from "./deal-room/external-agent-primer";
 import { SendFeedbackLink } from "./send-feedback";
 import { formatDuration } from "@/lib/format-duration";
 import { stripRendererOnlyBlocks } from "@/lib/message-render";
+import { ChannelChatStreamParser } from "@/lib/channel-chat-stream";
 import { mergePollResult, type LiveSyncMessage } from "@/lib/deal-room-live-sync";
 import { emojiForActivity } from "@/lib/activity-vocab";
 import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
@@ -1692,11 +1693,34 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       ]);
 
       const decoder = new TextDecoder();
+      // 2026-05-13: deal-room migration to unified-agent (yesterday's flag
+      // deletion) switched the stream wire shape from plain-text deltas →
+      // NDJSON frames per `runUnifiedTurn`'s `emitText` / `emitStatus`. Prior
+      // body concatenated raw bytes into the bubble, which produced
+      // `{"type":"text","content":"..."}` garbage in the chat once the server
+      // started shipping NDJSON. Now parse frames via the shared
+      // `ChannelChatStreamParser` (same parser the host-channel `feed.tsx`
+      // uses) and treat each `type:"text"` frame's `content` as the FULL
+      // accumulated text (NOT a delta). Reported by John on session rnmp4f.
+      const parser = new ChannelChatStreamParser();
       let fullText = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
+          // Flush any trailing line the server closed without a final newline.
+          const { frames: tailFrames } = parser.flush();
+          for (const frame of tailFrames) {
+            if (frame.type === "text") fullText = frame.content;
+          }
+          if (tailFrames.length > 0) {
+            const rendered = stripRendererOnlyBlocks(fullText);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: rendered } : m,
+              ),
+            );
+          }
           // Stage 1 live-sync (§8.4): flip isStreaming false 500ms after
           // the stream closes. The 500ms window covers the race between
           // onFinish's DB write (server-side admin row) and the next
@@ -1732,7 +1756,19 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         }
 
         const chunk = decoder.decode(value, { stream: true });
-        fullText += chunk;
+        const { frames } = parser.feed(chunk);
+        for (const frame of frames) {
+          // `type:"text"` frames carry the FULL accumulated text (snapshot,
+          // not delta — per the runner's `emitText(enqueue, fullText)`
+          // pattern). Each new text frame REPLACES the bubble's content.
+          if (frame.type === "text") {
+            fullText = frame.content;
+          }
+          // `type:"status"` and `type:"clarifier"` frames are emitted by the
+          // runner for the host-channel UI; deal-room v1 ignores them (the
+          // bubble just shows the assembled text). If we want to surface
+          // tool-progress indicators in the deal-room later, the hook is here.
+        }
         // Strip structured blocks client-side so mid-stream partials don't
         // flash raw `[DELEGATE_SPEAKER]...[/DELEGATE_SPEAKER]` / `[ACTION]`
         // / `[STATUS_UPDATE]` tags at the guest. Server re-strips in
