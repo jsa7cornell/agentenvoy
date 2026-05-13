@@ -4204,6 +4204,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 guestInitial={guestInitial}
                 isAdmin={isAdmin}
                 sessionId={sessionId}
+                // 2026-05-13 parity with MeetingCardConfirmedView at line ~4146.
+                // Without this, guests who land in proposal-state — including
+                // the retime_proposed shape after a botched in-place retime —
+                // have no Send-feedback affordance to flag the issue with.
+                feedbackLinkCode={feedbackCode ?? code}
               />
             </MeetingCardErrorBoundary>
           ) : (
