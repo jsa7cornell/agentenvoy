@@ -16,6 +16,7 @@
 import { useRouter } from "next/navigation";
 import { MeetingCard } from "@/components/MeetingCard/MeetingCard";
 import { EnvoyDock } from "@/components/EnvoyDock/EnvoyDock";
+import { SendFeedbackLink } from "@/components/send-feedback";
 import type { MeetingCardProps } from "@/components/MeetingCard/types";
 import type { Message as ChatMessage } from "@/components/MeetingCard/types";
 
@@ -67,6 +68,16 @@ interface Props {
    *  ThumbsDownFeedback button under agent bubbles knows which thread to
    *  file against. */
   sessionId?: string | null;
+  /**
+   * NegotiationLink.code used to file a feedback report from this proposal
+   * surface. Mirrors `feedbackLinkCode` on MeetingCardConfirmedView — same
+   * `feedbackCode ?? code` value from deal-room.tsx. Without this, the
+   * `Send feedback` affordance is suppressed (which was the bug fixed
+   * 2026-05-13 — the confirmed view had it; the proposal view didn't, so
+   * guests who landed in proposal-state, including the retime_proposed
+   * shape after a botched in-place retime, had no way to file feedback).
+   */
+  feedbackLinkCode?: string;
 }
 
 export function MeetingCardProposalView({
@@ -84,6 +95,7 @@ export function MeetingCardProposalView({
   guestInitial,
   isAdmin,
   sessionId,
+  feedbackLinkCode,
 }: Props) {
   const router = useRouter();
   // Stub out action handlers that don't apply pre-confirmation.
@@ -169,6 +181,24 @@ export function MeetingCardProposalView({
             sessionId={sessionId}
             onSendMessage={onSendMessage}
           />
+          {/* Send-feedback affordance — restored to the proposal surface
+              2026-05-13 (parity with MeetingCardConfirmedView line 262-274).
+              Anchored under the dock so it's reachable regardless of whether
+              the thread is expanded. The confirmed view added this on
+              2026-05-11; this view was missed — guests who landed in
+              proposal-state (including the retime_proposed shape after a
+              botched in-place retime) had no way to file feedback exactly
+              when they were most motivated to. */}
+          {feedbackLinkCode && (
+            <div className="mt-2 flex justify-end">
+              <SendFeedbackLink
+                mode={cardProps.viewerRole === "host" ? "host-deal-room" : "guest-deal-room"}
+                linkCode={feedbackLinkCode}
+                sessionId={sessionId ?? undefined}
+                className="text-[10px]"
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
