@@ -87,8 +87,10 @@ export function buildDealroomTools(ctx: DealroomToolContext): ToolSet {
 
   const session_confirm_slot = tool({
     description:
-      "Commit the agreed slot. STRICT: writes the GCal event, sends the invite, transitions session to 'agreed'. " +
-      "Use ONLY when the guest has clearly agreed to a specific time (e.g. 'yes that works', 'book it', 'sounds good' AFTER you offered a specific slot). " +
+      "Commit a slot. STRICT: writes the GCal event, sends the invite, transitions session to 'agreed'. " +
+      "Use when EITHER (a) the guest agreed to a specific time you offered ('yes that works', 'book it', 'sounds good'), " +
+      "OR (b) the host directs a commit on this session — naming a specific time, OR delegating the pick from your prior recommendation ('grab one', 'you pick', 'whatever works', 'go for it'). " +
+      "On host-delegated picks, choose a concrete time from your most recent recommended window (top-of-hour anchor) and commit; do not kick back asking for a specific time. " +
       "If email is unknown, call session_save_guest_info first on the same turn. " +
       "dateTime MUST be ISO 8601 — copy from the OFFERABLE SLOTS list with the UTC offset.",
     inputSchema: z.object({
