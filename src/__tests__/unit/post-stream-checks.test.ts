@@ -244,11 +244,14 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
   const successfulWrite = { toolName: "personal_link_create", success: true } as const;
 
   it("fires on prose > 240 chars when a successful write happened (cmp2qcnjy shape)", () => {
+    // 2026-05-13: original prose triggered both thinking-out-loud (regex match)
+    // and length (>240 chars); reordering put thinking-out-loud first. Use
+    // prose that ONLY trips the length cap (no forbidden phrases) so the
+    // assertion still validates the length sub-check distinctly.
     const longProse =
-      "Now I'll load the calendar to see today and tomorrow, then update the link " +
-      "to auto-confirm one of those two dates. Based on the calendar, today is May 12 " +
-      "and tomorrow is May 13. The most recent Susan link is already scheduled — " +
-      "I'll update that existing link to correct the guestPicks field.";
+      "Sure thing! Setting up the coffee meeting at the Stanford Research Coupa Cafe for next Tuesday at 2pm. " +
+      "Both calendars were free; the invite is on its way. " +
+      "Either party can request a change from the deal-room page whenever they want to revise.";
     const result = runPostStreamChecks({
       fullText: longProse,
       toolCalls: [successfulWrite],
@@ -289,26 +292,40 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("does NOT fire when no write happened — owned by narrationWithoutEmitCheck instead", () => {
+  it("fires on LOAD-only turn with thinking-out-loud prose (2026-05-13 rnmp4f shape)", () => {
+    // Prior expectation: narrationLeak skipped no-write turns ("owned by
+    // narrationWithoutEmitCheck"). But narrationWithoutEmit only catches
+    // CONFIRMATION-SHAPED prose, and the LOAD-only-leak shape is different
+    // (model narrates its loading process before answering). On 2026-05-13
+    // John hit this exact shape on session rnmp4f: 3 LOAD tools called,
+    // 4 sentences of "I need to load X" / "Based on the calendar..." prose,
+    // both pre-existing checks slept. 2026-05-13 widen: narrationLeak's
+    // thinking-out-loud sub-check now runs universally.
     const result = runPostStreamChecks({
       fullText:
-        "Now I'll load the calendar to see today and tomorrow, then update the link to auto-confirm one of those two dates. Based on the calendar, today is May 12 and tomorrow is May 13. The most recent Susan link is already scheduled.",
-      toolCalls: [],
+        "I need to load the calendar to see what's available. Now I need to load the preferences. Based on the calendar and preferences I've loaded, next Tuesday has several active blocking rules.",
+      toolCalls: [
+        { toolName: "LOAD_calendar_context", success: true },
+        { toolName: "LOAD_preferences", success: true },
+      ],
     });
-    // Only narration-without-emit fires (the prose looks confirmation-shaped,
-    // tools.length === 0). narrationLeak skips this case.
-    expect(result.map((r) => r.name)).not.toContain("narration-leak");
+    expect(result.map((r) => r.name)).toContain("narration-leak");
+    expect(result.find((r) => r.name === "narration-leak")?.scope).toBe("thinking-out-loud");
   });
 
-  it("does NOT fire when the write failed — owned by successTheaterCheck", () => {
+  it("narration-leak fires on a failed-write turn with thinking-out-loud prose", () => {
+    // 2026-05-13 widen: narrationLeak's thinking-out-loud sub-check runs
+    // universally — including on failed-write turns. successTheater may
+    // or may not also fire depending on whether the prose is
+    // confirmation-shaped (this prose isn't — "Now I'll create the link"
+    // is intent-future, not write-claim-past).
     const result = runPostStreamChecks({
       fullText:
         "Now I'll create the link. The most recent Susan session is already scheduled. " +
         "Based on the calendar, the slot is taken. I'll update that existing link.",
       toolCalls: [{ toolName: "personal_link_create", success: false }],
     });
-    // successTheater owns this (failed write + prose). narrationLeak skips.
-    expect(result.map((r) => r.name)).not.toContain("narration-leak");
+    expect(result.map((r) => r.name)).toContain("narration-leak");
   });
 
   it("uses DEFAULT_POST_STREAM_CHECKS when no override passed", () => {

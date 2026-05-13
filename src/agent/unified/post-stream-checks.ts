@@ -276,9 +276,16 @@ const THINKING_OUT_LOUD_PATTERNS: readonly RegExp[] = [
   // "Let me <think-verb>" — NOT "Let me know" (canonical template close).
   /\bLet me (?:check|load|look|update|verify|fetch|see|think|review|reconsider|update the|check the|load the|look at|see if|think about)\b/i,
   /\bI[''']ll (?:load|check|look|update|update the|create the|fetch)\b/i,
+  // "I need to load/check/..." — the LOAD-narration variant that doesn't use
+  // "I'll" (2026-05-13 rnmp4f incident). "Now I need to load..." is the same
+  // shape with a leading "Now".
+  /\b(?:Now\s+)?I need to (?:load|check|look|update|verify|fetch|see|review|reconsider)\b/i,
   /\bHowever,?\s+looking more carefully\b/i, // The cmp2qcnjy smoking gun
   /\bOn review\b/i,                         // From the old remediation prompt
   /\bLooking (?:more carefully|at this again)\b/i,
+  // "Looking at your calendar" / "Looking at the preferences" — narrating
+  // the model's own context-read (2026-05-13 rnmp4f).
+  /\bLooking at (?:your|the) (?:calendar|preferences|sessions|schedule|availability|link|rules)\b/i,
   /\bThinking about this\b/i,
   /\bThe user (?:specified|said|wants|is asking)\b/i,  // Narrating the model's parse of the user
   /\bBased on the (?:calendar|preferences|sessions)\b/i,
@@ -299,31 +306,34 @@ export function hasThinkingOutLoudPhrase(text: string): boolean {
 export const narrationLeakCheck: PostStreamCheck = {
   name: "narration-leak",
   check: ({ fullText, toolCalls }) => {
-    // Only fires on turns where SOMETHING got done. A turn with zero writes
-    // is owned by narrationWithoutEmitCheck (shape-1); a turn with failed
-    // writes is owned by successTheaterCheck (shape-3). This guard targets
-    // the "correct action, wrong prose" case.
+    // Thinking-out-loud sub-check runs UNIVERSALLY — these phrases narrate
+    // the model's internal process and are wrong on any turn (write,
+    // read-only, or pure-prose). 2026-05-13 widen: prior version only ran
+    // on successful-write turns; missed the LOAD-only-with-leak case on
+    // session rnmp4f where 3 LOADs ran + prose narrated each one before
+    // answering. Length sub-check still gates on writes because a legit
+    // read-only Q&A reply can exceed the 240-char cap.
+    if (hasThinkingOutLoudPhrase(fullText)) {
+      return {
+        fired: true,
+        scope: "thinking-out-loud",
+        reason: `Prose contains a forbidden "thinking out loud" phrase (Now I'll / I need to / Let me / Based on the / etc.).`,
+      };
+    }
+
+    // Length sub-check: only fires on successful-write turns. A pre-write
+    // narration leak gets the model classified narration-leak/thinking-out-loud
+    // (above). A pure-prose-answer turn can be long for good reason
+    // (status answer with calendar detail).
     const writeToolCalls = toolCalls.filter((tc) => !tc.toolName.startsWith("LOAD_"));
     if (writeToolCalls.length === 0) return { fired: false };
     const anySuccess = writeToolCalls.some((tc) => tc.success === true);
     if (!anySuccess) return { fired: false };
-
-    // Length-cap sub-check. Threshold deliberately generous (240 chars =
-    // ~40 words) so the canonical one-sentence templates pass cleanly.
     if (fullText.length > MAX_CONFIRMATION_LEN_CHARS) {
       return {
         fired: true,
         scope: "length",
         reason: `Prose ${fullText.length} chars > ${MAX_CONFIRMATION_LEN_CHARS} char cap (expected one short sentence).`,
-      };
-    }
-
-    // Thinking-out-loud sub-check.
-    if (hasThinkingOutLoudPhrase(fullText)) {
-      return {
-        fired: true,
-        scope: "thinking-out-loud",
-        reason: `Prose contains a forbidden "thinking out loud" phrase (Now I'll / Let me / However looking more carefully / etc.).`,
       };
     }
 
