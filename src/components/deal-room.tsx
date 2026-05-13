@@ -207,6 +207,55 @@ function GroupDayGrid({
   );
 }
 
+// 2026-05-13 deal-room-session-state-reducer proposal (decided 2026-05-13).
+// Mirrors the schema enum at prisma/schema.prisma:509 — keep in sync if a
+// new status is added to NegotiationSession. The discriminated union gives
+// the reducer's switch TSC exhaustiveness.
+type SessionStatus =
+  | "active"
+  | "proposed"
+  | "retime_proposed"
+  | "agreed"
+  | "cancelled"
+  | "escalated"
+  | "expired";
+
+// Status values that invalidate the local `confirmed` boolean + the
+// `confirmData` payload. NOT "terminal" — `retime_proposed` is transitional
+// (a new picker round follows). Naming reflects what the reducer does to
+// local state, not the server-side lifecycle position. The eventStatus
+// defense-in-depth derivation reads this list too — adding a new entry
+// updates both surfaces.
+//
+// `cancelled` — server-side cancel ran; agreedTime cleared.
+// `retime_proposed` — `update_time` on a previously-confirmed session
+//   cleared agreedTime per SPEC §2.3.1; the picker will re-propose.
+//   Preserving `confirmed=true` would render stale dateTime — the exact
+//   cmp46wtds shape applied to the retime path (Pitfall 2 from the proposal
+//   review; promoted to blocking).
+//
+// `expired` — NOT listed here, NOT handled in the reducer's switch. Route
+// returns HTTP 410 at session/route.ts:378 before the reducer sees the
+// status. When that changes (route surfaces expired rather than redirect
+// to /goodbye), add `expired` to this list AND a `case "expired":` arm.
+const INVALIDATES_CONFIRMED_STATE: readonly SessionStatus[] =
+  ["cancelled", "retime_proposed"] as const;
+
+// Payload shape consumed by `applySessionFromServer`. Subset of the
+// /api/negotiate/session response. Typed loosely with `string | null` for
+// status fields because the server can return arbitrary strings; the
+// reducer narrows to SessionStatus via the switch.
+type ServerSessionPayload = {
+  status?: string | SessionStatus;
+  statusLabel?: string;
+  agreedTime?: string | null;
+  agreedFormat?: string | null;
+  duration?: number | null;
+  location?: string | null;
+  meetLink?: string | null;
+  eventLink?: string | null;
+};
+
 export function DealRoom({ slug, code }: DealRoomProps) {
   const router = useRouter();
   const { setTheme } = useTheme();
@@ -326,7 +375,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     guestResponseStatus: "accepted" | "declined" | "tentative" | "needsAction" | null;
     htmlLink?: string | null;
   } | null>(null);
-  const [sessionStatus, setSessionStatus] = useState<string>("active");
+  // 2026-05-13 deal-room-session-state-reducer proposal (decided 2026-05-13).
+  // Typed against the schema enum at prisma/schema.prisma:509 so the helper
+  // switch below gets TSC exhaustiveness — the next time a status is added
+  // to the enum, the helper's switch fails to compile if it doesn't handle it.
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>("active");
   const [, setSessionStatusLabel] = useState<string>("");
   const [statusAnimating, setStatusAnimating] = useState(false);
   const [isGroupEvent, setIsGroupEvent] = useState(false);
@@ -708,6 +761,83 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // - Merge via mergePollResult: content-matched id-swap on temp-id rows,
   //   standard id-dedup otherwise. See deal-room-live-sync.ts for the
   //   B1-fold rationale (why we didn't do the server-id handshake).
+  //
+  // 2026-05-13 deal-room-session-state-reducer (decided 2026-05-13):
+  // `applySessionFromServer` is the single reducer that maps a server
+  // session-snapshot payload into local UI state. Replaces 4 duplicated
+  // reductions (polling tick, initial-mount, two post-stream refetches).
+  // Future status branches (currently: `expired` once the 410 short-circuit
+  // is moved) extend this switch in one place.
+  //
+  // React setter stability: setSessionStatus / setConfirmed / etc. are
+  // guaranteed stable across renders by React, so this closure's identity
+  // doesn't matter for downstream deps. Declared as a `function` (not
+  // useCallback) for hoisting + readability.
+  function applySessionFromServer(sess: ServerSessionPayload): void {
+    if (typeof sess.status === "string") {
+      setSessionStatus(sess.status as SessionStatus);
+    }
+    if (typeof sess.statusLabel === "string") setSessionStatusLabel(sess.statusLabel);
+
+    switch (sess.status as SessionStatus | undefined) {
+      case "agreed": {
+        setConfirmed(true);
+        // Merge semantics: prior fields survive if the snapshot omits them.
+        // The polling tick + post-stream refetches rely on this so partial
+        // payloads don't clobber data the picker just optimistically wrote.
+        // Initial-mount caller pre-coerces its own fallbacks before calling
+        // (the merge/replace asymmetry is backfill-driven, not structural;
+        // §3 of the decided spec).
+        setConfirmData((prev) => {
+          const next: Record<string, unknown> = { ...(prev ?? {}) };
+          if (typeof sess.agreedTime === "string") next.dateTime = sess.agreedTime;
+          if (typeof sess.agreedFormat === "string") next.format = sess.agreedFormat;
+          if (typeof sess.duration === "number") next.duration = sess.duration;
+          // B1 from review: meetLink was silently dropped on initial-mount
+          // replace before this consolidation. The MeetingCard's Join Google
+          // Meet CTA disappears on every confirmed-video-meeting reload
+          // without this line.
+          if (typeof sess.meetLink === "string") next.meetLink = sess.meetLink;
+          if ("location" in sess) next.location = sess.location;
+          if (typeof sess.eventLink === "string") next.eventLink = sess.eventLink;
+          return next;
+        });
+        break;
+      }
+
+      case "cancelled":
+      case "retime_proposed": {
+        // Both invalidate the local `confirmed` boolean + agreedTime payload.
+        // - cancelled: server cancel ran; agreedTime cleared; UI must
+        //   transition to cancelled-state immediately.
+        // - retime_proposed: update_time cleared agreedTime per SPEC §2.3.1
+        //   while preserving calendarEventId. Preserving confirmed=true
+        //   would render the card with stale dateTime — the exact cmp46wtds
+        //   shape applied to the retime path. Reset; the picker re-proposes;
+        //   user re-confirms.
+        // Picker-optimistic write at ~950 (setConfirmData merge) is
+        // intentionally invalidated when cancelled/retime_proposed wins the
+        // race — server signal beats in-flight optimistic.
+        setConfirmed(false);
+        setConfirmData(null);
+        break;
+      }
+
+      // `expired` deliberately omitted. The route returns HTTP 410 at
+      // session/route.ts:378 before the helper ever observes the status,
+      // so a case-arm here is dead code. When the route changes to surface
+      // `expired` (e.g. for a "this link is expired, here's why" UI), add
+      // both the case-arm AND extend INVALIDATES_CONFIRMED_STATE.
+      //
+      // active / proposed / escalated: intentionally fall through. The
+      // picker-optimistic update at ~950 maintains `confirmData` partial
+      // state during the agreed-locally-not-yet-on-server race window;
+      // the `agreed` arm handles that on the next merge.
+      default:
+        break;
+    }
+  }
+
   useEffect(() => {
     if (!sessionId) return;
 
@@ -737,37 +867,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           }),
         );
         setMessages((prev) => mergePollResult(prev as LiveSyncMessage[], serverMessages) as Message[]);
-        // Mirror session status surfaces so the remote side's confirm /
-        // status changes land as well.
-        if (typeof sess.status === "string") setSessionStatus(sess.status);
-        if (typeof sess.statusLabel === "string") setSessionStatusLabel(sess.statusLabel);
-        // 2026-05-11 — when a confirmed session is edited in-chat
-        // (`updateConfirmedMeeting`), the GCal event is patched and
-        // session.agreedTime / agreedFormat / link.parameters.location
-        // are updated. Refresh confirmData here so the MeetingCard
-        // reflects the change without a page reload.
-        if (sess.status === "agreed") {
-          setConfirmData((prev) => {
-            const next: Record<string, unknown> = { ...(prev ?? {}) };
-            if (typeof sess.agreedTime === "string") next.dateTime = sess.agreedTime;
-            if (typeof sess.agreedFormat === "string") next.format = sess.agreedFormat;
-            if (typeof sess.duration === "number") next.duration = sess.duration;
-            if ("location" in sess) next.location = sess.location;
-            if (typeof sess.eventLink === "string") next.eventLink = sess.eventLink;
-            return next;
-          });
-        }
-        // 2026-05-13 cmp46wtds fix: when a cancel lands (server-side
-        // status → "cancelled"), the local `confirmed` boolean was never
-        // reset and `confirmData` was never cleared — so eventStatus
-        // (computed `confirmed ? "agreed" : sessionStatus`) stayed "agreed"
-        // and the MeetingCard kept rendering the confirmed-state UI even
-        // though the DB cancel had succeeded. User filed "didnt cancel"
-        // because the visible state lied. Reset both on cancel pickup.
-        if (sess.status === "cancelled") {
-          setConfirmed(false);
-          setConfirmData(null);
-        }
+        // 2026-05-13 deal-room-session-state-reducer (decided 2026-05-13):
+        // consolidated session-status + confirmed/confirmData mapping into
+        // applySessionFromServer. Previously inlined here as three branches
+        // (status/label, agreed-merge, cancelled-reset from cmp46wtds);
+        // helper preserves all three behaviors and adds retime_proposed
+        // handling + meetLink restoration on agreed-merge.
+        applySessionFromServer(sess);
       } catch {
         // Swallow transient network errors — next tick will retry.
       }
@@ -1373,8 +1479,28 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             setFormGuestLocation(negotiated.trim());
           }
         }
-        setSessionStatus(data.status || "active");
-        setSessionStatusLabel(data.statusLabel || "");
+        // 2026-05-13 deal-room-session-state-reducer (decided). Initial-mount
+        // is the third migrated site. Pre-coerce legacy-row fallbacks at the
+        // caller (per §3 step 3a-i of the decided spec — the merge-vs-replace
+        // split is backfill-driven, not structural) and let the helper
+        // dispatch on status. When status === "agreed" the helper's merge mode
+        // populates confirmData from the same payload that the original
+        // explicit setConfirmData call below used to populate; the duplicated
+        // `if (data.confirmed)` block at ~1511 is removed below.
+        applySessionFromServer({
+          status: data.status || "active",
+          statusLabel: data.statusLabel || "",
+          agreedTime: data.agreedTime,
+          // Pre-coerced fallbacks for legacy rows where these columns are NULL.
+          // The polling tick / post-stream paths don't carry these fallbacks
+          // because their payloads always come from session.write paths that
+          // populate both fields. A future one-time backfill of NULL duration/
+          // agreedFormat values would let this caller collapse to bare merge.
+          agreedFormat: data.agreedFormat || "phone",
+          duration: data.duration ?? 30,
+          meetLink: data.meetLink,
+          eventLink: data.eventLink,
+        });
         if (data.isGroupEvent) setIsGroupEvent(true);
         if (data.participants) setParticipants(data.participants);
         if (data.groupCoordination) setGroupCoordination(data.groupCoordination as { candidateDays: string[] | null; responses: Array<{ person: string; dayVotes?: Record<string, boolean> }> });
@@ -1401,20 +1527,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           }
         }
 
-        // Already confirmed — load messages AND set confirmed state
+        // Already confirmed — load message history.
+        // 2026-05-13 deal-room-session-state-reducer (decided): the
+        // setConfirmData + setConfirmed calls that used to live here are now
+        // handled by applySessionFromServer above (the `agreed` arm fires
+        // when data.status === "agreed", which the route guarantees is true
+        // when data.confirmed === true — verified at session/route.ts:313
+        // and :397). This branch keeps the message-history load + early
+        // return; nothing else.
         if (data.confirmed) {
-          setConfirmData({
-            dateTime: data.agreedTime,
-            duration: data.duration || 30,
-            format: data.agreedFormat || "phone",
-            meetLink: data.meetLink,
-            // 2026-05-10: GCal event deep-link from session-load endpoint
-            // (constructed via googleCalendarEventUrl on the server). Drives
-            // the new MeetingCard "Open in Google Calendar" action immediately
-            // on page load, no async fetch required.
-            eventLink: data.eventLink,
-          });
-          setConfirmed(true);
           // Load message history so chat is visible below the event card
           if (data.messages?.length > 0) {
             setMessages(
@@ -1596,27 +1717,11 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 .then((body) => {
                   const sess = body?.session;
                   if (!sess) return;
-                  if (typeof sess.status === "string") setSessionStatus(sess.status);
-                  if (typeof sess.statusLabel === "string") setSessionStatusLabel(sess.statusLabel);
-                  if (sess.status === "agreed") {
-                    setConfirmData((prev) => {
-                      const next: Record<string, unknown> = { ...(prev ?? {}) };
-                      if (typeof sess.agreedTime === "string") next.dateTime = sess.agreedTime;
-                      if (typeof sess.agreedFormat === "string") next.format = sess.agreedFormat;
-                      if (typeof sess.duration === "number") next.duration = sess.duration;
-                      if ("location" in sess) next.location = sess.location;
-                      if (typeof sess.eventLink === "string") next.eventLink = sess.eventLink;
-                      return next;
-                    });
-                  }
-                  // 2026-05-13 cmp46wtds fix: mirror the polling-effect reset.
-                  // The post-stream refetch is the more critical of the two
-                  // because cancel-via-agent fires here within ~500ms; the
-                  // polling effect would catch it on the next 10s tick.
-                  if (sess.status === "cancelled") {
-                    setConfirmed(false);
-                    setConfirmData(null);
-                  }
+                  // 2026-05-13 deal-room-session-state-reducer (decided).
+                  // Previously inlined as agreed-merge + cancelled-reset
+                  // branches; helper consolidates both behaviors and
+                  // adds retime_proposed reset + meetLink restoration.
+                  applySessionFromServer(sess);
                 })
                 .catch(() => {
                   // Polling tick will retry — non-blocking.
@@ -1656,9 +1761,18 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           const sessionRes = await fetch(`/api/negotiate/session?id=${sessionId}`);
           if (sessionRes.ok) {
             const { session: sess } = await sessionRes.json();
-            setSessionStatus(sess.status);
-            setSessionStatusLabel(sess.statusLabel || "");
-            // Update link info (guest name, topic, email) if changed by save_guest_info action
+            // 2026-05-13 deal-room-session-state-reducer (decided).
+            // Reviewer B3: this is the sibling post-stream refetch that
+            // fires synchronously after the `done`-branch setTimeout
+            // refetch. Before consolidation, it wrote setSessionStatus
+            // without the cancelled/retime reset — leaving a ~500ms
+            // window where sessionStatus="cancelled" AND confirmed=true.
+            // The eventStatus defense-in-depth caught it; the helper
+            // closes the window.
+            applySessionFromServer(sess);
+            // Link-metadata refresh stays inline — it's not state the
+            // reducer owns (different concern: guest name / topic / email
+            // updates from save_guest_info actions).
             if (sess.link?.inviteeName && !inviteeName) setInviteeName(sess.link.inviteeName);
             // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
             const freshTopic = sess.link?.customTitle ?? sess.link?.topic;
@@ -2032,16 +2146,23 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   })();
 
   // Server-driven status — confirmed state overrides sessionStatus for
-  // backwards compat. BUT cancelled wins over confirmed: when the server
-  // says "cancelled", honor it even if the local `confirmed` boolean
-  // wasn't reset (defense-in-depth for cmp46wtds, 2026-05-13). The two
-  // reset paths above clear `confirmed` on cancel pickup; this catches
-  // any future code path that forgets.
-  const eventStatus = sessionStatus === "cancelled"
-    ? "cancelled"
-    : confirmed
-      ? "agreed"
-      : sessionStatus;
+  // backwards compat. BUT status values that invalidate confirmed-state
+  // win over the local `confirmed` boolean: when the server says cancel
+  // or retime-proposed, honor it even if the helper reset above didn't
+  // fire (defense-in-depth for cmp46wtds + retime variant, 2026-05-13).
+  // The reset paths inside applySessionFromServer clear `confirmed`; this
+  // catches any future code path that writes sessionStatus without going
+  // through the helper.
+  //
+  // Typed against INVALIDATES_CONFIRMED_STATE so the constant is the
+  // single source of truth — extend the list (e.g. when `expired` becomes
+  // helper-observable) and TSC + this derivation stay in sync.
+  const eventStatus: SessionStatus | "agreed" =
+    INVALIDATES_CONFIRMED_STATE.includes(sessionStatus)
+      ? sessionStatus
+      : confirmed
+        ? "agreed"
+        : sessionStatus;
 
   // Event details come from confirmData (confirmed) or latestProposal (proposed) or just title (scheduling)
   const eventDateTime = confirmed && confirmData
@@ -2135,7 +2256,12 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         justConfirmedGlow
           ? "ring-4 ring-emerald-400/60 shadow-[0_0_28px_rgba(16,185,129,0.4)] scale-[1.01]"
           : statusAnimating
-            ? (eventStatus === "confirmed" ? "ring-emerald-500/40" : eventStatus === "cancelled" ? "ring-red-500/40" : "ring-amber-300 dark:ring-amber-500/40")
+            // 2026-05-13: `eventStatus === "confirmed"` was a pre-existing
+            // typo bug surfaced by the new discriminated-union type — the
+            // produced value is "agreed" (from the eventStatus derivation
+            // and the schema's session-status enum), never "confirmed".
+            // Branch was dead before; emerald ring now fires correctly.
+            ? (eventStatus === "agreed" ? "ring-emerald-500/40" : eventStatus === "cancelled" ? "ring-red-500/40" : "ring-amber-300 dark:ring-amber-500/40")
             : ""
       }`}>
         {/* Title row — status leads ("Confirmed: Call with Katie"). The
