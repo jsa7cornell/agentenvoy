@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, createContext, useContext } from "react";
 import { DragSlotPicker } from "./drag-slot-picker";
 import { selectPickerVariant } from "./picker/registry";
 import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
@@ -67,6 +67,29 @@ export interface AvailabilityCalendarProps {
    */
   inPlaceApplyMode?: boolean;
 }
+
+// ─── Slot-selection context ─────────────────────────────────────────────────
+// Tracks the slot/date the user just clicked so the picker can keep that
+// chip highlighted (blue). Lives at each variant's top level so multiple
+// pickers on the page have independent selection.
+type SlotSelection = { key: string | null; pick: (k: string) => void };
+const SlotSelectionContext = createContext<SlotSelection>({
+  key: null,
+  pick: () => {},
+});
+function useSlotSelection() {
+  return useContext(SlotSelectionContext);
+}
+/** Variant tops call this to get a memoized {key, pick} value + the state
+ *  setter; pass the value into <SlotSelectionContext.Provider>. */
+function useSlotSelectionState(): SlotSelection {
+  const [key, setKey] = useState<string | null>(null);
+  return useMemo<SlotSelection>(() => ({ key, pick: setKey }), [key]);
+}
+/** Override classes applied to a picked slot/date — strong blue, overrides
+ *  the base color utilities via Tailwind's !important prefix. */
+const PICKED_CLS =
+  "!bg-blue-600 !text-white !border-blue-700 dark:!bg-blue-500 dark:!border-blue-600 !shadow-sm hover:!bg-blue-600";
 
 function getSlotColor(slots: Slot[], isPast: boolean) {
   if (isPast) return "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700";
@@ -154,6 +177,7 @@ function SlotPills({
   minDuration?: number;
 }) {
   const visible = slots.filter((s) => isSlotVisible(s));
+  const sel = useSlotSelection();
   if (visible.length === 0) return <p className="text-xs text-muted">No available slots</p>;
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -166,17 +190,24 @@ function SlotPills({
           ? "Short window — may not fit full meeting"
           : undefined;
         const tooltipText = !clickable ? "Potentially doable" : shortTooltip;
+        const isPicked = sel.key === slot.start;
         return (
           <button
             key={i}
-            onClick={() => clickable && onSelectSlot?.(formatSlotMessage(slot, dateStr, timezone), { start: slot.start, end: slot.end })}
+            onClick={() => {
+              if (!clickable) return;
+              sel.pick(slot.start);
+              onSelectSlot?.(formatSlotMessage(slot, dateStr, timezone), { start: slot.start, end: slot.end });
+            }}
             disabled={!clickable}
             title={tooltipText}
+            aria-pressed={isPicked || undefined}
             className={`px-2 py-1 bg-surface-secondary border rounded-md text-xs transition
               ${isShort
                 ? "border-dashed border-indigo-300 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 opacity-80"
                 : getSlotPillColor(slot)}
-              ${clickable && onSelectSlot ? "hover:bg-surface-tertiary cursor-pointer" : "cursor-default opacity-70"}`}
+              ${clickable && onSelectSlot ? "hover:bg-surface-tertiary cursor-pointer" : "cursor-default opacity-70"}
+              ${isPicked ? PICKED_CLS : ""}`}
           >
             {new Date(slot.start).toLocaleTimeString("en-US", {
               hour: "numeric",
@@ -351,6 +382,7 @@ function SlotChipRows({
   // linger silently. Hooks declared above the early-return for "no
   // available times" so the hook order stays stable.
   const [stagedSlot, setStagedSlot] = useState<Slot | null>(null);
+  const sel = useSlotSelection();
   useEffect(() => {
     setStagedSlot(null);
   }, [dateStr]);
@@ -412,6 +444,7 @@ function SlotChipRows({
 
   const renderChip = (slot: Slot, key: string, variant: "matched" | "open" | "hostOnly") => {
     const isStaged = inPlaceApplyMode && stagedSlot?.start === slot.start;
+    const isPicked = !inPlaceApplyMode && sel.key === slot.start;
     const handleClick = () => {
       if (inPlaceApplyMode) {
         // Stage — wait for Confirm. Idempotent re-click on the same chip is a
@@ -419,6 +452,7 @@ function SlotChipRows({
         setStagedSlot(slot);
         return;
       }
+      sel.pick(slot.start);
       onSelectSlot?.(
         formatSlotMessage(slot, dateStr, timezone),
         { start: slot.start, end: slot.end },
@@ -429,7 +463,7 @@ function SlotChipRows({
         key={key}
         onClick={handleClick}
         disabled={!onSelectSlot}
-        aria-pressed={isStaged || undefined}
+        aria-pressed={isStaged || isPicked || undefined}
         className={`
           inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium leading-none border transition-all
           ${isStaged
@@ -440,6 +474,7 @@ function SlotChipRows({
                 ? "border-dashed border-zinc-300 dark:border-zinc-700 bg-transparent text-zinc-500 dark:text-zinc-500 hover:border-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
                 : "border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-900 dark:text-indigo-100 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 hover:border-indigo-400"}
           ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
+          ${isPicked ? PICKED_CLS : ""}
         `}
       >
         <span className="py-1">{isStaged ? `✓ ${fmt(slot.start)}` : fmt(slot.start)}</span>
@@ -636,6 +671,7 @@ function WindowCards({
   inPlaceApplyMode?: boolean;
 }) {
   const [revealMore, setRevealMore] = useState(false);
+  const sel = useSlotSelection();
 
   if (durationMinutes <= 30) {
     return (
@@ -685,23 +721,27 @@ function WindowCards({
             hour: "numeric", minute: "2-digit", timeZone: timezone,
           });
         const ariaLabel = `${w.name}, ${fmt(w.start)} to ${fmt(w.end)}${matched ? ", both calendars confirm" : ""}${w.isPick ? ", best pick" : ""}`;
+        const isPicked = sel.key === w.defaultStart;
         return (
           <button
             key={i}
-            onClick={() =>
+            onClick={() => {
+              sel.pick(w.defaultStart);
               onSelectSlot?.(
                 formatWindowMessage(w, dateStr, timezone),
                 { start: w.defaultStart, end: w.defaultEnd },
-              )
-            }
+              );
+            }}
             disabled={!onSelectSlot}
             aria-label={ariaLabel}
+            aria-pressed={isPicked || undefined}
             className={`
               w-full text-left px-3 py-2 rounded-lg border transition-all
               ${w.isPick
                 ? "border-emerald-400/60 bg-emerald-950/30 hover:border-emerald-300"
                 : "border-DEFAULT bg-surface-secondary hover:border-secondary"}
               ${onSelectSlot ? "cursor-pointer" : "cursor-default opacity-70"}
+              ${isPicked ? PICKED_CLS : ""}
             `}
           >
             <div className="flex items-center justify-between gap-2">
@@ -1102,6 +1142,8 @@ function DetailedRow({
     "grid grid-cols-[42px_1fr] gap-2 items-center min-h-[28px]";
   const timeCls = "text-[10px] text-muted text-right tabular-nums";
 
+  const sel = useSlotSelection();
+  const isPicked = row.state === "match" && sel.key === row.start;
   if (row.state === "match") {
     return (
       <div className={baseRowCls}>
@@ -1112,19 +1154,21 @@ function DetailedRow({
             the gutter absorbs the extra hit area. */}
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
+            sel.pick(row.start);
             onSelectSlot?.(
               row.slot
                 ? formatSlotMessage(row.slot, dateStr, timezone)
                 : `How about ${time}?`,
               { start: row.start, end: row.end },
-            )
-          }
+            );
+          }}
           disabled={!onSelectSlot}
           aria-label={`${time}, both free, book`}
+          aria-pressed={isPicked || undefined}
           className="relative -my-1.5 py-1.5 group"
         >
-          <span className="block h-7 px-2.5 rounded-md text-left text-[11px] font-medium border border-emerald-400/60 bg-emerald-950/30 text-emerald-300 group-hover:border-emerald-300 transition cursor-pointer flex items-center justify-between">
+          <span className={`block h-7 px-2.5 rounded-md text-left text-[11px] font-medium border border-emerald-400/60 bg-emerald-950/30 text-emerald-300 group-hover:border-emerald-300 transition cursor-pointer flex items-center justify-between ${isPicked ? PICKED_CLS : ""}`}>
             <span>{row.label}</span>
             <span className="text-[10px] text-emerald-400/70">›</span>
           </span>
@@ -1215,6 +1259,7 @@ export function WeekView({
 }: Omit<AvailabilityCalendarProps, "view">) {
   // F1: bin in the same tz we render in.
   assertBinningTz(timezone, timezone);
+  const selValue = useSlotSelectionState();
 
   // Compute windows per day up-front — drives both day-strip count and selected-day cards.
   const durationMinutes = duration ?? 30;
@@ -1358,6 +1403,7 @@ export function WeekView({
   return (
     /* px-4 py-3 — gutter so day chips, meeting label, slot pills, and the
        timezone footer aren't flush against the surrounding card edges. */
+    <SlotSelectionContext.Provider value={selValue}>
     <div className="px-4 py-3">
       {/* Match banner — shown when bilateral overlap found and eventTitle provided */}
       {hasMatches && eventTitle && <MatchHeader eventTitle={eventTitle} />}
@@ -1515,6 +1561,7 @@ export function WeekView({
         {footerSlot ?? <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />}
       </div>
     </div>
+    </SlotSelectionContext.Provider>
   );
 }
 
@@ -1533,6 +1580,7 @@ export function MonthView({
   headerSlot,
   footerSlot,
 }: Omit<AvailabilityCalendarProps, "view">) {
+  const selValue = useSlotSelectionState();
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -1596,6 +1644,7 @@ export function MonthView({
   const selectedSlots = selectedDay ? slotsByDay[selectedDay] || [] : [];
 
   return (
+    <SlotSelectionContext.Provider value={selValue}>
     <div>
       {/* Header slot — e.g., inline CTA chip for calendar connect */}
       {headerSlot && <div className="mb-3">{headerSlot}</div>}
@@ -1697,6 +1746,7 @@ export function MonthView({
         {footerSlot ?? <TimezoneLabel timezone={timezone} onClick={onTimezoneClick} />}
       </div>
     </div>
+    </SlotSelectionContext.Provider>
   );
 }
 
@@ -1714,6 +1764,8 @@ export function DatePickerView({
   footerSlot,
   onTimezoneClick,
 }: Omit<AvailabilityCalendarProps, "view" | "schedulingMode">) {
+  const selValue = useSlotSelectionState();
+  const sel = selValue;
   const [viewMonth, setViewMonth] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -1752,6 +1804,7 @@ export function DatePickerView({
   }
 
   return (
+    <SlotSelectionContext.Provider value={selValue}>
     <div>
       {headerSlot && <div className="mb-3">{headerSlot}</div>}
 
@@ -1791,18 +1844,26 @@ export function DatePickerView({
           const hasSlots = !!slotsByDay[cell.dateStr]?.length;
           const isToday = cell.dateStr === todayStr;
           const available = !isPast && hasSlots;
+          const dateKey = `date:${cell.dateStr}`;
+          const isPicked = sel.key === dateKey;
 
           return (
             <button
               key={cell.dateStr}
-              onClick={() => available && onSelectDate?.(cell.dateStr)}
+              onClick={() => {
+                if (!available) return;
+                sel.pick(dateKey);
+                onSelectDate?.(cell.dateStr);
+              }}
               disabled={!available}
+              aria-pressed={isPicked || undefined}
               className={`
                 aspect-square rounded-lg text-sm font-medium flex items-center justify-center transition-all
                 ${available
                   ? "bg-green-500/15 text-green-300 hover:ring-1 hover:ring-green-400 cursor-pointer"
                   : "bg-zinc-200 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-700 cursor-default"}
                 ${isToday ? "ring-1 ring-indigo-500" : ""}
+                ${isPicked ? PICKED_CLS : ""}
               `}
             >
               {cell.day}
@@ -1817,6 +1878,7 @@ export function DatePickerView({
         {footerSlot ?? <TimezoneLabel timezone={_timezone} onClick={onTimezoneClick} />}
       </div>
     </div>
+    </SlotSelectionContext.Provider>
   );
 }
 
