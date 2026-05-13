@@ -757,6 +757,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             return next;
           });
         }
+        // 2026-05-13 cmp46wtds fix: when a cancel lands (server-side
+        // status → "cancelled"), the local `confirmed` boolean was never
+        // reset and `confirmData` was never cleared — so eventStatus
+        // (computed `confirmed ? "agreed" : sessionStatus`) stayed "agreed"
+        // and the MeetingCard kept rendering the confirmed-state UI even
+        // though the DB cancel had succeeded. User filed "didnt cancel"
+        // because the visible state lied. Reset both on cancel pickup.
+        if (sess.status === "cancelled") {
+          setConfirmed(false);
+          setConfirmData(null);
+        }
       } catch {
         // Swallow transient network errors — next tick will retry.
       }
@@ -1598,6 +1609,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       return next;
                     });
                   }
+                  // 2026-05-13 cmp46wtds fix: mirror the polling-effect reset.
+                  // The post-stream refetch is the more critical of the two
+                  // because cancel-via-agent fires here within ~500ms; the
+                  // polling effect would catch it on the next 10s tick.
+                  if (sess.status === "cancelled") {
+                    setConfirmed(false);
+                    setConfirmData(null);
+                  }
                 })
                 .catch(() => {
                   // Polling tick will retry — non-blocking.
@@ -2012,8 +2031,17 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     return null;
   })();
 
-  // Server-driven status — confirmed state overrides sessionStatus for backwards compat
-  const eventStatus = confirmed ? "agreed" : sessionStatus;
+  // Server-driven status — confirmed state overrides sessionStatus for
+  // backwards compat. BUT cancelled wins over confirmed: when the server
+  // says "cancelled", honor it even if the local `confirmed` boolean
+  // wasn't reset (defense-in-depth for cmp46wtds, 2026-05-13). The two
+  // reset paths above clear `confirmed` on cancel pickup; this catches
+  // any future code path that forgets.
+  const eventStatus = sessionStatus === "cancelled"
+    ? "cancelled"
+    : confirmed
+      ? "agreed"
+      : sessionStatus;
 
   // Event details come from confirmData (confirmed) or latestProposal (proposed) or just title (scheduling)
   const eventDateTime = confirmed && confirmData
