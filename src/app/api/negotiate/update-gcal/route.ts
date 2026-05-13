@@ -39,9 +39,10 @@ const bodySchema = z.object({
 
 const REFUSAL_TO_STATUS: Record<RefusalReason, number> = {
   session_not_found: 404,
-  session_not_agreed: 409,
   session_archived: 409,
   no_calendar_event: 400,
+  no_live_event: 409,
+  time_change_on_retime_proposed: 409,
   past_start_time: 400,
   ownership_mismatch: 403,
   gcal_failed: 502,

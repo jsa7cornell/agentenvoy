@@ -13,9 +13,22 @@
  * `agentenvoy/proposals/2026-05-11_update-confirmed-meeting_reviewed-2026-05-11_decided-2026-05-11.md`
  * for the full decision rationale.
  *
- * Scope (decided): in-place `status: "agreed"` edits only. NOT first-confirm
- * (`confirmBooking` stays separate), NOT cancellation, NOT group sessions
- * (fast-refuses with `group_session_not_supported`).
+ * Scope (decided 2026-05-11 + widened 2026-05-13): in-place edits to a session
+ * with a LIVE calendar event — `status: "agreed"` OR `status: "retime_proposed"`
+ * (both preserve calendarEventId per SPEC §2.3.2; identical patch mechanics).
+ * Gate is now `calendarEventId != null && !archived`, not a status allowlist —
+ * the helper trusts the live-event signal. NOT first-confirm (`confirmBooking`
+ * stays separate), NOT cancellation, NOT group sessions (fast-refuses with
+ * `group_session_not_supported`).
+ *
+ * Caveat — `changes.startTime` on `retime_proposed`: writing `agreedTime` while
+ * status is `retime_proposed` would violate SPEC §2.3.1 (agreedTime must be
+ * null when not agreed). Callers MUST NOT pass `startTime`/`endTime`/`duration`
+ * (the time-axis changes) when the session is `retime_proposed` — the helper
+ * rejects with `time_change_on_retime_proposed`. Non-time edits (location,
+ * format) work fine on both states. The "host re-times a retime_proposed
+ * session" semantic is a separate decision (does it flip to agreed? stay
+ * retime_proposed?) — out of scope until a proposal lands.
  *
  * Semantics: partial-state update (HTTP PATCH-style). For each key in
  * `changes`, the supplied value is written. Absent keys leave the current
@@ -72,9 +85,10 @@ export type UpdateOpts = {
 
 export type RefusalReason =
   | "session_not_found"
-  | "session_not_agreed"
   | "session_archived"
   | "no_calendar_event"
+  | "no_live_event"
+  | "time_change_on_retime_proposed"
   | "past_start_time"
   | "ownership_mismatch"
   | "gcal_failed"
@@ -146,18 +160,23 @@ async function loadAndGate(
   if (session.archived) {
     return { ok: false, reason: "session_archived", message: "Session is archived." };
   }
-  if (session.status !== "agreed") {
-    return {
-      ok: false,
-      reason: "session_not_agreed",
-      message: `Session is not in a confirmed state (status=${session.status}).`,
-    };
-  }
+  // 2026-05-13 widen: accept `agreed` AND `retime_proposed` (both preserve
+  // calendarEventId per SPEC §2.3.2). Gate on the live-event signal, not on
+  // a status allowlist — that's the actual semantic ("can we patch a GCal
+  // event for this session"). See file header for the time-axis caveat on
+  // retime_proposed.
   if (!session.calendarEventId) {
     return {
       ok: false,
-      reason: "no_calendar_event",
-      message: "Session has no calendar event to patch.",
+      reason: "no_live_event",
+      message: "Session has no live calendar event to patch.",
+    };
+  }
+  if (session.status !== "agreed" && session.status !== "retime_proposed") {
+    return {
+      ok: false,
+      reason: "no_live_event",
+      message: `Session is not in a live-event state (status=${session.status}).`,
     };
   }
   if (session.link.mode === "group") {
@@ -375,6 +394,29 @@ export async function updateConfirmedMeeting(
   if (!resolution.ok) return resolution;
   const { resolved } = resolution;
 
+  // Time-axis guard for retime_proposed (SPEC §2.3.1).
+  //
+  // Writing `agreedTime` while status is `retime_proposed` would violate
+  // §2.3.1 (agreedTime must be null when not agreed). Until a proposal
+  // decides "host re-times a retime_proposed session" semantics (flip to
+  // agreed? stay retime_proposed?), refuse here rather than silently
+  // corrupting state. Callers should keep their existing retime_proposed
+  // fallback path for time changes.
+  if (changes.startTime !== undefined || changes.endTime !== undefined || changes.duration !== undefined) {
+    const gateCheck = await prisma.negotiationSession.findUnique({
+      where: { id: sessionId },
+      select: { status: true },
+    });
+    if (gateCheck?.status === "retime_proposed") {
+      return {
+        ok: false,
+        reason: "time_change_on_retime_proposed",
+        message:
+          "Time/duration changes on a retime_proposed session are not yet supported — semantic decision pending.",
+      };
+    }
+  }
+
   // Re-load the session because resolveMeetingState's gate already validated
   // it but we need calendarEventId + link below. The double-load is one
   // extra query; acceptable for now (helper is on the write path, not hot).
@@ -484,8 +526,11 @@ export async function updateConfirmedMeeting(
     dbUpdates.gcalHtmlLink = gcalResult.htmlLink;
   }
   if (Object.keys(dbUpdates).length > 0) {
+    // Defense-in-depth: if status flipped out from under us between gate +
+    // write, the filter no-ops the write. Accepts the same live-event
+    // states the gate accepts (2026-05-13 widen).
     await prisma.negotiationSession.updateMany({
-      where: { id: sessionId, status: "agreed", archived: false },
+      where: { id: sessionId, status: { in: ["agreed", "retime_proposed"] }, archived: false },
       data: dbUpdates,
     });
   }

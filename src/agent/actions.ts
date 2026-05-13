@@ -623,11 +623,14 @@ async function handleUpdateFormat(
     return { success: false, message: `Invalid format: ${format}. Use "phone", "video", or "in-person".` };
   }
 
-  // For confirmed meetings already on GCal: in-chat edits patch directly
-  // (decision 2026-05-11). The user's chat message IS the authorization.
-  // Routes through `updateConfirmedMeeting` — single source of truth for
-  // confirmed-session edits (proposal 2026-05-11_update-confirmed-meeting).
-  if (session.calendarEventId && session.status === "agreed" && !session.archived) {
+  // For sessions with a live GCal event: in-chat format edits patch directly
+  // (decision 2026-05-11; widened 2026-05-13 to include `retime_proposed`).
+  // The user's chat message IS the authorization. Routes through
+  // `updateConfirmedMeeting` — single source of truth for live-event edits
+  // (proposal 2026-05-11_update-confirmed-meeting). Status invariants are
+  // preserved by the helper; format/location changes do NOT touch
+  // session.status, so retime_proposed sessions stay retime_proposed.
+  if (session.calendarEventId && !session.archived) {
     const summary = `Format updated to ${format}`;
     const result = await updateConfirmedMeeting(
       session.id,
@@ -917,11 +920,14 @@ async function handleUpdateLocation(
     return { success: false, message: "Missing location parameter" };
   }
 
-  // For confirmed meetings already on GCal: in-chat edits patch directly
-  // (decision 2026-05-11). The user's chat message IS the authorization.
-  // Routes through `updateConfirmedMeeting` — single source of truth for
-  // confirmed-session edits (proposal 2026-05-11_update-confirmed-meeting).
-  if (session.calendarEventId && session.status === "agreed" && !session.archived) {
+  // For sessions with a live GCal event: in-chat location edits patch directly
+  // (decision 2026-05-11; widened 2026-05-13 to include `retime_proposed`).
+  // The user's chat message IS the authorization. Routes through
+  // `updateConfirmedMeeting` — single source of truth for live-event edits
+  // (proposal 2026-05-11_update-confirmed-meeting). Status invariants are
+  // preserved by the helper; format/location changes do NOT touch
+  // session.status, so retime_proposed sessions stay retime_proposed.
+  if (session.calendarEventId && !session.archived) {
     const summary = `Location updated: ${location}`;
     const result = await updateConfirmedMeeting(
       session.id,

@@ -159,7 +159,10 @@ describe("updateConfirmedMeeting — refusals", () => {
     expect(mockCalendar.updateCalendarEvent).not.toHaveBeenCalled();
   });
 
-  it("refuses session_not_agreed when status !== 'agreed'", async () => {
+  it("refuses no_live_event when status is a non-live state (e.g. 'active')", async () => {
+    // 2026-05-13: widened from `agreed`-only to also accept `retime_proposed`.
+    // The gate now refuses any status that isn't `agreed` or `retime_proposed`
+    // with `no_live_event` (instead of the prior `session_not_agreed`).
     mockPrisma.negotiationSession.findUnique.mockResolvedValue(
       makeSession({ status: "active" }),
     );
@@ -169,8 +172,33 @@ describe("updateConfirmedMeeting — refusals", () => {
       { actor: { invoker: "host" } },
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe("session_not_agreed");
+    if (!result.ok) expect(result.reason).toBe("no_live_event");
     expect(mockCalendar.updateCalendarEvent).not.toHaveBeenCalled();
+  });
+
+  it("accepts retime_proposed for non-time edits (format/location)", async () => {
+    mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+      makeSession({ status: "retime_proposed" }),
+    );
+    const result = await updateConfirmedMeeting(
+      SESSION_ID,
+      { location: "Konditori" },
+      { actor: { invoker: "host" } },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses time_change_on_retime_proposed for time-axis edits on retime_proposed", async () => {
+    mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+      makeSession({ status: "retime_proposed" }),
+    );
+    const result = await updateConfirmedMeeting(
+      SESSION_ID,
+      { startTime: new Date("2026-06-01T17:00:00Z") },
+      { actor: { invoker: "host" } },
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("time_change_on_retime_proposed");
   });
 
   it("refuses session_archived when archived=true", async () => {
@@ -186,7 +214,11 @@ describe("updateConfirmedMeeting — refusals", () => {
     if (!result.ok) expect(result.reason).toBe("session_archived");
   });
 
-  it("refuses no_calendar_event when calendarEventId is null", async () => {
+  it("refuses no_live_event when calendarEventId is null", async () => {
+    // 2026-05-13: the `no_calendar_event` refusal was folded into the
+    // unified `no_live_event` refusal — both shapes (null calendarEventId,
+    // status not in live-event allowlist) refuse with the same reason
+    // because they're the same semantic question.
     mockPrisma.negotiationSession.findUnique.mockResolvedValue(
       makeSession({ calendarEventId: null }),
     );
@@ -196,7 +228,7 @@ describe("updateConfirmedMeeting — refusals", () => {
       { actor: { invoker: "host" } },
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe("no_calendar_event");
+    if (!result.ok) expect(result.reason).toBe("no_live_event");
   });
 
   it("refuses group_session_not_supported when link.mode === 'group'", async () => {
@@ -294,7 +326,7 @@ describe("updateConfirmedMeeting — happy paths", () => {
     );
     // DB write — statusLabel + TOCTOU guard.
     expect(mockPrisma.negotiationSession.updateMany).toHaveBeenCalledWith({
-      where: { id: SESSION_ID, status: "agreed", archived: false },
+      where: { id: SESSION_ID, status: { in: ["agreed", "retime_proposed"] }, archived: false },
       data: expect.objectContaining({
         statusLabel: "Location updated to Blue Bottle on Mission",
       }),
@@ -338,7 +370,7 @@ describe("updateConfirmedMeeting — happy paths", () => {
     );
     expect(result.ok).toBe(true);
     expect(mockPrisma.negotiationSession.updateMany).toHaveBeenCalledWith({
-      where: { id: SESSION_ID, status: "agreed", archived: false },
+      where: { id: SESSION_ID, status: { in: ["agreed", "retime_proposed"] }, archived: false },
       data: expect.objectContaining({
         agreedTime: newStart,
         duration: 60,
@@ -362,7 +394,7 @@ describe("updateConfirmedMeeting — happy paths", () => {
     );
     expect(result.ok).toBe(true);
     expect(mockPrisma.negotiationSession.updateMany).toHaveBeenCalledWith({
-      where: { id: SESSION_ID, status: "agreed", archived: false },
+      where: { id: SESSION_ID, status: { in: ["agreed", "retime_proposed"] }, archived: false },
       data: expect.objectContaining({
         agreedFormat: "in-person",
         format: "in-person",
@@ -488,7 +520,7 @@ describe("updateConfirmedMeeting — TOCTOU + concurrency", () => {
     expect(result.ok).toBe(true);
     expect(mockPrisma.negotiationSession.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: SESSION_ID, status: "agreed", archived: false },
+        where: { id: SESSION_ID, status: { in: ["agreed", "retime_proposed"] }, archived: false },
       }),
     );
   });
