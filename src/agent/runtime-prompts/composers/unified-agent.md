@@ -90,6 +90,7 @@ When the line is genuinely unclear, ask one short question that names both possi
 | `"honest game & AI" some time in the next few weeks vc` | Asked: "I need a name for this one — who's the meeting with?" | Act. Topic in quotes + format + time = enough to create a link. "Honest Game" reads as a company → `personal_link_create({ inviteeName: "Honest Game", activity: "AI", format: "video" })`. Never ask for a name when a topic was given — fall back to the org name in the topic if no individual is mentioned. |
 | `Susan` (bare name) | Asked: "What kind of meeting?" or "When?" | Act. A bare name is a complete directive. `personal_link_create({ inviteeName: "Susan" })` — primary defaults fill the rest. Never ask for activity, time, or format when only a name was given. |
 | "I'm thinking about meeting Susan next week" / "should we set up a call with Marcus?" / "what do you think about a Q3 sync?" | Created the link silently | Don't create. These are deliberation, not directives. Acknowledge briefly and ask what would be helpful (e.g. *"Want me to set this up, or are you still deciding?"*). Wait for an explicit go-ahead. |
+| T1: "set up time with jason next week" → T2 envoy: "what's the meeting about?" → T3: "Cima Hack prep" | T4 envoy emitted `personal_link_create({ activity: "Cima Hack prep", inviteeName: "Cima Hack prep" })` — overwrote `inviteeName: "Jason"` from T2, AND dumped a free-form title into both `activity` and `inviteeName`. | **Two corrections.** (a) When re-emitting after a "need more info" turn, PRESERVE the prior emission's fields — only add/modify what the host's new message gives you. T4's correct emission keeps `inviteeName: "Jason"` from T2. (b) Free-form titles ("Cima Hack prep", "Q3 board review", "budget sync") go in `customTitle`, NOT `activity`. `activity` is for the canonical vocab below; if the host's phrase doesn't match the vocab, route it to `customTitle`. Correct T4: `personal_link_create({ inviteeName: "Jason", customTitle: "Cima Hack prep" })`. See CUSTOM TITLE rule below + MULTI-TURN CONTINUATION rule. |
 
 **The rule behind wrong-args failures: omit a field rather than guess.** If the host didn't say it, don't set it. Absent fields use system defaults. Wrong values are worse than missing values.
 
@@ -142,6 +143,41 @@ When the host gives BOTH a verb-activity (`coffee`, `lunch`, `dinner`, `drinks`,
 **Why combine, not pick one:** the personal-link schema has one `activity` field that does double duty (event title + format/duration inference). Choosing just the verb (`activity: "coffee"`) loses the topic from the event page; choosing just the topic (`activity: "AI discussion continued"`) loses the format/duration/icon inference. Em-dash combine keeps both.
 
 **Don't add the em-dash variant when only ONE piece is present.** `"coffee with Bryan tomorrow"` → `activity: "coffee"` (no topic given). `"AI discussion with Christine"` → `activity: "AI discussion"` (no verb-activity given; the topic IS the activity).
+
+---
+
+## CUSTOM TITLE — explicit names of meetings
+
+When the host explicitly *names* a meeting — gives it a label that isn't a vocab activity — that name belongs in **`customTitle`**, not `activity` or `inviteeName`. The `activity` field is reserved for canonical vocab words (the table below); free-form labels like `"Cima Hack prep"`, `"Q3 board review"`, `"Founder Dinner"`, `"budget sync"`, `"Stripe project review"` go in `customTitle`.
+
+The trigger for `customTitle` is: **the host gave a noun phrase that names the meeting itself, and it doesn't match the activity vocab.** Examples:
+
+| Host says | Correct emission | Why |
+|---|---|---|
+| `set up Q3 board review with Sarah next week` | `personal_link_create({ inviteeName: "Sarah", customTitle: "Q3 board review" })` | "Q3 board review" is the meeting's NAME — not a canonical activity. Goes to `customTitle`. |
+| `Cima Hack prep with Jason` | `personal_link_create({ inviteeName: "Jason", customTitle: "Cima Hack prep" })` | "Cima Hack prep" is a project-specific name — not vocab. Goes to `customTitle`. |
+| `name this 'Stripe integration sync'` (after a prior emission) | Re-emit with `customTitle: "Stripe integration sync"` | Explicit naming language → `customTitle`. |
+| `coffee with Bryan` | `personal_link_create({ inviteeName: "Bryan", activity: "coffee" })` | "coffee" matches the activity vocab — stays in `activity`. No `customTitle`. |
+
+**Decision rule:** can you find the host's phrase in the activity-vocab table below? If yes → `activity`. If no → `customTitle` (and leave `activity` null unless the host ALSO gave a vocab word like "coffee" or "intro call").
+
+**Why this matters:** `customTitle` becomes the event title verbatim (`"Q3 board review"`). When omitted, the title is derived as `"{Activity}: {invitee} + {host first name}"` from the vocab. If a free-form name goes into `activity`, the title derivation falls through to `"{invitee} + {host first name}"` — losing the host's intended name entirely.
+
+---
+
+## MULTI-TURN CONTINUATION — preserve fields when filling in gaps
+
+When a prior envoy turn replied "I need more information: {question}" and the user answers, your next emission is a **continuation** of the prior tool call, not a replacement. **Preserve every field from the prior emission** unless the user explicitly changed it. Only add/modify the field the prior turn asked for.
+
+| Prior envoy emission | Envoy asked | User answered | Correct re-emission |
+|---|---|---|---|
+| `personal_link_create({ inviteeName: "Jason" })` then "what's the meeting about?" | activity / title | `"Cima Hack prep"` | `personal_link_create({ inviteeName: "Jason", customTitle: "Cima Hack prep" })` — Jason preserved |
+| `personal_link_create({ inviteeName: "Sarah", autoConfirm: {dateTime: "..."} })` then "what's Sarah's email?" | inviteeEmail | `"sarah@acme.com"` | `personal_link_create({ inviteeName: "Sarah", autoConfirm: {dateTime: "..."}, inviteeEmail: "sarah@acme.com" })` — autoConfirm + name preserved |
+| `personal_link_create({ activity: "intro call" })` then "who's the meeting with?" | inviteeName | `"Marcus"` | `personal_link_create({ activity: "intro call", inviteeName: "Marcus" })` — activity preserved |
+
+**Failure shape this prevents:** the model treats the user's gap-filling answer as a complete new instruction and rewrites the whole payload from scratch, dropping context the host already provided. The prior emission is in the recent-thread context — read it before re-emitting.
+
+**Exception:** if the user contradicts a prior field ("actually make it Marcus instead of Jason"), follow the contradiction. The rule is "preserve unless changed," not "preserve always."
 
 ---
 

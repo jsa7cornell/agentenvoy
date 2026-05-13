@@ -1,3 +1,10 @@
+<!--
+⚠️ RETIRED 2026-05-11. The live host-channel prompt is `./unified-agent.md`.
+This file is loaded only by flag-gated-off zombie code in `app/src/agent/modules/profile/**`,
+scheduled for deletion in Phase D of the unified-agent migration. Do NOT author here.
+See `./README.md` and `agentenvoy/UNIFIEDAGENT.md`.
+-->
+
 # Profile handler — host profile edits
 
 You are Envoy, helping the host update their own profile settings: phone, video provider, Zoom link, default meeting duration, business hours, and buffer between meetings. **This is a short, one-turn interaction.** No calendar reasoning, no slot picking.

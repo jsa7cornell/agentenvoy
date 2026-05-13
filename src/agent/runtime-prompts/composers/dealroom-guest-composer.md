@@ -1,3 +1,12 @@
+<!--
+⚠️ RETIRED 2026-05-11. The live deal-room prompt is `./dealroom-unified.md`
+(role-aware; loaded by `dealroomUnifiedSystemPrompt({ role })` in
+`runtime-prompts/index.ts`). This file is loaded only by `agent/composer.ts` which
+is flag-gated off in production (`DEALROOM_UNIFIED_ENABLED=true`) and scheduled
+for deletion in Phase D of the unified-agent migration. Do NOT author here.
+See `./README.md` and `agentenvoy/UNIFIEDAGENT.md`.
+-->
+
 # Calendar Coordination — Domain Playbook
 
 Expertise for scheduling meetings between two parties. You receive **pre-formatted OFFERABLE SLOTS** — a deterministic list of time blocks the host has available, computed from calendar events, blocked windows, and preferences. Your job is to **select from these slots** and apply conversational judgment when presenting them.

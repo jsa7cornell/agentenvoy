@@ -49,6 +49,24 @@ describe("buildEventTitle — 1:1 turns", () => {
     })).toBe("Bike ride: Marcus + John");
   });
 
+  it("cmp457nxd regression: Cima Hack prep with Jason yields the host-named title verbatim (post Fix A/B)", () => {
+    // The cmp457nxd-shape bug: the model emitted activity="Cima Hack prep"
+    // + inviteeName="Cima Hack prep" + customTitle=null, dropping "Jason"
+    // from the prior turn. Title rendered "Cima Hack prep + John" via the
+    // 1:1 fallback formula.
+    //
+    // After Fix A (prompt-level CUSTOM TITLE + MULTI-TURN CONTINUATION rules)
+    // and Fix B (handler-side activity-vocab guard reclassifying free-form
+    // activity → customTitle), the inputs to buildEventTitle are correct
+    // and the title renders the host's intent:
+    expect(buildEventTitle({
+      customTitle: "Cima Hack prep",
+      activity: null,
+      inviteeDisplay: "Jason",
+      hostFirstName: "John",
+    })).toBe("Cima Hack prep");
+  });
+
   it("activity alias resolves to canonical name in prefix", () => {
     // "biking" is an alias of bike-ride
     expect(buildEventTitle({
