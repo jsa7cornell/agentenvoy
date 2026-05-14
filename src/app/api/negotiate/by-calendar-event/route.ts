@@ -29,7 +29,6 @@ export async function GET(req: NextRequest) {
     id: true,
     status: true,
     archived: true,
-    title: true,
     agreedTime: true,
     agreedFormat: true,
     duration: true,

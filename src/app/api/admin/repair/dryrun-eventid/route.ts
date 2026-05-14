@@ -43,7 +43,6 @@ export async function GET() {
     },
     select: {
       id: true,
-      title: true,
       guestName: true,
       guestEmail: true,
       agreedTime: true,

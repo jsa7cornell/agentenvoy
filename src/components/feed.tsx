@@ -33,7 +33,6 @@ interface ChannelMsg {
   metadata?: Record<string, unknown> | null;
   thread?: {
     id: string;
-    title?: string;
     status: string;
     statusLabel?: string;
     type: string;
@@ -54,6 +53,7 @@ interface ChannelMsg {
       inviteeNames?: string[];
       inviteeEmail?: string;
       topic?: string;
+      customTitle?: string | null;
       code?: string;
       slug: string;
       mode?: string;
@@ -2104,7 +2104,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                   </>
                 )}
                 <ThreadCard
-                  title={msg.thread.title || "Thread"}
+                  title={msg.thread.link?.customTitle || "Thread"}
                   statusLabel={status.label}
                   statusColor={status.color}
                   activityIcon={msg.thread.link.activityIcon || undefined}
@@ -2170,7 +2170,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                 <div className="flex justify-end">
                   <ThumbsDownFeedback
                     sessionId={msg.thread.id}
-                    messageContent={msg.content || msg.thread.title || "Session"}
+                    messageContent={msg.content || msg.thread.link?.customTitle || "Session"}
                   />
                 </div>
               </div>

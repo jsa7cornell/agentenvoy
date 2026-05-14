@@ -34,7 +34,6 @@ export async function loadActiveSessions(
     select: {
       id: true,
       status: true,
-      title: true,
       guestName: true,
       guestEmail: true,
       archived: true,
@@ -42,6 +41,8 @@ export async function loadActiveSessions(
       link: {
         select: {
           code: true,
+          customTitle: true,
+          inviteeName: true,
           parameters: true,
         },
       },
@@ -54,7 +55,7 @@ export async function loadActiveSessions(
     return {
       id: r.id,
       status: r.status,
-      title: r.title,
+      title: r.link?.customTitle ?? r.link?.inviteeName ?? null,
       guestName: r.guestName,
       guestEmail: r.guestEmail,
       archived: r.archived,

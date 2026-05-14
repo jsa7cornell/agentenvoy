@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
   // it belongs to this link. Mismatch is a hard error, not a silent drop.
   let sessionRow: {
     id: string;
-    title: string | null;
+    title: string | null; // resolved from link.customTitle
     status: string;
     agreedTime: Date | null;
     guestName: string | null;
@@ -138,7 +138,6 @@ export async function POST(request: NextRequest) {
       select: {
         id: true,
         linkId: true,
-        title: true,
         status: true,
         agreedTime: true,
         guestName: true,
@@ -154,7 +153,7 @@ export async function POST(request: NextRequest) {
     }
     sessionRow = {
       id: session.id,
-      title: session.link?.customTitle ?? session.title,
+      title: session.link?.customTitle ?? null,
       status: session.status,
       agreedTime: session.agreedTime,
       guestName: session.guestName,

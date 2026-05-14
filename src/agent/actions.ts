@@ -327,7 +327,7 @@ async function executeAction(
 
 // --- Authorization helper ---
 
-async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; title: string | null; linkId: string; calendarEventId: string | null; archived: boolean; guestEmail: string | null; guestName: string | null; link: { id: string; type: string; inviteeName: string | null; topic: string | null; parameters: unknown } } }> {
+async function getAuthorizedSession(sessionId: unknown, userId: string): Promise<ActionResult | { session: { id: string; hostId: string; status: string; linkId: string; calendarEventId: string | null; archived: boolean; guestEmail: string | null; guestName: string | null; link: { id: string; type: string; inviteeName: string | null; topic: string | null; parameters: unknown } } }> {
   if (!sessionId || typeof sessionId !== "string") {
     return { success: false, message: "Missing or invalid sessionId" };
   }
@@ -337,7 +337,6 @@ async function getAuthorizedSession(sessionId: unknown, userId: string): Promise
       id: true,
       hostId: true,
       status: true,
-      title: true,
       linkId: true,
       calendarEventId: true,
       archived: true,
@@ -1719,7 +1718,6 @@ export async function handleCreateLink(
       hostId: userId,
       type: "calendar",
       status: "active",
-      title,
       statusLabel: getWaitingLabel({ inviteeNames, inviteeName }),
       format: effectiveFormat,
       duration: effectiveDurationParam ?? 30,
@@ -2642,26 +2640,6 @@ async function handleExpandLink(
       where: { linkId: link.id, status: { in: ["active", "pending"] } },
       select: { id: true, format: true },
     });
-    const { getInviteeDisplay, getInviteeFirstNamesDisplay } = await import("@/lib/invitee-display");
-    const hostUser = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { name: true },
-    });
-    const hostFirstName = resolveHostFirstName(hostUser);
-    const activityRaw = (mergedRules as Record<string, unknown>).activity;
-    const isGroupNow = inviteeNamesPatch.length > 1;
-    const inviteeNameSingular = inviteeNamesPatch[0] ?? null;
-    const inviteeDisplay = getInviteeDisplay({
-      inviteeNames: inviteeNamesPatch,
-      inviteeName: inviteeNameSingular,
-    });
-    const firstNamesDisplay = getInviteeFirstNamesDisplay({
-      inviteeNames: inviteeNamesPatch,
-      inviteeName: inviteeNameSingular,
-    });
-
-    const activityForTitle = typeof activityRaw === "string" ? activityRaw : null;
-
     for (const s of activeSessionsForInvitees) {
       await prisma.sessionInvitee.deleteMany({ where: { sessionId: s.id } });
       if (inviteeNamesPatch.length > 0) {
@@ -2673,74 +2651,6 @@ async function handleExpandLink(
             email: i === 0 ? null : null,
             role: "guest",
           })),
-        });
-      }
-      const nextTitle = buildEventTitle({
-        customTitle: link.customTitle ?? null,
-        activity: activityForTitle,
-        format: (typeof s.format === "string" ? s.format : null) as "video" | "phone" | "in-person" | null,
-        inviteeDisplay: inviteeDisplay || null,
-        firstNamesDisplay: firstNamesDisplay || null,
-        isGroup: isGroupNow,
-        hostFirstName,
-      });
-      await prisma.negotiationSession.update({
-        where: { id: s.id },
-        data: { title: nextTitle },
-      });
-    }
-  } else if (patch.activity !== undefined) {
-    // Activity-only refresh path (proposal §3.B.1, decided 2026-04-28).
-    // No invitee swap, but the activity changed — session titles need to
-    // pick up the new activity. Use buildEventTitle with each session's
-    // existing invitee set rather than rebuilding SessionInvitee.
-    const activeSessions = await prisma.negotiationSession.findMany({
-      where: { linkId: link.id, status: { in: ["active", "pending"] } },
-      select: {
-        id: true,
-        format: true,
-        invitees: { select: { name: true }, orderBy: { id: "asc" } },
-      },
-    });
-    if (activeSessions.length > 0) {
-      const { getInviteeDisplay, getInviteeFirstNamesDisplay } = await import("@/lib/invitee-display");
-      const hostUser = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { name: true },
-      });
-      const hostFirstName = resolveHostFirstName(hostUser);
-      const activityForTitle = typeof (mergedRules as Record<string, unknown>).activity === "string"
-        ? ((mergedRules as Record<string, unknown>).activity as string)
-        : null;
-      for (const s of activeSessions) {
-        const inviteeNames = s.invitees.map((i) => i.name).filter((n): n is string => !!n);
-        // Fall back to the link's inviteeName column if SessionInvitee rows
-        // are empty (legacy single-guest sessions seeded before group code).
-        const fallbackInvitees = inviteeNames.length === 0 && link.inviteeName
-          ? [link.inviteeName]
-          : inviteeNames;
-        const inviteeNameSingular = fallbackInvitees[0] ?? null;
-        const inviteeDisplay = getInviteeDisplay({
-          inviteeNames: fallbackInvitees,
-          inviteeName: inviteeNameSingular,
-        });
-        const firstNamesDisplay = getInviteeFirstNamesDisplay({
-          inviteeNames: fallbackInvitees,
-          inviteeName: inviteeNameSingular,
-        });
-        const isGroup = fallbackInvitees.length > 1;
-        const nextTitle = buildEventTitle({
-          customTitle: link.customTitle ?? null,
-          activity: activityForTitle,
-          format: (typeof s.format === "string" ? s.format : null) as "video" | "phone" | "in-person" | null,
-          inviteeDisplay: inviteeDisplay || null,
-          firstNamesDisplay: firstNamesDisplay || null,
-          isGroup,
-          hostFirstName,
-        });
-        await prisma.negotiationSession.update({
-          where: { id: s.id },
-          data: { title: nextTitle },
         });
       }
     }

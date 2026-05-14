@@ -81,7 +81,6 @@ async function buildBundle(userId: string, sessionId: string | null) {
       take: MAX_SESSIONS,
       select: {
         id: true,
-        title: true,
         status: true,
         agreedTime: true,
         createdAt: true,
@@ -146,7 +145,7 @@ async function buildBundle(userId: string, sessionId: string | null) {
     },
     activeSessions: sessions.map((s) => ({
       id: s.id,
-      title: s.link?.customTitle ?? s.title ?? null,
+      title: s.link?.customTitle ?? null,
       status: s.status,
       agreedTime: s.agreedTime?.toISOString() ?? null,
       createdAt: s.createdAt.toISOString(),

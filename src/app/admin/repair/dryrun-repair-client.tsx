@@ -4,7 +4,6 @@ import { useState } from "react";
 
 interface BrokenSession {
   id: string;
-  title: string | null;
   guestName: string | null;
   guestEmail: string | null;
   agreedTime: Date | string | null;
@@ -111,7 +110,7 @@ export function DryrunRepairClient({ initial }: Props) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-sm font-semibold">
-                  {s.link.customTitle || s.title || "Meeting"}
+                  {s.link.customTitle || "Meeting"}
                 </span>
                 <span className="text-[10px] uppercase tracking-wider text-muted">
                   {s.agreedFormat || "meeting"} · {s.duration || 30}m

@@ -34,7 +34,6 @@ export default async function AdminRepairPage() {
     },
     select: {
       id: true,
-      title: true,
       guestName: true,
       guestEmail: true,
       agreedTime: true,

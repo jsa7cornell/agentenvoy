@@ -47,7 +47,6 @@ export async function GET() {
       thread: {
         select: {
           id: true,
-          title: true,
           status: true,
           statusLabel: true,
           guestEmail: true,

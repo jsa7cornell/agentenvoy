@@ -338,7 +338,6 @@ export async function POST(req: NextRequest) {
               where: { hostId: safeUser.id, archived: false, status: { not: "cancelled" } },
               select: {
                 id: true,
-                title: true,
                 guestEmail: true,
                 link: { select: { inviteeName: true, customTitle: true } },
               },
@@ -348,7 +347,7 @@ export async function POST(req: NextRequest) {
             const activeSessionsSummary = recentSessions
               .map((s) => {
                 const guest = s.link?.inviteeName || s.guestEmail || "unknown";
-                return `- "${s.link?.customTitle ?? s.title ?? "Untitled"}" (guest: ${guest})`;
+                return `- "${s.link?.customTitle ?? "Untitled"}" (guest: ${guest})`;
               })
               .join("\n");
 

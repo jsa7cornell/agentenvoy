@@ -529,7 +529,6 @@ model NegotiationSession {
   /// first-observation was a transient Google error). See Phase 7 of
   /// /api/cron/daily and proposal calendar-popup-cancel-reschedule-ctas.
   gcalDriftFirstSeenAt DateTime?
-  title                String? // "Q2 Roadmap — Sarah Chen"
   statusLabel          String? // "Waiting for Sarah", "Confirmed", etc.
   meetingType          String? // phone | video | in-person
   duration             Int? // minutes

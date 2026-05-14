@@ -237,7 +237,6 @@ async function loadRecentSessions(userId: string) {
     take: MAX_SESSIONS,
     select: {
       id: true,
-      title: true,
       status: true,
       agreedTime: true,
       createdAt: true,
@@ -245,13 +244,14 @@ async function loadRecentSessions(userId: string) {
         select: {
           code: true,
           slug: true,
+          customTitle: true,
         },
       },
     },
   });
   return rows.map((r) => ({
     id: r.id,
-    title: r.title,
+    title: r.link?.customTitle ?? null,
     status: r.status,
     agreedTime: r.agreedTime ? r.agreedTime.toISOString() : null,
     createdAt: r.createdAt.toISOString(),
