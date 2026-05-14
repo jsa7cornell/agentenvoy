@@ -254,6 +254,14 @@ export const DEALROOM_GUEST_ALLOWED_TOOLS = [
   // narrate the shrink confirmation, not punt with a clarification
   // question (the cmp51ltr5 bad shape).
   "session_lock_duration",
+  // 2026-05-14 (same triage): guest can change the meeting format
+  // (video / phone / in-person). The dealroom-unified.md "Format
+  // downgrade ladder" rule already directs the agent to honor this
+  // request; the tool surface needs to match. The handler doesn't
+  // currently gate by role (any caller with sessionId access passes);
+  // any host-protection refinements would go in handleUpdateFormat
+  // as a follow-up.
+  "session_update_format",
   // Telemetry
   "flag_ambiguity",
 ] as const;
