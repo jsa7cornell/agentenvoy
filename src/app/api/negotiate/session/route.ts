@@ -900,6 +900,8 @@ export async function POST(req: NextRequest) {
       const parsedParams = parseLinkParameters(link.parameters);
       const guestPicksLocation =
         (parsedParams.guestPicks as { location?: boolean } | undefined)?.location === true;
+      const guestPicksFormat =
+        (parsedParams.guestPicks as { format?: boolean } | undefined)?.format === true;
       // 2026-05-12 event-data-model proposal (PR-2b): linkGeneratedTip threads
       // through alongside linkAuthoredTip. parameters.generatedTip is the
       // priority-9 slot below authored-link-tip (11).
@@ -917,6 +919,7 @@ export async function POST(req: NextRequest) {
         linkAuthoredTip: posture.tip ?? null,
         linkGeneratedTip,
         guestPicksLocation,
+        guestPicksFormat,
       });
       tipText = renderTip(tipInput, "guest")?.text ?? DEFAULT_TIP;
     } catch {

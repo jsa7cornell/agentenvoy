@@ -1567,6 +1567,8 @@ export async function handleGetTip(
   const linkLocation = typeof parameters.location === "string" ? parameters.location : null;
   const guestPicksLocation =
     (parameters.guestPicks as { location?: boolean } | undefined)?.location === true;
+  const guestPicksFormat =
+    (parameters.guestPicks as { format?: boolean } | undefined)?.format === true;
 
   // AP5b: same renderTip call as deal-room renderer — role-invariant templateId/sourceKind
   const rendered = renderTip(
@@ -1579,6 +1581,7 @@ export async function handleGetTip(
       linkAuthoredTip,
       linkGeneratedTip,
       guestPicksLocation,
+      guestPicksFormat,
     }),
     "guest", // external agent = guest perspective for AP5b role-invariance
   );

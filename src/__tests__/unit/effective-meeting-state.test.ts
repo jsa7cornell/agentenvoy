@@ -234,3 +234,36 @@ describe("title derivation — customTitle and buildEventTitle fallback", () => 
     expect(state.channelRow.kind).toBe("video");
   });
 });
+
+// cmp5sm07o: guestPicks flags propagate through getEffectiveMeetingState
+describe("guestPicks flag propagation (cmp5sm07o)", () => {
+  it("guestPicksFormat:false and guestPicksLocation:false by default", () => {
+    const state = getEffectiveMeetingState(makeSession());
+    expect(state.guestPicksFormat).toBe(false);
+    expect(state.guestPicksLocation).toBe(false);
+  });
+
+  it("guestPicksFormat:true when link.parameters.guestPicks.format=true", () => {
+    const state = getEffectiveMeetingState(makeSession({
+      link: { parameters: { guestPicks: { format: true } }, inviteeName: "Drake", user: null },
+    }));
+    expect(state.guestPicksFormat).toBe(true);
+    expect(state.guestPicksLocation).toBe(false);
+  });
+
+  it("guestPicksLocation:true when link.parameters.guestPicks.location=true", () => {
+    const state = getEffectiveMeetingState(makeSession({
+      link: { parameters: { format: "in-person", guestPicks: { location: true } }, inviteeName: "Alice", user: null },
+    }));
+    expect(state.guestPicksLocation).toBe(true);
+    expect(state.guestPicksFormat).toBe(false);
+  });
+
+  it("both flags true when guestPicks has format:true and location:true", () => {
+    const state = getEffectiveMeetingState(makeSession({
+      link: { parameters: { guestPicks: { format: true, location: true } }, inviteeName: "Drake", user: null },
+    }));
+    expect(state.guestPicksFormat).toBe(true);
+    expect(state.guestPicksLocation).toBe(true);
+  });
+});

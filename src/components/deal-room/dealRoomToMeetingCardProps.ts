@@ -261,6 +261,7 @@ function buildProposalMeetingCardProps(
       linkAuthoredTip,
       linkGeneratedTip,
       guestPicksLocation,
+      guestPicksFormat: hasFormatGuestPicks,
     }),
     viewerRole,
   );

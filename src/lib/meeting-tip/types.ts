@@ -8,6 +8,7 @@ export type TipSourceKind =
   | "derived-relationship-history"
   | "derived-series-progress"
   | "derived-guest-picks-location"
+  | "derived-guest-picks-format"
   /**
    * 2026-05-12 event-data-model proposal (PR-2):
    * Model-generated tip from `generateMeetingNotes` (Haiku 4.5) at create time
@@ -39,6 +40,8 @@ export interface TipInput {
   linkAuthoredTip?: string;
   /** Host deferred venue selection to the guest (`guestPicks.location: true`). */
   guestPicksLocation?: boolean;
+  /** Host deferred format selection to the guest (`guestPicks.format: true`). */
+  guestPicksFormat?: boolean;
   /**
    * Model-generated tip from `generateMeetingNotes` (Haiku 4.5), persisted
    * on `Link.parameters.generatedTip` at create time and on edit triggers

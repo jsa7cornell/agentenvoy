@@ -17,6 +17,8 @@ export interface BuildTipInputArgs {
   bothCalendarsConnected?: boolean;
   linkAuthoredTip?: string | null;
   guestPicksLocation?: boolean | null;
+  /** Host deferred format selection to guest (`guestPicks.format: true`). */
+  guestPicksFormat?: boolean | null;
   /** Model-generated tip from generateMeetingNotes — see types.ts. */
   linkGeneratedTip?: string | null;
 }
@@ -39,6 +41,7 @@ export function buildTipInput(args: BuildTipInputArgs): TipInput {
     bothCalendarsConnected: args.bothCalendarsConnected,
     linkAuthoredTip: args.linkAuthoredTip ?? undefined,
     guestPicksLocation: args.guestPicksLocation ?? false,
+    guestPicksFormat: args.guestPicksFormat ?? false,
     linkGeneratedTip: args.linkGeneratedTip ?? undefined,
   };
 }

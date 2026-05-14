@@ -1519,6 +1519,11 @@ export async function handleCreateLink(
   // `hasFormatGuestPicks` branch produces the picker correctly.
   const guestPicksFormatActive =
     guestPicksOut?.format === true || Array.isArray(guestPicksOut?.format);
+  // cmp5sm07o: when the guest picks format, also null out the model's
+  // explicit effectiveFormat — the prior fix stripped the posture default
+  // but not params.format. A model that emits both `format:"in-person"` and
+  // `guestPicks:{format:true}` produced a contradictory link state.
+  if (guestPicksFormatActive) effectiveFormat = null;
   const postureForMerge = guestPicksFormatActive
     ? (() => {
         // Don't mutate the snapshot — it's used by other call sites.

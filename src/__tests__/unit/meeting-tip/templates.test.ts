@@ -72,3 +72,51 @@ describe("source label substitution", () => {
     expect(r?.source).toBe("Day-of tip from John");
   });
 });
+
+// cmp5sm07o: derived-guest-picks-format template
+describe("derived-guest-picks-format (cmp5sm07o)", () => {
+  it("fires when guestPicksFormat:true — guest view, format-only", () => {
+    const r = renderTip({ ...base, guestPicksFormat: true }, "guest");
+    expect(r?.templateId).toBe("derived-guest-picks-format-v1");
+    expect(r?.text).toContain("John");
+    expect(r?.text).toContain("format");
+  });
+
+  it("fires when guestPicksFormat:true — host view, format-only", () => {
+    const r = renderTip({ ...base, guestPicksFormat: true }, "host");
+    expect(r?.templateId).toBe("derived-guest-picks-format-v1");
+    expect(r?.text).toContain("Sarah");
+    expect(r?.text).toContain("format");
+    expect(r?.text).not.toContain("spot");
+  });
+
+  it("folds location into message when both format and location are deferred — guest", () => {
+    const r = renderTip({ ...base, guestPicksFormat: true, guestPicksLocation: true }, "guest");
+    expect(r?.templateId).toBe("derived-guest-picks-format-v1");
+    expect(r?.text).toContain("format");
+    expect(r?.text).toContain("where to meet");
+  });
+
+  it("folds location into message when both format and location are deferred — host", () => {
+    const r = renderTip({ ...base, guestPicksFormat: true, guestPicksLocation: true }, "host");
+    expect(r?.templateId).toBe("derived-guest-picks-format-v1");
+    expect(r?.text).toContain("format");
+    expect(r?.text).toContain("spot");
+  });
+
+  it("does NOT fire on anonymous links", () => {
+    const r = renderTip({ ...base, guestPicksFormat: true, isAnonymousLink: true }, "guest");
+    expect(r?.templateId).not.toBe("derived-guest-picks-format-v1");
+  });
+
+  it("authored-link-tip still wins over format deferral", () => {
+    const r = renderTip({ ...base, guestPicksFormat: true, linkAuthoredTip: "Custom tip text" }, "guest");
+    expect(r?.templateId).toBe("authored-link-tip-v1");
+    expect(r?.text).toBe("Custom tip text");
+  });
+
+  it("location-only deferral still routes to derived-guest-picks-location, not format template", () => {
+    const r = renderTip({ ...base, guestPicksLocation: true, meetingFormat: "in-person" }, "guest");
+    expect(r?.templateId).toBe("derived-guest-picks-location-v1");
+  });
+});

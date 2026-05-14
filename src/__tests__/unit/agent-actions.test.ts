@@ -1460,6 +1460,55 @@ describe("executeActions", () => {
         expect(parameters.tip).toBe(DEFAULT_TIP);
       });
     });
+
+    // cmp5sm07o: guestPicks.format write-time contract
+    describe("guestPicks.format write-time (cmp5sm07o)", () => {
+      it("does NOT write format when guestPicks.format:true + model passes explicit format:in-person", async () => {
+        mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john", name: "John Anderson" });
+        mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
+        mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
+
+        await executeActions(
+          [{ action: "create_link", params: { inviteeName: "Drake", format: "in-person", guestPicks: { format: true } } }],
+          HOST_USER_ID,
+        );
+        const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+        const parameters = call.data.parameters as Record<string, unknown>;
+        // format must be absent — "in-person" contradicts the guestPicks.format deferral
+        expect(parameters.format).toBeUndefined();
+        expect((parameters.guestPicks as Record<string, unknown>)?.format).toBe(true);
+      });
+
+      it("does NOT write format when guestPicks.format:true + format:video (combined deferral)", async () => {
+        mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john", name: "John Anderson" });
+        mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
+        mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
+
+        await executeActions(
+          [{ action: "create_link", params: { inviteeName: "Alice", format: "video", guestPicks: { format: true, location: true } } }],
+          HOST_USER_ID,
+        );
+        const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+        const parameters = call.data.parameters as Record<string, unknown>;
+        expect(parameters.format).toBeUndefined();
+        expect((parameters.guestPicks as Record<string, unknown>)?.format).toBe(true);
+        expect((parameters.guestPicks as Record<string, unknown>)?.location).toBe(true);
+      });
+
+      it("DOES write format when guestPicks.format absent (normal path unchanged)", async () => {
+        mockPrisma.user.findUnique.mockResolvedValue({ meetSlug: "john", name: "John Anderson" });
+        mockPrisma.negotiationLink.create.mockResolvedValue({ id: "link-1" });
+        mockPrisma.negotiationSession.create.mockResolvedValue({ id: "new-session" });
+
+        await executeActions(
+          [{ action: "create_link", params: { inviteeName: "Bob", format: "phone" } }],
+          HOST_USER_ID,
+        );
+        const call = mockPrisma.negotiationLink.create.mock.calls[0][0];
+        const parameters = call.data.parameters as Record<string, unknown>;
+        expect(parameters.format).toBe("phone");
+      });
+    });
   });
 
   // --- Expand Link ---

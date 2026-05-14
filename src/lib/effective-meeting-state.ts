@@ -97,6 +97,10 @@ export interface EffectiveMeetingState {
   emoji: string | null;
   /** Structured channel descriptor for the meeting-card channel row. */
   channelRow: ChannelInfo;
+  /** True when the host deferred format selection to the guest (`guestPicks.format: true`). */
+  guestPicksFormat: boolean;
+  /** True when the host deferred venue selection to the guest (`guestPicks.location: true`). */
+  guestPicksLocation: boolean;
 }
 
 // ── Implementation ─────────────────────────────────────────────────────────
@@ -124,6 +128,15 @@ export function getEffectiveMeetingState(session: SessionWithLink): EffectiveMee
     session.negotiatedDuration ?? session.duration ?? params.duration ?? 30;
   const location =
     session.negotiatedLocation ?? session.location ?? params.location ?? null;
+
+  // guestPicks flags — read from link parameters (not negotiated*, they're
+  // host-set on the link template). cmp5sm07o: needed so renderers that
+  // consume getEffectiveMeetingState can surface "guest picks format/location"
+  // affordances correctly.
+  const guestPicksFormat =
+    (params.guestPicks as { format?: boolean } | undefined)?.format === true;
+  const guestPicksLocation =
+    (params.guestPicks as { location?: boolean } | undefined)?.location === true;
 
   // ── Derived display fields ───────────────────────────────────────────────
   const hostFirstName = splitFirstName(link.user?.name ?? null);
@@ -155,7 +168,13 @@ export function getEffectiveMeetingState(session: SessionWithLink): EffectiveMee
     format as "video" | "phone" | "in-person" | null,
   );
 
-  const channelRow = buildChannelRow(format, location, session.meetLink ?? null);
+  const channelRow = buildChannelRow(
+    format,
+    location,
+    session.meetLink ?? null,
+    guestPicksFormat,
+    guestPicksLocation,
+  );
 
   return {
     activity,
@@ -169,6 +188,8 @@ export function getEffectiveMeetingState(session: SessionWithLink): EffectiveMee
     title,
     emoji: emoji ?? null,
     channelRow,
+    guestPicksFormat,
+    guestPicksLocation,
   };
 }
 
