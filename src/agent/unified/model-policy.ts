@@ -74,29 +74,58 @@ export type TurnContext = {
  * If the most recent prior envoy turn used tools AND was within this window,
  * we treat this turn as plausibly still in-flight and keep Sonnet. Beyond it,
  * the conversation is cold — short messages route to Haiku even after prior
- * tool use. 15 min covers the realistic "user got coffee mid-flow" case
+ * tool use. 15 min covered the realistic "user got coffee mid-flow" case
  * without stranding genuinely fresh interactions on Sonnet.
+ *
+ * **2026-05-14 (v4):** the constant was removed. The router no longer
+ * consults priorEnvoyTurnAgeMs. Documented here as institutional memory:
+ * if a v5 ever wants to bring this gate back, the prior value was 15 min
+ * (15 * 60 * 1000 ms). See selectModelForTurn for the v4 contract.
  */
-const HAIKU_RECENCY_WINDOW_MS = 15 * 60 * 1000;
 
 /**
  * Selects the appropriate model tier for a turn.
  *
- * Tier policy (v3 — recency-window gate, 2026-05-12):
- *   - **Opus** when the message is long (>500 chars) or `forceDeep`. Genuinely
- *     complex intents that benefit from deeper reasoning.
- *   - **Haiku** when the message is short (≤200 chars) AND there's no recent
- *     multi-step flow. Confirmations, simple acks, single-shot reads — Haiku
- *     handles these fine and costs ~3x less.
- *   - **Sonnet** for everything else (default tier — most tool-using turns).
+ * **Tier policy (v4 — flat length-based router, 2026-05-14):**
+ *   - **Opus** when message > 500 chars or `forceDeep`. Genuinely complex.
+ *   - **Sonnet** when message > 200 chars. Multi-constraint, multi-step shapes.
+ *   - **Haiku** otherwise (≤ 200 chars). Acks, confirmations, single-shot
+ *     reads, simple write requests. Most production traffic.
  *
- * Why the multi-step gate matters: if the host says "yes" mid-flow after a
- * `LOAD_active_sessions` proposal, dropping to Haiku risks losing tool-routing
- * accuracy. The v2 (2026-05-07) gate keyed on `priorToolUseInHistory` alone,
- * which fired on ANY prior tool use anywhere in the 10-turn window — including
- * 8h+ stale ones. v3 splits "in-flight" from "ever happened" using
- * `priorEnvoyTurnAgeMs`: prior tool use within HAIKU_RECENCY_WINDOW_MS still
- * keeps Sonnet (real in-flight case); older than that drops to Haiku.
+ * Why the simpler rule replaced v3's recency-window + multi-step gate:
+ *
+ * 14-day production data (cmp4u* triage thread, 2026-05-14) showed the
+ * v3 router routed 64 sub-200-char turns to Sonnet via the recency gate,
+ * averaging $0.063/turn with a 16-20% remediation rate. The 9 sub-200-char
+ * turns that DID route to Haiku in the same window averaged $0.028/turn
+ * with 0-25% remediation. Sonnet wasn't materially safer on this bucket,
+ * and the cost difference was a clear ~50% reduction available by routing
+ * by length alone.
+ *
+ * The conservatism the v3 router added — "if any tool fired in the last
+ * 15 min, keep Sonnet just in case" — was conservatism without empirical
+ * support. The safety nets that catch genuine Haiku misroutes
+ * (`runSelfCheck` + post-stream guards + the remediation pass) earn
+ * their keep regardless of tier, and were already absorbing the
+ * tier-switch cases the router was trying to prevent.
+ *
+ * Bonus win: the simpler rule eliminates the Haiku → Sonnet tier-switch
+ * mid-conversation, which was paying a fresh per-model cache write
+ * (22k tokens × $3.75/MTok = ~$0.086 every time). The simple rule keeps
+ * a conversation on one tier unless the message itself crosses the
+ * length boundary.
+ *
+ * Operational levers preserved:
+ *   - `forceDeep` / `forceFast` — per-call escalation/demotion.
+ *   - `UA_DISABLE_HAIKU=true` env — kill-switch routes every turn to
+ *     Sonnet without a redeploy if Haiku regresses.
+ *
+ * TurnContext fields not used by this version (priorToolUseInHistory,
+ * priorEnvoyTurnAgeMs, priorTurnToolCount, priorEnvoyTurnCount) are kept
+ * in the type for telemetry continuity — `runUnifiedTurn` still gathers
+ * them and persists them on the message metadata. Re-introducing them
+ * as router gates would be a v5 if production data shows the simpler
+ * rule misroutes a specific shape; today's data says it doesn't.
  */
 export function selectModelForTurn(ctx: TurnContext): ModelSelection {
   if (ctx.forceDeep) {
@@ -105,49 +134,19 @@ export function selectModelForTurn(ctx: TurnContext): ModelSelection {
   if (ctx.forceFast) {
     return { tier: "fast", modelId: MODEL_TIERS.fast, reason: "forced-fast" };
   }
-  // Escalate to Opus for genuinely long / complex messages.
-  if (ctx.messageLength > 500) {
-    return {
-      tier: "deep",
-      modelId: MODEL_TIERS.deep,
-      reason: "long-message-escalation",
-    };
-  }
-  // Operational kill-switch: setting UA_DISABLE_HAIKU=true in Vercel env keeps
-  // every turn on Sonnet without a redeploy. Use if Haiku produces a regression
-  // we need to revert immediately. Caching + tool trim + history cut still
-  // apply; only the tier router falls back.
+  // Operational kill-switch: setting UA_DISABLE_HAIKU=true keeps every turn
+  // on Sonnet without a redeploy. Use if Haiku produces a regression.
   if (process.env.UA_DISABLE_HAIKU === "true") {
     return { tier: "default", modelId: MODEL_TIERS.default, reason: "haiku-disabled" };
   }
-  // Multi-step gate (v3 — recency-aware):
-  //   - `priorTurnToolCount > 0`: the turn immediately before this one used tools
-  //     → still mid-flow → keep Sonnet.
-  //   - `priorToolUseInHistory` AND prior envoy turn was recent (<window) →
-  //     in-flight likely → keep Sonnet.
-  //   - `priorToolUseInHistory` AND age unknown → conservative, keep Sonnet
-  //     (preserves pre-recency behavior for callers that don't pass ageMs).
-  //   - `priorToolUseInHistory` AND age > window → dead history → route to Haiku.
-  //   - No prior tool use → route to Haiku.
-  const inMultiStep = !!ctx.priorTurnToolCount;
-  const recentPriorToolUse =
-    !!ctx.priorToolUseInHistory &&
-    (typeof ctx.priorEnvoyTurnAgeMs !== "number" ||
-      ctx.priorEnvoyTurnAgeMs <= HAIKU_RECENCY_WINDOW_MS);
-  if (ctx.messageLength <= 200 && !inMultiStep && !recentPriorToolUse) {
-    // Distinguish "stale prior tool use, recency dropped us through" from
-    // "no prior tool use ever" so production telemetry can show the v3 gate
-    // earning its keep.
-    const reason = ctx.priorToolUseInHistory
-      ? "short-stale-history"
-      : "short-no-multistep";
-    return {
-      tier: "fast",
-      modelId: MODEL_TIERS.fast,
-      reason,
-    };
+  // Length-based router (v4).
+  if (ctx.messageLength > 500) {
+    return { tier: "deep", modelId: MODEL_TIERS.deep, reason: "long-message-escalation" };
   }
-  return { tier: "default", modelId: MODEL_TIERS.default, reason: "default" };
+  if (ctx.messageLength > 200) {
+    return { tier: "default", modelId: MODEL_TIERS.default, reason: "default" };
+  }
+  return { tier: "fast", modelId: MODEL_TIERS.fast, reason: "short-message" };
 }
 
 export type TurnCost = {
