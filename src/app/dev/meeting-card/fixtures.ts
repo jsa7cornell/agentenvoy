@@ -441,6 +441,30 @@ export const singleHostView: MeetingCardProps = {
   },
 };
 
+// ── guestPicks format-deferred fixtures (cmp5sm07o) ─────────────────────────
+
+export const guestPicksFormatGuest: MeetingCardProps = {
+  viewerRole: "guest",
+  state: "proposal",
+  host: HOST,
+  guest: GUEST,
+  title: "Hang with John",
+  when: SINGLE_WHEN,
+  channel: { kind: "TBD" },
+  tip: { text: "John'd love your call on the format — video, phone, or in-person?" },
+};
+
+export const guestPicksFormatHost: MeetingCardProps = {
+  viewerRole: "host",
+  state: "proposal",
+  host: HOST,
+  guest: GUEST,
+  title: "Hang with Sarah",
+  when: SINGLE_WHEN,
+  channel: { kind: "TBD" },
+  tip: { text: "Sarah picks the format — they'll confirm video, phone, or in-person." },
+};
+
 /** All fixtures collected for iteration in the dev harness. */
 export const ALL_FIXTURES: Array<{ label: string; props: MeetingCardProps }> = [
   { label: "Single · In-person · Guest · Proposal", props: singleInPersonGuest },
@@ -462,6 +486,9 @@ export const ALL_FIXTURES: Array<{ label: string; props: MeetingCardProps }> = [
   { label: "GCal · Guest · Tentative", props: singleGuestTentative },
   { label: "GCal · Guest · Declined", props: singleGuestDeclined },
   { label: "GCal · Host view · Guest pending (stale + Nudge)", props: singleHostView },
+  // guestPicks format-deferred (cmp5sm07o)
+  { label: "TBD · Guest picks format · Guest view", props: guestPicksFormatGuest },
+  { label: "TBD · Guest picks format · Host view", props: guestPicksFormatHost },
 ];
 
 // ── SeriesPage fixture ────────────────────────────────────────────────────────

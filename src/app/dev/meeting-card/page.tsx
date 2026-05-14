@@ -40,6 +40,8 @@ import {
   singleGuestDeclined,
   singleHostView,
   seriesPageExample,
+  guestPicksFormatGuest,
+  guestPicksFormatHost,
 } from "./fixtures";
 
 export default function MeetingCardDevPage() {
@@ -104,6 +106,14 @@ export default function MeetingCardDevPage() {
               <LoggedInHeader meetingLabel="Intro Call with John" userFirstName="Sarah" />
             </div>
           </div>
+        </div>
+      </Section>
+
+      {/* ── Section: Guest picks format (kind:TBD) ──────────────────────── */}
+      <Section title="Guest picks format (kind:TBD)" description="Host deferred format to guest — channel row shows affordance copy instead of video/phone/in-person. cmp5sm07o.">
+        <div style={{ display: "flex", gap: "24px", flexWrap: "wrap" }}>
+          <PhoneFrame label="TBD · Guest view" desc="'You pick the format — video, phone, or in-person'" props={guestPicksFormatGuest} dockMessages={[]} dockState="resting" hostFirstName="John" />
+          <PhoneFrame label="TBD · Host view" desc="'Sarah picks the format'" props={guestPicksFormatHost} dockMessages={[]} dockState="resting" hostFirstName="John" />
         </div>
       </Section>
 
