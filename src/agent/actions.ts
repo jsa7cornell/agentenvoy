@@ -1524,8 +1524,32 @@ export async function handleCreateLink(
   }
 
   const postureSnapshot = snapshotPostureFromUser({ preferences: userRow?.preferences as UserPreferences | null });
+
+  // 2026-05-14 cmp50uvuq: when the host explicitly defers format to the
+  // guest (`guestPicks.format === true` or an allowed-subset array), the
+  // postureSnapshot's default `format: "video"` would silently win and
+  // produce a contradictory link state ("format=video" AND "guest picks
+  // format"). The downstream deal-room renderer then treats format as
+  // locked and skips the picker affordance.
+  //
+  // Fix: strip `format` from the merged posture when guestPicks.format is
+  // truthy. The handler's existing `effectiveFormat` only kicks in if the
+  // model explicitly passed `format` — in the defer-to-guest case, format
+  // stays undefined on the link, and the renderer's
+  // `hasFormatGuestPicks` branch produces the picker correctly.
+  const guestPicksFormatActive =
+    guestPicksOut?.format === true || Array.isArray(guestPicksOut?.format);
+  const postureForMerge = guestPicksFormatActive
+    ? (() => {
+        // Don't mutate the snapshot — it's used by other call sites.
+        const { format: _droppedFormat, ...rest } = postureSnapshot;
+        void _droppedFormat;
+        return rest;
+      })()
+    : postureSnapshot;
+
   const linkRulesPreIntent = normalizeLinkParameters({
-    ...postureSnapshot,
+    ...postureForMerge,
     ...rules,
     ...(effectiveFormat ? { format: effectiveFormat } : {}),
     ...(effectiveDurationParam != null ? { duration: effectiveDurationParam } : {}),

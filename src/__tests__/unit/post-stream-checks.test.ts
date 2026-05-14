@@ -288,6 +288,55 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
     expect(result.guards[0]?.scope).toBe("thinking-out-loud");
   });
 
+  it("fires on 'Now I can see <X>' (cmp50uvuq exact production shape)", () => {
+    // The cmp50uvuq turn produced "Now I can see tomorrow's date is May 8,
+    // 2026. Let me know if you want to adjust." Pre-fix this pattern wasn't
+    // caught; the canonical close stayed intact and the reasoning preamble
+    // leaked. Note that the date-injection fix (aebce99) should prevent the
+    // model from EVER needing to say this, but the pattern coverage is
+    // belt-and-suspenders.
+    const result = runPostStreamChecks({
+      fullText: "Now I can see tomorrow's date is May 14, 2026. Let me know if you want to adjust.",
+      toolCalls: [successfulWrite],
+    });
+    expect(result.guards.some((g) => g.scope === "thinking-out-loud")).toBe(true);
+  });
+
+  it("fires on the 'Now I (can|see|have|know|understand)' verb variants", () => {
+    for (const phrase of [
+      "Now I see what you want.",
+      "Now I have the context.",
+      "Now I know which session to update.",
+      "Now I understand your preference.",
+    ]) {
+      const result = runPostStreamChecks({
+        fullText: `${phrase} Done.`,
+        toolCalls: [successfulWrite],
+      });
+      expect(
+        result.guards.some((g) => g.scope === "thinking-out-loud"),
+        `expected thinking-out-loud fire on: ${phrase}`,
+      ).toBe(true);
+    }
+  });
+
+  it("fires on inverted 'I can see <X>' / 'I now see <X>' shapes", () => {
+    for (const phrase of [
+      "I can see that tomorrow is Friday. Got it.",
+      "I now see what you mean. Done.",
+      "I can see your calendar is open. Booked.",
+    ]) {
+      const result = runPostStreamChecks({
+        fullText: phrase,
+        toolCalls: [successfulWrite],
+      });
+      expect(
+        result.guards.some((g) => g.scope === "thinking-out-loud"),
+        `expected thinking-out-loud fire on: ${phrase}`,
+      ).toBe(true);
+    }
+  });
+
   it("fires on 'However, looking more carefully' (the cmp2qcnjy smoking gun)", () => {
     const result = runPostStreamChecks({
       fullText: "However, looking more carefully — let me update the link.",

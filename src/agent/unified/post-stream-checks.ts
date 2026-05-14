@@ -293,6 +293,13 @@ const MAX_CONFIRMATION_LEN_CHARS = 240;
  */
 const THINKING_OUT_LOUD_PATTERNS: readonly RegExp[] = [
   /\bNow I[''']ll\b/i,                     // "Now I'll load the calendar..."
+  // 2026-05-14 cmp50uvuq: "Now I (can|see|have|know) ..." — the model
+  // narrates what it just learned from a LOAD before acting. Same shape as
+  // "Now I'll", different verb structure. Production case: "Now I can see
+  // tomorrow's date is May 8, 2026" — leak that survived prior patterns.
+  /\bNow I (?:can(?:\s+see)?|see|have|know|understand)\b/i,
+  // "I (can|now) see <X>" — inverted form of the same shape.
+  /\bI (?:can|now) see\s+(?:that|what|why|how|the|your|tomorrow|today)/i,
   // "Let me <verb>" — NOT "Let me know" (canonical template close).
   // 2026-05-14 cmp4ss1ip widening: added the write-action verbs (reschedule,
   // cancel, move, create, book, set up, archive, release, free, update the
