@@ -881,7 +881,10 @@ export async function POST(req: NextRequest) {
               const [precheckSessions, recentTurns] = await Promise.all([
                 prisma.negotiationSession.findMany({
                   where: { hostId: safeUser.id, archived: false },
-                  include: {
+                  select: {
+                    id: true,
+                    status: true,
+                    updatedAt: true,
                     link: { select: { inviteeName: true, code: true, parameters: true, customTitle: true } },
                   },
                   orderBy: { updatedAt: "desc" },
@@ -900,7 +903,7 @@ export async function POST(req: NextRequest) {
                   : null;
                 return {
                   id: s.id,
-                  title: s.link?.customTitle ?? s.title ?? null,
+                  title: s.link?.customTitle ?? null,
                   guestName: s.link?.inviteeName ?? null,
                   linkCode: s.link?.code ?? null,
                   status: s.status,
