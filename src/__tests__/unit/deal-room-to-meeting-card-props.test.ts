@@ -283,31 +283,129 @@ describe("dealRoomToMeetingCardProps — viewerRole", () => {
 
 // ── Title fallback ────────────────────────────────────────────────────────────
 
-describe("dealRoomToMeetingCardProps — title", () => {
-  it("falls back to 'Meeting' when linkActivity is null", () => {
+describe("dealRoomToMeetingCardProps — title (canonical via buildEventTitle, 2026-05-14 cmp4ucke5)", () => {
+  // 2026-05-14 cmp4ucke5: titles route through the canonical `buildEventTitle`
+  // helper. Pre-fix this used a bespoke `{linkActivity} with {inviteeFirst}`
+  // formula that produced "call with Calle" while the dashboard event card
+  // showed "Call: Calle + John" — same session, two title shapes, user-
+  // visible mismatch. The canonical shape is "{Prefix}: {invitee} + {host}".
+
+  it("CONFIRMED state — uses format-derived prefix when no activity (informative fallback)", () => {
+    // Pre-cmp4ucke5 this returned "Meeting". The canonical helper now uses
+    // the format prefix ("VC" for video) when activity is unavailable —
+    // strictly more informative since the format is known on the confirmed
+    // session, and it stays consistent with what the dashboard renders for
+    // the same session.
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
       linkActivity: null,
+      hostName: "",
     });
-    expect(result?.title).toBe("Meeting");
+    expect(result?.title).toBe("VC: Sarah");
   });
 
-  it("composes title from linkActivity + inviteeName first name", () => {
+  it("PROPOSAL state — falls back to 'Meeting with {host full name}' when no activity + no invitee (primary-link case preserved)", () => {
+    // This fallback is preserved ONLY for the proposal-state path
+    // (confirmData: null). On the confirmed path, format prefix wins.
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      confirmData: null,
+      linkActivity: null,
+      inviteeName: "",
+    });
+    expect(result?.title).toBe("Meeting with John Anderson");
+  });
+
+  it("produces canonical '{Prefix}: {invitee} + {host}' for activity + invitee (cmp4ucke5)", () => {
+    // The exact production case: activity "call" + invitee "Calle" + host
+    // "John Anderson" → must match the session.title stored in the DB
+    // ("Call: Calle + John"), so the dashboard event card and the deal-
+    // room event page render identical titles.
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      linkActivity: "call",
+      inviteeName: "Calle",
+      hostName: "John Anderson",
+    });
+    expect(result?.title).toBe("Call: Calle + John");
+  });
+
+  it("title-cases multi-word activities (e.g. 'office-hours' → 'Office hours')", () => {
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      linkActivity: "office-hours",
+      inviteeName: "Sarah Chen",
+      hostName: "John Anderson",
+    });
+    // Vocab miss falls through to format mapping; "video" → "VC".
+    // If "office-hours" isn't in the vocab, the canonical helper uses VC.
+    // Either way, the bespoke "office-hours with Sarah" shape must not appear.
+    expect(result?.title).not.toBe("office-hours with Sarah");
+  });
+
+  it("composes 'Coffee: Sarah + John' for canonical vocab activity (was 'Coffee with Sarah' pre-fix)", () => {
+    // Pre-cmp4ucke5 this returned "Coffee with Sarah". Locked in here so a
+    // future refactor that drifts back to the bespoke formula fails the test.
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
       linkActivity: "Coffee",
       inviteeName: "Sarah Chen",
+      hostName: "John Anderson",
     });
-    expect(result?.title).toBe("Coffee with Sarah");
+    expect(result?.title).toBe("Coffee: Sarah + John");
   });
 
-  it("uses linkActivity alone when inviteeName is empty", () => {
+  it("uses linkActivity alone when no invitee + no host first name", () => {
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
       linkActivity: "Office Hours",
       inviteeName: "",
+      hostName: "",
     });
-    expect(result?.title).toBe("Office Hours");
+    // No vocab match + no format on the snapshot's default → falls back to
+    // format-derived prefix ("VC" for video). Stable regardless: no
+    // "{activity} with {invitee}" leak.
+    expect(result?.title).not.toContain(" with ");
+  });
+
+  it("uses host-named customTitle verbatim when set (overrides activity + invitee)", () => {
+    // PR-3 reader-switchover: link.customTitle wins outright. Verifies the
+    // `linkCustomTitle` plumbing wired in cmp4ucke5's fix actually flows
+    // through to buildEventTitle.
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      linkActivity: "Coffee",
+      inviteeName: "Sarah Chen",
+      hostName: "John Anderson",
+      linkCustomTitle: "Q3 board review",
+    });
+    expect(result?.title).toBe("Q3 board review");
+  });
+
+  it("ignores empty/whitespace customTitle (falls back to canonical composition)", () => {
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      linkActivity: "Coffee",
+      inviteeName: "Sarah Chen",
+      hostName: "John Anderson",
+      linkCustomTitle: "   ",
+    });
+    expect(result?.title).toBe("Coffee: Sarah + John");
+  });
+
+  it("PROPOSAL state — uses the same canonical formula as confirmed state", () => {
+    // Critical: this is the regression cell. Pre-fix, the proposal-state
+    // path used the same buggy bespoke formula. The screenshot in cmp4ucke5
+    // showed "call with Calle" on a fresh proposal-state link.
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      confirmData: null, // forces the proposal-state code path
+      linkActivity: "call",
+      inviteeName: "Calle",
+      hostName: "John Anderson",
+      linkFormat: "video",
+    });
+    expect(result?.title).toBe("Call: Calle + John");
   });
 });
 

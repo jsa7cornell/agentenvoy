@@ -2030,6 +2030,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       inviteeName,
       confirmData,
       linkActivity,
+      // 2026-05-14 cmp4ucke5: thread the host-named custom title (or legacy
+      // `topic` fallback per PR-3 of the event-data-model proposal) so the
+      // canonical buildEventTitle helper can use it verbatim when set.
+      linkCustomTitle: topic || null,
       linkLocation,
       sessionTimezone,
       slotTimezone,
@@ -2058,6 +2062,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     inviteeName,
     confirmData,
     linkActivity,
+    topic, // 2026-05-14 cmp4ucke5: customTitle/topic feeds into buildEventTitle.
     linkLocation,
     sessionTimezone,
     slotTimezone,

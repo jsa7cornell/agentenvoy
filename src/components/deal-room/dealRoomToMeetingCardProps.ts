@@ -1,6 +1,7 @@
 import type { MeetingCardProps, ChannelInfo, ViewerRole, Tip } from "@/components/MeetingCard/types";
 import { renderTip } from "@/lib/meeting-tip/render";
 import { buildTipInput } from "@/lib/meeting-tip/build-input";
+import { buildEventTitle } from "@/lib/build-event-title";
 
 /**
  * Minimum fields PR2a needs from deal-room state to build MeetingCardProps.
@@ -16,6 +17,20 @@ export interface DealRoomConfirmedSnapshot {
   confirmData: Record<string, unknown> | null;
   /** linkActivity from deal-room line 245 — for title composition. */
   linkActivity: string | null;
+  /**
+   * Host-named custom title from the link record (Link.customTitle, with
+   * Link.topic as the migration-window fallback per PR-3 of the
+   * event-data-model proposal). When set, `buildEventTitle` uses it verbatim
+   * and ignores activity / format / participants. Plumbed from deal-room.tsx
+   * line 1887 (the `freshTopic` state, which already does the
+   * customTitle ?? topic coalesce).
+   *
+   * 2026-05-14 cmp4ucke5: added so the proposal-state title routes through
+   * `buildEventTitle` instead of the bespoke "{activity} with {invitee}"
+   * formula that drifted from the canonical "{Prefix}: {invitee} + {host}"
+   * shape stored on the session.
+   */
+  linkCustomTitle?: string | null;
   /** linkLocation from deal-room line 244 — fallback for in-person channel. */
   linkLocation: string | null;
   /** sessionTimezone from deal-room line 373 — viewer-authoritative TZ. */
@@ -120,18 +135,31 @@ function buildProposalMeetingCardProps(
     ? splitName(snapshot.inviteeName, "G")
     : { firstName: "", lastName: undefined };
 
-  // 2026-05-10 fix: title falls back to "Meeting with {host full name}" when
-  // there's no specific invitee (primary-link case) — e.g. "Meeting with John
-  // Anderson" rather than the bare "Meeting" generic.
+  // 2026-05-14 cmp4ucke5: route through the canonical `buildEventTitle`
+  // helper so the proposal-state title matches the same `{Prefix}: {invitee}
+  // + {host}` shape stored on the session (and rendered on the dashboard
+  // event card). Pre-fix this used a bespoke `${linkActivity} with
+  // {inviteeFirst}` formula that produced "call with Calle" while the
+  // dashboard showed "Call: Calle + John" — same session, two title shapes,
+  // user-visible mismatch.
+  //
+  // Falls back to "Meeting with {host full name}" for primary-link cases
+  // (no specific invitee, no activity) — `buildEventTitle` returns "Meeting"
+  // there, so we patch that one case after the call.
   const hostFullName = [host.firstName, host.lastName].filter(Boolean).join(" ");
   const inviteeFirst = hasGuest && guest.firstName !== "G" ? guest.firstName : "";
-  const title = snapshot.linkActivity
-    ? `${snapshot.linkActivity}${inviteeFirst ? " with " + inviteeFirst : ""}`
-    : hasGuest
-    ? "Meeting"
-    : hostFullName
-    ? `Meeting with ${hostFullName}`
-    : "Meeting";
+  const canonical = buildEventTitle({
+    customTitle: snapshot.linkCustomTitle ?? null,
+    activity: snapshot.linkActivity,
+    format: snapshot.linkFormat as "in-person" | "video" | "phone" | undefined,
+    isGroup: false,
+    inviteeDisplay: inviteeFirst || null,
+    hostFirstName: host.firstName !== "H" ? host.firstName : null,
+  });
+  const title =
+    canonical === "Meeting" && !hasGuest && hostFullName
+      ? `Meeting with ${hostFullName}`
+      : canonical;
 
   // Determine card state
   let cardState: MeetingCardProps["state"];
@@ -331,13 +359,23 @@ export function dealRoomToMeetingCardProps(
     ? { text: rendered.text, source: rendered.source }
     : undefined;
 
-  // Title — fall back to "Meeting" if linkActivity not set
+  // Title — same canonical helper as the proposal-state path
+  // (2026-05-14 cmp4ucke5). See the comment block at the proposal-state
+  // builder above for the drift rationale.
   const inviteeFirst = snapshot.inviteeName
     ? snapshot.inviteeName.split(" ")[0]
     : "";
-  const title = snapshot.linkActivity
-    ? `${snapshot.linkActivity}${inviteeFirst ? " with " + inviteeFirst : ""}`
-    : "Meeting";
+  const hostFirstNameForTitle = snapshot.hostName
+    ? snapshot.hostName.split(/\s+/)[0]
+    : null;
+  const title = buildEventTitle({
+    customTitle: snapshot.linkCustomTitle ?? null,
+    activity: snapshot.linkActivity,
+    format: format as "in-person" | "video" | "phone",
+    isGroup: false,
+    inviteeDisplay: inviteeFirst || null,
+    hostFirstName: hostFirstNameForTitle,
+  });
 
   // Participants — split name into first/last.
   // 2026-05-10 hotfix: NEVER return an empty firstName. Avatar / Hero do
