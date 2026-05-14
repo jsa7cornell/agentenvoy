@@ -1706,13 +1706,25 @@ export async function handleCreateLink(
     linkRulesFormat === "video" || linkRulesFormat === "phone" || linkRulesFormat === "in-person"
       ? linkRulesFormat
       : null;
+  // 2026-05-14 (cmp51ltr5 follow-up): when `topicSource === "custom"` AND
+  // no explicit customTitle is set, the host gave a topic phrase ("Q3
+  // Planning", "Using AI at Sugarbowl") that should BE the title — same
+  // semantics as customTitle. Pre-fix this fell through to the
+  // `activity ?? topic` branch and got treated as a free-form activity;
+  // findActivity missed, the format prefix won, and the topic was lost
+  // from the title entirely. The same root cause as the em-dash
+  // composite drop, just via the params.topic path instead of activity-
+  // with-em-dash. Treat all three (rawCustomTitle, reroute target, and
+  // custom-source topic) as customTitle inputs to buildEventTitle.
+  const effectiveCustomTitle =
+    rawCustomTitle ??
+    activityReroutedToCustomTitle ??
+    (topicSource === "custom" ? topic : null);
   const title = buildEventTitle({
-    // Use the rerouted value too — the activity-vocab guard treats it as
-    // an explicit custom title from this point forward.
-    customTitle: rawCustomTitle ?? activityReroutedToCustomTitle,
-    // When no explicit customTitle but topic was activity-derived, pass activity
-    // to let buildEventTitle derive the prefix from vocab.
-    activity: (rawCustomTitle || activityReroutedToCustomTitle) ? null : (activity ?? topic),
+    customTitle: effectiveCustomTitle,
+    // When no effective custom title but topic was activity-derived,
+    // pass activity to let buildEventTitle derive the prefix from vocab.
+    activity: effectiveCustomTitle ? null : (activity ?? topic),
     format: titleFormatStr,
     isGroup,
     inviteeDisplay,

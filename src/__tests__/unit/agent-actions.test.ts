@@ -1134,8 +1134,14 @@ describe("executeActions", () => {
       expect(mockPrisma.negotiationSession.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           hostId: HOST_USER_ID,
-          // Title format changed in 753229d: "Topic: Guest + Host"
-          title: "Q3 Planning: Sarah + Host",
+          // 2026-05-14 cmp51ltr5: when the model passes a custom-source
+          // topic ("Q3 Planning" — not a vocab activity), the topic IS
+          // the title verbatim — same semantics as customTitle. Pre-fix
+          // this produced "Q3 Planning: Sarah + Host" (topic-as-prefix
+          // via the old computeSessionTitle path); the post-fix shape
+          // routes through buildEventTitle's customTitle branch which
+          // returns the topic verbatim.
+          title: "Q3 Planning",
           format: "video",
           duration: 45,
         }),
@@ -1155,8 +1161,16 @@ describe("executeActions", () => {
 
       expect(results[0].success).toBe(true);
       expect(results[0].data?.url).toContain("/meet/john-ctx/");
-      // Title format changed in 753229d: "Guest + Host" (guest first, then host first name)
-      expect(results[0].data?.title).toBe("Noah + John");
+      // 2026-05-14 cmp51ltr5 follow-up: title-build now uses the FINAL
+      // merged format from linkRulesPreIntent (which includes
+      // postureSnapshot's DEFAULT_FORMAT="video" when no explicit format
+      // is passed). For inviteeName-only params with no topic/activity,
+      // format=video → "VC" prefix → "VC: Noah + John". Pre-fix the
+      // title-build used `effectiveFormat` (params-only) which was null
+      // here, so the prefix path skipped and produced bare "Noah + John".
+      // The new shape matches what the deal-room renderer produces for
+      // the same link (cmp4ucke5 invariant: dashboard ↔ event-page parity).
+      expect(results[0].data?.title).toBe("VC: Noah + John");
     });
 
     it("looks up meetSlug from user when not in context", async () => {
@@ -2088,18 +2102,65 @@ describe("executeActions", () => {
       };
     }
 
-    it("refuses when guestPicks.duration is not set (defense in depth)", async () => {
+    it("refuses guest-extend when guestPicks.duration is not set (cmp51ltr5: extend gates on opt-in)", async () => {
+      // Pre-cmp51ltr5 this test asserted the old "doesn't allow guests to
+      // change duration" message — that wording was symmetric (both shrink
+      // and extend were refused without opt-in). 2026-05-14 policy: guests
+      // can shrink without opt-in; only extend requires it. The error
+      // message changed accordingly.
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeDurationSession({ duration: 30 }), // no guestPicks, current=30
+      );
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 60 } }], // EXTEND
+        HOST_USER_ID,
+        // No triggeringRole → treated as guest (conservative)
+      );
+      expect(results[0].success).toBe(false);
+      expect(results[0].message).toMatch(/doesn't allow guests to extend/i);
+      expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
+      expect(mockPrisma.message.create).not.toHaveBeenCalled();
+    });
+
+    it("allows guest-shrink even when guestPicks.duration is NOT set (cmp51ltr5 fix)", async () => {
+      // The exact scenario from the cmp51ltr5 report: guest in deal-room
+      // typed "change to 30 mins" on a 45-min meeting; pre-fix the
+      // handler refused because the link had no guestPicks.duration set.
+      // Post-fix: shrink-without-opt-in is always allowed.
+      mockPrisma.negotiationSession.findUnique.mockResolvedValue(
+        makeDurationSession({ duration: 45 }), // no guestPicks, current=45
+      );
+      const results = await executeActions(
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 30 } }], // SHRINK
+        HOST_USER_ID,
+        // triggeringRole left undefined — same conservative-guest path the
+        // deal-room runner will hit when no role is threaded yet (defensive).
+      );
+      expect(results[0].success).toBe(true);
+      expect(mockPrisma.negotiationSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            negotiatedDuration: 30,
+            negotiatedLockedBy: "guest",
+          }),
+        }),
+      );
+    });
+
+    it("allows host-triggered extend (cmp51ltr5: host bypasses opt-in)", async () => {
+      // Host can change duration in any direction without opt-in — the
+      // gate is for guest callers only. cmp51ltr5 introduced
+      // triggeringRole on context so the handler can distinguish.
       mockPrisma.negotiationSession.findUnique.mockResolvedValue(
         makeDurationSession({ duration: 30 }), // no guestPicks
       );
       const results = await executeActions(
-        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 60 } }],
+        [{ action: "lock_session_duration", params: { sessionId: "session-d1", durationMinutes: 90 } }], // EXTEND
         HOST_USER_ID,
+        { triggeringRole: "host" },
       );
-      expect(results[0].success).toBe(false);
-      expect(results[0].message).toMatch(/doesn't allow guests to change duration/i);
-      expect(mockPrisma.negotiationSession.update).not.toHaveBeenCalled();
-      expect(mockPrisma.message.create).not.toHaveBeenCalled();
+      expect(results[0].success).toBe(true);
+      expect(mockPrisma.negotiationSession.update).toHaveBeenCalled();
     });
 
     it("refuses when value is below the static cap (< 15)", async () => {

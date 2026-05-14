@@ -127,10 +127,21 @@ describe("buildUnifiedToolsFor — role-aware tool surface", () => {
     // surface; the prompt does the policing.
     expect(names).toContain("session_update_time");
 
+    // 2026-05-14 cmp51ltr5 guest capabilities (added so the agent can
+    // actually act on the prompt's existing guidance instead of punting
+    // with clarification questions):
+    //   - session_lock_duration: guest can SHRINK without opt-in;
+    //     extend gates on guestPicks.duration (enforced in handler via
+    //     shouldAllowSessionDurationChange).
+    //   - session_update_format: guest can change format
+    //     (video/phone/in-person); the prompt's "Format downgrade ladder"
+    //     section directs the agent here.
+    expect(names).toContain("session_lock_duration");
+    expect(names).toContain("session_update_format");
+
     // Guest exclusions — no host-link or account writes:
     expect(names).not.toContain("personal_link_update"); // guests don't edit host's link
-    expect(names).not.toContain("session_update_format"); // negotiation territory; lock_activity_location is the negotiated path
-    expect(names).not.toContain("session_update_location"); // same
+    expect(names).not.toContain("session_update_location"); // location is still negotiation territory; lock_activity_location is the negotiated path for it
     expect(names).not.toContain("session_cancel"); // host-only — ends the whole thread; guest uses session_request_reschedule to un-book
     expect(names).not.toContain("bookable_link_create");
     expect(names).not.toContain("rule_add");
