@@ -72,6 +72,11 @@ import {
 } from "@/lib/mcp/schemas";
 import { renderTip } from "@/lib/meeting-tip/render";
 import { buildTipInput } from "@/lib/meeting-tip/build-input";
+import {
+  applyOccurrenceOverride,
+  resolveNextUpcomingOccurrence,
+} from "@/lib/occurrence-override";
+import { readRecurrence } from "@/lib/recurrence";
 import type { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -1079,6 +1084,51 @@ export async function handleCancelMeeting(
 
   const { link } = auth;
 
+  // 2026-05-14 — Recurring-series occurrence path (proposal §3.5.1).
+  // When the link is recurring, route to applyOccurrenceOverride rather than
+  // cancelling the whole session. "Cancel this" on a recurring link means
+  // "cancel the next upcoming occurrence" by default; supply
+  // occurrence.originalStartAt to target a specific instance.
+  const linkRecurrenceJson = (link as { recurrence?: Prisma.JsonValue | null }).recurrence ?? null;
+  const linkRecurrence = readRecurrence(linkRecurrenceJson);
+  if (linkRecurrence) {
+    const rawOriginalStartAt = args.occurrence?.originalStartAt
+      ?? resolveNextUpcomingOccurrence(linkRecurrenceJson)?.toISOString()
+      ?? null;
+    if (!rawOriginalStartAt) {
+      return asCallResult({
+        ok: false,
+        reason: "session_not_found",
+        message:
+          "This is a recurring link whose first slot hasn't been picked yet. Supply occurrence.originalStartAt to target a specific instance.",
+      });
+    }
+    const originalStartAt = new Date(rawOriginalStartAt);
+    const occRow = await applyOccurrenceOverride({
+      linkId: link.id,
+      originalStartAt,
+      status: "cancelled",
+      divergedBy: "host",
+      counterpartyAck: "accepted",
+      reason: args.reason ?? null,
+    });
+    // Best-effort anchor session lookup for the response sessionId field.
+    const anchorSession = await prisma.negotiationSession.findFirst({
+      where: { linkId: link.id },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    return asCallResult({
+      ok: true,
+      sessionId: anchorSession?.id ?? link.id,
+      status: "cancelled",
+      occurrence: {
+        id: occRow.id,
+        originalStartAt: occRow.originalStartAt.toISOString(),
+      },
+    });
+  }
+
   // When sessionId is supplied, look it up by sessionId DIRECTLY — not
   // constrained to the auth'd link. This is the cancel-flow ergonomic
   // fix (2026-05-01, friend's Claude FEEDBACK.md): an agent that booked
@@ -1215,6 +1265,54 @@ export async function handleRescheduleMeeting(
   }
 
   const { link } = auth;
+
+  // 2026-05-14 — Recurring-series occurrence path (proposal §3.5.1, B2).
+  // When the link is recurring AND occurrence.originalStartAt is supplied (or
+  // defaults to next-upcoming), reschedule just that occurrence rather than
+  // moving the whole session. Time changes set counterpartyAck=null (bilateral
+  // per R4); format/location changes auto-ack.
+  const linkRecurrenceForReschedule = readRecurrence(
+    (link as { recurrence?: unknown }).recurrence ?? null,
+  );
+  if (linkRecurrenceForReschedule && args.occurrence) {
+    const originalStartAt = new Date(args.occurrence.originalStartAt);
+    const newStart = new Date(args.newSlot.start);
+    // Time changes require bilateral ACK; format/location single-occurrence
+    // ops auto-ack (proposal B2 table).
+    const isTimeChange = true; // newSlot always carries a time; this path is time-change
+    const occRow = await applyOccurrenceOverride({
+      linkId: link.id,
+      originalStartAt,
+      status: "rescheduled",
+      divergedBy: "host",
+      actualStartAt: newStart,
+      ...(args.newSlot.durationMinutes
+        ? { actualEndAt: new Date(newStart.getTime() + args.newSlot.durationMinutes * 60_000) }
+        : {}),
+      ...(args.overrides?.format ? { actualFormat: args.overrides.format } : {}),
+      ...(args.overrides?.location !== undefined
+        ? { actualLocation: args.overrides.location ?? null }
+        : {}),
+      counterpartyAck: isTimeChange ? null : "accepted",
+      reason: args.reason ?? null,
+    });
+    const anchorSessionForReschedule = await prisma.negotiationSession.findFirst({
+      where: { linkId: link.id },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    return asCallResult({
+      ok: true,
+      sessionId: anchorSessionForReschedule?.id ?? link.id,
+      status: "rescheduled",
+      from: originalStartAt.toISOString(),
+      to: newStart.toISOString(),
+      occurrence: {
+        id: occRow.id,
+        originalStartAt: occRow.originalStartAt.toISOString(),
+      },
+    });
+  }
 
   // Resolve sessionId — either passed explicitly or latest agreed session
   // on this link. Latest-on-link mirrors handleCancelMeeting's resolver.

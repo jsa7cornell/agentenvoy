@@ -1,7 +1,9 @@
-import type { MeetingCardProps, ChannelInfo, ViewerRole, Tip } from "@/components/MeetingCard/types";
+import type { MeetingCardProps, ChannelInfo, ViewerRole, Tip, SeriesInfo } from "@/components/MeetingCard/types";
 import { renderTip } from "@/lib/meeting-tip/render";
 import { buildTipInput } from "@/lib/meeting-tip/build-input";
 import { buildEventTitle } from "@/lib/build-event-title";
+import type { LinkRecurrence } from "@/lib/recurrence";
+import { formatRecurrenceSubtitle, formatCadenceWord } from "@/lib/format-recurrence";
 
 /**
  * Minimum fields PR2a needs from deal-room state to build MeetingCardProps.
@@ -81,6 +83,18 @@ export interface DealRoomConfirmedSnapshot {
    */
   linkFormat?: string;
   /**
+   * 2026-05-14 cmp4xju6z: recurring-meeting series metadata from link.recurrence.
+   * Pass the raw JSON blob from the session API response; readRecurrence() parses it.
+   * Null/undefined for one-off meetings.
+   */
+  linkRecurrence?: LinkRecurrence | null;
+  /**
+   * 1-based index of this session in the series (from LinkOccurrence.occurrenceIndex).
+   * Null when the anchor hasn't been committed yet (pre-pick state).
+   */
+  occurrenceIndex?: number | null;
+
+  /**
    * Guest-picks deferrals from link.parameters.guestPicks.
    * Only location and format are in scope for this PR; duration/window/date
    * are out of scope and should be ignored here.
@@ -97,6 +111,32 @@ export interface DealRoomConfirmedSnapshot {
     location?: boolean;
     format?: boolean | string[];
   } | null;
+}
+
+// ── Series info builder (2026-05-14 cmp4xju6z) ───────────────────────────────
+
+/**
+ * Converts a parsed LinkRecurrence + optional occurrence index into SeriesInfo
+ * for MeetingCardProps.series. Returns undefined for one-off meetings.
+ *
+ * Design directives from 2026-05-14 mockup sign-off:
+ *   - total is always undefined (M1: no session counts rendered on the card)
+ *   - cadence is the full subtitle ("weekly · 105 min"), cadenceShort is the
+ *     cadence word alone ("weekly") for the 🔁 eyebrow row
+ *   - position defaults to 1 (pre-commit) or occurrenceIndex (post-commit)
+ *   - span is omitted (empty string sentinel) — SeriesBlock Phase 3 will compute it
+ */
+function buildSeriesInfo(
+  rec: LinkRecurrence,
+  occurrenceIndex?: number | null,
+): SeriesInfo {
+  return {
+    cadence: formatRecurrenceSubtitle(rec),
+    cadenceShort: formatCadenceWord(rec),
+    span: "",
+    position: occurrenceIndex ?? 1,
+    total: undefined,
+  };
 }
 
 // ── Proposal-state MeetingCardProps builder (PR2c) ────────────────────────────
@@ -249,6 +289,10 @@ function buildProposalMeetingCardProps(
     // Absent means format is locked and channel is authoritative.
     ...(hasFormatGuestPicks
       ? { formatGuestPicks: guestPicksFormat as boolean | string[] }
+      : {}),
+    // 2026-05-14 cmp4xju6z: recurring series info (proposal §3.2.2).
+    ...(snapshot.linkRecurrence
+      ? { series: buildSeriesInfo(snapshot.linkRecurrence, snapshot.occurrenceIndex) }
       : {}),
   };
 }
@@ -409,5 +453,9 @@ export function dealRoomToMeetingCardProps(
     channel,
     tip,
     googleCalendar: baselineGCal,
+    // 2026-05-14 cmp4xju6z: recurring series info — same helper as proposal path.
+    ...(snapshot.linkRecurrence
+      ? { series: buildSeriesInfo(snapshot.linkRecurrence, snapshot.occurrenceIndex) }
+      : {}),
   };
 }

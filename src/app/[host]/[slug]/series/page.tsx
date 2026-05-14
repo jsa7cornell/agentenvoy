@@ -15,20 +15,16 @@
  */
 
 import { notFound } from "next/navigation";
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { SeriesPage } from "@/components/SeriesPage/SeriesPage";
+import { fetchSeriesPageProps } from "@/lib/series-page-props";
 
 interface PageProps {
   params: Promise<{ host: string; slug: string }>;
 }
 
 export default async function SeriesRoute({ params }: PageProps) {
-  // Consume params to satisfy the async server component contract.
-  // Will be used in PR2 for the real data fetch.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const _params = await params;
-
-  // Stub: notFound() in all environments until PR2 wires data.
-  // Dev harness is at /dev/meeting-card (Series page section).
-  notFound();
+  const { host, slug } = await params;
+  const data = await fetchSeriesPageProps(host, slug);
+  if (!data) notFound();
+  return <SeriesPage {...data} />;
 }

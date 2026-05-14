@@ -47,6 +47,7 @@ import { ThumbsDownFeedback } from "./thumbs-down-feedback";
 import { MeetingCardConfirmedView } from "./deal-room/MeetingCardConfirmedView";
 import { MeetingCardErrorBoundary } from "./deal-room/MeetingCardErrorBoundary";
 import { dealRoomToMeetingCardProps } from "./deal-room/dealRoomToMeetingCardProps";
+import { readRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { Message as ChatMessage } from "@/components/MeetingCard/types";
 // PR2c — proposal/matched/skipped states + reschedule overlay
 import { MeetingCardProposalView } from "./deal-room/MeetingCardProposalView";
@@ -464,6 +465,10 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // B5: signals that this session is a bookable child link (has recurringWindowId).
   // Used to render the guest-facing "Bookable" subtitle when !isHost.
   const [isBookable, setIsBookable] = useState(false);
+  // 2026-05-14 cmp4xju6z: parsed recurrence from link.recurrence (session API).
+  // Null for one-off links. Passed to dealRoomToMeetingCardProps so the card
+  // renders the 🔁 cadence row for recurring series.
+  const [linkRecurrence, setLinkRecurrence] = useState<LinkRecurrence | null>(null);
   const [schedulingMode, setSchedulingMode] = useState<"time" | "date">("time");
   const [isVip, setIsVip] = useState(false);
   // WISHLIST §1o PR-α: three-state response from `/api/negotiate/slots`
@@ -1475,6 +1480,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         // B5 N1: use !!() not conditional set — resets to false on re-load to a
         // non-bookable session in the same React instance (N1 reviewer fix).
         setIsBookable(!!data.isBookable);
+        // 2026-05-14 cmp4xju6z: parse recurrence from session API response so
+        // the deal-room card renders the 🔁 cadence row for recurring links.
+        setLinkRecurrence(readRecurrence((data.link as Record<string, unknown>)?.recurrence ?? null));
         setLinkFormat(data.link?.format || "");
         // B2: populate linkDuration from session response — fallback when slotDuration
         // is undefined (e.g. slots API returned compute_failed for a bookable session).
@@ -2061,6 +2069,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
       linkFormat,
       // Guest-picks deferrals from link.parameters.guestPicks
       linkGuestPicks,
+      // 2026-05-14 cmp4xju6z: recurring series info
+      linkRecurrence,
     });
     return props;
   }, [
@@ -2079,6 +2089,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     isConfirming,
     bilateralByDay,
     linkFormat,
+    linkRecurrence,
   ]);
 
   // PR2a/PR2c — map deal-room messages to EnvoyDock ChatMessage shape.

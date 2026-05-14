@@ -581,6 +581,18 @@ export const cancelMeetingInput = z
     notifyHost: z.boolean().optional().default(true),
     idempotencyKey: z.string().max(200).optional(),
     clientMeta: clientMetaSchema.optional(),
+    /**
+     * 2026-05-14 — recurring-series occurrence target.
+     * When present on a recurring-link session, cancels only this occurrence
+     * (writes a LinkOccurrence row) rather than the whole series.
+     * When absent on a recurring-link session, defaults to the next upcoming
+     * occurrence (if the anchor is committed). On non-recurring sessions,
+     * ignored.
+     */
+    occurrence: z
+      .object({ originalStartAt: z.iso.datetime() })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -591,6 +603,10 @@ export const cancelMeetingOutput = z.discriminatedUnion("ok", [
       sessionId: z.string(),
       status: z.literal("cancelled"),
       idempotent: z.boolean().optional(),
+      /** Present when a single occurrence was cancelled (recurring series). */
+      occurrence: z
+        .object({ id: z.string(), originalStartAt: z.iso.datetime() })
+        .optional(),
     })
     .strict(),
   refusal(
@@ -629,6 +645,18 @@ export const rescheduleMeetingInput = z
       .optional(),
     idempotencyKey: z.string().max(200).optional(),
     clientMeta: clientMetaSchema.optional(),
+    /**
+     * 2026-05-14 — recurring-series occurrence target.
+     * When present on a recurring-link session, reschedules only this occurrence
+     * (writes a LinkOccurrence row + sets counterpartyAck=null for bilateral time
+     * change per proposal R4). On non-recurring sessions, ignored.
+     * When absent on a recurring-link session with a committed anchor, defaults
+     * to the next upcoming occurrence.
+     */
+    occurrence: z
+      .object({ originalStartAt: z.iso.datetime() })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -641,6 +669,10 @@ export const rescheduleMeetingOutput = z.discriminatedUnion("ok", [
       from: z.iso.datetime(),
       to: z.iso.datetime(),
       idempotent: z.boolean().optional(),
+      /** Present when a single occurrence was rescheduled (recurring series). */
+      occurrence: z
+        .object({ id: z.string(), originalStartAt: z.iso.datetime() })
+        .optional(),
     })
     .strict(),
   refusal(

@@ -166,7 +166,7 @@ export interface SeriesInfo {
   cadenceShort?: string;
   span: string;
   position: number;
-  total: number;
+  total?: number;
   /** Date of the session AFTER this one — shown as sub-line in series row. */
   nextSessionDate?: Date;
   /** URL to the series page — e.g. /{host}/{slug}/series */

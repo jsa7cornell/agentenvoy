@@ -1104,6 +1104,10 @@ export async function POST(req: NextRequest) {
       // PR-58 links have no intent blob — client falls through to slot-count
       // / same-day rules (N7 fold of deal-room-widget-state-machine).
       intent: (parseLinkParameters(link.parameters).intent as Record<string, unknown> | null) ?? null,
+      // 2026-05-14 cmp4xju6z: surface recurrence so the deal-room adapter can
+      // build SeriesInfo and render the 🔁 cadence row. Was computed in
+      // page.tsx for iMessage unfurl but never included in this response.
+      recurrence: (link as { recurrence?: unknown }).recurrence ?? null,
     },
     isHost,
     isGuest,

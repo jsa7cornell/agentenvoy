@@ -540,3 +540,165 @@ describe("dealRoomToMeetingCardProps — state", () => {
     expect(result?.state).toBe("confirmed");
   });
 });
+
+// ── Series info (2026-05-14 cmp4xju6z fix) ───────────────────────────────────
+//
+// Regression cells for the deal-room/event-page recurrence rendering bug.
+// The fix wires `link.recurrence` from the session API response through
+// dealRoomToMeetingCardProps so MeetingCard renders the 🔁 cadence row.
+//
+// Variant axis: {confirmed, proposal} × {one-off (no recurrence), recurring}
+//   + occurrenceIndex sub-axis for position rendering
+//   + link-type axis (primary, personal, bookable) is API-level — modelled
+//     here via the presence/absence of linkRecurrence (same adapter path
+//     for all three types).
+//
+// To verify regression: remove the `...(snapshot.linkRecurrence ? { series:
+// buildSeriesInfo(...) } : {})` spread from dealRoomToMeetingCardProps.ts.
+// All "recurring" cells in this describe block must fail with "expected
+// undefined to be defined". Restore the spread → all pass.
+
+import type { LinkRecurrence } from "@/lib/recurrence";
+
+// Canonical recurring fixture — mirrors cmp4xju6z bug link (3cqmet):
+// weekly Wednesday, 9:15-11am PT, 105-min in-person.
+const WEEKLY_105: LinkRecurrence = {
+  v: "1",
+  pattern: "weekly",
+  timezone: "America/Los_Angeles",
+  anchor: { durationMin: 105 },
+};
+
+// Bounded series (8 weekly 45-min sessions — matches bug report §3).
+const WEEKLY_8x45: LinkRecurrence = {
+  v: "1",
+  pattern: "weekly",
+  timezone: "America/Los_Angeles",
+  endBy: { count: 8 },
+  anchor: { durationMin: 45 },
+};
+
+describe("dealRoomToMeetingCardProps — series info (cmp4xju6z)", () => {
+  describe("CONFIRMED path", () => {
+    it("series is undefined when linkRecurrence is absent (one-off link)", () => {
+      const result = dealRoomToMeetingCardProps(BASE_SNAPSHOT);
+      expect(result?.series).toBeUndefined();
+    });
+
+    it("series is undefined when linkRecurrence is null (explicit null)", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        linkRecurrence: null,
+      });
+      expect(result?.series).toBeUndefined();
+    });
+
+    it("series is defined when linkRecurrence is present (weekly 105-min)", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        linkRecurrence: WEEKLY_105,
+      });
+      expect(result?.series).toBeDefined();
+    });
+
+    it("series.cadence is 'weekly · 105 min' for weekly 105-min link (the exact bug scenario)", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        linkRecurrence: WEEKLY_105,
+      });
+      expect(result?.series?.cadence).toBe("weekly · 105 min");
+    });
+
+    it("series.cadenceShort is 'weekly' for weekly link", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        linkRecurrence: WEEKLY_105,
+      });
+      expect(result?.series?.cadenceShort).toBe("weekly");
+    });
+
+    it("series.total is always undefined (M1 directive: no session counts on card)", () => {
+      // Even for bounded series (endBy.count set), total must be undefined
+      // — M1 mockup sign-off 2026-05-14: session counts are not rendered.
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        linkRecurrence: WEEKLY_8x45,
+      });
+      expect(result?.series?.total).toBeUndefined();
+    });
+
+    it("series.cadence includes end-by count in subtitle for bounded series", () => {
+      // formatRecurrenceSubtitle appends the count clause when endBy.count is set.
+      // The card no longer renders `total`, but `cadence` still carries the full
+      // subtitle string (which other surfaces like iMessage unfurl use).
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        linkRecurrence: WEEKLY_8x45,
+      });
+      expect(result?.series?.cadence).toBe("weekly · 45 min · 8 sessions");
+    });
+
+    it("series.position defaults to 1 when occurrenceIndex is absent", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        linkRecurrence: WEEKLY_105,
+      });
+      expect(result?.series?.position).toBe(1);
+    });
+
+    it("series.position defaults to 1 when occurrenceIndex is null", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        linkRecurrence: WEEKLY_105,
+        occurrenceIndex: null,
+      });
+      expect(result?.series?.position).toBe(1);
+    });
+
+    it("series.position reflects occurrenceIndex when present", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        linkRecurrence: WEEKLY_105,
+        occurrenceIndex: 3,
+      });
+      expect(result?.series?.position).toBe(3);
+    });
+  });
+
+  describe("PROPOSAL path (confirmData: null)", () => {
+    it("series is defined for recurring link in proposal state", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        confirmData: null,
+        linkRecurrence: WEEKLY_105,
+      });
+      expect(result?.series).toBeDefined();
+    });
+
+    it("series cadence renders correctly in proposal state", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        confirmData: null,
+        linkRecurrence: WEEKLY_8x45,
+      });
+      expect(result?.series?.cadence).toBe("weekly · 45 min · 8 sessions");
+    });
+
+    it("series is undefined in proposal state when no recurrence", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        confirmData: null,
+      });
+      expect(result?.series).toBeUndefined();
+    });
+
+    it("series.total is undefined in proposal state (M1)", () => {
+      const result = dealRoomToMeetingCardProps({
+        ...BASE_SNAPSHOT,
+        confirmData: null,
+        linkRecurrence: WEEKLY_8x45,
+      });
+      expect(result?.series?.total).toBeUndefined();
+    });
+  });
+});
