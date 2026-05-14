@@ -139,6 +139,7 @@ function makeConfig(opts: {
   return {
     userId: "u-test",
     userMessage: "Block my Wednesdays",
+    timezone: "America/Los_Angeles",
     systemPrompt: "test-system-prompt",
     tools: {},
     recentMessages: [],

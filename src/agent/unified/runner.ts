@@ -57,6 +57,68 @@ const MAX_STEPS = 8; // passed as stopCondition: stepCountIs(MAX_STEPS)
 // falls back to "local" for dev environments without it.
 const PROMPT_VERSION = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local";
 
+/**
+ * Render a one-line date-context block to prefix the user message with.
+ *
+ * 2026-05-14 cmp50uvuq fix: the model had no authoritative source of "today"
+ * before this — the system prompt has no date substitution, and
+ * `LOAD_calendar_context` only returns events + timezone (not the current
+ * date). When the host said "tomorrow", the model was guessing from training
+ * data; the cmp50uvuq turn produced "May 8" for what should have been
+ * May 14 (six-day error). This prefix gives the model an authoritative anchor
+ * for every turn at zero cache cost (user messages are after the cache
+ * breakpoints, so the changing date doesn't invalidate the cached prefix).
+ *
+ * Format: `[Context · today is <Weekday>, <YYYY-MM-DD> (<TZ>)]` — concise,
+ * machine-parseable, human-readable. Anchored in the host's timezone so
+ * "tomorrow" resolves to a date the host's calendar would recognize.
+ */
+function renderTodayContextLine(timezone: string, now: Date = new Date()): string {
+  // Native Intl avoids a date-fns-tz dependency. Already used elsewhere in
+  // the codebase for the same kind of formatting (see lib/timezone.ts).
+  let weekday: string;
+  let isoDate: string;
+  try {
+    weekday = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      weekday: "long",
+    }).format(now);
+    // sv-SE locale renders ISO-like "YYYY-MM-DD" naturally.
+    isoDate = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now);
+  } catch {
+    // Invalid IANA zone — defensive fallback to UTC. Caller is responsible
+    // for passing a valid zone; this just prevents a crash on bad input.
+    weekday = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(now);
+    isoDate = new Intl.DateTimeFormat("sv-SE", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now);
+  }
+  return `[Context · today is ${weekday}, ${isoDate} (${timezone})]`;
+}
+
+/**
+ * Build the user message we send to the model: date context line + blank
+ * line + the host's original message. The persisted ChannelMessage row
+ * keeps the host's original message — only the streamText call sees the
+ * prefixed version.
+ *
+ * Exported for tests + the deal-room runner (which also needs it).
+ */
+export function prefixUserMessageWithDateContext(
+  userMessage: string,
+  timezone: string,
+  now: Date = new Date(),
+): string {
+  return `${renderTodayContextLine(timezone, now)}\n\n${userMessage}`;
+}
+
 export type UnifiedAgentContext = {
   userId: string;
   channelId: string;
@@ -102,6 +164,19 @@ export type UnifiedTurnConfig = {
   userId: string;
   /** The user's message for this turn. Persisted upstream by the caller. */
   userMessage: string;
+  /**
+   * IANA timezone used to render the date-context prefix the runner injects
+   * in front of `userMessage` (e.g. "America/Los_Angeles"). Authoritative
+   * source for "today" in the model's reasoning — see cmp50uvuq triage,
+   * 2026-05-14, where the model hallucinated "May 8" for "tomorrow" because
+   * no system surface had ever told it the current date.
+   *
+   * For host-channel turns: pass the host's preferences timezone.
+   * For deal-room turns: pass the host's timezone (canonical for the
+   *   session's calendar effects; guest-tz context is conveyed separately
+   *   via `[VIEWER_TZ]` GROUND TRUTH lines in the system prompt).
+   */
+  timezone: string;
   /** System prompt loaded by the caller. Host-channel uses `unifiedAgentSystemPrompt()`. */
   systemPrompt: string;
   /** Tool surface for this turn. Built by the caller from request context. */
@@ -176,6 +251,7 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
   const {
     userId,
     userMessage,
+    timezone,
     systemPrompt,
     tools,
     recentMessages,
@@ -245,6 +321,16 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
     //      of replaying uncached. On a 5-turn conversation this drops input
     //      cost ~30-50% beyond the system-only baseline.
     const cachedHistory = withTrailingCacheBreakpoint(recentMessages);
+    // 2026-05-14 cmp50uvuq: inject "[Context · today is …]" line in front of
+    // the user message. The runner persists the ORIGINAL `userMessage` to the
+    // DB upstream (in `runUnifiedAgent` / `dealroom-runner`); only this
+    // streamText call sees the prefixed version. User messages sit after
+    // both cache breakpoints, so changing the date day-over-day has zero
+    // cache impact.
+    const userMessageWithDateContext = prefixUserMessageWithDateContext(
+      userMessage,
+      timezone,
+    );
     const result = streamText({
       model: envoyModel(modelSelection.modelId),
       messages: [
@@ -263,7 +349,7 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
           },
         },
         ...cachedHistory,
-        { role: "user", content: userMessage },
+        { role: "user", content: userMessageWithDateContext },
       ],
       tools,
       stopWhen: stepCountIs(MAX_STEPS),
@@ -382,7 +468,14 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
             },
           },
           ...withTrailingCacheBreakpoint(recentMessages),
-          { role: "user", content: userMessage },
+          // Pass the SAME date-prefixed user message the original stream saw,
+          // so remediation's resolution of "tomorrow" / "next Friday" matches
+          // the original turn's anchor. Without this, remediation would have
+          // no current-date source and could produce the cmp50uvuq-shape
+          // hallucination during the fix-up pass (which is exactly where it
+          // happened — the remediation, not the original stream, narrated
+          // "Now I can see tomorrow's date is May 8").
+          { role: "user", content: userMessageWithDateContext },
           { role: "assistant", content: fullText },
           {
             role: "user",
@@ -630,6 +723,7 @@ export function runUnifiedAgent(ctx: UnifiedAgentContext): ReadableStream<Uint8A
         await runUnifiedTurn({
           userId: ctx.userId,
           userMessage: ctx.message,
+          timezone: ctx.timezone,
           systemPrompt: SYSTEM_PROMPT,
           tools,
           recentMessages,

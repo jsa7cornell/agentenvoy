@@ -181,6 +181,11 @@ export function runDealroomTurn(ctx: DealroomTurnContext): ReadableStream<Uint8A
         await runUnifiedTurn({
           userId: ctxOut.session.hostId,
           userMessage: ctx.currentMessage,
+          // Anchor the date-context prefix to the host's TZ. The deal-room
+          // system prompt already conveys guest TZ via [VIEWER_TZ] when
+          // relevant; "today" is canonically the host's today for scheduling
+          // effects. cmp50uvuq fix, 2026-05-14.
+          timezone: ctxOut.session.hostTimezone,
           systemPrompt,
           tools,
           recentMessages: ctxOut.history,
