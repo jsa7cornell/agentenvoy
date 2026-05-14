@@ -227,10 +227,21 @@ export const successTheaterCheck: PostStreamCheck = {
   name: "success-theater",
   check: ({ fullText, toolCalls }) => {
     if (toolCalls.length === 0) return { fired: false }; // shape-1 owned elsewhere
-    const anyFailed = toolCalls.some((tc) => tc.success === false);
+    // 2026-05-14 cmp4ss1ip: exclude LOAD_* tools from the "any failed" gate.
+    // LOAD tools are READS, not writes — their failures (calendar not
+    // authorized, GCal API hiccup, stale token) don't constitute success-
+    // theater regardless of what the prose claims, because the prose's claim
+    // is always about a write effect ("blocked", "cancelled", "created").
+    // Prior version flagged false-positives on every turn that had a LOAD
+    // hiccup + confirmation-shaped prose for a successful write
+    // (cmp4ss1ip: `LOAD_calendar_context` failed alongside a successful
+    // `session_request_reschedule`). Mirrors the same write/read partition
+    // used by `narrationLeakCheck` below.
+    const writeToolCalls = toolCalls.filter((tc) => !tc.toolName.startsWith("LOAD_"));
+    const anyFailed = writeToolCalls.some((tc) => tc.success === false);
     if (!anyFailed) return { fired: false };
     if (!isConfirmationShapedProse(fullText)) return { fired: false };
-    const failedNames = toolCalls
+    const failedNames = writeToolCalls
       .filter((tc) => tc.success === false)
       .map((tc) => tc.toolName)
       .join(", ");
@@ -282,13 +293,24 @@ const MAX_CONFIRMATION_LEN_CHARS = 240;
  */
 const THINKING_OUT_LOUD_PATTERNS: readonly RegExp[] = [
   /\bNow I[''']ll\b/i,                     // "Now I'll load the calendar..."
-  // "Let me <think-verb>" — NOT "Let me know" (canonical template close).
-  /\bLet me (?:check|load|look|update|verify|fetch|see|think|review|reconsider|update the|check the|load the|look at|see if|think about)\b/i,
+  // "Let me <verb>" — NOT "Let me know" (canonical template close).
+  // 2026-05-14 cmp4ss1ip widening: added the write-action verbs (reschedule,
+  // cancel, move, create, book, set up, archive, release, free, update the
+  // <thing>) — Haiku narrates "Let me reschedule this meeting" as a preamble
+  // before the actual tool call on deal-room reschedule turns. Same shape as
+  // the original "Let me check/load" pre-action narration.
+  /\bLet me (?:check|load|look|update|verify|fetch|see|think|review|reconsider|update the|check the|load the|look at|see if|think about|reschedule|cancel|move|create|book|set up|archive|release|free|find|grab|adjust)\b/i,
   /\bI[''']ll (?:load|check|look|update|update the|create the|fetch)\b/i,
   // "I need to load/check/..." — the LOAD-narration variant that doesn't use
   // "I'll" (2026-05-13 rnmp4f incident). "Now I need to load..." is the same
   // shape with a leading "Now".
   /\b(?:Now\s+)?I need to (?:load|check|look|update|verify|fetch|see|review|reconsider)\b/i,
+  // 2026-05-14 cmp4ss1ip: date-announcement preamble. The model narrates
+  // "Today/Tomorrow is <Date>" before acting on a temporal reference. Pure
+  // reasoning out loud — the user doesn't need the model to recite the date
+  // back at them. Production-observed shape: "Tomorrow is **May 14, 2026
+  // (Thursday)**. Let me reschedule this meeting."
+  /\b(?:Today|Tomorrow|Yesterday) is\s+\*{0,2}[A-Z][a-z]+/,
   /\bHowever,?\s+looking more carefully\b/i, // The cmp2qcnjy smoking gun
   /\bOn review\b/i,                         // From the old remediation prompt
   /\bLooking (?:more carefully|at this again)\b/i,

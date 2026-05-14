@@ -212,7 +212,7 @@ function GroupDayGrid({
 // Mirrors the schema enum at prisma/schema.prisma:509 — keep in sync if a
 // new status is added to NegotiationSession. The discriminated union gives
 // the reducer's switch TSC exhaustiveness.
-type SessionStatus =
+export type SessionStatus =
   | "active"
   | "proposed"
   | "retime_proposed"
@@ -241,6 +241,39 @@ type SessionStatus =
 // to /goodbye), add `expired` to this list AND a `case "expired":` arm.
 const INVALIDATES_CONFIRMED_STATE: readonly SessionStatus[] =
   ["cancelled", "retime_proposed"] as const;
+
+/**
+ * Returns true when the server-status transition indicates a previously-
+ * confirmed session has been reset to a non-confirmed state via a path the
+ * status-switch's case-arms above do NOT explicitly handle.
+ *
+ * Authored 2026-05-14 for cmp4ss1ip. Background: the case-arms cover
+ * `cancelled` and `retime_proposed` (both INVALIDATES_CONFIRMED_STATE) by
+ * resetting confirmData inline. But a successful `session_request_reschedule`
+ * returns the session to `active` — which the reducer's `default:` branch
+ * intentionally preserves confirmData for (to handle the picker-optimistic
+ * race window `active → agreed`). Without a directional check, the prior
+ * agreed state's confirmData stayed rendered as a stale "CONFIRMED BY
+ * <guest>" card after a reschedule.
+ *
+ * Why only `agreed → active` and not other transitions:
+ * - `active → agreed`: the picker-optimistic race; preserve local confirmData.
+ * - `agreed → agreed`: idempotent re-confirm; preserve.
+ * - `agreed → cancelled`/`retime_proposed`: handled by the case-arms.
+ * - `agreed → active`: UNIQUELY the post-reschedule case. The case-arms can't
+ *   own it because `active` also represents "fresh session before picker" and
+ *   "in-flight optimistic confirm".
+ *
+ * Other `* → active` transitions (e.g., `proposed → active`, `null → active`)
+ * either start with confirmData already null OR are mid-optimistic-flow; they
+ * don't need invalidation.
+ */
+export function shouldInvalidateConfirmedOnStatusTransition(
+  prev: SessionStatus | null,
+  next: SessionStatus | undefined,
+): boolean {
+  return prev === "agreed" && next === "active";
+}
 
 // Payload shape consumed by `applySessionFromServer`. Subset of the
 // /api/negotiate/session response. Typed loosely with `string | null` for
@@ -381,6 +414,15 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // switch below gets TSC exhaustiveness — the next time a status is added
   // to the enum, the helper's switch fails to compile if it doesn't handle it.
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>("active");
+  // 2026-05-14 cmp4ss1ip: tracks the previous server-reported status so the
+  // reducer's default branch can detect a directional `agreed → active`
+  // transition. That transition happens after `session_request_reschedule`
+  // releases a confirmed slot and resets the session to `active`. Without it,
+  // confirmData stays populated from the prior agreed state and the meeting
+  // card renders a stale "CONFIRMED BY <guest>" header for a session that no
+  // longer has an agreed time. The picker-optimistic race goes `active →
+  // agreed`, never the reverse, so this check is one-directional and safe.
+  const prevServerStatusRef = useRef<SessionStatus | null>(null);
   const [, setSessionStatusLabel] = useState<string>("");
   const [statusAnimating, setStatusAnimating] = useState(false);
   const [isGroupEvent, setIsGroupEvent] = useState(false);
@@ -775,12 +817,22 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   // doesn't matter for downstream deps. Declared as a `function` (not
   // useCallback) for hoisting + readability.
   function applySessionFromServer(sess: ServerSessionPayload): void {
+    const newStatus = sess.status as SessionStatus | undefined;
     if (typeof sess.status === "string") {
       setSessionStatus(sess.status as SessionStatus);
     }
     if (typeof sess.statusLabel === "string") setSessionStatusLabel(sess.statusLabel);
 
-    switch (sess.status as SessionStatus | undefined) {
+    // 2026-05-14 cmp4ss1ip: invalidate confirmData on a post-reschedule
+    // transition (`agreed → active`). See helper's docstring for why this
+    // direction is uniquely the case-arms can't own.
+    if (shouldInvalidateConfirmedOnStatusTransition(prevServerStatusRef.current, newStatus)) {
+      setConfirmed(false);
+      setConfirmData(null);
+    }
+    prevServerStatusRef.current = newStatus ?? prevServerStatusRef.current;
+
+    switch (newStatus) {
       case "agreed": {
         setConfirmed(true);
         // Merge semantics: prior fields survive if the snapshot omits them.

@@ -210,6 +210,23 @@ describe("successTheaterCheck — cost-reduction Phase 1.5 (E) shape-3", () => {
     });
     expect(result.fired).toBe(false);
   });
+
+  it("does NOT fire when only a LOAD_* tool failed and write tools succeeded (cmp4ss1ip)", () => {
+    // 2026-05-14: LOAD failures are reads, not success-theater. Production
+    // shape from cmp4ss1ip: deal-room reschedule turn where
+    // `LOAD_calendar_context` failed alongside a successful
+    // `session_request_reschedule`. The prose ("Got it — cancelled the
+    // meeting") truthfully describes a successful write. Pre-fix this fired
+    // shape-3 falsely on the LOAD failure.
+    const result = successTheaterCheck.check({
+      fullText: "Got it — cancelled the meeting. The slot's released; the session's open if you want to find a new time.",
+      toolCalls: [
+        { toolName: "LOAD_calendar_context", success: false },
+        { toolName: "session_request_reschedule", success: true },
+      ],
+    });
+    expect(result.fired).toBe(false);
+  });
 });
 
 describe("runPostStreamChecks — convergence behavior", () => {
@@ -279,6 +296,47 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
     expect(result.guards).toHaveLength(1);
     expect(result.guards[0]?.name).toBe("narration-leak");
     expect(result.guards[0]?.scope).toBe("thinking-out-loud");
+  });
+
+  it("fires on 'Tomorrow is **<Date>**' date-announcement preamble (cmp4ss1ip)", () => {
+    // 2026-05-14: production-observed deal-room reschedule shape. Model
+    // narrates the date before acting. Pure reasoning out loud.
+    const result = runPostStreamChecks({
+      fullText:
+        "Tomorrow is **May 14, 2026 (Thursday)**. Let me reschedule this meeting. Got it — cancelled the meeting.",
+      toolCalls: [{ toolName: "session_request_reschedule", success: true }],
+    });
+    const leak = result.guards.find((r) => r.name === "narration-leak");
+    expect(leak?.scope).toBe("thinking-out-loud");
+  });
+
+  it("fires on 'Let me reschedule' pre-action narration (cmp4ss1ip)", () => {
+    // The verb list previously omitted action verbs (reschedule, cancel,
+    // move, create, book, set up). Haiku narrated "Let me reschedule this
+    // meeting" as a preamble before the actual tool call.
+    const result = runPostStreamChecks({
+      fullText: "Let me reschedule this meeting. Done — cancelled.",
+      toolCalls: [{ toolName: "session_request_reschedule", success: true }],
+    });
+    const leak = result.guards.find((r) => r.name === "narration-leak");
+    expect(leak?.scope).toBe("thinking-out-loud");
+  });
+
+  it("fires on 'Let me cancel' / 'Let me move' / 'Let me book' pre-action verbs", () => {
+    for (const phrase of [
+      "Let me cancel that for you. Done — cancelled.",
+      "Let me move it to Thursday. Got it — moved.",
+      "Let me book that slot. Booked.",
+      "Let me set up the link. Done — created.",
+      "Let me archive that. Archived.",
+    ]) {
+      const result = runPostStreamChecks({
+        fullText: phrase,
+        toolCalls: [successfulWrite],
+      });
+      const leak = result.guards.find((r) => r.name === "narration-leak");
+      expect(leak?.scope, `expected leak on: ${phrase}`).toBe("thinking-out-loud");
+    }
   });
 
   it("does NOT fire on a clean one-sentence confirmation", () => {
