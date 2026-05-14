@@ -67,6 +67,17 @@ export type AgentToolContext = {
    * callers that haven't wired the accumulator.
    */
   recordGroundingFire?: (fire: GroundingFire) => void;
+  /**
+   * 2026-05-14 cmp51ltr5: which side of the deal-room conversation initiated
+   * this tool call. Threaded through to executeActions so handlers that
+   * vary by caller role (e.g., `session_lock_duration` — guest-shrink
+   * bypass vs. host bypass vs. extend-needs-opt-in) can branch correctly.
+   *
+   * Host-channel callers leave this undefined (they're always the host;
+   * the handler's `userId === session.hostId` check covers them).
+   * Deal-room callers set "host" or "guest" based on `speakerRole`.
+   */
+  triggeringRole?: "host" | "guest";
 };
 
 // Shared availability window schema — matches AvailabilityWindow[] contract.
@@ -128,6 +139,7 @@ export function buildUnifiedTools(ctx: AgentToolContext) {
     getThisTurnToolResults: ctx.getThisTurnToolResults,
     recordToolResult: ctx.recordToolResult,
     recordGroundingFire: ctx.recordGroundingFire,
+    triggeringRole: ctx.triggeringRole,
   };
 
   // Per-request seen-call set. Guards against the model issuing the same write

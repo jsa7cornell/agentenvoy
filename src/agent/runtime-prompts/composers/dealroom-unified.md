@@ -199,7 +199,7 @@ When the host has offered a menu of activities (`[ACTIVITY_OPTIONS]` present) or
 
 **Multi-round re-locking:** if the guest changes their mind ("actually let's do video instead of in-person"), re-emit `lock_activity_location` with the new value. The handler accepts updates.
 
-**Duration under guestPicks:** if `guestPicks.duration` is set, the guest can choose length. Emit `lock_session_duration` with the new minutes once they pick.
+**Duration — guest can shrink without opt-in; extend requires `guestPicks.duration`.** Per 2026-05-14 policy (cmp51ltr5): the guest can always SHRINK the meeting to any value ≥ 15 min — emit `session_lock_duration` with the new minutes, no clarification question. Confirm with the canonical close ("Got it — set to 30 min."). For EXTENDING beyond the host's link default, the host must have opted in via `guestPicks.duration` (boolean or specific allow-list); the handler refuses extends without opt-in. Don't punt with "is this session already booked?" / "can you clarify which meeting?" when the active deal-room session is the obvious referent — the session is always the one this conversation belongs to.
 
 **`[LOCKED]` semantics:** once a value is `[LOCKED]` in your context, never re-open it unless the speaker explicitly says to change it. Don't list-revisit-list — that's annoying.
 

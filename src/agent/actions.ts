@@ -336,7 +336,7 @@ async function executeAction(
     case "lock_activity_location":
       return handleLockActivityLocation(action.params, userId, context?.sessionId);
     case "lock_session_duration":
-      return handleLockSessionDuration(action.params, userId, context?.sessionId);
+      return handleLockSessionDuration(action.params, userId, context?.sessionId, context?.triggeringRole);
     case "lock_buffer_minutes":
       return handleLockBufferMinutes(action.params, userId, context?.sessionId);
     default:
@@ -3888,6 +3888,56 @@ export async function handleLockActivityLocation(
 }
 
 /**
+ * Pure decision for whether a `session_lock_duration` proposal should
+ * proceed past the `guestPicks.duration` opt-in gate.
+ *
+ * Extracted from `handleLockSessionDuration` for unit-test coverage of
+ * the role × shrink × opt-in matrix (cmp51ltr5, 2026-05-14). The handler
+ * still owns DB I/O, GCal effects, and message persistence; this helper
+ * is just the policy decision.
+ *
+ * Returns:
+ *   - `{ allow: true, reason }` — proceed with the change.
+ *   - `{ allow: false, reason }` — refuse with the given reason.
+ *
+ * Rules:
+ *   - Host caller → always allowed (host owns the session).
+ *   - Guest caller, shrink (proposed < current) → always allowed (per
+ *     John's 2026-05-14 policy: guests can shrink without explicit
+ *     opt-in).
+ *   - Guest caller, extend (proposed > current) OR same → only allowed
+ *     when `guestPicks.duration` is set (true → static cap;
+ *     array → must include the value).
+ *   - Unspecified triggeringRole → treated as guest (conservative).
+ */
+export function shouldAllowSessionDurationChange(input: {
+  triggeringRole?: "host" | "guest";
+  proposedDuration: number;
+  currentDuration: number | null;
+  guestPicksDuration?: boolean | readonly number[];
+}): { allow: boolean; reason: "host" | "guest-shrink" | "opt-in" | "no-opt-in" | "no-current-duration" } {
+  if (input.triggeringRole === "host") {
+    return { allow: true, reason: "host" };
+  }
+  // Shrink bypass: only meaningful when we have a current duration to
+  // compare against. If the link has no duration set at all (null), we
+  // can't determine "shrink", so fall through to the opt-in gate.
+  if (input.currentDuration === null) {
+    if (input.guestPicksDuration !== undefined && input.guestPicksDuration !== false) {
+      return { allow: true, reason: "opt-in" };
+    }
+    return { allow: false, reason: "no-current-duration" };
+  }
+  if (input.proposedDuration < input.currentDuration) {
+    return { allow: true, reason: "guest-shrink" };
+  }
+  if (input.guestPicksDuration !== undefined && input.guestPicksDuration !== false) {
+    return { allow: true, reason: "opt-in" };
+  }
+  return { allow: false, reason: "no-opt-in" };
+}
+
+/**
  * `lock_session_duration` — guest-initiated meeting-duration negotiation.
  *
  * Mirrors `handleLockActivityLocation` for the duration dimension. Validates
@@ -3916,7 +3966,8 @@ export async function handleLockActivityLocation(
 async function handleLockSessionDuration(
   params: Record<string, unknown>,
   userId: string,
-  sessionId?: string
+  sessionId?: string,
+  triggeringRole?: "host" | "guest"
 ): Promise<ActionResult> {
   const resolvedSessionId = (params.sessionId as string) || sessionId;
   if (!resolvedSessionId) {
@@ -3950,39 +4001,64 @@ async function handleLockSessionDuration(
 
   const linkRules = parseLinkParameters(session.link?.parameters);
   const guestPicksDuration = linkRules.guestPicks?.duration;
+  const hostEffectiveDuration =
+    typeof linkRules.duration === "number" ? linkRules.duration : null;
 
-  // Defense in depth: composer should already have refused if guestPicks.duration
-  // is not set, but enforce here too. The host hasn't opted in → refuse.
-  if (guestPicksDuration === undefined || guestPicksDuration === false) {
+  // 2026-05-14 cmp51ltr5: policy decision extracted to a pure helper so
+  // the host × guest × shrink × opt-in matrix is unit-testable. See
+  // `shouldAllowSessionDurationChange` above for the contract.
+  const gateDecision = shouldAllowSessionDurationChange({
+    triggeringRole,
+    proposedDuration: durationMinutes,
+    currentDuration: hostEffectiveDuration,
+    guestPicksDuration:
+      guestPicksDuration === true
+        ? true
+        : Array.isArray(guestPicksDuration)
+          ? guestPicksDuration
+          : undefined,
+  });
+  const isHostTriggered = gateDecision.reason === "host";
+  const bypassOptInGate = isHostTriggered || gateDecision.reason === "guest-shrink";
+
+  if (!gateDecision.allow) {
     return {
       success: false,
       message:
-        "This link doesn't allow guests to change duration. Refuse the proposal in chat without acknowledging the change.",
+        "This link doesn't allow guests to extend the meeting duration. Refuse the proposal in chat without acknowledging the change. (Guests CAN shrink to any duration ≥ 15 min without explicit opt-in; this proposal is an extend.)",
     };
   }
 
-  // Allow-list form: duration must be in the host's explicit list.
-  if (Array.isArray(guestPicksDuration)) {
-    if (!guestPicksDuration.includes(durationMinutes)) {
-      return {
-        success: false,
-        message: `Duration ${durationMinutes} is not in the host's allowed list (${guestPicksDuration.join(", ")}). Refuse with: "${session.link?.parameters ? "" : ""}John offers ${guestPicksDuration.join(", ")} — pick one of those."`,
-      };
-    }
-  } else {
-    // Boolean true → static cap.
-    if (durationMinutes < GUEST_PICKS_DURATION_MIN_MINUTES) {
-      return {
-        success: false,
-        message: `Duration ${durationMinutes} is below the minimum of ${GUEST_PICKS_DURATION_MIN_MINUTES} minutes. Refuse with: "${GUEST_PICKS_DURATION_MIN_MINUTES} minutes is the shortest I can lock in."`,
-      };
-    }
-    if (durationMinutes > GUEST_PICKS_DURATION_MAX_MINUTES) {
-      const maxHours = GUEST_PICKS_DURATION_MAX_MINUTES / 60;
-      return {
-        success: false,
-        message: `Duration ${durationMinutes} exceeds the maximum of ${GUEST_PICKS_DURATION_MAX_MINUTES} minutes. Refuse with: "${durationMinutes} minutes is more than I can lock in — most I can do is ${maxHours} hours."`,
-      };
+  // Static lower bound applies universally — even host-triggered or
+  // shrink-bypass calls must respect a sane minimum (no 0-min or negative
+  // durations).
+  if (durationMinutes < GUEST_PICKS_DURATION_MIN_MINUTES) {
+    return {
+      success: false,
+      message: `Duration ${durationMinutes} is below the minimum of ${GUEST_PICKS_DURATION_MIN_MINUTES} minutes. Refuse with: "${GUEST_PICKS_DURATION_MIN_MINUTES} minutes is the shortest I can lock in."`,
+    };
+  }
+
+  // Allow-list / upper-cap checks only apply when the opt-in gate is
+  // active (i.e., NOT host-triggered, NOT a guest-shrink bypass). Hosts and
+  // shrinking guests are not subject to the host's explicit allow-list.
+  if (!bypassOptInGate) {
+    if (Array.isArray(guestPicksDuration)) {
+      if (!guestPicksDuration.includes(durationMinutes)) {
+        return {
+          success: false,
+          message: `Duration ${durationMinutes} is not in the host's allowed list (${guestPicksDuration.join(", ")}). Refuse with: "${session.link?.parameters ? "" : ""}John offers ${guestPicksDuration.join(", ")} — pick one of those."`,
+        };
+      }
+    } else {
+      // Boolean true → static upper cap (lower already enforced above).
+      if (durationMinutes > GUEST_PICKS_DURATION_MAX_MINUTES) {
+        const maxHours = GUEST_PICKS_DURATION_MAX_MINUTES / 60;
+        return {
+          success: false,
+          message: `Duration ${durationMinutes} exceeds the maximum of ${GUEST_PICKS_DURATION_MAX_MINUTES} minutes. Refuse with: "${durationMinutes} minutes is more than I can lock in — most I can do is ${maxHours} hours."`,
+        };
+      }
     }
   }
 

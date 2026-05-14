@@ -246,6 +246,14 @@ export const DEALROOM_GUEST_ALLOWED_TOOLS = [
   // only emits dateTime values from the offered list (vs. host who can
   // override their own hours).
   "session_update_time",
+  // 2026-05-14 cmp51ltr5: guest can SHRINK the meeting duration without
+  // host opt-in (per John's policy: "guests should be allowed to shrink
+  // a meeting length"). The handler enforces shrink-only: any extend
+  // requires the host's `guestPicks.duration` opt-in. Static minimum
+  // (15 min) applies universally. The deal-room guest composer should
+  // narrate the shrink confirmation, not punt with a clarification
+  // question (the cmp51ltr5 bad shape).
+  "session_lock_duration",
   // Telemetry
   "flag_ambiguity",
 ] as const;

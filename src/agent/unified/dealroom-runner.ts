@@ -154,6 +154,10 @@ export function runDealroomTurn(ctx: DealroomTurnContext): ReadableStream<Uint8A
           recordGroundingFire: (fire) => {
             groundingFires.push(fire);
           },
+          // 2026-05-14 cmp51ltr5: thread the speakerRole down through tool
+          // dispatch so handlers can branch on guest vs. host caller
+          // (e.g., session_lock_duration's guest-shrink bypass).
+          triggeringRole: ctx.speakerRole,
         };
         const role: "dealroom-host" | "dealroom-guest" =
           ctx.speakerRole === "host" ? "dealroom-host" : "dealroom-guest";

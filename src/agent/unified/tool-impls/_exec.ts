@@ -56,6 +56,13 @@ export type ToolContext = {
    * metadata (PR-D).
    */
   recordGroundingFire?: (fire: GroundingFire) => void;
+  /**
+   * 2026-05-14 cmp51ltr5: who initiated the call ("host" / "guest").
+   * Threaded into executeActions for role-conditional handlers (e.g.
+   * `session_lock_duration` guest-shrink bypass). Host-channel callers
+   * leave undefined.
+   */
+  triggeringRole?: "host" | "guest";
 };
 
 export async function execAction(
@@ -100,6 +107,9 @@ export async function execAction(
       // NegotiationLink.creationPrompt. Used by regenerateMeetingNotesForLink
       // on activity/time/invitee edit triggers.
       userMessage: ctx.userMessage,
+      // 2026-05-14 cmp51ltr5: thread triggeringRole into role-conditional
+      // handlers (e.g. session_lock_duration guest-shrink bypass).
+      ...(ctx.triggeringRole ? { triggeringRole: ctx.triggeringRole } : {}),
     },
   );
   return results[0] ?? { success: false, message: "No result returned" };
