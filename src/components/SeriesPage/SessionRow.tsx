@@ -132,6 +132,7 @@ function dateBlockStyle(status: UpcomingSessionStatus): React.CSSProperties {
 function channelDetail(session: UpcomingSession): string {
   const { channel, skipReason } = session;
   if (session.status === "skipped" && skipReason) return skipReason;
+  if (channel.kind === "TBD") return "Format TBD";
   if (channel.kind === "in-person") return channel.location;
   if (channel.kind === "video") return channel.platform;
   return "Phone call";

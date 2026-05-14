@@ -81,6 +81,35 @@ describe("in-person format", () => {
   });
 });
 
+// ── guestPicksFormat — kind:TBD (cmp5sm07o display fix) ──────────────────
+// These cells exist specifically because d185362 added the parameter to
+// buildChannelRow but never used it — the dead-parameter gap that WALLOFSHAME
+// Entry 4 documents. A passing test here means the flag is live, not dead.
+
+describe("guestPicksFormat:true → kind:TBD", () => {
+  it("returns kind:TBD when guestPicksFormat is true, ignoring format value", () => {
+    const row = buildChannelRow("video", null, null, true);
+    expect(row.kind).toBe("TBD");
+  });
+
+  it("returns kind:TBD even when format is 'in-person' (pre-fix DB state)", () => {
+    // This is the exact contradictory state that caused the cmp5sm07o bug:
+    // DB had format:"in-person" + guestPicks.format:true. Flag must win.
+    const row = buildChannelRow("in-person", "Some Venue", null, true);
+    expect(row.kind).toBe("TBD");
+  });
+
+  it("returns kind:TBD when format is null and guestPicksFormat is true", () => {
+    const row = buildChannelRow(null, null, null, true);
+    expect(row.kind).toBe("TBD");
+  });
+
+  it("does NOT return kind:TBD when guestPicksFormat is false", () => {
+    const row = buildChannelRow("video", null, null, false);
+    expect(row.kind).toBe("video");
+  });
+});
+
 // ── Unknown / edge-case formats fall through to video ─────────────────────
 
 describe("unrecognized format", () => {

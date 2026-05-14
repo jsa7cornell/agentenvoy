@@ -18,7 +18,7 @@
  * Decision: proposals/2026-05-14_event-record-alignment_reviewed-2026-05-14_decided-2026-05-14.md §2.3
  */
 
-import type { ChannelInfo } from "@/components/MeetingCard/types";
+import type { ChannelInfo, TBDChannel } from "@/components/MeetingCard/types";
 
 /**
  * Build a structured ChannelInfo from the already-resolved effective format,
@@ -39,6 +39,11 @@ export function buildChannelRow(
   guestPicksFormat?: boolean,
   guestPicksLocation?: boolean,
 ): ChannelInfo {
+  // Format-deferred: guest picks — short-circuit before format branch so
+  // contradictory DB state (format:"in-person" + guestPicks.format:true on
+  // pre-fix links) can't win. cmp5sm07o display fix.
+  if (guestPicksFormat) return { kind: "TBD" } satisfies TBDChannel;
+
   const resolvedFormat = format ?? "video";
 
   if (resolvedFormat === "in-person") {

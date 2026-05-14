@@ -76,6 +76,39 @@ function ChannelLine({
   guest: Participant;
   onFocusChat?: (prefill: string) => void;
 }) {
+  if (channel.kind === "TBD") {
+    const guestCopy = "You pick the format — video, phone, or in-person";
+    const hostCopy = `${guest.firstName} picks the format`;
+    const copy = viewerRole === "guest" ? guestCopy : hostCopy;
+    const isClickable = viewerRole === "guest";
+    return (
+      <div
+        className="flex items-start gap-[9px] text-[13px] pt-2"
+        data-guest-picks-format="true"
+      >
+        <span className="text-[14px] w-5 text-center flex-shrink-0 text-zinc-400 leading-[1.45]">
+          🔀
+        </span>
+        <div className="flex-1 min-w-0 leading-[1.45]">
+          {isClickable ? (
+            <button
+              className="text-left font-medium underline-offset-2 hover:underline focus:outline-none"
+              style={{ color: "#4f46e5" }}
+              onClick={() => onFocusChat?.("I'd prefer ")}
+              aria-label="Share your preferred format"
+            >
+              {copy}
+            </button>
+          ) : (
+            <span className="font-medium" style={{ color: "#4f46e5" }}>
+              {copy}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (channel.kind === "in-person") {
     // Guest-picks venue deferral — host explicitly asked guest to choose.
     if (channel.guestPicks) {

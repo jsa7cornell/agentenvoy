@@ -116,9 +116,19 @@ function buildDefaultChannel(
   sessionFormat: string | null | undefined,
   sessionMeetLink: string | null | undefined,
 ): ChannelInfo {
+  const guestPicksFormat =
+    (linkParams.guestPicks as { format?: boolean } | undefined)?.format === true;
+  if (guestPicksFormat) return { kind: "TBD" };
+
   const format = sessionFormat ?? linkParams.format ?? "video";
   if (format === "in-person") {
-    return { kind: "in-person", location: linkParams.location ?? "TBD" };
+    const guestPicksLocation =
+      (linkParams.guestPicks as { location?: boolean } | undefined)?.location === true;
+    return {
+      kind: "in-person",
+      location: linkParams.location ?? "TBD",
+      ...(guestPicksLocation ? { guestPicks: true } : {}),
+    };
   }
   if (format === "phone") {
     return { kind: "phone", phoneNumber: "", hostCallsGuest: true };

@@ -219,14 +219,10 @@ function buildProposalMeetingCardProps(
   const hasFormatGuestPicks = guestPicksFormat === true || Array.isArray(guestPicksFormat);
 
   // Channel — best-effort from link format; picker is the primary action.
-  // When format is wholly deferred, default to in-person (most generic sentinel)
-  // so the renderer's guestPicks affordance path handles it.
-  const format = snapshot.linkFormat || (hasFormatGuestPicks ? "in-person" : "video");
+  const format = snapshot.linkFormat || "video";
   let channel: ChannelInfo;
   if (hasFormatGuestPicks) {
-    // Format is deferred — use a sentinel in-person channel with empty location.
-    // The renderer detects formatGuestPicks on the props and overrides this row.
-    channel = { kind: "in-person", location: "" };
+    channel = { kind: "TBD" };
   } else if (format === "video") {
     channel = { kind: "video", platform: "Google Meet" };
   } else if (format === "phone") {

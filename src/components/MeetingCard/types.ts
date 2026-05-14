@@ -27,7 +27,7 @@ export type ViewerRole = "guest" | "host";
  * Meeting channel — how participants will connect.
  * Drives the channel-line display in MeetingCardInfoBlock.
  */
-export type ChannelKind = "in-person" | "video" | "phone";
+export type ChannelKind = "in-person" | "video" | "phone" | "TBD";
 
 /**
  * Card state — which phase the scheduling negotiation is in.
@@ -94,10 +94,19 @@ export interface PhoneChannel {
 }
 
 /**
+ * TBD channel — host deferred format selection to the guest.
+ * Rendered as an explicit "guest picks format" affordance.
+ * Replaces the old sentinel hack (kind:"in-person", location:"").
+ */
+export interface TBDChannel {
+  kind: "TBD";
+}
+
+/**
  * Discriminated union of all channel variants.
  * Narrow via `channel.kind` before reading channel-specific fields.
  */
-export type ChannelInfo = InPersonChannel | VideoChannel | PhoneChannel;
+export type ChannelInfo = InPersonChannel | VideoChannel | PhoneChannel | TBDChannel;
 
 // ── Participants ─────────────────────────────────────────────────────────────
 
