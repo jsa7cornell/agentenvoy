@@ -39,10 +39,29 @@ const BASE_SNAPSHOT: DealRoomConfirmedSnapshot = {
 // ── Null-return guards ────────────────────────────────────────────────────────
 
 describe("dealRoomToMeetingCardProps — null-return guards", () => {
-  it("returns null when confirmData is null", () => {
+  it("returns proposal-state props (NOT null) when confirmData is null but participants exist", () => {
+    // 2026-05-14 cleanup: PR2c extended dealRoomToMeetingCardProps to also
+    // build proposal/matched/skipped/confirming card props (not just
+    // confirmed). When confirmData is null but a host or invitee name is
+    // available, it returns proposal-state props now instead of null. The
+    // null-return path is only hit when BOTH names are missing — see the
+    // "both names absent" cell below.
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
       confirmData: null,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.state).toBe("proposal");
+  });
+
+  it("returns null when confirmData is null AND both host and invitee names are missing", () => {
+    // The new null-return contract for proposal-state: only fires when
+    // there's literally nothing to render (no names, no card).
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      confirmData: null,
+      hostName: "",
+      inviteeName: "",
     });
     expect(result).toBeNull();
   });
@@ -160,7 +179,13 @@ describe("dealRoomToMeetingCardProps — channel discrimination", () => {
     }
   });
 
-  it("falls back to 'TBD' for in-person when no location available", () => {
+  it("falls back to 'In-person — venue TBD' for in-person when no location available", () => {
+    // 2026-05-11 widening: the bare "TBD" fallback was replaced with a
+    // string that surfaces format context. Two shapes documented at
+    // dealRoomToMeetingCardProps.ts:317-326:
+    //   - guestPicks.location === true → "Venue TBD — guest to pick"
+    //   - venue just unset            → "In-person — venue TBD"
+    // The test exercises the latter (linkGuestPicks unset on BASE_SNAPSHOT).
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
       confirmData: {
@@ -170,7 +195,25 @@ describe("dealRoomToMeetingCardProps — channel discrimination", () => {
       linkLocation: null,
     });
     if (result?.channel.kind === "in-person") {
-      expect(result.channel.location).toBe("TBD");
+      expect(result.channel.location).toBe("In-person — venue TBD");
+    }
+  });
+
+  it("falls back to 'Venue TBD — guest to pick' when guestPicks.location is true", () => {
+    // 2026-05-11 widening: documents the OTHER fallback shape from the
+    // same code block. Locks in both branches so future changes can't
+    // silently drop one.
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      confirmData: {
+        ...BASE_SNAPSHOT.confirmData,
+        format: "in-person",
+      },
+      linkLocation: null,
+      linkParameters: { guestPicks: { location: true } },
+    });
+    if (result?.channel.kind === "in-person") {
+      expect(result.channel.location).toBe("Venue TBD — guest to pick");
     }
   });
 });
@@ -178,25 +221,36 @@ describe("dealRoomToMeetingCardProps — channel discrimination", () => {
 // ── Tip derivation ────────────────────────────────────────────────────────────
 
 describe("dealRoomToMeetingCardProps — tip derivation", () => {
-  it("tip is set from generative-fallback when linkActivity is present", () => {
+  // 2026-05-14 cleanup: the generative-fallback template was locked
+  // 2026-05-10 (per John, see templates/generative-fallback.ts:8) to
+  // render `DEFAULT_TIP` verbatim. The earlier activity-substituting
+  // form ("Looking forward to coffee with John") was dropped because
+  // it duplicated content already on the card (title + channel row).
+  // Source label is now "From {host}" (or "From the host" when no
+  // first name available), not the older "Generated for you".
+
+  it("tip is the default 'Looking forward to it…' string when no authored/derived tip applies (activity present)", () => {
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
       linkActivity: "Coffee",
     });
     expect(result?.tip).toBeDefined();
-    expect(result?.tip?.text).toContain("Coffee");
-    expect(result?.tip?.text).toContain("John");
-    expect(result?.tip?.source).toBe("Generated for you");
+    expect(result?.tip?.text).toBe(
+      "Looking forward to it — pick whatever time works.",
+    );
+    expect(result?.tip?.source).toBe("From John");
   });
 
-  it("tip uses generative-fallback without activity when linkActivity is null", () => {
+  it("tip is the default 'Looking forward to it…' string when no activity (and no authored tip)", () => {
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
       linkActivity: null,
     });
     expect(result?.tip).toBeDefined();
-    expect(result?.tip?.text).toContain("John");
-    expect(result?.tip?.source).toBe("Generated for you");
+    expect(result?.tip?.text).toBe(
+      "Looking forward to it — pick whatever time works.",
+    );
+    expect(result?.tip?.source).toBe("From John");
   });
 
   it("tip is null when isAnonymousLink with no authored/derived data", () => {
@@ -243,16 +297,20 @@ describe("dealRoomToMeetingCardProps — tip derivation", () => {
     expect(result?.tip?.text).toBe("From the link");
   });
 
-  it("generative-fallback fires when both linkParameters.tip and userPrimaryTip are null", () => {
+  it("generative-fallback fires (rendering DEFAULT_TIP) when both linkParameters.tip and userPrimaryTip are null", () => {
+    // 2026-05-14 cleanup: generative-fallback locked to DEFAULT_TIP verbatim
+    // 2026-05-10. The test now asserts that the fallback fires (returns
+    // DEFAULT_TIP), not that it composes activity/host into the string.
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
       linkParameters: null,
       userPrimaryTip: null,
       linkActivity: "Coffee",
     });
-    // generative-fallback composes a sentence using activity + host name
-    expect(result?.tip?.text).toContain("Coffee");
-    expect(result?.tip?.text).toContain("John");
+    expect(result?.tip?.text).toBe(
+      "Looking forward to it — pick whatever time works.",
+    );
+    expect(result?.tip?.source).toBe("From John");
   });
 
   it("DEFAULT_TIP constant is a non-empty string", () => {
