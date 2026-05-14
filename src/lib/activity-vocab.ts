@@ -134,6 +134,11 @@ export const GENERIC_TOPICS: ReadonlySet<string> = new Set([
   "quick chat", "quick meeting", "quick sync", "discussion",
   "call", "quick call", "phone call", "video call",
   "zoom", "zoom call", "video", "talk",
+  // Colloquial meeting verbs — the model sometimes emits these literally when
+  // the host says "grab time", "link up", "hang out", etc. They carry no
+  // activity information; null them so the title falls back to the
+  // "{invitee} + {host}" template. (cmp5ysc8r — "grab" rerouted to customTitle)
+  "grab", "grab time", "link up", "hang out", "hangout", "catch up with", "touch base with",
 ]);
 
 /**
