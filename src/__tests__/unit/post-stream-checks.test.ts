@@ -218,17 +218,17 @@ describe("runPostStreamChecks — convergence behavior", () => {
     const proseClaim = "Wednesday afternoons (12–5pm) are now blocked.";
 
     const noTools = runPostStreamChecks({ fullText: proseClaim, toolCalls: [] });
-    expect(noTools).toHaveLength(1);
-    expect(noTools[0]?.name).toBe("narration-without-emit");
-    expect(noTools[0]?.scope).toBe("shape-1");
+    expect(noTools.guards).toHaveLength(1);
+    expect(noTools.guards[0]?.name).toBe("narration-without-emit");
+    expect(noTools.guards[0]?.scope).toBe("shape-1");
 
     const failedTool = runPostStreamChecks({
       fullText: proseClaim,
       toolCalls: [{ toolName: "rule_add", success: false }],
     });
-    expect(failedTool).toHaveLength(1);
-    expect(failedTool[0]?.name).toBe("success-theater");
-    expect(failedTool[0]?.scope).toBe("shape-3");
+    expect(failedTool.guards).toHaveLength(1);
+    expect(failedTool.guards[0]?.name).toBe("success-theater");
+    expect(failedTool.guards[0]?.scope).toBe("shape-3");
   });
 
   it("returns empty when no check fires", () => {
@@ -236,7 +236,7 @@ describe("runPostStreamChecks — convergence behavior", () => {
       fullText: "Your timezone is set to America/New_York (EDT).",
       toolCalls: [{ toolName: "LOAD_preferences", success: undefined }],
     });
-    expect(result).toHaveLength(0);
+    expect(result.guards).toHaveLength(0);
   });
 });
 
@@ -256,9 +256,9 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
       fullText: longProse,
       toolCalls: [successfulWrite],
     });
-    expect(result).toHaveLength(1);
-    expect(result[0]?.name).toBe("narration-leak");
-    expect(result[0]?.scope).toBe("length");
+    expect(result.guards).toHaveLength(1);
+    expect(result.guards[0]?.name).toBe("narration-leak");
+    expect(result.guards[0]?.scope).toBe("length");
   });
 
   it("fires on 'Now I\\'ll' phrase even when prose is short", () => {
@@ -266,9 +266,9 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
       fullText: "Now I'll create that link for you.",
       toolCalls: [successfulWrite],
     });
-    expect(result).toHaveLength(1);
-    expect(result[0]?.name).toBe("narration-leak");
-    expect(result[0]?.scope).toBe("thinking-out-loud");
+    expect(result.guards).toHaveLength(1);
+    expect(result.guards[0]?.name).toBe("narration-leak");
+    expect(result.guards[0]?.scope).toBe("thinking-out-loud");
   });
 
   it("fires on 'However, looking more carefully' (the cmp2qcnjy smoking gun)", () => {
@@ -276,9 +276,9 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
       fullText: "However, looking more carefully — let me update the link.",
       toolCalls: [successfulWrite],
     });
-    expect(result).toHaveLength(1);
-    expect(result[0]?.name).toBe("narration-leak");
-    expect(result[0]?.scope).toBe("thinking-out-loud");
+    expect(result.guards).toHaveLength(1);
+    expect(result.guards[0]?.name).toBe("narration-leak");
+    expect(result.guards[0]?.scope).toBe("thinking-out-loud");
   });
 
   it("does NOT fire on a clean one-sentence confirmation", () => {
@@ -289,7 +289,7 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
     // narrationWithoutEmit won't fire (tools > 0), successTheater won't fire
     // (no success: false), narrationLeak won't fire (length under cap + no
     // forbidden phrases).
-    expect(result).toHaveLength(0);
+    expect(result.guards).toHaveLength(0);
   });
 
   it("fires on LOAD-only turn with thinking-out-loud prose (2026-05-13 rnmp4f shape)", () => {
@@ -309,8 +309,8 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
         { toolName: "LOAD_preferences", success: true },
       ],
     });
-    expect(result.map((r) => r.name)).toContain("narration-leak");
-    expect(result.find((r) => r.name === "narration-leak")?.scope).toBe("thinking-out-loud");
+    expect(result.guards.map((r) => r.name)).toContain("narration-leak");
+    expect(result.guards.find((r) => r.name === "narration-leak")?.scope).toBe("thinking-out-loud");
   });
 
   it("narration-leak fires on a failed-write turn with thinking-out-loud prose", () => {
@@ -325,7 +325,7 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
         "Based on the calendar, the slot is taken. I'll update that existing link.",
       toolCalls: [{ toolName: "personal_link_create", success: false }],
     });
-    expect(result.map((r) => r.name)).toContain("narration-leak");
+    expect(result.guards.map((r) => r.name)).toContain("narration-leak");
   });
 
   it("uses DEFAULT_POST_STREAM_CHECKS when no override passed", () => {
@@ -342,7 +342,52 @@ describe("narrationLeakCheck — successful write + wrong-shape prose", () => {
       { fullText: "I've blocked Friday for you.", toolCalls: [] },
       [narrationWithoutEmitCheck],
     );
-    expect(onlyA5).toHaveLength(1);
-    expect(onlyA5[0]?.name).toBe("narration-without-emit");
+    expect(onlyA5.guards).toHaveLength(1);
+    expect(onlyA5.guards[0]?.name).toBe("narration-without-emit");
+  });
+});
+
+describe("narrationLeakCheck — text replacement (truncation)", () => {
+  const successfulWrite = { toolName: "personal_link_create", success: true } as const;
+
+  it("truncates thinking-out-loud preamble + keeps the clean closing sentence", () => {
+    const leaked =
+      "I need to load your calendar to show you what's available next week. " +
+      "Now I'll load your active sessions. " +
+      "Here's a meeting link for Jackson using your primary settings. " +
+      "Let me know if you want to adjust.";
+    const result = runPostStreamChecks({
+      fullText: leaked,
+      toolCalls: [successfulWrite],
+    });
+    expect(result.guards[0]?.name).toBe("narration-leak");
+    expect(result.guards[0]?.scope).toBe("thinking-out-loud");
+    expect(result.replacedFullText).not.toBeNull();
+    expect(result.replacedFullText).toContain("Here's a meeting link for Jackson");
+    expect(result.replacedFullText).toContain("Let me know if you want to adjust");
+    expect(result.replacedFullText).not.toContain("I need to load");
+    expect(result.replacedFullText).not.toContain("Now I'll");
+  });
+
+  it("falls back to a canonical close when every sentence was forbidden + a write succeeded", () => {
+    const allReasoning =
+      "Now I'll load the calendar. Let me check the preferences. Based on the calendar, this is fine.";
+    const result = runPostStreamChecks({
+      fullText: allReasoning,
+      toolCalls: [successfulWrite],
+    });
+    expect(result.guards[0]?.scope).toBe("thinking-out-loud");
+    expect(result.replacedFullText).toBe("Done. Let me know if you want to adjust.");
+  });
+
+  it("does NOT replace when no thinking-out-loud phrase fires", () => {
+    const clean =
+      "Here's a meeting link for Jackson using your primary settings. Let me know if you want to adjust.";
+    const result = runPostStreamChecks({
+      fullText: clean,
+      toolCalls: [successfulWrite],
+    });
+    expect(result.guards).toHaveLength(0);
+    expect(result.replacedFullText).toBeNull();
   });
 });

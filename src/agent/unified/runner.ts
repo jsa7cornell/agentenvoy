@@ -224,9 +224,15 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
     //     Wednesdays", "yes go for it") don't benefit from thinking and
     //     pay output-rate tokens for it.
     //   - everything else: adaptive (model decides budget per turn).
+    // 2026-05-13 (cmp4rin7c): extended thinking disabled by default. Reasoning
+    // leaked into visible content in multiple reports despite explicit prompt
+    // rules; adaptive thinking's cost/quality benefit didn't justify the
+    // narration-leak risk on host-facing turns. Re-enable with UA_THINKING_ENABLED=true
+    // for experiments. The tier + short-turn gates are preserved so that if
+    // we flip the env back on, the prior fine-grained policy still applies.
     const SHORT_TURN_NO_THINK_THRESHOLD = 80;
     const thinkingEnabled =
-      process.env.UA_THINKING_DISABLED !== "true" &&
+      process.env.UA_THINKING_ENABLED === "true" &&
       modelSelection.tier !== "fast" &&
       userMessage.length > SHORT_TURN_NO_THINK_THRESHOLD;
     const startMs = Date.now();
@@ -472,10 +478,16 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
       toolName: r.action,
       success: r.success,
     }));
-    const postStreamGuards: PostStreamGuardRecord[] = runPostStreamChecks(
+    const { guards: postStreamGuards, replacedFullText } = runPostStreamChecks(
       { fullText, toolCalls: postStreamToolCalls },
       postStreamChecks,
     );
+    // A check may have requested replacing `fullText` (e.g., narration-leak
+    // truncation strips reasoning preambles from the visible message). Apply
+    // before persistence and the final emit so the client sees the clean text.
+    if (replacedFullText !== null) {
+      fullText = replacedFullText;
+    }
 
     // Compose the metadata blob and hand it to the caller's persistence
     // callback. Host-channel writes to `ChannelMessage`; deal-room (A.4)

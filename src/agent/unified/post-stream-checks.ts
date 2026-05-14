@@ -77,6 +77,15 @@ export type PostStreamCheckResult = {
   scope?: string;
   /** Free-text reason for telemetry. */
   reason?: string;
+  /**
+   * Optional sanitized replacement for `fullText`. When non-null, the runner
+   * persists this in place of the original and re-emits a final text frame
+   * with the sanitized content. Use only for deterministic, reversible
+   * sanitizations (e.g., stripping forbidden preamble sentences). Telemetry
+   * still records the fire — the original `fullText` length is captured in
+   * `reason` so we can measure how often this kicks in.
+   */
+  replaceFullText?: string;
 };
 
 export type PostStreamCheck = {
@@ -303,6 +312,28 @@ export function hasThinkingOutLoudPhrase(text: string): boolean {
   return false;
 }
 
+/**
+ * Strip "thinking out loud" sentences from prose. Splits on sentence
+ * boundaries (`.`, `!`, `?`, newline) and drops any sentence containing a
+ * forbidden phrase. Returns the remainder trimmed. If everything was
+ * forbidden (the model leaked top-to-bottom), returns an empty string —
+ * the caller decides on a fallback (typically the canonical close template).
+ *
+ * Deterministic, reversible, no model call. Used by `narrationLeakCheck`
+ * when its `thinking-out-loud` sub-shape fires.
+ */
+export function stripThinkingOutLoudSentences(text: string): string {
+  if (!text) return "";
+  // Split on sentence terminators while keeping the terminator. Newline
+  // is treated as a soft boundary so multi-paragraph leaks split cleanly.
+  const pieces = text
+    .split(/(?<=[.!?])\s+|\n+/g)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const kept = pieces.filter((s) => !hasThinkingOutLoudPhrase(s));
+  return kept.join(" ").trim();
+}
+
 export const narrationLeakCheck: PostStreamCheck = {
   name: "narration-leak",
   check: ({ fullText, toolCalls }) => {
@@ -314,10 +345,26 @@ export const narrationLeakCheck: PostStreamCheck = {
     // answering. Length sub-check still gates on writes because a legit
     // read-only Q&A reply can exceed the 240-char cap.
     if (hasThinkingOutLoudPhrase(fullText)) {
+      // 2026-05-13 (cmp4rin7c): escalate thinking-out-loud sub-shape from
+      // flag-only to truncate. Strip forbidden-phrase sentences and persist
+      // the remainder. If everything was forbidden (no clean sentence left),
+      // fall back to the canonical post-write close so the user sees
+      // SOMETHING rather than an empty bubble. Length sub-shape (below)
+      // stays flag-only — fuzzier signal, higher false-positive risk.
+      const stripped = stripThinkingOutLoudSentences(fullText);
+      const writeToolCalls = toolCalls.filter((tc) => !tc.toolName.startsWith("LOAD_"));
+      const anyWriteSuccess = writeToolCalls.some((tc) => tc.success === true);
+      const replacement =
+        stripped.length > 0
+          ? stripped
+          : anyWriteSuccess
+            ? "Done. Let me know if you want to adjust."
+            : "";
       return {
         fired: true,
         scope: "thinking-out-loud",
-        reason: `Prose contains a forbidden "thinking out loud" phrase (Now I'll / I need to / Let me / Based on the / etc.).`,
+        reason: `Prose contained a forbidden "thinking out loud" phrase; truncated ${fullText.length} → ${replacement.length} chars.`,
+        replaceFullText: replacement,
       };
     }
 
@@ -372,18 +419,26 @@ export type PostStreamGuardRecord = {
 
 /**
  * Run all post-stream checks against the given input. Returns the list of
- * guards that fired (empty if none). The runner persists this to
- * `metadata.unifiedTurn.postStreamGuards`.
+ * guards that fired (empty if none) AND any text replacement requested by
+ * a check. The runner persists guards to `metadata.unifiedTurn.postStreamGuards`
+ * and uses `replacedFullText` (when non-null) instead of the original
+ * `fullText` for both persistence and the final text frame.
  *
  * Side-effect-free except for one `console.warn` per fire, so admin log
- * scanning surfaces these without needing to query metadata first. v1 is
- * log-only; v2 may add retry per the cost-reduction proposal's Phase 2.
+ * scanning surfaces these without needing to query metadata first.
  */
+export type RunPostStreamChecksResult = {
+  guards: PostStreamGuardRecord[];
+  /** When non-null, a check requested replacing `fullText` with this value. */
+  replacedFullText: string | null;
+};
+
 export function runPostStreamChecks(
   input: PostStreamCheckInput,
   checks: readonly PostStreamCheck[] = DEFAULT_POST_STREAM_CHECKS,
-): PostStreamGuardRecord[] {
-  const fired: PostStreamGuardRecord[] = [];
+): RunPostStreamChecksResult {
+  const guards: PostStreamGuardRecord[] = [];
+  let replacedFullText: string | null = null;
   for (const c of checks) {
     const result = c.check(input);
     if (!result.fired) continue;
@@ -392,10 +447,15 @@ export function runPostStreamChecks(
       ...(result.scope ? { scope: result.scope } : {}),
       ...(result.reason ? { reason: result.reason } : {}),
     };
-    fired.push(rec);
+    guards.push(rec);
+    if (result.replaceFullText !== undefined && replacedFullText === null) {
+      // First check wins on text replacement. Subsequent checks still get to
+      // record their fires (telemetry) but can't override the replacement.
+      replacedFullText = result.replaceFullText;
+    }
     console.warn(
       `[unified-agent] post-stream check fired: ${c.name}${result.scope ? ` (${result.scope})` : ""} — ${result.reason ?? ""}`,
     );
   }
-  return fired;
+  return { guards, replacedFullText };
 }
