@@ -100,6 +100,32 @@ describe("buildEventTitle — 1:1 turns", () => {
     })).toBe("Susan + John");
   });
 
+  // cmp50uvuq end-state contract: when the handler drops a generic-topic
+  // `activity: "meeting"` via the GENERIC_TOPICS guard, both `activity` and
+  // `customTitle` arrive at buildEventTitle as null. With format=video set
+  // (or guest-pick-format defaulting), the title composes via the format
+  // prefix → "VC: Geoff + John". Pre-fix the generic-topic word leaked into
+  // customTitle and overrode the composition, producing the literal lowercase
+  // "meeting" as the session title.
+  it("no customTitle / no activity / format=video — generic-topic drop produces VC composition (cmp50uvuq)", () => {
+    expect(buildEventTitle({
+      customTitle: null,
+      activity: null,
+      format: "video",
+      inviteeDisplay: "Geoff",
+      hostFirstName: "John",
+    })).toBe("VC: Geoff + John");
+  });
+
+  it("ditto without format → just names (also acceptable; the handler may pass null format on guestPicks.format=true)", () => {
+    expect(buildEventTitle({
+      customTitle: null,
+      activity: null,
+      inviteeDisplay: "Geoff",
+      hostFirstName: "John",
+    })).toBe("Geoff + John");
+  });
+
   it("no host first name → falls back to prefix:invitee", () => {
     expect(buildEventTitle({
       activity: "coffee",

@@ -1160,7 +1160,25 @@ export async function handleCreateLink(
   if (activity && !rawCustomTitle) {
     const isEmDashComposite = activity.includes(" — ");
     const isInVocab = findActivity(activity) !== null;
-    if (!isInVocab && !isEmDashComposite) {
+    // 2026-05-14 cmp50uvuq: also drop the value entirely when it's a GENERIC
+    // filler word ("meeting", "catch up", "sync", "call", "chat", etc.). The
+    // prior guard only handled "not-in-vocab" by rerouting to customTitle,
+    // which turned `activity: "meeting"` into `customTitle: "meeting"` →
+    // `buildEventTitle` then used "meeting" verbatim, producing the literal
+    // lowercase "meeting" as the session title instead of falling through to
+    // the "{invitee} + {host}" / "VC: …" composition. Generic-topic values
+    // carry no information; they should be null on both fields.
+    if (activity && isGenericTopic(activity)) {
+      console.warn("[create_link] activity-vocab guard fired", {
+        rawActivity: activity,
+        action: "drop_generic_topic",
+      });
+      activity = null;
+      // Leave topic + topicSource alone — they were null going in (the
+      // `topic = rawTopic && isGenericTopic(rawTopic) ? null : rawTopic`
+      // filter at the top of the handler already drops generic-topic
+      // `params.topic`). Setting them here would resurrect the filler word.
+    } else if (!isInVocab && !isEmDashComposite) {
       activityReroutedToCustomTitle = activity;
       console.warn("[create_link] activity-vocab guard fired", {
         rawActivity: activity,
