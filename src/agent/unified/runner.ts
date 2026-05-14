@@ -446,6 +446,15 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
     let remediationCost: TurnCost | null = null;
     let remediationDurationMs: number | null = null;
     let remediated = false;
+    // 2026-05-14 (cmp50uvuq follow-up): persist remediation tool calls + their
+    // results separately from the original-stream `actions`/`actionResults`.
+    // The cmp50uvuq triage stalled because the LOAD_calendar_context call that
+    // produced "tomorrow is May 8" happened in the REMEDIATION pass, and only
+    // the remediation pass's tool *names* were persisted — the results were
+    // silently dropped. With these arrays surfaced on the message metadata,
+    // future triages can see what the model actually received during remediation.
+    const remediationActions: { action: string; params: Record<string, unknown> }[] = [];
+    const remediationActionResults: { action: string; success: boolean; message: string; data?: Record<string, unknown> }[] = [];
 
     if (!selfCheckResult.passed) {
       console.warn(
@@ -516,6 +525,24 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
       remediationToolNames = remedSteps.flatMap((s) =>
         s.toolCalls.map((tc) => tc.toolName),
       );
+      // Mirror the original-stream legacyActions/legacyActionResults build,
+      // but keep these scoped to the remediation pass so triages can tell
+      // which pass produced which call. Same { action, success, message, data? }
+      // shape as legacyActionResults — the bundle pipeline already knows it.
+      for (const step of remedSteps) {
+        const results = step.toolResults ?? [];
+        step.toolCalls.forEach((tc, i) => {
+          const input = (tc.input ?? {}) as Record<string, unknown>;
+          remediationActions.push({ action: tc.toolName, params: input });
+          const out = results[i]?.output as ActionResultLike | undefined;
+          remediationActionResults.push({
+            action: tc.toolName,
+            success: out?.success === true,
+            message: typeof out?.message === "string" ? out.message : "",
+            ...(out?.data ? { data: out.data } : {}),
+          });
+        });
+      }
       remediationDurationMs = Date.now() - remediationStart;
       remediationCost = computeTurnCost(
         remedUsage,
@@ -603,6 +630,18 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
       }) as object),
       ...(legacyActions.length > 0
         ? { actions: legacyActions, actionResults: legacyActionResults }
+        : {}),
+      // 2026-05-14 (cmp50uvuq follow-up): when the turn was remediated and
+      // the remediation pass made tool calls, persist those calls + their
+      // full results in a separate field. Scoped to the remediation pass —
+      // the original-stream calls stay in `actions`/`actionResults`. Omitted
+      // entirely when no remediation calls were made (omission mirrors how
+      // `remediated`/`remediationDurationMs` are conditionally included).
+      ...(remediationActions.length > 0
+        ? {
+            remediationActions,
+            remediationActionResults,
+          }
         : {}),
       ...(linkCardExtras
         ? {
