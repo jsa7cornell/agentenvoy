@@ -30,6 +30,32 @@ export interface ActivityEntry {
   /** Display emoji. Used by emoji picker and calendar invite copy. */
   emoji: string;
   /**
+   * 2026-05-14 cmp4u* video-call emoji bug: optional format-aware emoji
+   * override. When the host's chosen format matches a key here, the override
+   * wins over the static `emoji` field above. Today only `call` uses this
+   * (📞 for phone, 📹 for video); other entries either lock format (so static
+   * emoji is correct by definition) or use format-agnostic emoji that work
+   * across formats (💬 chat, 🧠 brainstorm, 👋 intro, etc.).
+   *
+   * Format-locked entries (defaultFormat: "in-person" / "phone" / "video")
+   * generally don't need this — their emoji matches the locked format.
+   * Format-flex entries (defaultFormat: null) only need it when the static
+   * emoji is strongly format-coded.
+   */
+  emojiByFormat?: Partial<Record<"in-person" | "video" | "phone", string>>;
+  /**
+   * 2026-05-14 cmp4u* video-call title bug: optional format-aware title-
+   * prefix override consumed by `buildEventTitle`. When the host's chosen
+   * format matches a key here, the override wins over the title-cased
+   * canonical name. Today only `call` uses this ("Call" for phone, "VC" for
+   * video) — the static title-case of `call` is "Call", which is wrong for
+   * a video call. Without this override, `buildEventTitle` would produce
+   * "Call: Calle + John" for a video meeting because the vocab lookup wins
+   * before the format-prefix fallback (FORMAT_PREFIX_MAP at
+   * build-event-title.ts:53).
+   */
+  prefixByFormat?: Partial<Record<"in-person" | "video" | "phone", string>>;
+  /**
    * Default format when activity is named alone. Drives the physical-activity
    * rule in calendar-event-composer.md — "video" silently applying to a bike
    * ride was the bug this primitive prevents.
@@ -80,7 +106,12 @@ export const ACTIVITY_VOCAB: readonly ActivityEntry[] = [
   // 2026-05-12 additions. These don't lock format — coffee call vs. coffee
   // in-person is a real distinction, and "meet" / "chat" can be any medium.
   { name: "meet",       aliases: ["meet", "meet up", "meet-up", "get together", "hang", "1:1", "one on one", "review", "catch up in person"], emoji: "🤝", defaultFormat: null, naturalWindow: null, defaultDuration: null },
-  { name: "call",       aliases: ["call", "phone call", "ring", "give me a buzz"],     emoji: "📞", defaultFormat: "phone", naturalWindow: null, defaultDuration: null },
+  // 2026-05-14 cmp4u*: "call" is format-flex now. Modern usage ("let's hop
+  // on a call", "VC with Calle") is video-default; "ring", "give me a buzz"
+  // are still phone shapes. Format-aware emoji + prefix overrides resolve
+  // the right display per host-chosen format. defaultFormat is null so the
+  // host's format wins (no silent phone-locking like the prior entry).
+  { name: "call",       aliases: ["call", "phone call", "video call", "vc", "zoom call", "zoom", "ring", "give me a buzz"], emoji: "📞", emojiByFormat: { video: "📹", phone: "📞", "in-person": "🤝" }, prefixByFormat: { video: "VC", phone: "Call", "in-person": "Meeting" }, defaultFormat: null, naturalWindow: null, defaultDuration: null },
   { name: "chat",       aliases: ["chat", "catch up", "quick chat"],                    emoji: "💬", defaultFormat: null, naturalWindow: null, defaultDuration: null },
   { name: "brainstorm", aliases: ["brainstorm", "brainstorming"],                       emoji: "🧠", defaultFormat: null,    naturalWindow: null, defaultDuration: null },
   { name: "intro",      aliases: ["intro", "introduction", "meet-and-greet"],           emoji: "👋", defaultFormat: null,    naturalWindow: null, defaultDuration: null },
@@ -124,10 +155,23 @@ export function findActivity(query: string | null | undefined): ActivityEntry | 
  * vocab — caller may fall back to a format-derived emoji or omit the icon
  * entirely. Original null-fallback semantics preserved (callers handle the
  * miss explicitly; do not force a 📌 default).
+ *
+ * 2026-05-14 cmp4u*: optional `format` parameter routes through the entry's
+ * `emojiByFormat` override when the entry defines one for the given format.
+ * Only `call` uses this today (📹 video, 📞 phone, 🤝 in-person). Callers
+ * that don't know the format can omit the param — falls back to the entry's
+ * static `emoji`, preserving pre-fix behavior.
  */
-export function emojiForActivity(activity: string | null | undefined): string | null {
+export function emojiForActivity(
+  activity: string | null | undefined,
+  format?: "in-person" | "video" | "phone" | null,
+): string | null {
   const entry = findActivity(activity);
-  return entry?.emoji ?? null;
+  if (!entry) return null;
+  if (format && entry.emojiByFormat?.[format]) {
+    return entry.emojiByFormat[format];
+  }
+  return entry.emoji;
 }
 
 /**

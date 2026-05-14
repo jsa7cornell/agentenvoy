@@ -74,10 +74,22 @@ export function buildEventTitle(input: BuildEventTitleInput): string {
   }
 
   // Derive activity prefix from vocab match; fall back to format mapping.
+  // 2026-05-14 cmp4u*: when the matched entry defines a `prefixByFormat`
+  // override for the host's chosen format, that wins over the title-cased
+  // canonical name. Only `call` uses this today ("Call" for phone, "VC" for
+  // video). Pre-fix, vocab match for "call" + format=video produced "Call:
+  // Calle + John" because the title-case path didn't know the format mattered.
   let prefix: string | null = null;
   if (input.activity) {
     const entry = findActivity(input.activity);
-    if (entry) prefix = titleCaseActivity(entry.name);
+    if (entry) {
+      const byFormat = input.format ? entry.prefixByFormat?.[input.format] : undefined;
+      if (byFormat) {
+        prefix = byFormat;
+      } else {
+        prefix = titleCaseActivity(entry.name);
+      }
+    }
   }
   if (!prefix && input.format && FORMAT_PREFIX_MAP[input.format]) {
     prefix = FORMAT_PREFIX_MAP[input.format];

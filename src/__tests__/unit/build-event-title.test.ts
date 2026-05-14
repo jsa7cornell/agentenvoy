@@ -162,3 +162,76 @@ describe("buildEventTitle — group turns", () => {
     })).toBe("Founder Dinner");
   });
 });
+
+// ── Format-aware prefix overrides (2026-05-14 cmp4u*) ───────────────────────
+describe("buildEventTitle — format-aware prefix overrides (cmp4u*)", () => {
+  // Pre-cmp4u* "call" → "Call" via titleCaseActivity, regardless of format.
+  // Production bug: "grab 45 mins VC with Calle" produced "Call: Calle + John"
+  // because the vocab match for "call" beat the FORMAT_PREFIX_MAP fallback.
+  // Fix: the "call" vocab entry now defines prefixByFormat = { video: "VC",
+  // phone: "Call", in-person: "Meeting" }, which buildEventTitle consults
+  // before falling through to titleCaseActivity.
+
+  it("call + video → 'VC: <invitee> + <host>' (the bug — was 'Call: ...')", () => {
+    expect(buildEventTitle({
+      activity: "call",
+      format: "video",
+      inviteeDisplay: "Calle",
+      hostFirstName: "John",
+    })).toBe("VC: Calle + John");
+  });
+
+  it("call + phone → 'Call: <invitee> + <host>' (phone-call shape preserved)", () => {
+    expect(buildEventTitle({
+      activity: "call",
+      format: "phone",
+      inviteeDisplay: "Sarah",
+      hostFirstName: "John",
+    })).toBe("Call: Sarah + John");
+  });
+
+  it("call + in-person → 'Meeting: <invitee> + <host>' (rare combo)", () => {
+    expect(buildEventTitle({
+      activity: "call",
+      format: "in-person",
+      inviteeDisplay: "Bob",
+      hostFirstName: "John",
+    })).toBe("Meeting: Bob + John");
+  });
+
+  it("call with no format → falls back to title-cased canonical name 'Call'", () => {
+    // Defensive: a turn without a format should still produce a stable title
+    // rather than null/empty. Falls through to titleCaseActivity → "Call".
+    // Documents the back-compat path.
+    expect(buildEventTitle({
+      activity: "call",
+      inviteeDisplay: "Calle",
+      hostFirstName: "John",
+    })).toBe("Call: Calle + John");
+  });
+
+  it("call aliases route through prefixByFormat too ('VC' / 'video call' / 'zoom call')", () => {
+    for (const alias of ["VC", "video call", "zoom call", "Zoom"]) {
+      expect(
+        buildEventTitle({
+          activity: alias,
+          format: "video",
+          inviteeDisplay: "Calle",
+          hostFirstName: "John",
+        }),
+        `expected VC prefix for alias: ${alias}`,
+      ).toBe("VC: Calle + John");
+    }
+  });
+
+  it("other entries (no prefixByFormat) ignore format and use title-cased canonical name", () => {
+    // Sanity check that the format-aware path doesn't accidentally affect
+    // entries that haven't opted in.
+    expect(buildEventTitle({
+      activity: "coffee",
+      format: "video", // unusual combo — coffee is in-person-locked by vocab
+      inviteeDisplay: "Christine",
+      hostFirstName: "John",
+    })).toBe("Coffee: Christine + John");
+  });
+});

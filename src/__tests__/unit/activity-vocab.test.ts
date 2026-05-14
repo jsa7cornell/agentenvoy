@@ -128,6 +128,45 @@ describe("emojiForActivity", () => {
     expect(emojiForActivity(null)).toBeNull();
     expect(emojiForActivity("")).toBeNull();
   });
+
+  // ── Format-aware overrides (2026-05-14 cmp4u*) ────────────────────────────
+  describe("format-aware overrides", () => {
+    it("returns 📹 for call + video", () => {
+      expect(emojiForActivity("call", "video")).toBe("📹");
+    });
+
+    it("returns 📞 for call + phone", () => {
+      expect(emojiForActivity("call", "phone")).toBe("📞");
+    });
+
+    it("returns 🤝 for call + in-person (rare but defined)", () => {
+      expect(emojiForActivity("call", "in-person")).toBe("🤝");
+    });
+
+    it("returns static 📞 for call when no format passed (back-compat)", () => {
+      // Pre-cmp4u* signature was emojiForActivity(activity) with no format.
+      // Callers that haven't been updated to pass format still get the
+      // historical static emoji ("📞") — no behavior break, just no upgrade.
+      expect(emojiForActivity("call")).toBe("📞");
+    });
+
+    it("vocab aliases route through the format-aware path too", () => {
+      // "vc", "zoom call", "video call" are aliases on the "call" entry.
+      // The format-aware override fires for any alias match.
+      expect(emojiForActivity("VC", "video")).toBe("📹");
+      expect(emojiForActivity("video call", "video")).toBe("📹");
+      expect(emojiForActivity("zoom call", "video")).toBe("📹");
+      expect(emojiForActivity("phone call", "phone")).toBe("📞");
+    });
+
+    it("falls back to static emoji when format is passed but no override defined", () => {
+      // Other entries don't define emojiByFormat → static emoji wins
+      // regardless of format. Sanity check for the fallback path.
+      expect(emojiForActivity("coffee", "video")).toBe("☕");
+      expect(emojiForActivity("hike", "phone")).toBe("🥾");
+      expect(emojiForActivity("intro", "video")).toBe("👋");
+    });
+  });
 });
 
 describe("defaultFormatForActivity", () => {
@@ -150,8 +189,12 @@ describe("defaultFormatForActivity", () => {
     expect(defaultFormatForActivity("other")).toBeNull();
   });
 
-  it("returns phone for call (format-locked)", () => {
-    expect(defaultFormatForActivity("call")).toBe("phone");
+  it("returns null for call (now format-flex per 2026-05-14 cmp4u*)", () => {
+    // Pre-cmp4u* "call" was phone-locked. The vocab now treats "call" as
+    // format-flex so video calls don't get the phone emoji 📞 and the title
+    // prefix matches the format ("VC" for video, "Call" for phone). The
+    // host's chosen format wins via prefixByFormat / emojiByFormat overrides.
+    expect(defaultFormatForActivity("call")).toBeNull();
   });
 
   it("returns null for unknown activities", () => {

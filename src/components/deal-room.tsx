@@ -1939,7 +1939,14 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     activity?: string | null | undefined,
   ): string {
     // 1. Activity vocab — canonical source of truth.
-    const activityEmoji = emojiForActivity(activity ?? null);
+    // 2026-05-14 cmp4u*: pass the known format so format-aware overrides
+    // (only `call` today: 📹 video / 📞 phone / 🤝 in-person) kick in.
+    // Without this, `call` always returned 📞 even on video meetings.
+    const fmtTyped: "in-person" | "video" | "phone" | null =
+      format === "in-person" || format === "video" || format === "phone"
+        ? format
+        : null;
+    const activityEmoji = emojiForActivity(activity ?? null, fmtTyped);
     if (activityEmoji) return activityEmoji;
 
     // 2. Location-keyword fallback — only when activity didn't resolve.

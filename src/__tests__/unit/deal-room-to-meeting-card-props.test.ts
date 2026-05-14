@@ -374,13 +374,37 @@ describe("dealRoomToMeetingCardProps — title (canonical via buildEventTitle, 2
     expect(result?.title).toBe("Meeting with John Anderson");
   });
 
-  it("produces canonical '{Prefix}: {invitee} + {host}' for activity + invitee (cmp4ucke5)", () => {
-    // The exact production case: activity "call" + invitee "Calle" + host
-    // "John Anderson" → must match the session.title stored in the DB
-    // ("Call: Calle + John"), so the dashboard event card and the deal-
-    // room event page render identical titles.
+  it("produces canonical '{Prefix}: {invitee} + {host}' for activity + invitee — VC shape per cmp4u* fix", () => {
+    // cmp4ucke5 (2026-05-14): exact production case is "grab 45 mins VC with
+    // Calle". The MODEL emits activity:"call" + format:"video". Pre-cmp4u*
+    // both this assertion AND the session.title in DB were "Call: Calle +
+    // John" — wrong shape for a video call (phone-flavored prefix).
+    // Post-cmp4u* the "call" vocab entry's prefixByFormat override resolves
+    // video → "VC", so both surfaces produce "VC: Calle + John". The pair
+    // still matches (the cmp4ucke5 fix's invariant) — just with the
+    // correct video shape.
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
+      linkActivity: "call",
+      inviteeName: "Calle",
+      hostName: "John Anderson",
+    });
+    // BASE_SNAPSHOT.confirmData.format === "video" → routes through
+    // prefixByFormat.video = "VC".
+    expect(result?.title).toBe("VC: Calle + John");
+  });
+
+  it("call + phone (explicit phone-call) produces 'Call: <invitee> + <host>'", () => {
+    // The "phone call" side of the call vocab entry: explicit phone format
+    // still produces the "Call:" prefix. Documents the directional contract
+    // (video → VC, phone → Call) at the deal-room surface, not just at the
+    // helper level.
+    const result = dealRoomToMeetingCardProps({
+      ...BASE_SNAPSHOT,
+      confirmData: {
+        ...BASE_SNAPSHOT.confirmData,
+        format: "phone",
+      },
       linkActivity: "call",
       inviteeName: "Calle",
       hostName: "John Anderson",
@@ -451,10 +475,13 @@ describe("dealRoomToMeetingCardProps — title (canonical via buildEventTitle, 2
     expect(result?.title).toBe("Coffee: Sarah + John");
   });
 
-  it("PROPOSAL state — uses the same canonical formula as confirmed state", () => {
-    // Critical: this is the regression cell. Pre-fix, the proposal-state
-    // path used the same buggy bespoke formula. The screenshot in cmp4ucke5
-    // showed "call with Calle" on a fresh proposal-state link.
+  it("PROPOSAL state — uses the same canonical formula as confirmed state (now with VC shape per cmp4u*)", () => {
+    // Critical: this is the cross-path regression cell. Pre-cmp4ucke5 the
+    // proposal-state path used a bespoke "{activity} with {invitee}" formula
+    // ("call with Calle"); the cmp4ucke5 fix routed both paths through
+    // buildEventTitle. The cmp4u* follow-up corrects the video-call shape —
+    // the canonical title for call+video is now "VC: ..." not "Call: ...".
+    // Both paths must produce the same shape (the original invariant).
     const result = dealRoomToMeetingCardProps({
       ...BASE_SNAPSHOT,
       confirmData: null, // forces the proposal-state code path
@@ -463,7 +490,7 @@ describe("dealRoomToMeetingCardProps — title (canonical via buildEventTitle, 2
       hostName: "John Anderson",
       linkFormat: "video",
     });
-    expect(result?.title).toBe("Call: Calle + John");
+    expect(result?.title).toBe("VC: Calle + John");
   });
 });
 

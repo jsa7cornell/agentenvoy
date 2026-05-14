@@ -137,7 +137,9 @@ When the host gives BOTH a verb-activity (`coffee`, `lunch`, `dinner`, `drinks`,
 |---|---|---|
 | `one-hour coffee with Christine regarding AI discussion continued` | `"coffee — AI discussion continued"` | `in-person`, `60`, `☕` |
 | `lunch with Bob about the Q3 launch` | `"lunch — Q3 launch"` | `in-person`, `60`, `🥗` |
-| `quick call with Sarah re. budget` | `"call — budget"` | `video`, `15` or `30`, `📞` |
+| `quick call with Sarah re. budget` (video-default modern usage) | `"call — budget"` | `video`, `15` or `30`, **omit `activityIcon`** — the system derives 📹 from `call`+`video` |
+| `phone call with Sarah re. budget` (explicit phone) | `"call — budget"` | `phone`, `15` or `30`, **omit `activityIcon`** — system derives 📞 from `call`+`phone` |
+| `VC with Calle tomorrow` (no topic — just the verb-activity) | `"call"` (verb only — no topic given) | `video`, primary default, **omit `activityIcon`** — system derives 📹 |
 | `hike with Marcus to discuss the merger` | `"hike — merger discussion"` | `in-person`, `120`, `🥾` |
 
 **Why combine, not pick one:** the personal-link schema has one `activity` field that does double duty (event title + format/duration inference). Choosing just the verb (`activity: "coffee"`) loses the topic from the event page; choosing just the topic (`activity: "AI discussion continued"`) loses the format/duration/icon inference. Em-dash combine keeps both.

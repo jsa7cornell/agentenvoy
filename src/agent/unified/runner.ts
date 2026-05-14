@@ -972,6 +972,22 @@ type LinkCardExtras = {
  * the feed needs to render a structured card. Returns null if no link-create
  * tool fired on this turn.
  */
+/**
+ * Narrow a free-form tool-input format string to the activity-vocab's typed
+ * format union, or `null` when it's not one of the recognized values. The
+ * model may emit any string in `params.format`; emojiForActivity's optional
+ * format param requires the typed union for the lookup table.
+ * 2026-05-14 cmp4u* (call/video emoji fix).
+ */
+function normalizeFormat(
+  format: string | undefined,
+): "in-person" | "video" | "phone" | null {
+  if (format === "in-person" || format === "video" || format === "phone") {
+    return format;
+  }
+  return null;
+}
+
 function extractLinkCardMeta(
   steps: Array<{
     toolCalls: ReadonlyArray<{ toolName: string; input: unknown }>;
@@ -1003,7 +1019,7 @@ function extractLinkCardMeta(
             timeEnd: input.timeEnd,
             recurrence: input.recurrence,
             activity: input.activity,
-            activityIcon: input.activityIcon ?? emojiForActivity(input.activity),
+            activityIcon: input.activityIcon ?? emojiForActivity(input.activity, normalizeFormat(input.format)),
           },
         };
       }
@@ -1016,7 +1032,7 @@ function extractLinkCardMeta(
             inviteeName: input.inviteeName,
             inviteeEmail: input.inviteeEmail,
             activity: input.activity,
-            activityIcon: input.activityIcon ?? emojiForActivity(input.activity),
+            activityIcon: input.activityIcon ?? emojiForActivity(input.activity, normalizeFormat(input.format)),
             format: input.format,
             durationMinutes: input.durationMinutes,
             recurrence: input.recurrence,
@@ -1032,7 +1048,7 @@ function extractLinkCardMeta(
             topic: input.topic,
             inviteeNames: input.inviteeNames,
             activity: input.activity,
-            activityIcon: input.activityIcon ?? emojiForActivity(input.activity),
+            activityIcon: input.activityIcon ?? emojiForActivity(input.activity, normalizeFormat(input.format)),
             format: input.format,
             durationMinutes: input.durationMinutes,
           },
