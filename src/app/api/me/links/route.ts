@@ -18,7 +18,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { compileBookableLinks } from "@/lib/availability-rules";
+import { compileBookableLinks, getBusinessHoursWindow } from "@/lib/availability-rules";
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { linkNeedsSetup } from "@/lib/links/posture";
 
@@ -96,7 +96,7 @@ export async function GET() {
   const prefs = (user.preferences as Record<string, unknown> | null) || {};
   const explicit = (prefs.explicit as Record<string, unknown> | undefined) || {};
   const rules = (explicit.structuredRules as AvailabilityRule[] | undefined) || [];
-  const bookableLinks = compileBookableLinks(rules);
+  const bookableLinks = compileBookableLinks(rules, getBusinessHoursWindow(prefs));
   for (const oh of bookableLinks) {
     links.push({
       kind: "bookable",

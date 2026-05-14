@@ -221,8 +221,13 @@ export function dropLegacyActionRules(
  *
  * Pure function — no LLM, no async, fully deterministic.
  */
-export function compileBookableLinks(rules: AvailabilityRule[]): CompiledBookableLink[] {
+export function compileBookableLinks(
+  rules: AvailabilityRule[],
+  defaults?: { windowStart?: string; windowEnd?: string },
+): CompiledBookableLink[] {
   const today = new Date().toISOString().slice(0, 10);
+  const defaultStart = defaults?.windowStart || "00:00";
+  const defaultEnd = defaults?.windowEnd || "23:59";
   const out: CompiledBookableLink[] = [];
 
   for (const rule of rules) {
@@ -240,14 +245,46 @@ export function compileBookableLinks(rules: AvailabilityRule[]): CompiledBookabl
       title: bookableData.title,
       format: bookableData.format,
       durationMinutes: bookableData.durationMinutes,
-      windowStart: rule.timeStart || "00:00",
-      windowEnd: rule.timeEnd || "23:59",
+      // No time bounds on the rule means "bookable during my normal hours,"
+      // not "bookable 24/7." Inherit the host's business-hours window when
+      // the caller passes it; fall back to 00:00–23:59 only when no defaults
+      // are available (callers without prefs context).
+      windowStart: rule.timeStart || defaultStart,
+      windowEnd: rule.timeEnd || defaultEnd,
       daysOfWeek: rule.daysOfWeek || [],
       expiryDate: rule.expiryDate,
     });
   }
 
   return out;
+}
+
+/**
+ * Extract the host's business-hours window as HH:MM strings to seed
+ * `compileBookableLinks` defaults. Returns undefined when prefs don't carry
+ * a usable business-hours pair (caller falls back to 00:00/23:59).
+ */
+export function getBusinessHoursWindow(
+  prefs: Record<string, unknown> | null | undefined,
+): { windowStart: string; windowEnd: string } | undefined {
+  const explicit = (prefs?.explicit as Record<string, unknown> | undefined) || {};
+  const startMin =
+    (explicit.businessHoursStartMinutes as number | undefined) ??
+    (typeof explicit.businessHoursStart === "number"
+      ? (explicit.businessHoursStart as number) * 60
+      : undefined);
+  const endMin =
+    (explicit.businessHoursEndMinutes as number | undefined) ??
+    (typeof explicit.businessHoursEnd === "number"
+      ? (explicit.businessHoursEnd as number) * 60
+      : undefined);
+  if (startMin == null || endMin == null) return undefined;
+  const fmt = (m: number) => {
+    const h = Math.floor(m / 60);
+    const min = m % 60;
+    return `${h < 10 ? "0" : ""}${h}:${min < 10 ? "0" : ""}${min}`;
+  };
+  return { windowStart: fmt(startMin), windowEnd: fmt(endMin) };
 }
 
 /**

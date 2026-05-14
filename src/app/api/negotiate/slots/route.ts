@@ -5,7 +5,7 @@ import { applyEventOverrides, type LinkParameters, type ScoredSlot } from "@/lib
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getUserTimezone } from "@/lib/timezone";
-import { getActiveLocationRule, compileBookableLinks, type AvailabilityRule } from "@/lib/availability-rules";
+import { getActiveLocationRule, compileBookableLinks, getBusinessHoursWindow, type AvailabilityRule } from "@/lib/availability-rules";
 import { computeDensityHorizon } from "@/lib/availability-density";
 import { getSchedulingMode } from "@/lib/scheduling-mode";
 import { applyBookableWindow, type ConfirmedBooking } from "@/lib/bookable-links";
@@ -204,7 +204,7 @@ export async function GET(req: NextRequest) {
     // protection, and subtract already-booked sibling sessions for the same rule.
     if (recurringWindowId) {
       const allRules = (explicit?.structuredRules as AvailabilityRule[] | undefined) ?? [];
-      const compiledLinks = compileBookableLinks(allRules);
+      const compiledLinks = compileBookableLinks(allRules, getBusinessHoursWindow(prefs));
       const compiled = compiledLinks.find((l) => l.ruleId === recurringWindowId);
       if (compiled) {
         // Sibling confirmed bookings — any other session spawned from the same

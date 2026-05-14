@@ -9,6 +9,11 @@ import {
 import type { AvailabilityRule } from "@/lib/availability-rules";
 import { formatDuration, formatDurationCompact } from "@/lib/format-duration";
 
+// Hidden 2026-05-13. Primary-link modal is now the canonical edit surface
+// for business hours; the underlying setting still drives scoring. Flip true
+// to restore the dedicated card on the rules page if needed before retirement.
+const SHOW_BUSINESS_HOURS_CARD = false;
+
 // --- Types ---
 
 interface ParsedRule {
@@ -423,7 +428,7 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
                 onClick={() => setHelpOpen(true)}
                 className="text-[10px] text-muted mt-1.5 text-left hover:text-secondary transition underline decoration-dotted decoration-muted underline-offset-2"
               >
-                Set business hours &middot; Block or protect time &middot; Limit days &middot; Set buffers &middot; Create office hours &middot; Allow exceptions
+                Block or protect time &middot; Limit days &middot; Set buffers &middot; Create office hours &middot; Allow exceptions
               </button>
             )}
             </>
@@ -442,8 +447,11 @@ export function AvailabilityRules({ onSaved }: { onSaved: () => void }) {
             />
           )}
 
-          {/* Business hours card */}
-          {data.businessHoursStart != null && data.businessHoursEnd != null && (
+          {/* Business hours card — hidden 2026-05-13. Primary-link modal is now
+              the canonical edit surface; the underlying setting still drives
+              scoring (hoursProtectionLayer). Card retained for short-term
+              fallback / future-retire — toggle via SHOW_BUSINESS_HOURS_CARD. */}
+          {SHOW_BUSINESS_HOURS_CARD && data.businessHoursStart != null && data.businessHoursEnd != null && (
             <div className="bg-surface-secondary border border-DEFAULT rounded-xl">
               <div
                 className="flex items-center gap-2 px-3 py-2.5 cursor-pointer"
@@ -614,12 +622,6 @@ function HelpModal({ onClose }: { onClose: () => void }) {
             Type rules in plain English. Envoy parses them, shows you what it understood,
             and lets you confirm before saving. Rules compose &mdash; add as many as you need.
           </p>
-
-          <div>
-            <p className="text-primary font-medium mb-1">Business hours</p>
-            <p className="text-muted">&ldquo;Available 9am to 5pm weekdays&rdquo;</p>
-            <p className="text-muted">&ldquo;Work hours Monday to Thursday 10 to 4&rdquo;</p>
-          </div>
 
           <div>
             <p className="text-primary font-medium mb-1">Block or protect time</p>

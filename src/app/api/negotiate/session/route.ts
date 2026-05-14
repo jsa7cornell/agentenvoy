@@ -9,7 +9,7 @@ import { generateCode } from "@/lib/utils";
 import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
 import type { ScoredSlot, LinkParameters } from "@/lib/scoring";
 import { applyEventOverrides } from "@/lib/scoring";
-import { compileBookableLinks, type AvailabilityRule } from "@/lib/availability-rules";
+import { compileBookableLinks, getBusinessHoursWindow, type AvailabilityRule } from "@/lib/availability-rules";
 import { applyBookableWindow } from "@/lib/bookable-links";
 import type { Prisma } from "@prisma/client";
 import { displayStatusLabel } from "@/lib/status-label";
@@ -819,7 +819,7 @@ export async function POST(req: NextRequest) {
   // was spawned from (if any), so the greeting shows the same set of times the
   // slots endpoint will later return for the widget.
   if (officeHoursRule) {
-    const compiledLinks = compileBookableLinks([officeHoursRule]);
+    const compiledLinks = compileBookableLinks([officeHoursRule], getBusinessHoursWindow(hostPrefs));
     const compiled = compiledLinks[0];
     if (compiled) {
       const siblings = await prisma.negotiationSession.findMany({

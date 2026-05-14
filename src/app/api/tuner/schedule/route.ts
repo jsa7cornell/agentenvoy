@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getOrComputeSchedule, CalendarEvent } from "@/lib/calendar";
-import { type AvailabilityRule, compileBookableLinks } from "@/lib/availability-rules";
+import { type AvailabilityRule, compileBookableLinks, getBusinessHoursWindow } from "@/lib/availability-rules";
 import { applyBookableWindow } from "@/lib/bookable-links";
 import type { EventProtectionOverride } from "@/lib/scoring";
 
@@ -65,29 +65,33 @@ export async function GET(req: NextRequest) {
     return t >= weekStart.getTime() && t < weekEnd.getTime();
   });
 
-  // Apply bookable-link transforms so the host's own availability view
-  // reflects any bookable rules (soft-protection override inside window).
-  // Confirmed bookings are already present as real calendar events via the
-  // Google Calendar sync path, so we pass an empty array here.
+  // Apply bookable-link transforms ONLY when the host has selected a specific
+  // bookable link from the dropdown. The default dashboard view shows the
+  // host's primary-link perspective — no bookable transforms — so business-
+  // hours protection (off-hours / weekend) is visible and isn't clobbered
+  // by broad bookable rules that cover most of the calendar.
   //
-  // If ?linkCode= is provided, scope to that bookable link only so the
-  // calendar shows availability from that link's perspective.
+  // When ?linkCode= is provided, scope to that one rule so the calendar
+  // reflects what guests of that bookable link would see.
   const linkCodeParam = req.nextUrl.searchParams.get("linkCode");
-  const compiledOH = compileBookableLinks(structuredRules);
-  const ohRulesToApply = linkCodeParam
-    ? compiledOH.filter((r) => r.linkCode === linkCodeParam)
-    : compiledOH;
-  for (const ohRule of ohRulesToApply) {
-    const transformed = applyBookableWindow({
-      rule: ohRule,
-      slots,
-      confirmedBookings: [],
-      timezone: schedule.timezone,
-    });
-    // applyBookableWindow drops slots outside the window — merge its
-    // overrides back into the full week set so the rest of the day still renders.
-    const overrideByKey = new Map(transformed.map((s) => [`${s.start}|${s.end}`, s]));
-    slots = slots.map((s) => overrideByKey.get(`${s.start}|${s.end}`) ?? s);
+  if (linkCodeParam) {
+    const compiledOH = compileBookableLinks(
+      structuredRules,
+      getBusinessHoursWindow(prefs),
+    );
+    const ohRulesToApply = compiledOH.filter((r) => r.linkCode === linkCodeParam);
+    for (const ohRule of ohRulesToApply) {
+      const transformed = applyBookableWindow({
+        rule: ohRule,
+        slots,
+        confirmedBookings: [],
+        timezone: schedule.timezone,
+      });
+      // applyBookableWindow drops slots outside the window — merge its
+      // overrides back into the full week set so the rest of the day still renders.
+      const overrideByKey = new Map(transformed.map((s) => [`${s.start}|${s.end}`, s]));
+      slots = slots.map((s) => overrideByKey.get(`${s.start}|${s.end}`) ?? s);
+    }
   }
 
   // Filter events to the requested week (include events that overlap)

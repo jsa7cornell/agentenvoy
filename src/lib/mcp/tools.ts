@@ -31,6 +31,7 @@ import {
 import { getOrComputeSchedule } from "@/lib/calendar";
 import {
   compileBookableLinks,
+  getBusinessHoursWindow,
   type AvailabilityRule,
 } from "@/lib/availability-rules";
 import {
@@ -307,7 +308,7 @@ export async function handleGetAvailability(
     const explicit = prefs.explicit as Record<string, unknown> | undefined;
     const allRules =
       (explicit?.structuredRules as AvailabilityRule[] | undefined) ?? [];
-    const compiledLinks = compileBookableLinks(allRules);
+    const compiledLinks = compileBookableLinks(allRules, getBusinessHoursWindow(prefs as Record<string, unknown>));
     const compiled = compiledLinks.find((l) => l.ruleId === link.recurringWindowId);
     if (compiled) {
       const siblings = await prisma.negotiationSession.findMany({

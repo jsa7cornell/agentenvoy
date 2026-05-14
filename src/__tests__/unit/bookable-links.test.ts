@@ -377,6 +377,31 @@ describe("compileBookableLinks", () => {
     const out = compileBookableLinks([bad]);
     expect(out).toHaveLength(0);
   });
+
+  it("falls back to 00:00/23:59 when rule has no time bounds and no defaults", () => {
+    const rule = ruleOf();
+    delete rule.timeStart;
+    delete rule.timeEnd;
+    const out = compileBookableLinks([rule]);
+    expect(out[0].windowStart).toBe("00:00");
+    expect(out[0].windowEnd).toBe("23:59");
+  });
+
+  it("inherits caller-provided defaults (business hours) when rule has no time bounds", () => {
+    const rule = ruleOf();
+    delete rule.timeStart;
+    delete rule.timeEnd;
+    const out = compileBookableLinks([rule], { windowStart: "09:00", windowEnd: "18:00" });
+    expect(out[0].windowStart).toBe("09:00");
+    expect(out[0].windowEnd).toBe("18:00");
+  });
+
+  it("explicit rule time bounds win over defaults", () => {
+    const rule = ruleOf({ timeStart: "14:00", timeEnd: "16:00" });
+    const out = compileBookableLinks([rule], { windowStart: "09:00", windowEnd: "18:00" });
+    expect(out[0].windowStart).toBe("14:00");
+    expect(out[0].windowEnd).toBe("16:00");
+  });
 });
 
 describe("generateBookableLinkCode", () => {
