@@ -1141,6 +1141,16 @@ function MeetLinkCard({ url, topic, kind }: { url: string; topic?: string; kind?
 
 // ── Feed component ──────────────────────────────────────────────────────
 
+/** Extract the link code (last path segment) from a /meet/{slug}/{code} URL. */
+function extractLinkCode(url: string): string | null {
+  try {
+    const parts = new URL(url).pathname.split("/").filter(Boolean);
+    return parts.length >= 3 ? (parts[parts.length - 1] ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | null } = {}) {
   const router = useRouter();
   const [messages, setMessages] = useState<ChannelMsg[]>([]);
@@ -1169,6 +1179,7 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     // PR-E: "event_action" is the new cluster name; "schedule" kept for stale-data compat.
     replies: Array<{ label: string; intent: "event_action" | "inquire" | "schedule" }>;
   } | null>(null);
+  const [liveLinkMeta, setLiveLinkMeta] = useState<Record<string, BookableMeta>>({});
   const [initialLoading, setInitialLoading] = useState(true);
   const [calendarConnected, setCalendarConnected] = useState(true);
   const [isCalibrated, setIsCalibrated] = useState(true);
@@ -1508,6 +1519,33 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
     window.addEventListener("envoy:calendar-confirmed", onConfirmed);
     return () => window.removeEventListener("envoy:calendar-confirmed", onConfirmed);
   }, []);
+
+  // Fetch live link metadata for any link-card messages in the feed.
+  // On each messages change, collect unique link codes from messages that
+  // have a linkKind (bookable/personal/group) and a parseable linkUrl, then
+  // batch-fetch current state from /api/me/links/live. Merges into existing
+  // liveLinkMeta so codes from earlier pages aren't evicted.
+  useEffect(() => {
+    const codes: string[] = [];
+    for (const msg of messages) {
+      const meta = msg.metadata as Record<string, unknown> | null;
+      const kind = meta?.linkKind;
+      if (kind !== "bookable" && kind !== "personal" && kind !== "group") continue;
+      const url = meta?.linkUrl;
+      if (typeof url !== "string") continue;
+      const code = extractLinkCode(url);
+      if (code && !codes.includes(code)) codes.push(code);
+    }
+    if (codes.length === 0) return;
+    let cancelled = false;
+    fetch(`/api/me/links/live?codes=${codes.join(",")}`)
+      .then((r) => r.json())
+      .then((data: { links: Record<string, BookableMeta> }) => {
+        if (!cancelled) setLiveLinkMeta((prev) => ({ ...prev, ...data.links }));
+      })
+      .catch(() => {/* silent: fall back to frozen snapshot */});
+    return () => { cancelled = true; };
+  }, [messages]);
 
   // PR-B telemetry seam (Author Response N2): record when the posture
   // readback first paints in the FirstRunWelcome flow so we can measure
@@ -2278,10 +2316,14 @@ export default function Feed({ onboardReturnTo }: { onboardReturnTo?: string | n
                     url={meetLinkUrl}
                     kind={meetLinkKind}
                     meta={
-                      ((msg.metadata as Record<string, unknown> | null)?.linkCardMeta
-                        ?? (msg.metadata as Record<string, unknown> | null)?.bookableMeta) as
-                        | BookableMeta
-                        | undefined
+                      // Live data takes priority; frozen snapshot keys are the fallback
+                      // chain for rows written before the live-fetch plumbing existed.
+                      (
+                        (meetLinkUrl ? liveLinkMeta[extractLinkCode(meetLinkUrl) ?? ""] : undefined)
+                        ?? (msg.metadata as Record<string, unknown> | null)?.linkCardMetaAtCreation
+                        ?? (msg.metadata as Record<string, unknown> | null)?.linkCardMeta
+                        ?? (msg.metadata as Record<string, unknown> | null)?.bookableMeta
+                      ) as BookableMeta | undefined
                     }
                   />
                 )}

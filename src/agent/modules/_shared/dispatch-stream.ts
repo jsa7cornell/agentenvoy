@@ -293,7 +293,7 @@ export async function dispatchModuleAndStream(
           };
           break;
         }
-        if (bookableMeta) (additions as Record<string, unknown>).bookableMeta = bookableMeta;
+        if (bookableMeta) (additions as Record<string, unknown>).linkCardMetaAtCreation = bookableMeta;
       }
     }
     // Stash history-scope telemetry into moduleGuard for debug bundles +

@@ -647,12 +647,7 @@ export async function runUnifiedTurn(config: UnifiedTurnConfig): Promise<void> {
         ? {
             linkKind: linkCardExtras.linkKind,
             ...(linkCardExtras.linkUrl ? { linkUrl: linkCardExtras.linkUrl } : {}),
-            ...(linkCardExtras.linkCardMeta ? { linkCardMeta: linkCardExtras.linkCardMeta } : {}),
-            // Keep legacy bookableMeta key populated for bookable links
-            // so rows written before linkCardMeta existed still render.
-            ...(linkCardExtras.linkKind === "bookable" && linkCardExtras.linkCardMeta
-              ? { bookableMeta: linkCardExtras.linkCardMeta }
-              : {}),
+            ...(linkCardExtras.linkCardMeta ? { linkCardMetaAtCreation: linkCardExtras.linkCardMeta } : {}),
           }
         : {}),
     } as Prisma.InputJsonValue;
