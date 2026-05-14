@@ -148,7 +148,18 @@ async function handleModifyLinkTool(
   }
 
   if (args.topic !== undefined) {
-    await prisma.negotiationLink.update({ where: { id: args.linkId }, data: { topic: args.topic } });
+    await prisma.negotiationLink.update({
+      where: { id: args.linkId },
+      data: {
+        topic: args.topic,
+        // Mirror non-null topic to customTitle (write-mirror per 2026-05-14
+        // event-record-alignment proposal PR3). One-way mirror: model emits
+        // `topic`; we write `customTitle` so the dashboard reads the live
+        // value. The wire shape stays `topic`; customTitle rename is a
+        // follow-up when the wire-shape changes get their own review.
+        ...(args.topic !== null ? { customTitle: args.topic } : {}),
+      },
+    });
     fieldsUpdated.push("topic");
   }
 
@@ -403,6 +414,9 @@ function withHostCallLogging(
     return result;
   };
 }
+
+/** @internal exported for unit tests only — do not import in production code. */
+export { handleModifyLinkTool as _testHandleModifyLinkTool };
 
 export function registerHostMcpTools(
   server: McpServer,

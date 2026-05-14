@@ -77,8 +77,7 @@ export function buildGreetingInput(args: BuildGreetingInputArgs): GreetingInput 
   // user.name is missing — this surface is user-facing prose, not a label.
   const hostFirstName = user.name ? resolveHostFirstName(user) : "the organizer";
 
-  // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
-  const rawTopic = (link as { customTitle?: string | null }).customTitle ?? link.topic ?? null;
+  const rawTopic = (link as { customTitle?: string | null }).customTitle ?? null;
 
   // Greeting V2 (Danny spec, 2026-04-18). Multi-invitee-aware: for a 2+
   // invitee link we greet "Will & Andrew" rather than just the first name

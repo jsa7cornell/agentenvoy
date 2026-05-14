@@ -1464,7 +1464,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         if (typeof data.viewerTimezone === "string" || data.viewerTimezone === null) {
           setViewerTimezoneState(data.viewerTimezone);
         }
-        setTopic(data.link?.topic || "");
+        setTopic(data.link?.customTitle || "");
         // Per-field "Edited" pill — read material-edit metadata.
         {
           const lastEdit = (data.link as Record<string, unknown> | undefined)?.lastMaterialEditAt;
@@ -1891,8 +1891,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             } else if ((sess as { guestName?: string | null }).guestName && !inviteeName) {
               setInviteeName((sess as { guestName: string }).guestName);
             }
-            // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
-            const freshTopic = sess.link?.customTitle ?? sess.link?.topic;
+            const freshTopic = sess.link?.customTitle;
             if (freshTopic && !topic) setTopic(freshTopic);
             const freshEmail = sess.guestEmail || sess.link?.inviteeEmail;
             if (freshEmail && !guestEmail) setGuestEmail(freshEmail);

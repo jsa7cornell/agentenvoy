@@ -272,8 +272,7 @@ export default async function MyLinksPage() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-semibold truncate">
-                          {/* PR-3 reader-switchover: prefer customTitle, fall back to topic during migration window */}
-                          {link.customTitle ?? link.topic ?? "Meeting"}
+                          {link.customTitle ?? "Meeting"}
                           {link.inviteeName && (
                             <span className="text-muted font-normal"> — {link.inviteeName}</span>
                           )}

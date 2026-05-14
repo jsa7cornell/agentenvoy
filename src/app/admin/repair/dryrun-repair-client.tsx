@@ -111,8 +111,7 @@ export function DryrunRepairClient({ initial }: Props) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-sm font-semibold">
-                  {/* PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window */}
-                  {s.title || s.link.customTitle || s.link.topic || "Meeting"}
+                  {s.link.customTitle || s.title || "Meeting"}
                 </span>
                 <span className="text-[10px] uppercase tracking-wider text-muted">
                   {s.agreedFormat || "meeting"} · {s.duration || 30}m

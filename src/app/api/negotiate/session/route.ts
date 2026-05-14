@@ -245,8 +245,7 @@ export async function POST(req: NextRequest) {
       : undefined;
     const linkPayload = {
       type: link.type,
-      // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window. Both fields surfaced for client compat.
-      topic: (link as { customTitle?: string | null }).customTitle ?? link.topic,
+      topic: (link as { customTitle?: string | null }).customTitle ?? null,
       customTitle: (link as { customTitle?: string | null }).customTitle ?? null,
       inviteeName: link.inviteeName,
       inviteeNames: link.inviteeNames,
@@ -633,8 +632,7 @@ export async function POST(req: NextRequest) {
           guestId: guestIdForCreate,
           type: "calendar",
           status: "active",
-          // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
-          title: buildSessionTitle((link as { customTitle?: string | null }).customTitle ?? link.topic, link, hostFirstName),
+          title: buildSessionTitle((link as { customTitle?: string | null }).customTitle ?? null, link, hostFirstName),
           statusLabel: getWaitingLabel(link) || "Waiting for invitee",
           guestTimezone: resolveSeedGuestTimezoneForCreate({
           linkInviteeTimezone: link.inviteeTimezone,
@@ -656,7 +654,7 @@ export async function POST(req: NextRequest) {
         guestId: guestIdForCreate,
         type: "calendar",
         status: "active",
-        title: buildSessionTitle(link.topic, link, hostFirstName),
+        title: buildSessionTitle((link as { customTitle?: string | null }).customTitle ?? null, link, hostFirstName),
         statusLabel: getWaitingLabel(link) || "Waiting for invitee",
         guestTimezone: resolveSeedGuestTimezoneForCreate({
           linkInviteeTimezone: link.inviteeTimezone,
@@ -669,7 +667,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  console.log(`[negotiate/session] created | session=${session.id} | duration=${session.duration} | format=${session.format} | topic=${link.topic || "none"}`);
+  console.log(`[negotiate/session] created | session=${session.id} | duration=${session.duration} | format=${session.format} | customTitle=${(link as { customTitle?: string | null }).customTitle || "none"}`);
 
   // Effective guest timezone used for downstream formatting. Priority:
   //   1. link.inviteeTimezone — host-declared ("Sarah is on EST")
@@ -763,8 +761,7 @@ export async function POST(req: NextRequest) {
     guestName: isGroupEvent ? undefined : (link.inviteeName || undefined),
     guestEmail: link.inviteeEmail || undefined,
     guestTimezone: effectiveGuestTz,
-    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
-    topic: (link as { customTitle?: string | null }).customTitle ?? link.topic ?? undefined,
+    topic: (link as { customTitle?: string | null }).customTitle ?? undefined,
     rules: parseLinkParameters(link.parameters),
     calendarContext,
     hostPersistentKnowledge: user.persistentKnowledge,
@@ -898,8 +895,7 @@ export async function POST(req: NextRequest) {
       ? (link.inviteeNames as string[]).join(", ")
       : null;
     const forWhom = knownNames ? ` for ${knownNames}` : "";
-    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
-    const groupTitle = (link as { customTitle?: string | null }).customTitle ?? link.topic;
+    const groupTitle = (link as { customTitle?: string | null }).customTitle ?? null;
     const greetingPrompt = `Someone just opened this group coordination link. This is a shared link — the same URL goes to everyone the host invited. The visitor hasn't told you their name yet. Greet them warmly in 2–3 short sentences: welcome them to the ${groupTitle ? `"${groupTitle}"` : "group event"} coordination${forWhom}, let them know everyone is sharing their availability here, and ask them to tell you their name so you can record their windows. Do not assume who they are or reference any individual's name as if you know it's them.`;
     greeting = await generateAgentResponse({
       ...context,
@@ -1079,8 +1075,7 @@ export async function POST(req: NextRequest) {
     },
     link: {
       type: link.type,
-      // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window. Both surfaced for client compat.
-      topic: (link as { customTitle?: string | null }).customTitle ?? link.topic,
+      topic: (link as { customTitle?: string | null }).customTitle ?? null,
       customTitle: (link as { customTitle?: string | null }).customTitle ?? null,
       inviteeName: link.inviteeName,
       inviteeNames: link.inviteeNames,

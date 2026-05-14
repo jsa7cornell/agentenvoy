@@ -272,7 +272,6 @@ export async function fetchSeriesPageProps(
   // 10. Title.
   const title =
     link.customTitle ??
-    link.topic ??
     `Recurring meeting with ${hostFirst}`;
 
   // 11. Cadence sentence.

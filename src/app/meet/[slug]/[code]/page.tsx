@@ -42,7 +42,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const hostFirst = hostName.split(" ")[0];
   const guestName = link?.inviteeName;
   const guestFirst = guestName ? guestName.split(" ")[0] : null;
-  const topic = link?.topic;
+  const topic = link?.customTitle;
   const rules = parseLinkParameters(link?.parameters);
   const format = rules.format;
   // rules.duration is stored as raw minutes (number or numeric string).

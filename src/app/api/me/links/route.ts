@@ -141,12 +141,12 @@ export async function GET() {
     if (!c.code) continue;
     links.push({
       kind: "personalized",
-      title: c.topic || c.inviteeName || "Single-use link",
+      title: c.customTitle ?? c.inviteeName ?? "Single-use link",
       url: `${baseUrl}/meet/${c.slug}/${c.code}`,
       slug: c.slug,
       code: c.code,
       inviteeName: c.inviteeName,
-      topic: c.topic,
+      topic: c.customTitle,
       expiresAt: c.expiresAt ? c.expiresAt.toISOString() : null,
       createdAt: c.createdAt.toISOString(),
       lastMaterialEditAt: c.lastMaterialEditAt ? c.lastMaterialEditAt.toISOString() : null,

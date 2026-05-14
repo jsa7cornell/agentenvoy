@@ -115,8 +115,7 @@ export async function POST(req: NextRequest) {
   const guestLabel = session.guestName || session.guestEmail || "guest";
   const hostLabel = session.host.name || "Host";
   const eventSummary = (() => {
-    // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
-    const title = session.link.customTitle ?? session.link.topic;
+    const title = session.link.customTitle;
     if (title) return `${title} — ${guestLabel}`;
     if (meetingFormat === "phone") return `Phone call: ${guestLabel} & ${hostLabel}`;
     return `Meeting with ${guestLabel}`;

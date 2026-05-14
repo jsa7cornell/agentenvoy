@@ -115,6 +115,21 @@ jobs:
       - run: npx prisma db push --skip-generate
       - run: npm run test:integration
 
+  # PLAYBOOK Rule 19c (event-record-alignment — 2026-05-14):
+  # Link.topic is write-only after PR3. All reads must use link.customTitle.
+  # The tsx lint script maintains an allowlist of write paths and non-Link
+  # .topic accesses; anything outside fails CI.
+  link-topic-retirement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsx scripts/lint-no-link-topic-read.ts
+
   # PLAYBOOK Rule 19 (chat-decisioning-layer-redesign — 2026-04-27):
   # protects the architectural invariants that surfaced PR1's five prod bugs.
   #

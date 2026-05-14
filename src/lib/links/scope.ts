@@ -230,8 +230,7 @@ export async function findAffectedVariances(
     if (differs) {
       affected.push({
         id: link.id,
-        // PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window
-        name: link.customTitle ?? link.topic ?? link.code ?? link.slug,
+        name: link.customTitle ?? link.code ?? link.slug,
       });
     }
   }

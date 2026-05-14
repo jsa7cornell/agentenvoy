@@ -177,8 +177,7 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
           <span role="img" aria-label="calendar">&#128197;</span>
         </div>
         <h2 className="text-sm font-semibold text-gray-100 truncate flex-1 min-w-0">
-          {/* PR-3 reader-switchover: prefer customTitle; fall back to topic during migration window */}
-          {session.title || session.link.customTitle || session.link.topic || "Thread"}
+          {session.link.customTitle || session.title || "Thread"}
         </h2>
         <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide flex-shrink-0 ${statusColor}`}>
           {session.statusLabel || session.status}
@@ -199,7 +198,7 @@ export default function ThreadPanel({ sessionId, onClose }: ThreadPanelProps) {
         {session.link.code && (
           <ThreadLinkActions
             url={`${typeof window !== "undefined" ? window.location.origin : ""}/meet/${session.link.slug}/${session.link.code}`}
-            topic={session.title || session.link.customTitle || session.link.topic}
+            topic={session.link.customTitle || session.title}
           />
         )}
       </div>
