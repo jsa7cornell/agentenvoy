@@ -225,9 +225,6 @@ export const DEALROOM_HOST_ALLOWED_TOOLS = [
 ] as const;
 
 export const DEALROOM_GUEST_ALLOWED_TOOLS = [
-  // LOAD reads
-  "LOAD_calendar_context",
-  "LOAD_preferences",
   // Bilateral availability (2026-04-29 §B2 — guest-only)
   "get_matched_availability",
   // Group coordination tools (when session is a group event — out of scope
