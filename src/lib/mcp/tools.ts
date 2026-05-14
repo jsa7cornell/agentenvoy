@@ -660,7 +660,6 @@ async function resolveSession(args: {
       linkId: args.linkId,
       hostId: args.hostId,
       status: "active",
-      title: args.bootstrap.title,
       format: args.bootstrap.format,
       duration: args.bootstrap.duration,
     },

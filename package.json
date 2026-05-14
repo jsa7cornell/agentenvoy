@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "prisma generate && prisma migrate deploy && next build",
     "start": "next start",
-    "check": "tsc --noEmit && next lint",
+    "check": "prisma generate && tsc --noEmit && next lint",
     "lint": "next lint",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "INTEGRATION_TEST_DB_OK=1 vitest run --config vitest.integration.config.ts",
