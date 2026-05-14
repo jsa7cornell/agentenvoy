@@ -134,10 +134,12 @@ export const GENERIC_TOPICS: ReadonlySet<string> = new Set([
   "quick chat", "quick meeting", "quick sync", "discussion",
   "call", "quick call", "phone call", "video call",
   "zoom", "zoom call", "video", "talk",
-  // Colloquial meeting verbs — the model sometimes emits these literally when
-  // the host says "grab time", "link up", "hang out", etc. They carry no
-  // activity information; null them so the title falls back to the
-  // "{invitee} + {host}" template. (cmp5ysc8r — "grab" rerouted to customTitle)
+  // Scheduling directive verbs — the model sometimes emits these literally
+  // when the host uses them as a directive ("grab 45 with drake" = "please
+  // schedule a 45-min meeting with Drake"). "grab" is the action, not the
+  // activity. Null them so the title falls back to the "{invitee} + {host}"
+  // template rather than the verb becoming the card title.
+  // (cmp5ysc8r — "grab" rerouted to customTitle instead of nulled)
   "grab", "grab time", "link up", "hang out", "hangout", "catch up with", "touch base with",
 ]);
 
