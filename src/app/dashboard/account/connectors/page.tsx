@@ -12,11 +12,8 @@
  *   - POST   /api/host/tokens          (mint)
  *   - GET    /api/host/tokens          (list active)
  *   - DELETE /api/host/tokens/:id      (revoke)
- *
- * Workstream E (single-fetch agent surface follow-up). Per-token call log
- * ("what did this AI do?") is deferred to a follow-up.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 
 type Scope = "read" | "schedule" | "admin";
@@ -55,6 +52,26 @@ interface MintedToken {
   plaintext: string;
 }
 
+const MCP_URL = "https://agentenvoy.ai/api/mcp/host";
+
+function buildMcpConfig(token: string) {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        agentenvoy: {
+          type: "http",
+          url: MCP_URL,
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
+
 export default function ConnectorsPage() {
   const [tokens, setTokens] = useState<ListedToken[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -70,7 +87,13 @@ export default function ConnectorsPage() {
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
-  const [copied, setCopied] = useState(false);
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
+  const [copiedSetupConfig, setCopiedSetupConfig] = useState(false);
+
+  // Whether the user has expanded the "Already have a token?" setup section
+  const [setupExpanded, setSetupExpanded] = useState(false);
+  const mintBannerRef = useRef<HTMLDivElement>(null);
 
   async function reloadTokens() {
     try {
@@ -90,6 +113,13 @@ export default function ConnectorsPage() {
   useEffect(() => {
     void reloadTokens();
   }, []);
+
+  // Scroll to banner when a token is freshly minted
+  useEffect(() => {
+    if (justMinted && mintBannerRef.current) {
+      mintBannerRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [justMinted]);
 
   function toggleScope(scope: Scope) {
     const next = new Set(selectedScopes);
@@ -163,20 +193,22 @@ export default function ConnectorsPage() {
     }
   }
 
-  async function copyPlaintext() {
-    if (!justMinted) return;
+  async function copyText(text: string, setCopied: (v: boolean) => void) {
     try {
-      await navigator.clipboard.writeText(justMinted.plaintext);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Clipboard failed — user can still copy manually.
+      // Clipboard unavailable — user can copy manually.
     }
   }
 
+  const placeholderConfig = buildMcpConfig("agentenvoy_pat_live_YOUR_TOKEN_HERE");
+
   return (
     <main className="flex-1 overflow-y-auto bg-surface">
-      <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <div className="max-w-3xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-10">
+
         {/* Back link */}
         <div>
           <Link
@@ -189,52 +221,126 @@ export default function ConnectorsPage() {
 
         {/* Page heading */}
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-primary">Connectors</h1>
-          <p className="text-sm text-muted mt-1">
-            Connect Claude (or another AI) to AgentEnvoy. Tokens let your AI act
-            on your behalf — read your calendar, mint links, reschedule meetings.
+          <h1 className="text-2xl font-semibold tracking-tight text-primary">Connect Claude</h1>
+          <p className="text-sm text-muted mt-1.5 leading-relaxed">
+            Give Claude (or another AI) a token and it can act as you on AgentEnvoy — reading your
+            calendar, creating meeting links, and rescheduling confirmed meetings, all without
+            needing you to copy-paste anything.
           </p>
         </div>
+
+        {/* What Claude can do */}
+        <section>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-4">
+            What Claude can do for you
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <CapabilityCard
+              icon={
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              }
+              title="Check your real availability"
+              description={'Ask Claude "when am I free this week?" and it reads your actual calendar — busy times, preferences, and all — not just a generic response.'}
+              scope="read"
+            />
+            <CapabilityCard
+              icon={
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+              }
+              title="Create meeting links on command"
+              description={`Say "make me a 30-minute coffee chat link" and Claude mints a shareable AgentEnvoy URL instantly — no dashboard visit required.`}
+              scope="schedule"
+            />
+            <CapabilityCard
+              icon={
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              }
+              title="Reschedule confirmed meetings"
+              description="Claude can shift a confirmed meeting to a new time — it patches your Google Calendar event and notifies the other side, all in one step."
+              scope="schedule"
+            />
+            <CapabilityCard
+              icon={
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              }
+              title="See your scheduled meetings"
+              description="Ask Claude to list who you're meeting this week, check whether a session is confirmed, or find a specific meeting — it queries your sessions directly."
+              scope="read"
+            />
+          </div>
+          <p className="text-[11px] text-muted mt-3 leading-relaxed">
+            Claude only has the access you grant. A <span className="font-medium text-secondary">Read</span> token
+            can look but not touch. A <span className="font-medium text-secondary">Schedule</span> token can also
+            create links and reschedule — nothing else. You can revoke any token instantly from this page.
+          </p>
+        </section>
 
         {/* Just-minted plaintext banner — shown once, dismiss required */}
         {justMinted && (
           <section
+            ref={mintBannerRef}
             role="alert"
-            className="rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/15 p-4 space-y-3"
+            className="rounded-xl border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/15 p-5 space-y-5 scroll-mt-6"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                  New token: {justMinted.name}
+                  Token minted: {justMinted.name}
                 </h2>
                 <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
-                  Copy this token now — it&apos;s shown once and never again.
-                  AgentEnvoy stores only a hash, not the plaintext.
+                  Copy this now — it&apos;s shown once and never again. AgentEnvoy stores only a hash.
                 </p>
               </div>
               <button
                 onClick={() => setJustMinted(null)}
-                className="text-xs text-amber-700 dark:text-amber-300 hover:underline whitespace-nowrap"
+                className="text-xs text-amber-700 dark:text-amber-300 hover:underline whitespace-nowrap shrink-0"
               >
-                I&apos;ve saved it
+                I&apos;ve saved it ✓
               </button>
             </div>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 min-w-0 text-xs font-mono bg-white/70 dark:bg-black/30 border border-amber-200 dark:border-amber-700/40 rounded-md px-3 py-2 break-all">
-                {justMinted.plaintext}
-              </code>
-              <button
-                onClick={copyPlaintext}
-                className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-md transition whitespace-nowrap"
-              >
-                {copied ? "Copied" : "Copy"}
-              </button>
+
+            {/* Token value */}
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-amber-700 dark:text-amber-400 mb-1.5">
+                Your token
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 min-w-0 text-xs font-mono bg-white/70 dark:bg-black/30 border border-amber-200 dark:border-amber-700/40 rounded-md px-3 py-2 break-all">
+                  {justMinted.plaintext}
+                </code>
+                <button
+                  onClick={() => copyText(justMinted.plaintext, setCopiedToken)}
+                  className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-md transition whitespace-nowrap"
+                >
+                  {copiedToken ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+
+            {/* Step-by-step setup */}
+            <div className="border-t border-amber-200 dark:border-amber-700/40 pt-4 space-y-4">
+              <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+                Next: add AgentEnvoy to Claude
+              </p>
+
+              <SetupInstructions
+                token={justMinted.plaintext}
+                copiedConfig={copiedConfig}
+                onCopyConfig={() => copyText(buildMcpConfig(justMinted.plaintext), setCopiedConfig)}
+              />
             </div>
           </section>
         )}
 
-        {/* Active tokens — top of page so the host sees what's connected
-            before deciding to mint more. */}
+        {/* Active tokens */}
         <section>
           <h2 className="text-[10px] font-bold uppercase tracking-widest text-muted mb-3">
             Active tokens
@@ -366,8 +472,278 @@ export default function ConnectorsPage() {
             </div>
           </form>
         </section>
+
+        {/* Setup instructions — for users who already have a token */}
+        {!justMinted && (
+          <section>
+            <button
+              onClick={() => setSetupExpanded((v) => !v)}
+              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted hover:text-secondary transition w-full text-left mb-3"
+            >
+              <span>Already have a token? Here&apos;s how to add it to Claude</span>
+              <svg
+                className={`w-3.5 h-3.5 transition-transform ${setupExpanded ? "rotate-180" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {setupExpanded && (
+              <SetupInstructions
+                token={null}
+                copiedConfig={copiedSetupConfig}
+                onCopyConfig={() => copyText(placeholderConfig, setCopiedSetupConfig)}
+              />
+            )}
+          </section>
+        )}
+
       </div>
     </main>
+  );
+}
+
+/** Capability card used in the "What Claude can do" grid */
+function CapabilityCard({
+  icon,
+  title,
+  description,
+  scope,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  scope: "read" | "schedule";
+}) {
+  return (
+    <div className="rounded-xl border border-secondary bg-surface-inset/40 p-4 space-y-2">
+      <div className="flex items-center gap-2.5">
+        <span className="text-secondary">{icon}</span>
+        <h3 className="text-sm font-medium text-primary leading-tight">{title}</h3>
+      </div>
+      <p className="text-xs text-muted leading-relaxed">{description}</p>
+      <span className="inline-block text-[10px] font-semibold uppercase tracking-wide text-secondary bg-surface-secondary/70 border border-surface-tertiary/40 rounded px-1.5 py-0.5">
+        {scope}
+      </span>
+    </div>
+  );
+}
+
+type ClientTab = "claude-ai" | "claude-code" | "chatgpt" | "gemini";
+
+const CLIENT_TABS: { id: ClientTab; label: string }[] = [
+  { id: "claude-ai", label: "Claude.ai" },
+  { id: "claude-code", label: "Claude Code" },
+  { id: "chatgpt", label: "ChatGPT" },
+  { id: "gemini", label: "Gemini" },
+];
+
+/** Reusable field table for URL + auth values */
+function ConnectionFields({ token, showHeader = false }: { token: string; showHeader?: boolean }) {
+  return (
+    <div className="bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg overflow-hidden text-xs">
+      {showHeader && (
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-surface-tertiary/40">
+          <span className="text-muted w-20 shrink-0 font-medium">Name</span>
+          <code className="font-mono text-primary">AgentEnvoy</code>
+        </div>
+      )}
+      <div className="flex items-start gap-3 px-4 py-2.5 border-b border-surface-tertiary/40">
+        <span className="text-muted w-20 shrink-0 font-medium pt-px">URL</span>
+        <code className="font-mono text-primary break-all select-all">{MCP_URL}</code>
+      </div>
+      <div className="flex items-start gap-3 px-4 py-2.5 border-b border-surface-tertiary/40">
+        <span className="text-muted w-20 shrink-0 font-medium pt-px">Header</span>
+        <code className="font-mono text-primary">Authorization</code>
+      </div>
+      <div className="flex items-start gap-3 px-4 py-2.5">
+        <span className="text-muted w-20 shrink-0 font-medium pt-px">Value</span>
+        <code className="font-mono text-primary break-all select-all">Bearer {token}</code>
+      </div>
+    </div>
+  );
+}
+
+/** Numbered step item */
+function Step({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <li className="flex gap-2.5">
+      <span className="shrink-0 w-5 h-5 rounded-full bg-surface-secondary/70 border border-surface-tertiary/50 flex items-center justify-center text-[10px] font-bold text-muted">
+        {n}
+      </span>
+      <span className="text-xs text-secondary leading-relaxed">{children}</span>
+    </li>
+  );
+}
+
+/** Step-by-step MCP setup instructions, reused in both the post-mint banner and the collapsed section */
+function SetupInstructions({
+  token,
+  copiedConfig,
+  onCopyConfig,
+}: {
+  token: string | null;
+  copiedConfig: boolean;
+  onCopyConfig: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<ClientTab>("claude-ai");
+  const displayToken = token ?? "agentenvoy_pat_live_YOUR_TOKEN_HERE";
+  const config = buildMcpConfig(displayToken);
+
+  return (
+    <div className="space-y-4">
+      {/* Tab switcher — scrollable on narrow viewports */}
+      <div className="flex gap-1 bg-surface-secondary/50 rounded-lg p-1 overflow-x-auto">
+        {CLIENT_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition whitespace-nowrap ${
+              activeTab === tab.id
+                ? "bg-surface text-primary shadow-sm"
+                : "text-muted hover:text-secondary"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Claude.ai ── */}
+      {activeTab === "claude-ai" && (
+        <div className="space-y-3">
+          <ol className="space-y-3 list-none">
+            <Step n={1}>
+              In Claude.ai, open <strong className="text-primary font-medium">Settings → Connectors</strong> and
+              click <strong className="text-primary font-medium">Add custom connector</strong>.
+            </Step>
+            <Step n={2}>Fill in the Name and URL, then open <strong className="text-primary font-medium">Advanced settings</strong> to add the Authorization header:</Step>
+          </ol>
+
+          <ConnectionFields token={displayToken} showHeader />
+
+          <ol className="space-y-3 list-none" start={3}>
+            <Step n={3}>
+              Click <strong className="text-primary font-medium">Add</strong>. AgentEnvoy will appear in your connectors list.
+              Try asking Claude <span className="italic text-primary">&ldquo;when am I free this week?&rdquo;</span>
+            </Step>
+          </ol>
+        </div>
+      )}
+
+      {/* ── Claude Code ── */}
+      {activeTab === "claude-code" && (
+        <div className="space-y-3">
+          <ol className="space-y-3 list-none">
+            <Step n={1}>
+              Open (or create){" "}
+              <code className="font-mono text-primary bg-surface-secondary/60 px-1 rounded">~/.claude/mcp.json</code>{" "}
+              — your user-level MCP config for Claude Code.
+            </Step>
+            <Step n={2}>
+              Paste the block below{token ? " (your token is already filled in)" : ", replacing the placeholder with your token"}:
+            </Step>
+          </ol>
+
+          <div className="relative">
+            <pre className="text-[11px] font-mono leading-relaxed bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-4 py-3 overflow-x-auto whitespace-pre">
+              {config}
+            </pre>
+            <button
+              onClick={onCopyConfig}
+              className="absolute top-2 right-2 px-2.5 py-1 text-[10px] font-medium bg-surface border border-surface-tertiary/60 rounded text-secondary hover:text-primary transition"
+            >
+              {copiedConfig ? "Copied ✓" : "Copy"}
+            </button>
+          </div>
+
+          <ol className="space-y-3 list-none" start={3}>
+            <Step n={3}>
+              Save the file, then restart Claude Code (or run{" "}
+              <code className="font-mono text-primary bg-surface-secondary/60 px-1 rounded">/mcp</code>{" "}
+              to reload servers without restarting).
+            </Step>
+            <Step n={4}>
+              Try it: ask Claude <span className="italic text-primary">&ldquo;when am I free this week?&rdquo;</span>{" "}
+              or <span className="italic text-primary">&ldquo;make me a 30-minute coffee chat link.&rdquo;</span>
+            </Step>
+          </ol>
+
+          <p className="text-[10px] text-muted leading-relaxed">
+            Want this only for one project? Use{" "}
+            <code className="font-mono bg-surface-secondary/60 px-1 rounded">.mcp.json</code>{" "}
+            at the project root instead of{" "}
+            <code className="font-mono bg-surface-secondary/60 px-1 rounded">~/.claude/mcp.json</code>.
+          </p>
+        </div>
+      )}
+
+      {/* ── ChatGPT ── */}
+      {activeTab === "chatgpt" && (
+        <div className="space-y-3">
+          <ol className="space-y-3 list-none">
+            <Step n={1}>
+              In ChatGPT, open <strong className="text-primary font-medium">Settings → Connectors</strong>{" "}
+              (or <strong className="text-primary font-medium">Integrations</strong> depending on your plan){" "}
+              and look for an option to add a custom MCP server.
+            </Step>
+            <Step n={2}>
+              Enter the following — the exact field labels may differ but the values are the same:
+            </Step>
+          </ol>
+
+          <ConnectionFields token={displayToken} showHeader />
+
+          <ol className="space-y-3 list-none" start={3}>
+            <Step n={3}>
+              Save. ChatGPT will verify the connection and add AgentEnvoy to your available tools.
+              Try asking <span className="italic text-primary">&ldquo;check my schedule for this week.&rdquo;</span>
+            </Step>
+          </ol>
+
+          <p className="text-[10px] text-muted leading-relaxed">
+            ChatGPT&apos;s MCP connector UI updates frequently. If the menu path above doesn&apos;t match what you see,
+            look for &ldquo;MCP&rdquo; or &ldquo;custom connector&rdquo; in Settings — the URL and auth values above are always correct.
+          </p>
+        </div>
+      )}
+
+      {/* ── Gemini ── */}
+      {activeTab === "gemini" && (
+        <div className="space-y-3">
+          <ol className="space-y-3 list-none">
+            <Step n={1}>
+              Open <strong className="text-primary font-medium">Google AI Studio</strong>{" "}
+              (<code className="font-mono text-primary bg-surface-secondary/60 px-1 rounded">aistudio.google.com</code>)
+              or <strong className="text-primary font-medium">Gemini Advanced</strong>. Go to{" "}
+              <strong className="text-primary font-medium">Settings → Extensions</strong> or{" "}
+              <strong className="text-primary font-medium">Tools → MCP Servers</strong>.
+            </Step>
+            <Step n={2}>
+              Add a new MCP server with these values:
+            </Step>
+          </ol>
+
+          <ConnectionFields token={displayToken} showHeader />
+
+          <ol className="space-y-3 list-none" start={3}>
+            <Step n={3}>
+              Save and confirm. Try asking Gemini{" "}
+              <span className="italic text-primary">&ldquo;what does my schedule look like this week?&rdquo;</span>
+            </Step>
+          </ol>
+
+          <p className="text-[10px] text-muted leading-relaxed">
+            Google&apos;s MCP support surface varies across Gemini Advanced, AI Studio, and Workspace. If the path
+            above doesn&apos;t match, search your settings for &ldquo;MCP&rdquo; or &ldquo;custom tools.&rdquo;{" "}
+            The URL and auth values above are always correct regardless of which surface you use.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
