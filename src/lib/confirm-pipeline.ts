@@ -40,6 +40,7 @@ import { buildGuestConfirmationEmail } from "@/lib/emails/guest-confirmation";
 import { parseLinkParameters } from "@/lib/link-parameters";
 import { generateCode } from "@/lib/utils";
 import { readRecurrence, toRRule, commitAnchorAt, type LinkRecurrence } from "@/lib/recurrence";
+import { getEffectiveMeetingState } from "@/lib/effective-meeting-state";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -596,21 +597,13 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   const zoomLink = (hostPrefs?.zoomLink as string) || null;
 
   const guestLabel = guestName || guestEmail || "guest";
-  const hostLabel = session.host.name || "Host";
   const linkRulesObj = parseLinkParameters(session.link?.parameters);
-  // negotiatedActivity (guest-locked) wins over link.parameters.activity for the event title.
-  const effectiveActivity =
-    ((session as Record<string, unknown>).negotiatedActivity as string | null | undefined) ??
-    (typeof linkRulesObj.activity === "string" && linkRulesObj.activity.trim()
-      ? linkRulesObj.activity.trim()
-      : null);
-  const eventSummary = (() => {
-    if (effectiveActivity) return `${effectiveActivity.charAt(0).toUpperCase() + effectiveActivity.slice(1)} — ${guestLabel}`;
-    const titleField = session.link.customTitle;
-    if (titleField) return `${titleField} — ${guestLabel}`;
-    if (meetingFormat === "phone") return `Phone call: ${guestLabel} & ${hostLabel}`;
-    return `Meeting with ${guestLabel}`;
-  })();
+  // Canonical event title via the three-layer helper: negotiated* > session-column > link.params.
+  // Attaches session.host.name so buildEventTitle can include the host first name.
+  const eventSummary = getEffectiveMeetingState({
+    ...session,
+    link: { ...session.link, user: { name: session.host.name } },
+  }).title;
 
   const linkLocation =
     typeof linkRulesObj.location === "string" && linkRulesObj.location.trim()
@@ -1199,7 +1192,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
           html:
             `<p>Hi ${excusedLabel},</p>` +
             `<p>${session.host.name || "The organizer"} confirmed ${
-              session.link.customTitle || "the meeting"
+              eventSummary || "the meeting"
             } for a time that didn't work for you. The rest of the group is meeting on ${startTime.toISOString()}.</p>` +
             `<p>If you'd still like to connect, reply at <a href="${dealRoomUrl}">${dealRoomUrl}</a>.</p>`,
           context: {
@@ -1226,7 +1219,7 @@ export async function confirmBooking(input: ConfirmInput): Promise<ConfirmResult
   const { subject: confirmSubject, html: confirmHtml } = buildGuestConfirmationEmail({
     hostName: session.host.name || "The organizer",
     guestName: guestName || undefined,
-    topic: session.link.customTitle || undefined,
+    topic: eventSummary || undefined,
     dateTime: startTime,
     duration: durationMin,
     format: meetingFormat,

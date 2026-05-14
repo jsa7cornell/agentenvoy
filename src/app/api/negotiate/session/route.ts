@@ -19,6 +19,7 @@ import {
   getWaitingLabel,
 } from "@/lib/invitee-display";
 import { getUserTimezone } from "@/lib/timezone";
+import { buildEventTitle } from "@/lib/build-event-title";
 import {
   resolveSeedGuestTimezoneForCreate,
   resolveEffectiveGuestTimezone,
@@ -50,10 +51,6 @@ import { DEFAULT_TIP } from "@/lib/meeting-tip/default-tip";
 import { computeDensityHorizon } from "@/lib/availability-density";
 import { getSchedulingMode } from "@/lib/scheduling-mode";
 import { parseLinkParameters } from "@/lib/link-parameters";
-import { isGenericTopic } from "@/lib/activity-vocab";
-
-// GENERIC_TOPICS / isGenericTopic moved to @/lib/activity-vocab in the
-// 2026-04-28 event-edit proposal (Q3 fold) — single source of truth.
 
 /**
  * Pick the greeting from a session's messages. The greeting is the first
@@ -79,18 +76,6 @@ function pickGreeting(messages: Array<{ role: string; content: string }>): strin
   return "";
 }
 
-function buildSessionTitle(
-  topic: string | null,
-  link: { inviteeName?: string | null; inviteeNames?: string[] },
-  hostFirstName: string,
-): string {
-  const display = getInviteeDisplay(link);
-  if (topic && !isGenericTopic(topic)) {
-    return `${topic}${display ? ` — ${display}` : ""}`;
-  }
-  if (display) return `${hostFirstName} + ${display}`;
-  return `Meeting — ${hostFirstName}`;
-}
 
 // POST /api/negotiate/session
 // Start a new negotiation session from a link click
@@ -632,7 +617,7 @@ export async function POST(req: NextRequest) {
           guestId: guestIdForCreate,
           type: "calendar",
           status: "active",
-          title: buildSessionTitle((link as { customTitle?: string | null }).customTitle ?? null, link, hostFirstName),
+          title: buildEventTitle({ customTitle: (link as { customTitle?: string | null }).customTitle ?? null, inviteeDisplay: getInviteeDisplay(link), hostFirstName }),
           statusLabel: getWaitingLabel(link) || "Waiting for invitee",
           guestTimezone: resolveSeedGuestTimezoneForCreate({
           linkInviteeTimezone: link.inviteeTimezone,
@@ -654,7 +639,7 @@ export async function POST(req: NextRequest) {
         guestId: guestIdForCreate,
         type: "calendar",
         status: "active",
-        title: buildSessionTitle((link as { customTitle?: string | null }).customTitle ?? null, link, hostFirstName),
+        title: buildEventTitle({ customTitle: (link as { customTitle?: string | null }).customTitle ?? null, inviteeDisplay: getInviteeDisplay(link), hostFirstName }),
         statusLabel: getWaitingLabel(link) || "Waiting for invitee",
         guestTimezone: resolveSeedGuestTimezoneForCreate({
           linkInviteeTimezone: link.inviteeTimezone,

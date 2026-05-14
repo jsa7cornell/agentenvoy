@@ -85,7 +85,7 @@ async function buildBundle(userId: string, sessionId: string | null) {
         status: true,
         agreedTime: true,
         createdAt: true,
-        link: { select: { code: true, slug: true, parameters: true } },
+        link: { select: { code: true, slug: true, parameters: true, customTitle: true, inviteeName: true } },
       },
     }),
     prisma.routeError.findMany({
@@ -146,7 +146,7 @@ async function buildBundle(userId: string, sessionId: string | null) {
     },
     activeSessions: sessions.map((s) => ({
       id: s.id,
-      title: s.title,
+      title: s.link?.customTitle ?? s.title ?? null,
       status: s.status,
       agreedTime: s.agreedTime?.toISOString() ?? null,
       createdAt: s.createdAt.toISOString(),

@@ -340,7 +340,7 @@ export async function POST(req: NextRequest) {
                 id: true,
                 title: true,
                 guestEmail: true,
-                link: { select: { inviteeName: true } },
+                link: { select: { inviteeName: true, customTitle: true } },
               },
               orderBy: { updatedAt: "desc" },
               take: 5,
@@ -348,7 +348,7 @@ export async function POST(req: NextRequest) {
             const activeSessionsSummary = recentSessions
               .map((s) => {
                 const guest = s.link?.inviteeName || s.guestEmail || "unknown";
-                return `- "${s.title || "Untitled"}" (guest: ${guest})`;
+                return `- "${s.link?.customTitle ?? s.title ?? "Untitled"}" (guest: ${guest})`;
               })
               .join("\n");
 
@@ -883,7 +883,7 @@ export async function POST(req: NextRequest) {
                 prisma.negotiationSession.findMany({
                   where: { hostId: safeUser.id, archived: false },
                   include: {
-                    link: { select: { inviteeName: true, code: true, parameters: true } },
+                    link: { select: { inviteeName: true, code: true, parameters: true, customTitle: true } },
                   },
                   orderBy: { updatedAt: "desc" },
                   take: 20,
@@ -901,7 +901,7 @@ export async function POST(req: NextRequest) {
                   : null;
                 return {
                   id: s.id,
-                  title: s.title ?? null,
+                  title: s.link?.customTitle ?? s.title ?? null,
                   guestName: s.link?.inviteeName ?? null,
                   linkCode: s.link?.code ?? null,
                   status: s.status,

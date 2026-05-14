@@ -115,7 +115,22 @@ jobs:
       - run: npx prisma db push --skip-generate
       - run: npm run test:integration
 
-  # PLAYBOOK Rule 19c (event-record-alignment — 2026-05-14):
+  # PLAYBOOK Rule 19c — PR1 (event-record-alignment — 2026-05-14):
+  # computeSessionTitle and buildSessionTitle are deleted after PR1. All title
+  # composition goes through buildEventTitle (write paths) or
+  # getEffectiveMeetingState (render paths).
+  session-title-retirement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsx scripts/lint-no-compute-session-title.ts
+
+  # PLAYBOOK Rule 19c — PR3 (event-record-alignment — 2026-05-14):
   # Link.topic is write-only after PR3. All reads must use link.customTitle.
   # The tsx lint script maintains an allowlist of write paths and non-Link
   # .topic accesses; anything outside fails CI.

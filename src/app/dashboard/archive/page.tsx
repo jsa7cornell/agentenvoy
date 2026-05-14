@@ -18,7 +18,7 @@ interface ArchivedSession {
   link: {
     inviteeName?: string;
     inviteeEmail?: string;
-    topic?: string;
+    customTitle?: string;
   };
   _count: { messages: number };
 }
@@ -114,7 +114,7 @@ export default function ArchivePage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-primary truncate">
-                      {s.title || "Meeting"}
+                      {s.link?.customTitle ?? s.title ?? "Meeting"}
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-muted">
                       {(s.link.inviteeEmail || s.guestEmail) && (

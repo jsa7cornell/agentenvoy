@@ -29,6 +29,7 @@ import { invalidateBehaviorSnapshot } from "@/lib/profile-gaps";
 import { parseRecurrence, readRecurrence, type LinkRecurrence } from "@/lib/recurrence";
 import type { UserPreferences } from "@/lib/scoring";
 import { buildEventTitle } from "@/lib/build-event-title";
+import { getEffectiveMeetingState } from "@/lib/effective-meeting-state";
 import { parseLinkParameters, type AvailabilityWindow } from "@/lib/link-parameters";
 import { snapshotPostureFromUser } from "@/lib/links/create";
 import {
@@ -145,26 +146,6 @@ function diffMaterialFields(
  * capitalizes it for display. `format` is "phone" | "video" | "in-person"
  * | null.
  */
-function computeSessionTitle(opts: {
-  activity: string | null;
-  format: string | null;
-  inviteeDisplay: string | null;
-  firstNamesDisplay: string;
-  isGroup: boolean;
-  hostFirstName: string;
-}): string {
-  const { activity, format, inviteeDisplay, firstNamesDisplay, isGroup, hostFirstName } = opts;
-  const activityLabel = activity && activity.trim()
-    ? activity.charAt(0).toUpperCase() + activity.slice(1)
-    : null;
-  const formatPrefix = format === "phone" ? "Call" : format === "video" ? "VC" : null;
-  const prefix = activityLabel ?? formatPrefix;
-  if (isGroup) {
-    return prefix ? `${prefix} (${firstNamesDisplay})` : firstNamesDisplay || "Meeting";
-  }
-  if (!inviteeDisplay) return prefix ?? "Meeting";
-  return prefix ? `${prefix}: ${inviteeDisplay} + ${hostFirstName}` : `${inviteeDisplay} + ${hostFirstName}`;
-}
 
 // --- Types ---
 
@@ -498,7 +479,7 @@ async function handleArchive(
     data: { archived: true },
   });
 
-  const name = session.link.inviteeName || session.title || "session";
+  const name = session.link.inviteeName || getEffectiveMeetingState(session).title || "session";
   return { success: true, message: `Archived "${name}"`, data: { sessionId: session.id } };
 }
 
@@ -553,7 +534,7 @@ async function handleUnarchive(
     data: { archived: false },
   });
 
-  const name = session.link.inviteeName || session.title || "session";
+  const name = session.link.inviteeName || getEffectiveMeetingState(session).title || "session";
   return { success: true, message: `Unarchived "${name}"`, data: { sessionId: session.id } };
 }
 
@@ -598,7 +579,7 @@ async function handleCancel(
     return { success: false, message: result.error ?? "Cancel failed" };
   }
 
-  const name = session.link.inviteeName || session.title || "session";
+  const name = session.link.inviteeName || getEffectiveMeetingState(session).title || "session";
   return { success: true, message: `Cancelled "${name}"`, data: { sessionId: session.id } };
 }
 
@@ -2194,6 +2175,7 @@ async function handleExpandLink(
     code: string | null;
     topic: string | null;
     topicSource: string | null;
+    customTitle: string | null;
     recurrence: unknown;
   } | null = null;
   let resolvedSessionIdForLink: string | null = sessionId || null;
@@ -2667,9 +2649,6 @@ async function handleExpandLink(
     });
     const hostFirstName = resolveHostFirstName(hostUser);
     const activityRaw = (mergedRules as Record<string, unknown>).activity;
-    const activityLabel = typeof activityRaw === "string" && activityRaw.trim()
-      ? activityRaw.charAt(0).toUpperCase() + activityRaw.slice(1)
-      : null;
     const isGroupNow = inviteeNamesPatch.length > 1;
     const inviteeNameSingular = inviteeNamesPatch[0] ?? null;
     const inviteeDisplay = getInviteeDisplay({
@@ -2682,7 +2661,6 @@ async function handleExpandLink(
     });
 
     const activityForTitle = typeof activityRaw === "string" ? activityRaw : null;
-    void activityLabel; // kept for back-compat with surrounding scope; computeSessionTitle handles it
 
     for (const s of activeSessionsForInvitees) {
       await prisma.sessionInvitee.deleteMany({ where: { sessionId: s.id } });
@@ -2697,11 +2675,12 @@ async function handleExpandLink(
           })),
         });
       }
-      const nextTitle = computeSessionTitle({
+      const nextTitle = buildEventTitle({
+        customTitle: link.customTitle ?? null,
         activity: activityForTitle,
-        format: typeof s.format === "string" ? s.format : null,
-        inviteeDisplay,
-        firstNamesDisplay,
+        format: (typeof s.format === "string" ? s.format : null) as "video" | "phone" | "in-person" | null,
+        inviteeDisplay: inviteeDisplay || null,
+        firstNamesDisplay: firstNamesDisplay || null,
         isGroup: isGroupNow,
         hostFirstName,
       });
@@ -2713,8 +2692,8 @@ async function handleExpandLink(
   } else if (patch.activity !== undefined) {
     // Activity-only refresh path (proposal §3.B.1, decided 2026-04-28).
     // No invitee swap, but the activity changed — session titles need to
-    // pick up the new activity. Reuse computeSessionTitle with each
-    // session's existing invitee set rather than rebuilding SessionInvitee.
+    // pick up the new activity. Use buildEventTitle with each session's
+    // existing invitee set rather than rebuilding SessionInvitee.
     const activeSessions = await prisma.negotiationSession.findMany({
       where: { linkId: link.id, status: { in: ["active", "pending"] } },
       select: {
@@ -2750,11 +2729,12 @@ async function handleExpandLink(
           inviteeName: inviteeNameSingular,
         });
         const isGroup = fallbackInvitees.length > 1;
-        const nextTitle = computeSessionTitle({
+        const nextTitle = buildEventTitle({
+          customTitle: link.customTitle ?? null,
           activity: activityForTitle,
-          format: typeof s.format === "string" ? s.format : null,
-          inviteeDisplay,
-          firstNamesDisplay,
+          format: (typeof s.format === "string" ? s.format : null) as "video" | "phone" | "in-person" | null,
+          inviteeDisplay: inviteeDisplay || null,
+          firstNamesDisplay: firstNamesDisplay || null,
           isGroup,
           hostFirstName,
         });

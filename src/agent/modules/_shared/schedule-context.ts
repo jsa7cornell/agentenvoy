@@ -27,6 +27,7 @@
  * code paths NEVER set this field.
  */
 import { prisma } from "@/lib/prisma";
+import { getEffectiveMeetingState } from "@/lib/effective-meeting-state";
 import { getOrComputeSchedule, type CalendarEvent } from "@/lib/calendar";
 import {
   formatComputedSchedule,
@@ -282,7 +283,8 @@ function buildContextLines(args: {
         ]
           .filter(Boolean)
           .join(", ");
-        return `- "${s.title || "Untitled"}" (${ids}) — status: ${s.status}, guest: ${guest}${note}`;
+        const effectiveTitle = getEffectiveMeetingState(s).title;
+        return `- "${effectiveTitle || "Untitled"}" (${ids}) — status: ${s.status}, guest: ${guest}${note}`;
       })
       .join("\n");
     contextParts.push(
@@ -475,7 +477,7 @@ export async function loadScheduleContext(
     scheduleResult,
     activeSessions: activeSessions.map((s) => ({
       id: s.id,
-      title: s.title,
+      title: getEffectiveMeetingState(s).title,
       status: s.status,
       statusLabel: s.statusLabel,
       guestEmail: s.guestEmail,

@@ -143,6 +143,7 @@ export async function POST(request: NextRequest) {
         agreedTime: true,
         guestName: true,
         guestEmail: true,
+        link: { select: { customTitle: true } },
       },
     });
     if (!session || session.linkId !== link.id) {
@@ -153,7 +154,7 @@ export async function POST(request: NextRequest) {
     }
     sessionRow = {
       id: session.id,
-      title: session.title,
+      title: session.link?.customTitle ?? session.title,
       status: session.status,
       agreedTime: session.agreedTime,
       guestName: session.guestName,
