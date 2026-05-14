@@ -556,7 +556,7 @@ export function EventLinksPageContent() {
   function sortValue(s: UpcomingEventRow, key: SortKey, now: number): string | number {
     switch (key) {
       case "event":
-        return (s.title || s.link?.topic || "").toLowerCase();
+        return (s.link?.customTitle || s.title || "").toLowerCase();
       case "guest":
         return (
           s.guestName ||
@@ -843,7 +843,7 @@ export function EventLinksPageContent() {
                           s.guestEmail ||
                           s.link?.inviteeEmail ||
                           "Guest";
-                        const title = s.title || s.link?.topic || `Meeting with ${guestLabel}`;
+                        const title = s.link?.customTitle || s.title || `Meeting with ${guestLabel}`;
                         const sub = buildEventSub(s);
                         const dealUrl = getDealRoomUrl(s);
                         const isCoordinating = bucket === "coordinating";
@@ -1007,7 +1007,7 @@ export function EventLinksPageContent() {
                           available; one-click, no confirm). GCal link
                           moved to GCal column. */}
                       <div className="flex items-center justify-end gap-3 text-[12px]">
-                        {(isConfirmed || isCoordinating) && (
+                        {isConfirmed && (
                           <button
                             type="button"
                             onClick={() => setConfirmCancelId(s.id)}
@@ -1034,7 +1034,7 @@ export function EventLinksPageContent() {
                             className="text-secondary hover:text-accent transition disabled:opacity-50"
                             data-testid={`desktop-event-links-unarchive-${s.id}`}
                           >
-                            {archiving === s.id ? "…" : "Unarchive"}
+                            {archiving === s.id ? "…" : "Restore Link"}
                           </button>
                         ) : (
                           <button
@@ -1043,9 +1043,9 @@ export function EventLinksPageContent() {
                             disabled={archiving === s.id}
                             className="text-muted hover:text-secondary transition disabled:opacity-50"
                             data-testid={`desktop-event-links-archive-${s.id}`}
-                            title="Archive (the link will show 'host archived this' to guests)"
+                            title="Archive Link (guests will see 'host archived this')"
                           >
-                            {archiving === s.id ? "…" : "Archive"}
+                            {archiving === s.id ? "…" : "Archive Link"}
                           </button>
                         )}
                       </div>

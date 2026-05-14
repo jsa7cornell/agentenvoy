@@ -513,12 +513,12 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                 s.guestEmail ||
                 s.link?.inviteeEmail ||
                 "Guest";
-              const title = s.title || s.link?.topic || `Meeting with ${guestLabel}`;
+              const title = s.link?.customTitle || s.title || `Meeting with ${guestLabel}`;
               const sub = buildEventSub(s);
               const dealUrl = getDealRoomUrl(s);
               // Cancellable: only live sessions (coordinating / confirmed).
               // Complete + cancelled rows are terminal — no cancel action.
-              const isCancellable = bucket === "coordinating" || bucket === "confirmed";
+              const isCancellable = bucket === "confirmed";
 
               if (confirmCancelId === s.id) {
                 return (
@@ -539,13 +539,7 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                       Keep
                     </button>
                     <button
-                      onClick={() => {
-                        if (bucket === "confirmed") handleCancel(s.id);
-                        else {
-                          handleSetArchived(s.id, true);
-                          setConfirmCancelId(null);
-                        }
-                      }}
+                      onClick={() => handleCancel(s.id)}
                       disabled={cancelling === s.id || archiving === s.id}
                       className="text-[10px] font-medium text-red-400 hover:text-red-300 border border-red-500/30 rounded px-2 py-1 transition disabled:opacity-50"
                     >
@@ -609,10 +603,10 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                       disabled={archiving === s.id}
                       className="flex-shrink-0 px-2 py-1 rounded-md text-[10px] text-secondary hover:text-accent transition disabled:opacity-50"
                       data-testid={`mobile-event-links-unarchive-${s.id}`}
-                      title="Unarchive"
-                      aria-label={`Unarchive ${title}`}
+                      title="Restore Link"
+                      aria-label={`Restore link for ${title}`}
                     >
-                      {archiving === s.id ? "…" : "Unarchive"}
+                      {archiving === s.id ? "…" : "Restore Link"}
                     </button>
                   ) : (
                     <button
@@ -621,8 +615,8 @@ export function EventLinksSheet({ open, onClose }: EventLinksSheetProps) {
                       disabled={archiving === s.id}
                       className="flex-shrink-0 p-1 rounded-md text-zinc-500 hover:text-primary hover:bg-surface-secondary/60 transition disabled:opacity-50"
                       data-testid={`mobile-event-links-archive-${s.id}`}
-                      title="Archive"
-                      aria-label={`Archive ${title}`}
+                      title="Archive Link"
+                      aria-label={`Archive link for ${title}`}
                     >
                       {archiving === s.id ? (
                         <span className="text-[10px] text-muted">…</span>
