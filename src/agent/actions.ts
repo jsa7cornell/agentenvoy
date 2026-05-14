@@ -1691,7 +1691,21 @@ export async function handleCreateLink(
   // actions.ts:1544 ↔ deal-room.tsx:1654 drift the proposal §1.1 documents.
   // The helper handles customTitle override + activity-to-prefix mapping
   // (including the bike-ride/hike multi-word edge cases) + group vs 1:1 layout.
-  const effectiveFormatStr = typeof effectiveFormat === "string" ? effectiveFormat : null;
+  //
+  // 2026-05-14 cmp51ltr5: use the FINAL merged format from linkRulesPreIntent,
+  // not just the host's explicit `params.format`. The dashboard event card +
+  // event-page hero both read `parameters.format` at render time and route
+  // through `buildEventTitle` — for those to produce identical titles, the
+  // session.title at write-time must compute against the SAME format the
+  // renderers will see. Pre-fix the title used `effectiveFormat` (params
+  // only) while the persisted `parameters.format` was filled from
+  // postureSnapshot's DEFAULT_FORMAT="video", producing
+  // "Mark Beavor + John" on dashboard and "VC: Mark + John" on the event page.
+  const linkRulesFormat = linkRulesPreIntent.format;
+  const titleFormatStr =
+    linkRulesFormat === "video" || linkRulesFormat === "phone" || linkRulesFormat === "in-person"
+      ? linkRulesFormat
+      : null;
   const title = buildEventTitle({
     // Use the rerouted value too — the activity-vocab guard treats it as
     // an explicit custom title from this point forward.
@@ -1699,9 +1713,7 @@ export async function handleCreateLink(
     // When no explicit customTitle but topic was activity-derived, pass activity
     // to let buildEventTitle derive the prefix from vocab.
     activity: (rawCustomTitle || activityReroutedToCustomTitle) ? null : (activity ?? topic),
-    format: effectiveFormatStr === "video" || effectiveFormatStr === "phone" || effectiveFormatStr === "in-person"
-      ? effectiveFormatStr
-      : null,
+    format: titleFormatStr,
     isGroup,
     inviteeDisplay,
     firstNamesDisplay,

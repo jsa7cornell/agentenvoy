@@ -73,6 +73,41 @@ export function buildEventTitle(input: BuildEventTitleInput): string {
     return input.customTitle.trim();
   }
 
+  // 2026-05-14 cmp51ltr5: em-dash composite activities ("call — Using AI at
+  // Sugarbowl", "coffee — Q3 launch") carry BOTH a verb-activity AND a topic
+  // in a single field per the prompt's VERB+TOPIC convention. Extract the
+  // topic and use it as the title verbatim — the topic IS the meeting name
+  // the host gave. The verb part still drives downstream prefix lookup
+  // (vocab/format), but the topic wins for display.
+  //
+  // Pre-fix the title-build code path treated em-dash strings as opaque:
+  // findActivity returned null (em-dash composite not in vocab), the topic
+  // never made it into the rendered title, and "call — Using AI at
+  // Sugarbowl" produced "VC: Mark Beavor + John" — losing the host's
+  // intended title entirely.
+  let activityForLookup = input.activity?.trim() || null;
+  if (activityForLookup) {
+    // Split on the em-dash character regardless of surrounding whitespace.
+    // The prompt convention is "{verb} — {topic}" but trim() upstream may
+    // have stripped the trailing space (so "coffee — " arrives as
+    // "coffee —"). A `.includes(" — ")` check misses that variant.
+    const emDashMatch = activityForLookup.match(/^(.+?)\s*—\s*(.*)$/);
+    if (emDashMatch) {
+      const verb = emDashMatch[1].trim();
+      const topic = emDashMatch[2].trim();
+      if (topic) {
+        // Topic wins as the title. Don't fall through to vocab/format prefix
+        // composition. The verb part still flows through downstream surfaces
+        // (emoji, format inference) via the link's `parameters.activity`
+        // field — that storage shape is unchanged.
+        return topic;
+      }
+      // Defensive: if the topic side is empty ("call — "), strip the
+      // em-dash and continue with just the verb.
+      activityForLookup = verb || null;
+    }
+  }
+
   // Derive activity prefix from vocab match; fall back to format mapping.
   // 2026-05-14 cmp4u*: when the matched entry defines a `prefixByFormat`
   // override for the host's chosen format, that wins over the title-cased
@@ -80,8 +115,8 @@ export function buildEventTitle(input: BuildEventTitleInput): string {
   // video). Pre-fix, vocab match for "call" + format=video produced "Call:
   // Calle + John" because the title-case path didn't know the format mattered.
   let prefix: string | null = null;
-  if (input.activity) {
-    const entry = findActivity(input.activity);
+  if (activityForLookup) {
+    const entry = findActivity(activityForLookup);
     if (entry) {
       const byFormat = input.format ? entry.prefixByFormat?.[input.format] : undefined;
       if (byFormat) {

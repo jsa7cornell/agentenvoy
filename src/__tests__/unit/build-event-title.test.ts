@@ -261,3 +261,82 @@ describe("buildEventTitle — format-aware prefix overrides (cmp4u*)", () => {
     })).toBe("Coffee: Christine + John");
   });
 });
+
+// ── Em-dash composite extraction (2026-05-14 cmp51ltr5) ─────────────────────
+describe("buildEventTitle — em-dash composite topic extraction (cmp51ltr5)", () => {
+  // The VERB+TOPIC convention in unified-agent.md tells the model to combine
+  // both pieces into the `activity` field as "{verb} — {topic}" so both are
+  // preserved in the event title. Pre-fix, buildEventTitle treated em-dash
+  // composites as opaque (findActivity returned null on the full string),
+  // and the topic disappeared from the title entirely.
+  //
+  // Fix: extract the topic after " — " and use it as the title verbatim.
+  // The verb still drives downstream surfaces (emoji, format inference)
+  // via `parameters.activity` — storage shape unchanged, only display
+  // changes.
+
+  it("'call — Using AI at Sugarbowl' produces 'Using AI at Sugarbowl' (cmp51ltr5 exact case)", () => {
+    expect(buildEventTitle({
+      activity: "call — Using AI at Sugarbowl",
+      format: "video",
+      inviteeDisplay: "Mark Beavor",
+      hostFirstName: "John",
+    })).toBe("Using AI at Sugarbowl");
+  });
+
+  it("'coffee — Q3 launch' produces 'Q3 launch' (the prompt's canonical example)", () => {
+    expect(buildEventTitle({
+      activity: "coffee — Q3 launch",
+      inviteeDisplay: "Bob",
+      hostFirstName: "John",
+    })).toBe("Q3 launch");
+  });
+
+  it("'lunch — Q3 launch' (the prompt's lunch example) produces 'Q3 launch'", () => {
+    expect(buildEventTitle({
+      activity: "lunch — Q3 launch",
+      inviteeDisplay: "Bob",
+      hostFirstName: "John",
+    })).toBe("Q3 launch");
+  });
+
+  it("'coffee — AI discussion continued' (the cmp2qcnjy regression case) produces the topic", () => {
+    // The 2026-05-12 event-data-model proposal §6 had this exact fixture as
+    // the regression check for the VERB+TOPIC fix. Pre-cmp51ltr5 it produced
+    // "Coffee: Christine + John" (topic dropped). Now produces the topic.
+    expect(buildEventTitle({
+      activity: "coffee — AI discussion continued",
+      inviteeDisplay: "Christine",
+      hostFirstName: "John",
+    })).toBe("AI discussion continued");
+  });
+
+  it("customTitle still wins over em-dash composite when both present", () => {
+    expect(buildEventTitle({
+      customTitle: "Q3 board review",
+      activity: "coffee — Q3 launch",
+      inviteeDisplay: "Bob",
+      hostFirstName: "John",
+    })).toBe("Q3 board review");
+  });
+
+  it("falls back to verb-only when em-dash is present but topic side is empty", () => {
+    // Defensive: trailing em-dash with whitespace-only topic. Strip the
+    // em-dash and treat the verb as the only activity input.
+    expect(buildEventTitle({
+      activity: "coffee — ",
+      inviteeDisplay: "Bob",
+      hostFirstName: "John",
+    })).toBe("Coffee: Bob + John");
+  });
+
+  it("non-em-dash activities pass through unchanged (regression guard)", () => {
+    // Plain "coffee" (no em-dash) should still produce the canonical
+    // prefix+invitee+host shape. Em-dash detection must not affect this.
+    expect(buildEventTitle({
+      activity: "coffee",
+      inviteeDisplay: "Bob",
+      hostFirstName: "John",
+    })).toBe("Coffee: Bob + John");
+  });
+});
