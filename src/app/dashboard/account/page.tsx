@@ -385,7 +385,7 @@ export default function AccountPage() {
           >
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm text-primary font-medium">Connect Claude or another AI</p>
+                <p className="text-sm text-primary font-medium">Connect Claude Code, Cursor, or another AI</p>
                 <p className="text-[11px] text-muted mt-1 leading-relaxed">
                   Mint access tokens that let an AI act as you on AgentEnvoy —
                   read your calendar, mint links, reschedule meetings.

@@ -221,12 +221,27 @@ export default function ConnectorsPage() {
 
         {/* Page heading */}
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-primary">Connect Claude</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-primary">Connect your AI</h1>
           <p className="text-sm text-muted mt-1.5 leading-relaxed">
-            Give Claude (or another AI) a token and it can act as you on AgentEnvoy — reading your
-            calendar, creating meeting links, and rescheduling confirmed meetings, all without
-            needing you to copy-paste anything.
+            Give Claude (or another MCP-compatible AI) a token and it can act as you on AgentEnvoy —
+            reading your calendar, creating meeting links, and rescheduling confirmed meetings.
           </p>
+        </div>
+
+        {/* Hosted-client notice — Claude.ai web, ChatGPT, etc. need OAuth */}
+        <div className="rounded-xl border border-secondary bg-surface-inset/30 p-4 flex items-start gap-3">
+          <svg className="w-4 h-4 text-muted shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div className="text-xs leading-relaxed">
+            <p className="text-primary font-medium">Heads up: hosted clients aren&apos;t supported yet.</p>
+            <p className="text-muted mt-1">
+              Claude.ai (web/desktop) and ChatGPT custom connectors require OAuth, which AgentEnvoy
+              hasn&apos;t shipped yet. For now, the working clients are{" "}
+              <strong className="text-secondary font-medium">Claude Code, Cursor, VS Code, and other config-file based MCP clients</strong>{" "}
+              that let you set a static Authorization header.
+            </p>
+          </div>
         </div>
 
         {/* What Claude can do */}
@@ -532,14 +547,46 @@ function CapabilityCard({
   );
 }
 
-type ClientTab = "claude-ai" | "claude-code" | "chatgpt" | "gemini";
+type ClientTab = "claude-code" | "cursor" | "vscode" | "other";
 
 const CLIENT_TABS: { id: ClientTab; label: string }[] = [
-  { id: "claude-ai", label: "Claude.ai" },
   { id: "claude-code", label: "Claude Code" },
-  { id: "chatgpt", label: "ChatGPT" },
-  { id: "gemini", label: "Gemini" },
+  { id: "cursor", label: "Cursor" },
+  { id: "vscode", label: "VS Code" },
+  { id: "other", label: "Other" },
 ];
+
+/** Client config snippets — each editor expects a slightly different JSON shape */
+function buildCursorConfig(token: string) {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        agentenvoy: {
+          url: MCP_URL,
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
+
+function buildVscodeConfig(token: string) {
+  return JSON.stringify(
+    {
+      servers: {
+        agentenvoy: {
+          type: "http",
+          url: MCP_URL,
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      },
+    },
+    null,
+    2,
+  );
+}
 
 /** Reusable field table for URL + auth values */
 function ConnectionFields({ token, showHeader = false }: { token: string; showHeader?: boolean }) {
@@ -589,9 +636,12 @@ function SetupInstructions({
   copiedConfig: boolean;
   onCopyConfig: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<ClientTab>("claude-ai");
+  const [activeTab, setActiveTab] = useState<ClientTab>("claude-code");
   const displayToken = token ?? "agentenvoy_pat_live_YOUR_TOKEN_HERE";
   const config = buildMcpConfig(displayToken);
+  const cursorConfig = buildCursorConfig(displayToken);
+  const vscodeConfig = buildVscodeConfig(displayToken);
+  const cliCommand = `claude mcp add --transport http agentenvoy ${MCP_URL} --header "Authorization: Bearer ${displayToken}"`;
 
   return (
     <div className="space-y-4">
@@ -612,134 +662,167 @@ function SetupInstructions({
         ))}
       </div>
 
-      {/* ── Claude.ai ── */}
-      {activeTab === "claude-ai" && (
-        <div className="space-y-3">
-          <ol className="space-y-3 list-none">
-            <Step n={1}>
-              In Claude.ai, open <strong className="text-primary font-medium">Settings → Connectors</strong> and
-              click <strong className="text-primary font-medium">Add custom connector</strong>.
-            </Step>
-            <Step n={2}>Fill in the Name and URL, then open <strong className="text-primary font-medium">Advanced settings</strong> to add the Authorization header:</Step>
-          </ol>
-
-          <ConnectionFields token={displayToken} showHeader />
-
-          <ol className="space-y-3 list-none" start={3}>
-            <Step n={3}>
-              Click <strong className="text-primary font-medium">Add</strong>. AgentEnvoy will appear in your connectors list.
-              Try asking Claude <span className="italic text-primary">&ldquo;when am I free this week?&rdquo;</span>
-            </Step>
-          </ol>
-        </div>
-      )}
-
       {/* ── Claude Code ── */}
       {activeTab === "claude-code" && (
         <div className="space-y-3">
-          <ol className="space-y-3 list-none">
-            <Step n={1}>
-              Open (or create){" "}
-              <code className="font-mono text-primary bg-surface-secondary/60 px-1 rounded">~/.claude/mcp.json</code>{" "}
-              — your user-level MCP config for Claude Code.
-            </Step>
-            <Step n={2}>
-              Paste the block below{token ? " (your token is already filled in)" : ", replacing the placeholder with your token"}:
-            </Step>
-          </ol>
+          <p className="text-[11px] text-muted leading-relaxed">
+            Two ways — pick whichever you prefer.
+          </p>
 
-          <div className="relative">
-            <pre className="text-[11px] font-mono leading-relaxed bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-4 py-3 overflow-x-auto whitespace-pre">
-              {config}
-            </pre>
-            <button
-              onClick={onCopyConfig}
-              className="absolute top-2 right-2 px-2.5 py-1 text-[10px] font-medium bg-surface border border-surface-tertiary/60 rounded text-secondary hover:text-primary transition"
-            >
-              {copiedConfig ? "Copied ✓" : "Copy"}
-            </button>
+          {/* Option A: CLI command */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-1.5">
+              Option A — one command
+            </p>
+            <div className="relative">
+              <pre className="text-[11px] font-mono leading-relaxed bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-4 py-3 overflow-x-auto whitespace-pre">
+                {cliCommand}
+              </pre>
+            </div>
+          </div>
+
+          {/* Option B: JSON file */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-1.5">
+              Option B — edit the config file
+            </p>
+            <ol className="space-y-2 list-none mb-2">
+              <Step n={1}>
+                Open (or create){" "}
+                <code className="font-mono text-primary bg-surface-secondary/60 px-1 rounded">~/.claude/mcp.json</code>.
+              </Step>
+              <Step n={2}>
+                Paste the block below{token ? " (your token is pre-filled)" : ", replacing the placeholder with your token"}:
+              </Step>
+            </ol>
+            <div className="relative">
+              <pre className="text-[11px] font-mono leading-relaxed bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-4 py-3 overflow-x-auto whitespace-pre">
+                {config}
+              </pre>
+              <button
+                onClick={onCopyConfig}
+                className="absolute top-2 right-2 px-2.5 py-1 text-[10px] font-medium bg-surface border border-surface-tertiary/60 rounded text-secondary hover:text-primary transition"
+              >
+                {copiedConfig ? "Copied ✓" : "Copy"}
+              </button>
+            </div>
           </div>
 
           <ol className="space-y-3 list-none" start={3}>
             <Step n={3}>
-              Save the file, then restart Claude Code (or run{" "}
+              Restart Claude Code, or run{" "}
               <code className="font-mono text-primary bg-surface-secondary/60 px-1 rounded">/mcp</code>{" "}
-              to reload servers without restarting).
+              to reload servers without restarting.
             </Step>
             <Step n={4}>
-              Try it: ask Claude <span className="italic text-primary">&ldquo;when am I free this week?&rdquo;</span>{" "}
+              Try it: ask Claude{" "}
+              <span className="italic text-primary">&ldquo;when am I free this week?&rdquo;</span>{" "}
               or <span className="italic text-primary">&ldquo;make me a 30-minute coffee chat link.&rdquo;</span>
             </Step>
           </ol>
 
           <p className="text-[10px] text-muted leading-relaxed">
-            Want this only for one project? Use{" "}
+            Want it scoped to one project? Use{" "}
             <code className="font-mono bg-surface-secondary/60 px-1 rounded">.mcp.json</code>{" "}
-            at the project root instead of{" "}
-            <code className="font-mono bg-surface-secondary/60 px-1 rounded">~/.claude/mcp.json</code>.
+            at the project root instead.
           </p>
         </div>
       )}
 
-      {/* ── ChatGPT ── */}
-      {activeTab === "chatgpt" && (
+      {/* ── Cursor ── */}
+      {activeTab === "cursor" && (
         <div className="space-y-3">
           <ol className="space-y-3 list-none">
             <Step n={1}>
-              In ChatGPT, open <strong className="text-primary font-medium">Settings → Connectors</strong>{" "}
-              (or <strong className="text-primary font-medium">Integrations</strong> depending on your plan){" "}
-              and look for an option to add a custom MCP server.
+              Open (or create){" "}
+              <code className="font-mono text-primary bg-surface-secondary/60 px-1 rounded">~/.cursor/mcp.json</code>{" "}
+              — global, applies to every Cursor project.
             </Step>
             <Step n={2}>
-              Enter the following — the exact field labels may differ but the values are the same:
+              Paste this{token ? " (your token is pre-filled)" : ", replacing the placeholder with your token"}:
             </Step>
           </ol>
 
-          <ConnectionFields token={displayToken} showHeader />
+          <pre className="text-[11px] font-mono leading-relaxed bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-4 py-3 overflow-x-auto whitespace-pre">
+            {cursorConfig}
+          </pre>
 
           <ol className="space-y-3 list-none" start={3}>
             <Step n={3}>
-              Save. ChatGPT will verify the connection and add AgentEnvoy to your available tools.
-              Try asking <span className="italic text-primary">&ldquo;check my schedule for this week.&rdquo;</span>
+              Restart Cursor, or open{" "}
+              <strong className="text-primary font-medium">Settings → MCP</strong> and toggle
+              the AgentEnvoy server on. Tools will appear in the agent panel.
             </Step>
           </ol>
 
           <p className="text-[10px] text-muted leading-relaxed">
-            ChatGPT&apos;s MCP connector UI updates frequently. If the menu path above doesn&apos;t match what you see,
-            look for &ldquo;MCP&rdquo; or &ldquo;custom connector&rdquo; in Settings — the URL and auth values above are always correct.
+            Project-scoped? Use{" "}
+            <code className="font-mono bg-surface-secondary/60 px-1 rounded">.cursor/mcp.json</code>{" "}
+            at the project root instead.
           </p>
         </div>
       )}
 
-      {/* ── Gemini ── */}
-      {activeTab === "gemini" && (
+      {/* ── VS Code ── */}
+      {activeTab === "vscode" && (
         <div className="space-y-3">
           <ol className="space-y-3 list-none">
             <Step n={1}>
-              Open <strong className="text-primary font-medium">Google AI Studio</strong>{" "}
-              (<code className="font-mono text-primary bg-surface-secondary/60 px-1 rounded">aistudio.google.com</code>)
-              or <strong className="text-primary font-medium">Gemini Advanced</strong>. Go to{" "}
-              <strong className="text-primary font-medium">Settings → Extensions</strong> or{" "}
-              <strong className="text-primary font-medium">Tools → MCP Servers</strong>.
+              In your project, create{" "}
+              <code className="font-mono text-primary bg-surface-secondary/60 px-1 rounded">.vscode/mcp.json</code>{" "}
+              (or open VS Code user settings if you want it global).
             </Step>
             <Step n={2}>
-              Add a new MCP server with these values:
+              Paste this{token ? " (your token is pre-filled)" : ", replacing the placeholder with your token"}:
             </Step>
           </ol>
 
-          <ConnectionFields token={displayToken} showHeader />
+          <pre className="text-[11px] font-mono leading-relaxed bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-4 py-3 overflow-x-auto whitespace-pre">
+            {vscodeConfig}
+          </pre>
 
           <ol className="space-y-3 list-none" start={3}>
             <Step n={3}>
-              Save and confirm. Try asking Gemini{" "}
-              <span className="italic text-primary">&ldquo;what does my schedule look like this week?&rdquo;</span>
+              Reload VS Code. With GitHub Copilot installed, AgentEnvoy will appear in the
+              agent&apos;s tools palette.
             </Step>
           </ol>
 
           <p className="text-[10px] text-muted leading-relaxed">
-            Google&apos;s MCP support surface varies across Gemini Advanced, AI Studio, and Workspace. If the path
-            above doesn&apos;t match, search your settings for &ldquo;MCP&rdquo; or &ldquo;custom tools.&rdquo;{" "}
-            The URL and auth values above are always correct regardless of which surface you use.
+            Note: VS Code uses{" "}
+            <code className="font-mono bg-surface-secondary/60 px-1 rounded">servers</code>{" "}
+            as the root key, not{" "}
+            <code className="font-mono bg-surface-secondary/60 px-1 rounded">mcpServers</code>{" "}
+            — slight difference from Claude Code / Cursor.
+          </p>
+        </div>
+      )}
+
+      {/* ── Other (Windsurf, Gemini CLI, generic MCP clients) ── */}
+      {activeTab === "other" && (
+        <div className="space-y-3">
+          <p className="text-xs text-secondary leading-relaxed">
+            AgentEnvoy speaks standard <strong className="text-primary font-medium">Streamable HTTP MCP</strong>{" "}
+            with bearer-token auth. Any client that lets you specify a URL and a custom Authorization
+            header will work — including <strong className="text-primary font-medium">Windsurf</strong>,{" "}
+            <strong className="text-primary font-medium">Zed</strong>,{" "}
+            <strong className="text-primary font-medium">Gemini CLI</strong>, and{" "}
+            <strong className="text-primary font-medium">Continue.dev</strong>.
+          </p>
+
+          <p className="text-xs text-secondary leading-relaxed">
+            Drop these values into your client&apos;s MCP config:
+          </p>
+
+          <ConnectionFields token={displayToken} showHeader />
+
+          <p className="text-[10px] text-muted leading-relaxed">
+            Each client has slightly different config-file location and JSON shape (e.g. Windsurf uses{" "}
+            <code className="font-mono bg-surface-secondary/60 px-1 rounded">~/.codeium/windsurf/mcp_config.json</code>;
+            Gemini CLI uses{" "}
+            <code className="font-mono bg-surface-secondary/60 px-1 rounded">~/.gemini/settings.json</code>).
+            Check your client&apos;s MCP docs for the exact format — the URL and auth values above are
+            what you&apos;re plugging in.
           </p>
         </div>
       )}
