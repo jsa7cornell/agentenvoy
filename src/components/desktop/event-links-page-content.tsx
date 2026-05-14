@@ -846,7 +846,6 @@ export function EventLinksPageContent() {
                         const title = s.link?.customTitle || s.title || `Meeting with ${guestLabel}`;
                         const sub = buildEventSub(s);
                         const dealUrl = getDealRoomUrl(s);
-                        const isCoordinating = bucket === "coordinating";
                         const isConfirmed = bucket === "confirmed";
                         const isCancelled = bucket === "cancelled";
 
