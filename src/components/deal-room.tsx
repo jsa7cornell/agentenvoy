@@ -2026,15 +2026,13 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     const hasBilateralMatch = !!(bilateralByDay && Object.values(bilateralByDay).some((chips) =>
       chips.some((c) => c.color === "both"),
     ));
-    // Extract guestPicks from linkParameters for the new card surface.
-    // Only location + format are in scope; duration/window/date are out of scope.
-    const gp = (linkParameters?.guestPicks) as Record<string, unknown> | null | undefined;
-    const linkGuestPicks = gp
+    // Build linkGuestPicks from the individual state vars (set from data.link.guestPicks
+    // in the session fetch). linkParameters is the raw-blob state which the session
+    // route does NOT populate — using it here produced a permanent null (WALLOFSHAME §4).
+    const linkGuestPicks = (linkGuestPicksFormat || linkGuestPicksLocation)
       ? {
-          location: gp.location === true,
-          format: (gp.format === true || Array.isArray(gp.format))
-            ? gp.format as boolean | string[]
-            : undefined,
+          location: linkGuestPicksLocation,
+          format: linkGuestPicksFormat ? (true as boolean | string[]) : undefined,
         }
       : null;
 
@@ -2088,6 +2086,8 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     isConfirming,
     bilateralByDay,
     linkFormat,
+    linkGuestPicksFormat,
+    linkGuestPicksLocation,
     linkRecurrence,
   ]);
 
