@@ -1712,6 +1712,21 @@ export async function handleCreateLink(
     hostFirstName,
   });
 
+  // Back-fill customTitle so the live-link endpoint (live/route.ts, which
+  // reads customTitle first) returns a title matching linkCardMetaAtCreation.
+  // Without this, live/route.ts falls back to bare inviteeName ("Drake")
+  // instead of the computed title ("Meet: Drake + John"), and feed.tsx picks
+  // the live meta (truthy object) over the creation-time snapshot — losing
+  // the activity prefix. Only fires when no host-set title was already written
+  // at link-create time (effectiveCustomTitle was null).
+  // Fixed: cmp5rh39y "Title wrong" report (2026-05-14).
+  if (!effectiveCustomTitle && title) {
+    await prisma.negotiationLink.update({
+      where: { id: link.id },
+      data: { customTitle: title },
+    });
+  }
+
   const session = await prisma.negotiationSession.create({
     data: {
       linkId: link.id,
