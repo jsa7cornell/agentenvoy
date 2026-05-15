@@ -45,6 +45,15 @@
  *     directed when the cost-reduction (E) was parked.
  */
 
+import {
+  THINKING_OUT_LOUD_PATTERNS,
+  hasThinkingOutLoudPhrase,
+  stripThinkingOutLoudSentences,
+} from "@/lib/narration-strip";
+
+// Re-export so existing callers that import from this module continue to work.
+export { hasThinkingOutLoudPhrase, stripThinkingOutLoudSentences };
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -286,82 +295,10 @@ export const successTheaterCheck: PostStreamCheck = {
  */
 const MAX_CONFIRMATION_LEN_CHARS = 240;
 
-/**
- * Phrases the unified-agent prompt's FAILURE GALLERY explicitly forbids
- * (STEP 2 OUTPUT RULE + the cmp2qcnjy "shared reasoning" row).
- * Word-boundary anchored to avoid false positives on substrings.
- */
-const THINKING_OUT_LOUD_PATTERNS: readonly RegExp[] = [
-  /\bNow I[''']ll\b/i,                     // "Now I'll load the calendar..."
-  // 2026-05-14 cmp50uvuq: "Now I (can|see|have|know) ..." — the model
-  // narrates what it just learned from a LOAD before acting. Same shape as
-  // "Now I'll", different verb structure. Production case: "Now I can see
-  // tomorrow's date is May 8, 2026" — leak that survived prior patterns.
-  /\bNow I (?:can(?:\s+see)?|see|have|know|understand)\b/i,
-  // "I (can|now) see <X>" — inverted form of the same shape.
-  /\bI (?:can|now) see\s+(?:that|what|why|how|the|your|tomorrow|today)/i,
-  // "Let me <verb>" — NOT "Let me know" (canonical template close).
-  // 2026-05-14 cmp4ss1ip widening: added the write-action verbs (reschedule,
-  // cancel, move, create, book, set up, archive, release, free, update the
-  // <thing>) — Haiku narrates "Let me reschedule this meeting" as a preamble
-  // before the actual tool call on deal-room reschedule turns. Same shape as
-  // the original "Let me check/load" pre-action narration.
-  /\bLet me (?:check|load|look|update|verify|fetch|see|think|review|reconsider|update the|check the|load the|look at|see if|think about|reschedule|cancel|move|create|book|set up|archive|release|free|find|grab|adjust)\b/i,
-  /\bI[''']ll (?:load|check|look|update|update the|create the|fetch)\b/i,
-  // "I need to load/check/..." — the LOAD-narration variant that doesn't use
-  // "I'll" (2026-05-13 rnmp4f incident). "Now I need to load..." is the same
-  // shape with a leading "Now".
-  /\b(?:Now\s+)?I need to (?:load|check|look|update|verify|fetch|see|review|reconsider)\b/i,
-  // 2026-05-14 cmp4ss1ip: date-announcement preamble. The model narrates
-  // "Today/Tomorrow is <Date>" before acting on a temporal reference. Pure
-  // reasoning out loud — the user doesn't need the model to recite the date
-  // back at them. Production-observed shape: "Tomorrow is **May 14, 2026
-  // (Thursday)**. Let me reschedule this meeting."
-  /\b(?:Today|Tomorrow|Yesterday) is\s+\*{0,2}[A-Z][a-z]+/,
-  /\bHowever,?\s+looking more carefully\b/i, // The cmp2qcnjy smoking gun
-  /\bOn review\b/i,                         // From the old remediation prompt
-  /\bLooking (?:more carefully|at this again)\b/i,
-  // "Looking at your calendar" / "Looking at the preferences" — narrating
-  // the model's own context-read (2026-05-13 rnmp4f).
-  /\bLooking at (?:your|the) (?:calendar|preferences|sessions|schedule|availability|link|rules)\b/i,
-  /\bThinking about this\b/i,
-  /\bThe user (?:specified|said|wants|is asking)\b/i,  // Narrating the model's parse of the user
-  /\bBased on the (?:calendar|preferences|sessions)\b/i,
-  /\bSince (?:the user|you) (?:specified|said|mentioned)\b/i,
-];
-
-/**
- * Does the prose contain a known "thinking out loud" phrase?
- */
-export function hasThinkingOutLoudPhrase(text: string): boolean {
-  if (!text) return false;
-  for (const rx of THINKING_OUT_LOUD_PATTERNS) {
-    if (rx.test(text)) return true;
-  }
-  return false;
-}
-
-/**
- * Strip "thinking out loud" sentences from prose. Splits on sentence
- * boundaries (`.`, `!`, `?`, newline) and drops any sentence containing a
- * forbidden phrase. Returns the remainder trimmed. If everything was
- * forbidden (the model leaked top-to-bottom), returns an empty string —
- * the caller decides on a fallback (typically the canonical close template).
- *
- * Deterministic, reversible, no model call. Used by `narrationLeakCheck`
- * when its `thinking-out-loud` sub-shape fires.
- */
-export function stripThinkingOutLoudSentences(text: string): string {
-  if (!text) return "";
-  // Split on sentence terminators while keeping the terminator. Newline
-  // is treated as a soft boundary so multi-paragraph leaks split cleanly.
-  const pieces = text
-    .split(/(?<=[.!?])\s+|\n+/g)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  const kept = pieces.filter((s) => !hasThinkingOutLoudPhrase(s));
-  return kept.join(" ").trim();
-}
+// THINKING_OUT_LOUD_PATTERNS, hasThinkingOutLoudPhrase, and
+// stripThinkingOutLoudSentences are now defined in @/lib/narration-strip
+// and imported + re-exported above. The patterns are used by narrationLeakCheck
+// below via the imported THINKING_OUT_LOUD_PATTERNS constant.
 
 export const narrationLeakCheck: PostStreamCheck = {
   name: "narration-leak",

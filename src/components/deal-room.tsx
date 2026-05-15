@@ -23,6 +23,7 @@ import { ExternalAgentPrimer } from "./deal-room/external-agent-primer";
 import { SendFeedbackLink } from "./send-feedback";
 import { formatDuration } from "@/lib/format-duration";
 import { stripRendererOnlyBlocks } from "@/lib/message-render";
+import { stripThinkingOutLoudSentences } from "@/lib/narration-strip";
 import { ChannelChatStreamParser } from "@/lib/channel-chat-stream";
 import { mergePollResult, type LiveSyncMessage } from "@/lib/deal-room-live-sync";
 import { emojiForActivity, defaultFormatForActivity } from "@/lib/activity-vocab";
@@ -1788,7 +1789,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
             if (frame.type === "text") fullText = frame.content;
           }
           if (tailFrames.length > 0) {
-            const rendered = stripRendererOnlyBlocks(fullText);
+            const rendered = stripThinkingOutLoudSentences(stripRendererOnlyBlocks(fullText));
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId ? { ...m, content: rendered } : m,
@@ -1843,13 +1844,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
           // bubble just shows the assembled text). If we want to surface
           // tool-progress indicators in the deal-room later, the hook is here.
         }
-        // Strip structured blocks client-side so mid-stream partials don't
-        // flash raw `[DELEGATE_SPEAKER]...[/DELEGATE_SPEAKER]` / `[ACTION]`
-        // / `[STATUS_UPDATE]` tags at the guest. Server re-strips in
-        // onFinish before persisting — this is the client mirror so the
-        // visible state matches the persisted state without a reload.
-        // Bug reported 2026-04-21 by Danny on link j6ep75 (cmo909lkz).
-        const rendered = stripRendererOnlyBlocks(fullText);
+        // Strip structured blocks AND narration phrases client-side so
+        // mid-stream partials never flash raw tags or thinking-out-loud
+        // sentences at the guest. Server applies both strips post-stream
+        // before persisting — this is the client mirror so the visible
+        // state matches the persisted state without waiting for the final
+        // clean frame (narration-flash fix 2026-05-15, cmp662dbn).
+        // Structured-block strip first: tags don't contain sentence
+        // terminators so stripping them before sentence-splitting avoids
+        // spurious sentence boundary detection.
+        const rendered = stripThinkingOutLoudSentences(stripRendererOnlyBlocks(fullText));
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId ? { ...m, content: rendered } : m
