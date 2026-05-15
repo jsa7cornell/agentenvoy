@@ -46,7 +46,6 @@
  */
 
 import {
-  THINKING_OUT_LOUD_PATTERNS,
   hasThinkingOutLoudPhrase,
   stripThinkingOutLoudSentences,
 } from "@/lib/narration-strip";
