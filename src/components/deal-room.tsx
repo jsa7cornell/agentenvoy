@@ -25,7 +25,7 @@ import { formatDuration } from "@/lib/format-duration";
 import { stripRendererOnlyBlocks } from "@/lib/message-render";
 import { ChannelChatStreamParser } from "@/lib/channel-chat-stream";
 import { mergePollResult, type LiveSyncMessage } from "@/lib/deal-room-live-sync";
-import { emojiForActivity } from "@/lib/activity-vocab";
+import { emojiForActivity, defaultFormatForActivity } from "@/lib/activity-vocab";
 import { hostFirstName as resolveHostFirstName } from "@/lib/host-naming";
 import { EditedPill } from "@/components/edited-pill";
 import { deriveMode, type DealRoomMode } from "@/lib/deal-room-mode";
@@ -361,6 +361,9 @@ export function DealRoom({ slug, code }: DealRoomProps) {
   const [guestEmail, setGuestEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [archivedData, setArchivedData] = useState<{ hostEmail: string | null; hostName: string | null; hostMeetSlug: string | null } | null>(null);
+  // hostMeetSlug — surfaced from session API so the past-meeting CTA can
+  // link guests to the host's primary scheduling link.
+  const [hostMeetSlug, setHostMeetSlug] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmData, setConfirmData] = useState<Record<string, unknown> | null>(null);
   // PR2a — track whether the EnvoyDock thread is expanded in confirmed view
@@ -1164,7 +1167,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
 
     // FIRST-TIME CONFIRM PATH — pre-confirmation. Opens the confirm form
     // (name/email/etc.) and waits for the explicit Confirm click.
-    const format = linkFormat || "video";
+    const format = linkFormat || defaultFormatForActivity(linkActivity) || "video";
     setPendingProposal({
       dateTime: slot.start,
       duration,
@@ -1448,6 +1451,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
         const data = await res.json();
         setSessionId(data.sessionId);
         setHostName(data.host?.name || data.hostName || "");
+        setHostMeetSlug(typeof data.hostMeetSlug === "string" ? data.hostMeetSlug : null);
         setIsHost(data.isHost || false);
         setIsGuest(data.isGuest || false);
         setGuestUser(data.guestUser || null);
@@ -2157,6 +2161,16 @@ export function DealRoom({ slug, code }: DealRoomProps) {
     return out;
   }, [messages]);
 
+  // --- Past-meeting detection ---
+  // Fires when a confirmed meeting's end time has already passed. We compute
+  // this inline (not in a useMemo) so it sits cleanly between the archived
+  // check and the error check without creating an extra hook call. The IIFE
+  // runs only when the necessary data is present; otherwise false.
+  const isPastMeeting = !archivedData && confirmed && !!confirmData?.dateTime && (() => {
+    const end = new Date(confirmData.dateTime as string).getTime() + ((confirmData.duration as number) || 30) * 60_000;
+    return end < Date.now();
+  })();
+
   // --- Archived state ---
   if (archivedData) {
     const hostFirst = archivedData.hostName?.split(" ")[0] || "the host";
@@ -2201,6 +2215,67 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                 </a>
                 .
               </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Past-meeting state ---
+  if (isPastMeeting) {
+    const hostFirst = hostName?.split(" ")[0] || "the host";
+    const meetingDate = new Date(confirmData!.dateTime as string);
+    const formattedDate = new Intl.DateTimeFormat("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(meetingDate);
+    const bookAgainUrl = hostMeetSlug ? `/meet/${hostMeetSlug}` : null;
+    return (
+      <div className="min-h-screen bg-surface flex flex-col">
+        <PublicHeader />
+        <div className="flex-1 flex items-center justify-center px-6 py-12">
+          <div className="text-center max-w-md">
+            <div className="w-16 h-16 mx-auto mb-5 rounded-full bg-surface-secondary border border-DEFAULT flex items-center justify-center">
+              <svg className="w-7 h-7 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+              </svg>
+            </div>
+            {isHost ? (
+              <>
+                <h1 className="text-xl font-bold text-primary mb-2">This meeting happened.</h1>
+                <p className="text-sm text-muted">
+                  {formattedDate}
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-xl font-bold text-primary mb-2">
+                  You met with {hostFirst}.
+                </h1>
+                <p className="text-sm text-muted mb-6">
+                  {formattedDate}
+                </p>
+                {bookAgainUrl && (
+                  <div className="mb-6 p-5 rounded-xl bg-surface-secondary border border-DEFAULT text-left">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-2">
+                      Book again
+                    </div>
+                    <p className="text-sm text-secondary mb-4">
+                      Ready to meet with {hostFirst} again? Use their scheduling link.
+                    </p>
+                    <a
+                      href={bookAgainUrl}
+                      className="block w-full text-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition"
+                    >
+                      Book another meeting with {hostFirst}
+                    </a>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -3774,7 +3849,7 @@ export function DealRoom({ slug, code }: DealRoomProps) {
                       60000,
                   ),
                 );
-          const fmt = linkFormat || "video";
+          const fmt = linkFormat || defaultFormatForActivity(linkActivity) || "video";
           const tz = slotTimezone || viewerTimezone || "UTC";
           return (
             <OfferCard

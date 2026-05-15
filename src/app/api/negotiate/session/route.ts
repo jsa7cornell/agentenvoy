@@ -417,6 +417,7 @@ export async function POST(req: NextRequest) {
             hostTimezone: hostTimezoneEarly,
             viewerTimezone: existingSession.viewerTimezone ?? null,
             hostName: user.name,
+            hostMeetSlug: user.meetSlug ?? null,
             // 2026-05-13 cmp451sli completion (PR 2 of 2) — single-mode +
             // agreed-status path. This is the branch the link uvkh68 hit
             // when the prior fix shipped to only the fresh-greeting return.
@@ -1119,6 +1120,7 @@ export async function POST(req: NextRequest) {
       guestEmail: session.guestEmail ?? null,
     },
     hostName: user.name,
+    hostMeetSlug: user.meetSlug ?? null,
     // Guest-negotiated values (set by lock_activity_location in the deal room).
     // Client uses these to display the locked state in the event card thread.
     negotiatedActivity: session.negotiatedActivity ?? null,
