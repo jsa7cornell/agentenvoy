@@ -54,6 +54,10 @@ interface MintedToken {
 
 const MCP_URL = "https://agentenvoy.ai/api/mcp/host";
 
+function buildClaudeCodeCli(token: string) {
+  return `claude mcp add --transport http agentenvoy ${MCP_URL} --header "Authorization: Bearer ${token}"`;
+}
+
 function buildMcpConfig(token: string) {
   return JSON.stringify(
     {
@@ -94,6 +98,12 @@ export default function ConnectorsPage() {
   // Whether the user has expanded the "Already have a token?" setup section
   const [setupExpanded, setSetupExpanded] = useState(false);
   const mintBannerRef = useRef<HTMLDivElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // Test-connection state for the freshly-minted token
+  const [verifyState, setVerifyState] = useState<"idle" | "verifying" | "ok" | "fail">("idle");
+  const [verifyMessage, setVerifyMessage] = useState<string>("");
+  const [copiedCli, setCopiedCli] = useState(false);
 
   async function reloadTokens() {
     try {
@@ -133,6 +143,7 @@ export default function ConnectorsPage() {
     if (minting) return;
     if (!name.trim()) {
       setMintError("Give the token a name so you can identify it later.");
+      nameInputRef.current?.focus();
       return;
     }
     if (selectedScopes.size === 0) {
@@ -156,6 +167,8 @@ export default function ConnectorsPage() {
         return;
       }
       setJustMinted(json as MintedToken);
+      setVerifyState("idle");
+      setVerifyMessage("");
       setName("");
       setSelectedScopes(new Set<Scope>(["read", "schedule"]));
       await reloadTokens();
@@ -190,6 +203,32 @@ export default function ConnectorsPage() {
       setRevokeError(e instanceof Error ? e.message : "Network error");
     } finally {
       setRevokingId(null);
+    }
+  }
+
+  async function handleVerify() {
+    if (!justMinted || verifyState === "verifying") return;
+    setVerifyState("verifying");
+    setVerifyMessage("");
+    try {
+      const res = await fetch("/api/host/tokens/verify", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${justMinted.plaintext}`,
+        },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json?.ok) {
+        setVerifyState("ok");
+        const scopeList = Array.isArray(json.scopes) ? json.scopes.join(", ") : "";
+        setVerifyMessage(scopeList ? `Token works — granted: ${scopeList}` : "Token works");
+      } else {
+        setVerifyState("fail");
+        setVerifyMessage(json?.reason ?? `HTTP ${res.status}`);
+      }
+    } catch (e) {
+      setVerifyState("fail");
+      setVerifyMessage(e instanceof Error ? e.message : "Network error");
     }
   }
 
@@ -322,36 +361,76 @@ export default function ConnectorsPage() {
               </button>
             </div>
 
-            {/* Token value */}
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-amber-700 dark:text-amber-400 mb-1.5">
-                Your token
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 min-w-0 text-xs font-mono bg-white/70 dark:bg-black/30 border border-amber-200 dark:border-amber-700/40 rounded-md px-3 py-2 break-all">
-                  {justMinted.plaintext}
-                </code>
+            {/* HERO: one-line install command for Claude Code */}
+            <div className="rounded-lg border border-emerald-300 dark:border-emerald-700/60 bg-emerald-50 dark:bg-emerald-900/20 p-4 space-y-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+                  Fastest path · Claude Code
+                </p>
+                <p className="text-sm text-emerald-900 dark:text-emerald-100 mt-1 leading-relaxed">
+                  <strong>1.</strong> Copy this command. <strong>2.</strong> Paste it into your Terminal. Done.
+                </p>
+              </div>
+              <div className="relative">
+                <pre className="text-[11px] font-mono leading-relaxed bg-white/80 dark:bg-black/40 border border-emerald-200 dark:border-emerald-800/50 rounded-md px-3 py-3 overflow-x-auto whitespace-pre pr-20">
+                  {buildClaudeCodeCli(justMinted.plaintext)}
+                </pre>
                 <button
-                  onClick={() => copyText(justMinted.plaintext, setCopiedToken)}
-                  className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-md transition whitespace-nowrap"
+                  onClick={() => copyText(buildClaudeCodeCli(justMinted.plaintext), setCopiedCli)}
+                  className="absolute top-2 right-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-md transition whitespace-nowrap"
                 >
-                  {copiedToken ? "Copied" : "Copy"}
+                  {copiedCli ? "Copied ✓" : "Copy command"}
                 </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs">
+                <button
+                  onClick={handleVerify}
+                  disabled={verifyState === "verifying"}
+                  className="px-3 py-1.5 border border-emerald-400 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200 bg-white/60 dark:bg-black/30 hover:bg-white/90 dark:hover:bg-black/50 rounded-md font-medium transition disabled:opacity-50"
+                >
+                  {verifyState === "verifying" ? "Testing…" : "Test connection"}
+                </button>
+                {verifyState === "ok" && (
+                  <span className="text-emerald-700 dark:text-emerald-300 font-medium">✓ {verifyMessage}</span>
+                )}
+                {verifyState === "fail" && (
+                  <span className="text-red-700 dark:text-red-400 font-medium">✗ {verifyMessage}</span>
+                )}
+                {verifyState === "idle" && (
+                  <span className="text-emerald-700/70 dark:text-emerald-400/70">
+                    Confirm the token works before you paste it anywhere.
+                  </span>
+                )}
               </div>
             </div>
 
-            {/* Step-by-step setup */}
-            <div className="border-t border-amber-200 dark:border-amber-700/40 pt-4 space-y-4">
-              <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">
-                Next: add AgentEnvoy to Claude
-              </p>
-
-              <SetupInstructions
-                token={justMinted.plaintext}
-                copiedConfig={copiedConfig}
-                onCopyConfig={() => copyText(buildMcpConfig(justMinted.plaintext), setCopiedConfig)}
-              />
-            </div>
+            {/* Raw token — still shown for advanced users / non-Claude-Code clients */}
+            <details className="group">
+              <summary className="cursor-pointer text-xs font-medium text-amber-800 dark:text-amber-300 hover:underline list-none flex items-center gap-1.5">
+                <svg className="w-3 h-3 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                Show raw token (for Cursor, VS Code, or other clients)
+              </summary>
+              <div className="mt-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 min-w-0 text-xs font-mono bg-white/70 dark:bg-black/30 border border-amber-200 dark:border-amber-700/40 rounded-md px-3 py-2 break-all">
+                    {justMinted.plaintext}
+                  </code>
+                  <button
+                    onClick={() => copyText(justMinted.plaintext, setCopiedToken)}
+                    className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-md transition whitespace-nowrap"
+                  >
+                    {copiedToken ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <SetupInstructions
+                  token={justMinted.plaintext}
+                  copiedConfig={copiedConfig}
+                  onCopyConfig={() => copyText(buildMcpConfig(justMinted.plaintext), setCopiedConfig)}
+                />
+              </div>
+            </details>
           </section>
         )}
 
@@ -431,10 +510,11 @@ export default function ConnectorsPage() {
                 Name
               </label>
               <input
+                ref={nameInputRef}
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. My Claude desktop"
+                onChange={(e) => { setName(e.target.value); if (mintError) setMintError(null); }}
+                placeholder="e.g. My Claude on laptop"
                 maxLength={100}
                 className="w-full max-w-sm bg-surface-secondary/60 border border-surface-tertiary/50 rounded-lg px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-indigo-500 transition"
               />
@@ -479,8 +559,8 @@ export default function ConnectorsPage() {
             <div>
               <button
                 type="submit"
-                disabled={minting || !name.trim() || selectedScopes.size === 0}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-surface-tertiary disabled:text-muted text-white text-sm font-medium rounded-lg transition"
+                disabled={minting}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition"
               >
                 {minting ? "Minting…" : "Mint token"}
               </button>
